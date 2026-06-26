@@ -16,6 +16,8 @@ import {
   type IgnoreRegionRect,
 } from "@/components/diff/slider-comparison";
 import { SwipeDeck } from "@/components/diff/swipe-deck-client";
+import { RcaBadge } from "@/components/diff/rca-badge";
+import { RcaPanel } from "@/components/diff/rca-panel";
 import { useIsMobile } from "@/lib/hooks/use-is-mobile";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -173,6 +175,11 @@ import {
   RuntimeErrorsPanel,
   stripRuntimeErrorsFromMessage,
 } from "@/components/builds/runtime-errors-panel";
+import { ApiTestDialog } from "@/components/api-tests/api-test-dialog";
+import {
+  networkRequestToApiTest,
+  type ApiTestSeed,
+} from "@/lib/api-test/from-network";
 import {
   CheckCircle,
   ListTodo,
@@ -243,6 +250,7 @@ export function DiffViewerClient({
     | "shift-compare"
     | null;
   const [isProcessing, setIsProcessing] = useState(false);
+  const [apiSeed, setApiSeed] = useState<ApiTestSeed | null>(null);
   const [showUndo, setShowUndo] = useState(false);
   const [undoTimeout, setUndoTimeout] = useState<NodeJS.Timeout | null>(null);
   const [showTodoInput, setShowTodoInput] = useState(false);
@@ -667,6 +675,9 @@ export function DiffViewerClient({
                 {metadata.pageShift.deltaY}px
               </div>
             )}
+
+            {/* RCA verdict — "is this diff the test or the code?" */}
+            <RcaBadge rca={metadata?.rca} />
           </div>
 
           {/* Execution Error Banner (collapsed by default) */}
@@ -696,7 +707,20 @@ export function DiffViewerClient({
             networkRequests={diff.networkRequests}
             networkBodiesPath={diff.networkBodiesPath}
             downloads={diff.downloads}
+            onCreateApiTest={
+              diff.test?.repositoryId
+                ? (req) => setApiSeed(networkRequestToApiTest(req))
+                : undefined
+            }
           />
+
+          {/* Root Cause Analysis — element-level region→cause drill-down */}
+          {metadata?.rca && (
+            <RcaPanel
+              rca={metadata.rca}
+              currentImageSrc={diff.currentImagePath}
+            />
+          )}
 
           {/* AI Analysis */}
           {!banAiMode &&
@@ -1201,6 +1225,24 @@ export function DiffViewerClient({
             Undo
           </button>
         </div>
+      )}
+
+      {/* Create an API test seeded from a captured network request */}
+      {apiSeed && diff.test?.repositoryId && (
+        <ApiTestDialog
+          open={!!apiSeed}
+          onOpenChange={(open) => {
+            if (!open) setApiSeed(null);
+          }}
+          repositoryId={diff.test.repositoryId}
+          areas={[]}
+          initialName={apiSeed.name}
+          initialDefinition={apiSeed.definition}
+          onSaved={(id) => {
+            setApiSeed(null);
+            router.push(`/tests?test=${id}`);
+          }}
+        />
       )}
     </div>
   );

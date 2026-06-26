@@ -22,12 +22,23 @@ import { isKubernetesMode } from "@/lib/eb/provisioner";
 export interface CaptureStorageStateInput {
   repositoryId: string;
   baseUrl: string;
-  /** Rendered auth-setup test code (output of renderAuthSetupCode). */
+  /** Rendered auth-setup test code (output of renderAuthSetupCode/renderAuthLoginCode). */
   testCode: string;
   /** Display name for the persisted storage state. */
   name: string;
   /** Hard cap so a stuck signup can't burn the agent. Default 90s. */
   timeoutMs?: number;
+  /** Best-effort token location from the scout — only used as a provenance
+   *  fallback when the captured state's actual locations can't be derived. */
+  tokenLocation?:
+    | "cookie"
+    | "localstorage"
+    | "indexeddb"
+    | "sessionstorage"
+    | "unknown";
+  /** Best-effort auth library guess (better-auth, firebase, ...). Stored as
+   *  authFlavor provenance so re-runs can pick a re-auth strategy. */
+  authFlavor?: string;
 }
 
 export interface CaptureStorageStateResult {
@@ -109,7 +120,12 @@ async function attemptCapture(
       ),
     ]);
 
-    const storageStateJson = JSON.stringify(await context.storageState());
+    // { indexedDB: true } (PW 1.51+) captures Firebase Auth / Clerk / Supabase-v2
+    // sessions that the bare call drops. The runner/EB paths already do this; the
+    // host fallback must match or those apps replay unauthenticated.
+    const storageStateJson = JSON.stringify(
+      await context.storageState({ indexedDB: true }),
+    );
     return { ok: true, storageStateJson };
   } catch (err) {
     return {
@@ -212,30 +228,57 @@ export async function captureStorageState(
     };
   }
 
-  // Validate the captured state contains at least one cookie. A passing
-  // auth-setup script that left an empty cookie jar means the test technically
-  // navigated to a non-auth URL but the chain won't actually authenticate the
-  // walkthrough. Better to fail loudly here than to ship a useless storage state.
+  // Validate the captured state carries SOME session material. HttpOnly-cookie
+  // shops (better-auth, NextAuth) put it in cookies; Firebase/Clerk/Supabase-v2
+  // keep it in localStorage or IndexedDB (captured via { indexedDB: true }).
+  // Accept any of them — a truly empty jar means the script navigated off the
+  // auth URL without actually signing in. Also derive the real token locations
+  // for provenance (more accurate than the scout's guess).
   let cookieCount = 0;
+  let hasStorage = false;
+  const tokenLocations: string[] = [];
   try {
-    const parsed = JSON.parse(attempt.storageStateJson);
+    const parsed = JSON.parse(attempt.storageStateJson) as {
+      cookies?: unknown[];
+      origins?: Array<{ localStorage?: unknown[]; indexedDB?: unknown[] }>;
+    };
     cookieCount = Array.isArray(parsed.cookies) ? parsed.cookies.length : 0;
+    const origins = Array.isArray(parsed.origins) ? parsed.origins : [];
+    const hasLocal = origins.some(
+      (o) => Array.isArray(o.localStorage) && o.localStorage.length > 0,
+    );
+    const hasIdb = origins.some(
+      (o) => Array.isArray(o.indexedDB) && o.indexedDB.length > 0,
+    );
+    hasStorage = hasLocal || hasIdb;
+    if (cookieCount > 0) tokenLocations.push("cookie");
+    if (hasLocal) tokenLocations.push("localStorage");
+    if (hasIdb) tokenLocations.push("indexedDB");
   } catch {
     /* parse failure handled below */
   }
-  if (cookieCount === 0) {
+  if (cookieCount === 0 && !hasStorage) {
     return {
       captured: false,
       failureReason:
-        "auth-setup completed but captured 0 cookies — storage state would not authenticate the walkthrough. Likely the script navigated off the auth URL without actually signing in.",
+        "auth-setup completed but captured no cookies, localStorage, or IndexedDB session material — storage state would not authenticate the walkthrough. Likely the script navigated off the auth URL without actually signing in.",
       durationMs: Date.now() - start,
     };
   }
+
+  const provenanceLocations =
+    tokenLocations.length > 0
+      ? tokenLocations
+      : input.tokenLocation
+        ? [input.tokenLocation]
+        : null;
 
   const persisted = await queries.createStorageState({
     repositoryId: input.repositoryId,
     name: input.name,
     storageStateJson: attempt.storageStateJson,
+    tokenLocations: provenanceLocations,
+    authFlavor: input.authFlavor ?? null,
   });
 
   return {

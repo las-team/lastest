@@ -106,6 +106,7 @@ export async function GET(
       textDiffSummary: meta?.textDiffSummary ?? null,
       baselineSourceBranch: meta?.baselineSourceBranch ?? null,
       baselineExistsOn: meta?.baselineExistsOn ?? null,
+      rca: meta?.rca ?? null,
     };
   });
 
@@ -122,6 +123,7 @@ export async function GET(
     totalSteps: r.totalSteps,
     consoleErrors: r.consoleErrors,
     networkRequests: r.networkRequests,
+    networkBodiesPath: r.networkBodiesPath,
     a11yViolations: r.a11yViolations,
     a11yPassesCount: r.a11yPassesCount,
     designSystemViolations: r.designSystemViolations,
@@ -131,6 +133,7 @@ export async function GET(
     extractedVariables: r.extractedVariables,
     assignedVariables: r.assignedVariables,
     domSnapshot: r.domSnapshot,
+    apiResult: r.apiResult,
   }));
 
   // "running tests" = test_results in 'running' status without an end timestamp.

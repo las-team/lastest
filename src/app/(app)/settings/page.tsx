@@ -21,6 +21,11 @@ function GitLabIcon({ className }: { className?: string }) {
 import { PlaywrightSettingsCard } from "@/components/settings/playwright-settings-card";
 import { DiffSensitivityCard } from "@/components/settings/diff-sensitivity-card";
 import { AISettingsCard } from "@/components/settings/ai-settings-card";
+import { AiAdvancedSettings } from "@/components/settings/ai-advanced-settings";
+import { McpConnect } from "@/components/mcp/mcp-connect";
+import { McpPromptHints } from "@/components/mcp/mcp-prompt-hints";
+import { McpStatusBadge } from "@/components/mcp/mcp-status-badge";
+import { isByokConfigured } from "@/lib/ai/availability";
 import { getAISettings as getMaskedAISettings } from "@/server/actions/ai-settings";
 import { AILogsCard } from "@/components/settings/ai-logs-card";
 import { NotificationSettingsCard } from "@/components/settings/notification-settings-card";
@@ -111,6 +116,10 @@ export default async function SettingsPage({
   // Masked: API-key columns are redacted before reaching the client component
   // (raw keys must never be serialized into the page payload).
   const aiSettings = await getMaskedAISettings(selectedRepo?.id);
+  // In-product AI ("agent functions") is only surfaced when BYOK is configured;
+  // otherwise the panel steers users to drive Lastest from their own MCP agent.
+  // `aiSettings` is masked, but masked-empty keys are null, so this check holds.
+  const byokConfigured = isByokConfigured(aiSettings);
   const aiLogs = await queries.getAIPromptLogs(selectedRepo?.id, 50);
   const notificationSettings = await queries.getNotificationSettings(
     selectedRepo?.id,
@@ -551,16 +560,54 @@ export default async function SettingsPage({
         </Card>
       ) : (
         <>
-          <div id="ai-settings">
-            <AISettingsCard
-              settings={aiSettings}
-              repositoryId={selectedRepo?.id}
-            />
-          </div>
+          {/* MCP-first: the promoted way to get AI in Lastest. */}
+          <Card id="mcp-connect">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                Connect your AI agent
+                <Badge variant="default">Recommended</Badge>
+                <McpStatusBadge className="ml-auto" />
+              </CardTitle>
+              <CardDescription>
+                Drive Lastest from Claude Code, Cursor, or any MCP client using
+                your own model — no API keys stored here.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <McpConnect serverUrl={serverUrl} />
+            </CardContent>
+          </Card>
 
-          <div id="ai-logs">
-            <AILogsCard logs={aiLogs} repositoryId={selectedRepo?.id} />
-          </div>
+          {byokConfigured ? (
+            // BYOK is set up → in-product agent functions are live; show their logs.
+            <div id="ai-logs">
+              <AILogsCard logs={aiLogs} repositoryId={selectedRepo?.id} />
+            </div>
+          ) : (
+            // No BYOK → no in-product agent functions; offer MCP prompts instead.
+            <Card id="mcp-prompts">
+              <CardHeader>
+                <CardTitle>Run agent functions from your client</CardTitle>
+                <CardDescription>
+                  In-product AI is off. Paste any of these into your connected
+                  agent to generate, heal, review, or triage.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <McpPromptHints repositoryId={selectedRepo?.id} />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* BYOK provider config, demoted under an Advanced disclosure. */}
+          <AiAdvancedSettings defaultOpen={byokConfigured}>
+            <div id="ai-settings">
+              <AISettingsCard
+                settings={aiSettings}
+                repositoryId={selectedRepo?.id}
+              />
+            </div>
+          </AiAdvancedSettings>
         </>
       )}
     </>
@@ -760,43 +807,25 @@ export default async function SettingsPage({
                   />
                   <div>
                     <p className="font-medium mb-1">
-                      1. Install Playwright browser:
+                      1. Create an embedded browser above to get a token, then
+                      start the container:
                     </p>
-                    <pre className="bg-muted p-2 rounded text-xs font-mono">
-                      npx playwright install chromium
-                    </pre>
-                  </div>
-                  <div>
-                    <p className="font-medium mb-1">
-                      2. Start as background daemon:
-                    </p>
-                    <pre className="bg-muted p-2 rounded text-xs font-mono">
-                      npx @lastest/runner start -t YOUR_TOKEN -s {serverUrl}
-                    </pre>
+                    <pre className="bg-muted p-2 rounded text-xs font-mono whitespace-pre-wrap break-all">{`docker run -d --name lastest-eb \\
+  -e LASTEST_TOKEN=YOUR_TOKEN \\
+  -e LASTEST_URL=${serverUrl} \\
+  -p 9223:9223 -p 9224:9224 \\
+  ewyc/lastest-eb:latest`}</pre>
                     <p className="text-[11px] mt-1 opacity-75">
-                      Logs: ~/.lastest/runner.log · Config saved for subsequent
-                      runs
+                      It registers over WebSocket and executes tests for your
+                      team — no local Playwright install needed.
                     </p>
-                  </div>
-                  <div>
-                    <p className="font-medium mb-1">
-                      3. Or run in foreground (Docker / CI):
-                    </p>
-                    <pre className="bg-muted p-2 rounded text-xs font-mono">
-                      npx @lastest/runner run -t YOUR_TOKEN -s {serverUrl}
-                    </pre>
-                  </div>
-                  <div>
-                    <p className="font-medium mb-1">Manage daemon:</p>
-                    <pre className="bg-muted p-2 rounded text-xs font-mono space-y-0.5">{`npx @lastest/runner stop      # Stop background runner
-npx @lastest/runner status    # Check if running
-npx @lastest/runner log -f    # Follow logs in real-time`}</pre>
                   </div>
                   <div>
                     <p className="font-medium mb-1">Trigger builds from CI:</p>
-                    <pre className="bg-muted p-2 rounded text-xs font-mono">{`npx @lastest/runner trigger -t YOUR_TOKEN -s ${serverUrl} --branch main`}</pre>
+                    <pre className="bg-muted p-2 rounded text-xs font-mono">{`npx @lastest/runner trigger -r owner/repo -t YOUR_TOKEN -s ${serverUrl} --branch main`}</pre>
                     <p className="text-[11px] mt-1 opacity-75">
-                      Options:{" "}
+                      Creates a build on the server (executed by your registered
+                      embedded browsers) and waits for results. Options:{" "}
                       <code className="bg-muted px-1 py-0.5 rounded">
                         --timeout
                       </code>{" "}
@@ -819,20 +848,9 @@ npx @lastest/runner log -f    # Follow logs in real-time`}</pre>
                       List available repositories:
                     </p>
                     <pre className="bg-muted p-2 rounded text-xs font-mono">
-                      npx @lastest/runner repos
+                      npx @lastest/runner repos -t YOUR_TOKEN -s {serverUrl}
                     </pre>
                   </div>
-                  <p className="pt-1">
-                    Options:{" "}
-                    <code className="bg-muted px-1 py-0.5 rounded">
-                      -b, --base-url
-                    </code>{" "}
-                    override target URL,{" "}
-                    <code className="bg-muted px-1 py-0.5 rounded">
-                      -i, --interval
-                    </code>{" "}
-                    poll frequency (ms, default 5000)
-                  </p>
                 </div>
               </details>
             </div>

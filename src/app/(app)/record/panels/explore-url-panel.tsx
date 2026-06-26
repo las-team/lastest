@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useAiEnabled } from "@/components/ai/ai-availability-context";
+import { McpCtaHint } from "@/components/mcp/mcp-cta-hint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,6 +40,7 @@ export function ExploreUrlPanel({
   defaultBaseUrl,
 }: ExploreUrlPanelProps) {
   const router = useRouter();
+  const aiEnabled = useAiEnabled();
   const [prompt, setPrompt] = useState("");
   const [targetUrl, setTargetUrl] = useState(defaultBaseUrl || "");
   const [testName, setTestName] = useState("");
@@ -175,17 +178,26 @@ export function ExploreUrlPanel({
             </div>
 
             <div className="flex justify-end">
-              <Button
-                onClick={handleSubmit}
-                disabled={isSubmitting || !prompt.trim() || !repositoryId}
-              >
-                {isSubmitting ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <Sparkles className="h-4 w-4 mr-2" />
-                )}
-                Generate test
-              </Button>
+              {aiEnabled ? (
+                <Button
+                  onClick={handleSubmit}
+                  disabled={isSubmitting || !prompt.trim() || !repositoryId}
+                >
+                  {isSubmitting ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-4 w-4 mr-2" />
+                  )}
+                  Generate test
+                </Button>
+              ) : (
+                <McpCtaHint
+                  promptKey="generate"
+                  label="Generate with agent"
+                  repositoryId={repositoryId}
+                  targetUrl={targetUrl}
+                />
+              )}
             </div>
           </CardContent>
         </Card>

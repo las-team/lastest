@@ -105,9 +105,9 @@ export async function deleteGithubActionConfigAction(id: string) {
     }
   }
 
-  // Delete auto-created runner (ephemeral/auto modes link the runner to the config)
+  // Delete auto-created runner (auto mode links the runner to the config)
   const mode = config.mode as GithubActionMode;
-  if ((mode === "ephemeral" || mode === "auto") && config.runnerId) {
+  if (mode === "auto" && config.runnerId) {
     await deleteRunnerInternal(config.runnerId, session.team.id);
   }
 
@@ -124,7 +124,6 @@ export async function deployWorkflowToGithub(
   const config = await queries.getGithubActionConfig(configId, session.team.id);
   if (!config) throw new Error("Config not found");
 
-  const isEphemeral = config.mode === "ephemeral";
   const isAuto = config.mode === "auto";
 
   // Get GitHub account for token
@@ -173,16 +172,16 @@ export async function deployWorkflowToGithub(
   results.workflow = true;
 
   // 2. Set secrets
-  if (isEphemeral || isAuto) {
-    // Ephemeral/Auto mode: auto-create runner and set secrets automatically
+  if (isAuto) {
+    // Auto mode: auto-create runner and set secrets automatically
     const repoName = `${config.repositoryOwner}/${config.repositoryName}`;
     const result = await createRunnerInternal(
-      isAuto ? `gha-auto-${repoName}` : `gha-${repoName}`,
+      `gha-auto-${repoName}`,
       session.team.id,
       session.user.id,
       ["run"],
-      "remote",
-      isAuto, // authOnly for auto mode
+      "embedded",
+      true, // authOnly for auto mode
     );
     if ("error" in result)
       throw new Error(`Failed to create runner: ${result.error}`);

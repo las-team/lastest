@@ -9,7 +9,8 @@
  */
 
 import { generateWithAI } from "@/lib/ai";
-import type { AIProviderConfig } from "@/lib/ai/types";
+import { isByokConfigured } from "@/lib/ai/availability";
+import { aiConfigFromSettings } from "@/lib/ai/provider-config";
 import { parseAiJson } from "@/lib/ai/json-parse";
 import * as queries from "@/lib/db/queries";
 import type { TriageResult, TriageClassification } from "@/lib/db/schema";
@@ -23,6 +24,9 @@ interface TriageInput {
   recentHistory: Array<{ status: string | null; errorMessage: string | null }>;
   diffAnalysis?: { classification?: string; aiRecommendation?: string } | null;
   domDiffSummary?: string | null;
+  /** E1: api-type tests have no console/DOM signals — classify from the
+   *  request/response assertion outcome instead. */
+  apiResult?: import("@/lib/db/schema").ApiTestResultData | null;
 }
 
 const TRIAGE_SYSTEM_PROMPT = `You are a QA failure triage specialist. Classify test failures into one of these categories:
@@ -55,6 +59,17 @@ export async function triageTestFailure(
   try {
     const settings = await queries.getAISettings(repositoryId);
 
+    // MCP-first: background AI only runs when the team has configured in-product
+    // AI (BYOK). Otherwise we stay hands-off and let the user's own agent triage
+    // over MCP. (Quickstart uses the provider directly and never reaches here.)
+    if (!isByokConfigured(settings)) {
+      return {
+        classification: "unknown",
+        confidence: 0,
+        reasoning: "AI triage skipped (in-product AI not configured)",
+      };
+    }
+
     // Skip triage if AI is not configured or is CLI-only
     if (settings.provider === "claude-cli") {
       return {
@@ -64,17 +79,7 @@ export async function triageTestFailure(
       };
     }
 
-    const config: AIProviderConfig = {
-      provider: settings.provider as AIProviderConfig["provider"],
-      openrouterApiKey: settings.openrouterApiKey,
-      openrouterModel: settings.openrouterModel ?? undefined,
-      anthropicApiKey: settings.anthropicApiKey,
-      anthropicModel: settings.anthropicModel ?? undefined,
-      ollamaBaseUrl: settings.ollamaBaseUrl ?? undefined,
-      ollamaModel: settings.ollamaModel ?? undefined,
-      openaiApiKey: settings.openaiApiKey,
-      openaiModel: settings.openaiModel ?? undefined,
-    };
+    const config = aiConfigFromSettings(settings);
 
     const historyDesc =
       input.recentHistory.length > 0
@@ -90,6 +95,19 @@ export async function triageTestFailure(
       ? `**DOM Changes (recording → failure):**\n${input.domDiffSummary}`
       : "No DOM diff data";
 
+    // E1: api tests carry assertion outcomes instead of browser signals.
+    const apiSection = input.apiResult
+      ? `\n**API Test Result:** status ${input.apiResult.statusCode ?? "n/a"}, ${input.apiResult.latencyMs}ms${input.apiResult.error ? `, transport error: ${input.apiResult.error}` : ""}\nFailed assertions:\n${
+          input.apiResult.assertionResults
+            .filter((a) => !a.passed)
+            .map(
+              (a) =>
+                `- ${a.description} (expected ${JSON.stringify(a.expected)}, got ${JSON.stringify(a.actual)})`,
+            )
+            .join("\n") || "(none)"
+        }\nNote: a failed response assertion on a previously-passing API test usually indicates a real_regression (or environment_issue when the transport itself failed).\n`
+      : "";
+
     const prompt = `Classify this test failure:
 
 **Test:** ${input.testName}
@@ -98,7 +116,7 @@ export async function triageTestFailure(
 **Console Errors:** ${input.consoleErrors?.length ? input.consoleErrors.slice(0, 5).join("\n") : "None"}
 **Visual Diff:** ${input.diffAnalysis ? `Classification: ${input.diffAnalysis.classification}, AI Recommendation: ${input.diffAnalysis.aiRecommendation}` : "No visual diff data"}
 **${domDiffSection}**
-
+${apiSection}
 **Recent History (last 5 runs):**
 ${historyDesc}`;
 
@@ -243,6 +261,7 @@ export async function triageBuildFailures(
             }
           : null,
         domDiffSummary,
+        apiResult: result.apiResult ?? null,
       });
 
       // Save triage result

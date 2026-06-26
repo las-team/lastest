@@ -53,12 +53,60 @@ describe("runQuickstartScoutPublic — happy path", () => {
     const { data } = await runQuickstartScoutPublic(
       "repo-1",
       "https://www.featurely.no",
+      { cdpEndpoint: "http://eb.test:9222" },
     );
 
     expect(data.classification).toBe("email_password");
     expect(data.authAutomatable).toBe(true);
     expect(data.registerPath).toBe("/sign-up");
     expect(data.navLinks).toHaveLength(2);
+    expect(mockGen).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("runQuickstartScoutPublic — tolerant JSON extraction", () => {
+  it("parses JSON followed by a trailing summary sentence (no retry)", async () => {
+    mockGen.mockResolvedValueOnce(
+      `${HAPPY_JSON}\n\nI have completed the reconnaissance and classified the sign-up flow as email_password.`,
+    );
+
+    const { data } = await runQuickstartScoutPublic(
+      "repo-1",
+      "https://www.featurely.no",
+      { cdpEndpoint: "http://eb.test:9222" },
+    );
+
+    expect(data.classification).toBe("email_password");
+    expect(data.registerPath).toBe("/sign-up");
+    // The whole point: a trailing sentence must NOT cost a retry.
+    expect(mockGen).toHaveBeenCalledTimes(1);
+  });
+
+  it("parses JSON wrapped in leading prose + a markdown fence", async () => {
+    mockGen.mockResolvedValueOnce(
+      `Here is what I found:\n\n\`\`\`json\n${HAPPY_JSON}\n\`\`\`\n\nDone.`,
+    );
+
+    const { data } = await runQuickstartScoutPublic(
+      "repo-1",
+      "https://www.featurely.no",
+      { cdpEndpoint: "http://eb.test:9222" },
+    );
+
+    expect(data.classification).toBe("email_password");
+    expect(mockGen).toHaveBeenCalledTimes(1);
+  });
+
+  it("parses JSON preceded by prose when there is no fence", async () => {
+    mockGen.mockResolvedValueOnce(`Sure — the result is ${HAPPY_JSON}`);
+
+    const { data } = await runQuickstartScoutPublic(
+      "repo-1",
+      "https://www.featurely.no",
+      { cdpEndpoint: "http://eb.test:9222" },
+    );
+
+    expect(data.classification).toBe("email_password");
     expect(mockGen).toHaveBeenCalledTimes(1);
   });
 });
@@ -74,6 +122,7 @@ describe("runQuickstartScoutPublic — retry on non-JSON", () => {
     const { data } = await runQuickstartScoutPublic(
       "repo-1",
       "https://www.featurely.no",
+      { cdpEndpoint: "http://eb.test:9222" },
     );
 
     expect(data.classification).toBe("email_password");
@@ -89,7 +138,9 @@ describe("runQuickstartScoutPublic — retry on non-JSON", () => {
       .mockResolvedValueOnce("Still locked, sorry.");
 
     await expect(
-      runQuickstartScoutPublic("repo-1", "https://example.com"),
+      runQuickstartScoutPublic("repo-1", "https://example.com", {
+        cdpEndpoint: "http://eb.test:9222",
+      }),
     ).rejects.toThrow(/non-JSON on both attempts/i);
     expect(mockGen).toHaveBeenCalledTimes(2);
   });
@@ -110,6 +161,7 @@ describe("runQuickstartScoutPublic — validation gate downgrades empty no_publi
     const { data } = await runQuickstartScoutPublic(
       "repo-1",
       "https://example.com",
+      { cdpEndpoint: "http://eb.test:9222" },
     );
 
     expect(data.classification).toBe("unknown");
@@ -131,6 +183,7 @@ describe("runQuickstartScoutPublic — validation gate downgrades empty no_publi
     const { data } = await runQuickstartScoutPublic(
       "repo-1",
       "https://example.com",
+      { cdpEndpoint: "http://eb.test:9222" },
     );
 
     expect(data.classification).toBe("no_public_register");
@@ -152,6 +205,7 @@ describe("runQuickstartScoutPublic — classifier coercion", () => {
     const { data } = await runQuickstartScoutPublic(
       "repo-1",
       "https://example.com",
+      { cdpEndpoint: "http://eb.test:9222" },
     );
 
     expect(data.classification).toBe("unknown");
@@ -170,6 +224,7 @@ describe("runQuickstartScoutPublic — classifier coercion", () => {
     const { data } = await runQuickstartScoutPublic(
       "repo-1",
       "https://example.com",
+      { cdpEndpoint: "http://eb.test:9222" },
     );
 
     expect(data.classification).toBe("unknown");
@@ -190,6 +245,7 @@ describe("runQuickstartScoutPublic — authAutomatable guard", () => {
     const { data } = await runQuickstartScoutPublic(
       "repo-1",
       "https://example.com",
+      { cdpEndpoint: "http://eb.test:9222" },
     );
 
     expect(data.classification).toBe("oauth_only");

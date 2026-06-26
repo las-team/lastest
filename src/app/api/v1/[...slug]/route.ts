@@ -282,6 +282,29 @@ function normalizePlaywrightOverrides(
     }
     out[key] = r[key];
   }
+  // Per-layer 3-way check modes (lets agents configure layer gating, incl. the
+  // api layer, without the UI). enforce|log|disable.
+  for (const key of [
+    "visualMode",
+    "textMode",
+    "domMode",
+    "networkMode",
+    "consoleMode",
+    "a11yMode",
+    "designMode",
+    "perfMode",
+    "urlMode",
+    "apiMode",
+  ] as const) {
+    if (r[key] === undefined) continue;
+    if (r[key] !== "enforce" && r[key] !== "log" && r[key] !== "disable") {
+      return {
+        ok: false,
+        error: `${key} must be "enforce" | "log" | "disable"`,
+      };
+    }
+    out[key] = r[key];
+  }
   if (r.acceptAnyCertificate !== undefined) {
     if (typeof r.acceptAnyCertificate !== "boolean") {
       return { ok: false, error: "acceptAnyCertificate must be boolean" };
@@ -365,6 +388,29 @@ function normalizePlaywrightSettingsPatch(
     if (r[key] === undefined) continue;
     if (r[key] !== "fail" && r[key] !== "warn" && r[key] !== "ignore") {
       return { ok: false, error: `${key} must be "fail" | "warn" | "ignore"` };
+    }
+    out[key] = r[key];
+  }
+  // Per-layer 3-way check modes (lets agents configure layer gating, incl. the
+  // api layer, without the UI). enforce|log|disable.
+  for (const key of [
+    "visualMode",
+    "textMode",
+    "domMode",
+    "networkMode",
+    "consoleMode",
+    "a11yMode",
+    "designMode",
+    "perfMode",
+    "urlMode",
+    "apiMode",
+  ] as const) {
+    if (r[key] === undefined) continue;
+    if (r[key] !== "enforce" && r[key] !== "log" && r[key] !== "disable") {
+      return {
+        ok: false,
+        error: `${key} must be "enforce" | "log" | "disable"`,
+      };
     }
     out[key] = r[key];
   }
@@ -1070,6 +1116,44 @@ export async function GET(
       });
     }
 
+    // Ranger session: GET /api/v1/ranger/:sessionId
+    if (resource === "ranger" && id) {
+      const sessionRow = await queries.getAgentSession(id);
+      if (!sessionRow || sessionRow.kind !== "ranger") {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      return NextResponse.json({
+        id: sessionRow.id,
+        kind: sessionRow.kind,
+        repositoryId: sessionRow.repositoryId,
+        status: sessionRow.status,
+        currentStepId: sessionRow.currentStepId,
+        steps: sessionRow.steps.map((s) => ({
+          id: s.id,
+          status: s.status,
+          label: s.label,
+          description: s.description,
+          startedAt: s.startedAt,
+          completedAt: s.completedAt,
+          error: s.error,
+          result: s.result,
+        })),
+        metadata: {
+          rangerUrl: sessionRow.metadata.rangerUrl,
+          // Live EB screencast — host-routable, secret-free; watch it browse.
+          streamUrl: sessionRow.metadata.streamUrl,
+          queuedForBrowser: sessionRow.metadata.queuedForBrowser,
+          pageMap: sessionRow.metadata.rangerPageMap ?? null,
+        },
+        createdAt: sessionRow.createdAt,
+        updatedAt: sessionRow.updatedAt,
+        completedAt: sessionRow.completedAt,
+      });
+    }
+
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   } catch (error) {
     const mapped = mapAuthError(error);
@@ -1378,6 +1462,88 @@ export async function POST(
       return NextResponse.json(result);
     }
 
+    // MCP-first authoring aid — static (no-browser) scout: POST /api/v1/scout
+    // Body: { url: string }. Returns a best-effort map of the page (title,
+    // headings, forms, inputs, links, candidate selectors) so an agent without
+    // a live browser has a starting point. SPA/JS-rendered DOM won't appear —
+    // callers are told to prefer their own Playwright MCP for live pages.
+    if (resource === "scout" && !id) {
+      const sourceIp = extractSourceIp(request.headers);
+      const rl = checkRateLimit({ ip: sourceIp, userId: session.user.id });
+      if (!rl.ok) {
+        return NextResponse.json(
+          { error: "Rate limit exceeded" },
+          { status: 429, headers: rl.headers },
+        );
+      }
+      const body = (await request.json().catch(() => ({}))) as { url?: string };
+      if (!body.url || typeof body.url !== "string") {
+        return NextResponse.json({ error: "url required" }, { status: 400 });
+      }
+      try {
+        await validateTargetUrl(body.url, { sourceIp });
+      } catch (err) {
+        if (err instanceof SsrfBlockedError) {
+          return NextResponse.json(
+            { error: err.message },
+            { status: 400, headers: rl.headers },
+          );
+        }
+        throw err;
+      }
+      const { scoutUrlStatic } = await import("@/lib/playwright/static-scout");
+      try {
+        const scout = await scoutUrlStatic(body.url);
+        return NextResponse.json(scout, { headers: rl.headers });
+      } catch (err) {
+        return NextResponse.json(
+          { error: err instanceof Error ? err.message : "Scout failed" },
+          { status: 502, headers: rl.headers },
+        );
+      }
+    }
+
+    // Diff-scoped validation: POST /api/v1/validate-diff
+    // Body: { repositoryId, diff?, baseBranch?, headBranch?, wait?, maxWaitMs? }
+    // Maps a code change → affected tests → runs only those → returns a verdict.
+    if (resource === "validate-diff" && !id) {
+      const body = (await request.json().catch(() => ({}))) as {
+        repositoryId?: string;
+        diff?: string;
+        baseBranch?: string;
+        headBranch?: string;
+        wait?: boolean;
+        maxWaitMs?: number;
+      };
+      if (!body.repositoryId || typeof body.repositoryId !== "string") {
+        return NextResponse.json(
+          { error: "repositoryId required" },
+          { status: 400 },
+        );
+      }
+      if (!(await verifyRepoOwnership(body.repositoryId, session))) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      const { validateDiffCore, VALIDATE_DIFF_REQUEST_MAX_WAIT_MS } =
+        await import("@/server/actions/validate-diff");
+      // Cap the synchronous wait so a slow build can't hold the HTTP request
+      // past proxy/ingress timeouts — past the cap the caller gets a
+      // `build_running` verdict + buildId to poll.
+      const maxWaitMs = Math.min(
+        body.maxWaitMs ?? VALIDATE_DIFF_REQUEST_MAX_WAIT_MS,
+        VALIDATE_DIFF_REQUEST_MAX_WAIT_MS,
+      );
+      const result = await validateDiffCore({
+        repositoryId: body.repositoryId,
+        diff: body.diff,
+        baseBranch: body.baseBranch,
+        headBranch: body.headBranch,
+        wait: body.wait,
+        maxWaitMs,
+      });
+      return NextResponse.json(result);
+    }
+
     // URL Diff — single-URL synchronous capture: POST /api/v1/snapshot
     // Body: { url: string, viewport?: { width, height } }
     // Returns inline: { snapshotId, screenshotUrl, domSnapshot, networkRequests, a11yViolations, wcagScore }
@@ -1565,16 +1731,50 @@ export async function POST(
     }
 
     // Create test directly with raw code: POST /api/v1/tests
+    // For API tests (E1) pass `testType: 'api'` + `apiDefinition` instead of code.
     if (resource === "tests" && !slug[1]) {
       const body = await request.json();
-      const {
-        repositoryId,
-        name,
-        code,
-        functionalAreaId,
-        targetUrl,
-        description,
-      } = body;
+      const { repositoryId, name, functionalAreaId, targetUrl, description } =
+        body;
+      const testType = body.testType === "api" ? "api" : "browser";
+      const apiDefinition = body.apiDefinition as
+        | import("@/lib/db/schema").ApiTestDefinition
+        | undefined;
+      // API tests carry an apiDefinition; the `code` column stores a readable
+      // JSON rendering of it (the column is NOT NULL). Browser tests require code.
+      let code = body.code as string | undefined;
+      if (testType === "api") {
+        if (
+          !apiDefinition ||
+          typeof apiDefinition !== "object" ||
+          !apiDefinition.method ||
+          !apiDefinition.url
+        ) {
+          return NextResponse.json(
+            {
+              error: "apiDefinition with method and url required for api tests",
+            },
+            { status: 400 },
+          );
+        }
+        if (
+          !Array.isArray(apiDefinition.assertions) ||
+          apiDefinition.assertions.length === 0
+        ) {
+          return NextResponse.json(
+            { error: "apiDefinition.assertions must be a non-empty array" },
+            { status: 400 },
+          );
+        }
+        // The `code` column is human-visible and snapshotted into
+        // test_versions — never let credentials land in it.
+        const { renderApiDefinitionForCode } =
+          await import("@/lib/api-test/redact");
+        code =
+          code && typeof code === "string"
+            ? code
+            : renderApiDefinitionForCode(apiDefinition);
+      }
       if (!repositoryId) {
         return NextResponse.json(
           { error: "repositoryId required" },
@@ -1609,7 +1809,11 @@ export async function POST(
         repositoryId,
         name,
         code,
-        targetUrl: targetUrl ?? null,
+        testType,
+        apiDefinition: testType === "api" ? apiDefinition : undefined,
+        targetUrl:
+          targetUrl ??
+          (testType === "api" ? (apiDefinition?.url ?? null) : null),
         functionalAreaId: functionalAreaId ?? null,
         createdByBotId: mcpBot?.id ?? null,
         createdByUserId: mcpBot ? null : (session.user?.id ?? null),
@@ -1705,6 +1909,97 @@ export async function POST(
       const { agentHealTestCore } =
         await import("@/lib/playwright/healer-agent");
       const result = await agentHealTestCore(test.repositoryId!, testId);
+      return NextResponse.json(result);
+    }
+
+    // Generate an API test via AI and persist it: POST /api/v1/tests/generate-api
+    // Body: { repositoryId, name?, prompt?, endpoint?, openapiSpec?, graphqlSchema?, functionalAreaId? }
+    if (resource === "tests" && slug[1] === "generate-api" && !slug[2]) {
+      const body = (await request.json().catch(() => ({}))) as {
+        repositoryId?: string;
+        name?: string;
+        prompt?: string;
+        endpoint?: string;
+        openapiSpec?: string;
+        graphqlSchema?: string;
+        functionalAreaId?: string;
+      };
+      if (!body.repositoryId) {
+        return NextResponse.json(
+          { error: "repositoryId required" },
+          { status: 400 },
+        );
+      }
+      if (!(await verifyRepoOwnership(body.repositoryId, session))) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      const { generateApiTest } = await import("@/lib/api-test/generator");
+      const gen = await generateApiTest({
+        repositoryId: body.repositoryId,
+        prompt: body.prompt,
+        endpoint: body.endpoint,
+        openapiSpec: body.openapiSpec,
+        graphqlSchema: body.graphqlSchema,
+      });
+      if (gen.status !== "generated" || !gen.definition) {
+        return NextResponse.json(
+          { status: gen.status, error: gen.summary },
+          { status: 422 },
+        );
+      }
+      const mcpBot = await queries.getBotByKind(session.team!.id, "mcp_server");
+      const name =
+        body.name?.trim() || `${gen.definition.method} ${gen.definition.url}`;
+      const { renderApiDefinitionForCode } =
+        await import("@/lib/api-test/redact");
+      const created = await queries.createTest({
+        repositoryId: body.repositoryId,
+        name,
+        code: renderApiDefinitionForCode(gen.definition),
+        testType: "api",
+        apiDefinition: gen.definition,
+        targetUrl: gen.definition.url,
+        functionalAreaId: body.functionalAreaId ?? null,
+        createdByBotId: mcpBot?.id ?? null,
+        createdByUserId: mcpBot ? null : (session.user?.id ?? null),
+      });
+      return NextResponse.json(
+        {
+          status: "generated",
+          summary: gen.summary,
+          test: created,
+          definition: gen.definition,
+        },
+        { status: 201 },
+      );
+    }
+
+    // Suggest an application-code fix for a real_regression failure:
+    // POST /api/v1/tests/:id/suggest-app-fix   Body: { buildId? }
+    // Returns a recommendation only — never applies changes.
+    if (resource === "tests" && slug[2] === "suggest-app-fix") {
+      const testId = slug[1];
+      if (!testId) {
+        return NextResponse.json({ error: "testId required" }, { status: 400 });
+      }
+      const test = await queries.getTest(testId);
+      if (!test) {
+        return NextResponse.json({ error: "Test not found" }, { status: 404 });
+      }
+      if (test.repositoryId) {
+        if (!(await verifyRepoOwnership(test.repositoryId, session))) {
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
+        }
+      }
+      const body = (await request.json().catch(() => ({}))) as {
+        buildId?: string;
+      };
+      const { suggestAppFix } = await import("@/lib/ai/app-fix-advisor");
+      const result = await suggestAppFix({
+        repositoryId: test.repositoryId!,
+        testId,
+        buildId: typeof body.buildId === "string" ? body.buildId : undefined,
+      });
       return NextResponse.json(result);
     }
 
@@ -1839,7 +2134,7 @@ export async function POST(
     }
 
     // QuickStart agent: POST /api/v1/repos/:id/quickstart
-    // Body: { emailTemplate?: string }
+    // Body: { emailTemplate?: string, appEmail?: string, appPassword?: string }
     if (resource === "repos" && id && subResource === "quickstart") {
       if (!(await verifyRepoOwnership(id, session))) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -1849,12 +2144,22 @@ export async function POST(
         typeof body?.emailTemplate === "string"
           ? body.emailTemplate
           : undefined;
+      const appEmail =
+        typeof body?.appEmail === "string" && body.appEmail.trim().length > 0
+          ? body.appEmail.trim()
+          : undefined;
+      const appPassword =
+        typeof body?.appPassword === "string" && body.appPassword.length > 0
+          ? body.appPassword
+          : undefined;
       try {
         const { startQuickstart } =
           await import("@/server/actions/quickstart-agent");
         const result = await startQuickstart(
           id,
-          emailTemplate ? { emailTemplate } : undefined,
+          emailTemplate || appEmail || appPassword
+            ? { emailTemplate, appEmail, appPassword }
+            : undefined,
         );
         return NextResponse.json(result, { status: 201 });
       } catch (err) {
@@ -1874,6 +2179,32 @@ export async function POST(
           );
         }
         throw err;
+      }
+    }
+
+    // Ranger — EB-backed live page scout: POST /api/v1/repos/:id/ranger
+    // Body: { url?: string, viewport?: { width, height } }
+    // Returns { sessionId }; poll GET /api/v1/ranger/:sessionId for stream + map.
+    if (resource === "repos" && id && subResource === "ranger") {
+      if (!(await verifyRepoOwnership(id, session))) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      const body = (await request.json().catch(() => ({}))) as {
+        url?: string;
+        viewport?: { width: number; height: number };
+      };
+      try {
+        const { startRanger } = await import("@/server/actions/ranger-agent");
+        const result = await startRanger(id, {
+          url: typeof body.url === "string" ? body.url : undefined,
+          viewport: body.viewport,
+        });
+        return NextResponse.json(result, { status: 201 });
+      } catch (err) {
+        return NextResponse.json(
+          { error: err instanceof Error ? err.message : "Ranger failed" },
+          { status: 400 },
+        );
       }
     }
 
@@ -2233,6 +2564,36 @@ export async function PUT(
       if (body.targetUrl !== undefined) updates.targetUrl = body.targetUrl;
       if (body.functionalAreaId !== undefined)
         updates.functionalAreaId = body.functionalAreaId;
+      // E1: api tests are edited via their definition; keep the code column (a
+      // readable, credential-free JSON rendering) in sync unless code was set
+      // explicitly. The column is snapshotted into test_versions, so never
+      // write raw auth material into it.
+      if (body.apiDefinition !== undefined) {
+        const def = body.apiDefinition;
+        if (
+          def === null ||
+          typeof def !== "object" ||
+          Array.isArray(def) ||
+          !def.method ||
+          !def.url ||
+          !Array.isArray(def.assertions)
+        ) {
+          return NextResponse.json(
+            {
+              error:
+                "apiDefinition must be an object with method, url, and assertions[]",
+            },
+            { status: 400 },
+          );
+        }
+        updates.apiDefinition = def;
+        if (body.code === undefined) {
+          const { renderApiDefinitionForCode } =
+            await import("@/lib/api-test/redact");
+          updates.code = renderApiDefinitionForCode(def);
+        }
+        if (body.targetUrl === undefined) updates.targetUrl = def.url;
+      }
       if (body.quarantined !== undefined) {
         if (typeof body.quarantined !== "boolean") {
           return NextResponse.json(
@@ -2580,6 +2941,20 @@ export async function DELETE(
       const { cancelQuickstart } =
         await import("@/server/actions/quickstart-agent");
       const result = await cancelQuickstart(id);
+      return NextResponse.json(result);
+    }
+
+    // Cancel Ranger session: DELETE /api/v1/ranger/:sessionId
+    if (resource === "ranger" && id) {
+      const sessionRow = await queries.getAgentSession(id);
+      if (!sessionRow || sessionRow.kind !== "ranger") {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      const { cancelRanger } = await import("@/server/actions/ranger-agent");
+      const result = await cancelRanger(id);
       return NextResponse.json(result);
     }
 

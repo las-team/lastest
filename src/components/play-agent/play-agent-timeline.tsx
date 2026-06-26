@@ -144,6 +144,10 @@ const ROSTER_BADGE_STYLES: Record<PwAgentType, { bg: string; text: string }> = {
     bg: "bg-pink-500/15",
     text: "text-pink-600 dark:text-pink-400",
   },
+  ranger: {
+    bg: "bg-teal-500/15",
+    text: "text-teal-600 dark:text-teal-400",
+  },
 };
 
 // ============================================

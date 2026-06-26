@@ -65,6 +65,7 @@ export async function savePlaywrightSettings(data: {
   designMode?: CheckMode;
   perfMode?: CheckMode;
   urlMode?: CheckMode;
+  apiMode?: CheckMode;
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();

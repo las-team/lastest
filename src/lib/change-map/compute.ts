@@ -1,4 +1,5 @@
 import * as queries from "@/lib/db/queries";
+import { isByokConfigured } from "@/lib/ai/availability";
 import { compareBranches } from "@/lib/github/content";
 import { findAffectedTests } from "@/lib/smart-selection/file-matcher";
 import { analyzeChangeMap } from "@/lib/ai/change-map-analyzer";
@@ -296,6 +297,9 @@ async function runChangeMapAI(input: RunAIInput): Promise<AIResult> {
   const settings = await queries.getAISettings(input.repoId);
   if (!settings.aiDiffingEnabled)
     return { kind: "skipped", reason: "AI diffing disabled" };
+  // MCP-first: background AI only runs when in-product AI (BYOK) is set up.
+  if (!isByokConfigured(settings))
+    return { kind: "skipped", reason: "In-product AI not configured" };
 
   const rawProvider = (settings.aiDiffingProvider as AIDiffingProvider) || null;
   const rawApiKey = settings.aiDiffingApiKey;

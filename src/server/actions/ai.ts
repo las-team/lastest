@@ -31,6 +31,38 @@ import { embeddedSessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
 /**
+ * Probe an EB's CDP endpoint once. cdpUrl is `http://<host>:<cdpPort>` (a TCP
+ * proxy in the pod forwards 0.0.0.0 → 127.0.0.1 where Chromium binds); Chromium
+ * serves `/json/version` over it. Returns false on any error / non-2xx / timeout.
+ */
+async function probeCdp(cdpUrl: string, timeoutMs = 2500): Promise<boolean> {
+  const base = cdpUrl.replace(/^ws/i, "http").replace(/\/+$/, "");
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${base}/json/version`, { signal: ctrl.signal });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Confirm a claimed EB's CDP endpoint is actually reachable before handing it to
+ * an agent. After a `pnpm dev` restart (dead port-forward) or a dead pod, the DB
+ * still holds a cdpUrl whose proxy is gone — pointing Playwright MCP at it makes
+ * the agent fail with an opaque connect error (and no live screencast). Two quick
+ * attempts so a transient blip doesn't evict a healthy EB.
+ */
+async function isCdpReachable(cdpUrl: string): Promise<boolean> {
+  if (await probeCdp(cdpUrl)) return true;
+  await new Promise((r) => setTimeout(r, 250));
+  return probeCdp(cdpUrl);
+}
+
+/**
  * Claim an embedded browser from the pool for AI agent use.
  * Waits (polls) until an EB becomes available, up to maxWaitMs.
  * Returns CDP + stream URLs and the runnerId for release.
@@ -70,15 +102,25 @@ export async function claimEmbeddedBrowserForAgent(
         .where(eq(embeddedSessions.runnerId, poolEB.runnerId));
 
       if (session?.cdpUrl && session?.streamUrl) {
-        return {
-          cdpUrl: session.cdpUrl,
-          streamUrl: session.streamUrl,
-          runnerId: poolEB.runnerId,
-        };
+        if (await isCdpReachable(session.cdpUrl)) {
+          return {
+            cdpUrl: session.cdpUrl,
+            streamUrl: session.streamUrl,
+            runnerId: poolEB.runnerId,
+          };
+        }
+        // Registered but its CDP endpoint is unreachable — a stale port-forward
+        // (post `pnpm dev` restart) or a dead pod. Handing this to an agent makes
+        // Playwright MCP fail opaquely. Release it (k8s mode tears the Job down
+        // and ensureWarmPool provisions a fresh one) and keep waiting.
+        console.warn(
+          `[AgentPool] Claimed EB ${poolEB.runnerId.slice(0, 8)} has an unreachable CDP endpoint (${session.cdpUrl}) — evicting and retrying`,
+        );
+        await releasePoolEB(poolEB.runnerId);
+      } else {
+        // Session not found or missing URLs — release and retry
+        await releasePoolEB(poolEB.runnerId);
       }
-
-      // Session not found or missing URLs — release and retry
-      await releasePoolEB(poolEB.runnerId);
     }
 
     // Notify caller on first queue (so UI can update status)
@@ -159,7 +201,7 @@ export async function aiFixTest(
 
     // Validate against runner API surface; aiFixTest has no MCP loop so we
     // surface validation errors directly rather than retrying.
-    const validated = await runValidation(code, test.targetUrl);
+    const validated = await runValidation(code);
     if (!validated.valid) {
       return {
         success: false,
@@ -185,7 +227,23 @@ export async function aiEnhanceTest(
   userPrompt?: string,
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   const { agentEnhanceTest } = await import("@/lib/playwright/enhancer-agent");
-  return agentEnhanceTest(repositoryId, testId, userPrompt);
+  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
+    () => undefined,
+  );
+  if (!eb) {
+    return {
+      success: false,
+      error:
+        "No embedded browsers available — all browsers are busy. Please try again later.",
+    };
+  }
+  try {
+    return await agentEnhanceTest(repositoryId, testId, userPrompt, {
+      cdpEndpoint: eb.cdpUrl,
+    });
+  } finally {
+    await releasePoolEB(eb.runnerId).catch(() => {});
+  }
 }
 
 export async function saveGeneratedTest(data: {
@@ -197,9 +255,6 @@ export async function saveGeneratedTest(data: {
 }): Promise<{ success: boolean; testId?: string; error?: string }> {
   await requireRepoAccess(data.repositoryId);
   try {
-    // Static-only validation here — UI save action runs synchronously so we
-    // skip the 2-5s headless-chromium pass. The page-snapshot check belongs
-    // upstream on the agentic generator that produced this code.
     const parseCheck = validateTestCode(data.code);
     if (!parseCheck.valid) {
       return {
@@ -207,9 +262,7 @@ export async function saveGeneratedTest(data: {
         error: `Test code failed parse check: ${parseCheck.error}`,
       };
     }
-    const validated = await runValidation(data.code, null, {
-      skipPageCheck: true,
-    });
+    const validated = await runValidation(data.code);
     if (!validated.valid) {
       return {
         success: false,
@@ -860,7 +913,23 @@ export async function healTest(
     };
   }
   const { agentHealTest } = await import("@/lib/playwright/healer-agent");
-  return agentHealTest(repositoryId, testId);
+  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
+    () => undefined,
+  );
+  if (!eb) {
+    return {
+      success: false,
+      error:
+        "No embedded browsers available — all browsers are busy. Please try again later.",
+    };
+  }
+  try {
+    return await agentHealTest(repositoryId, testId, {
+      cdpEndpoint: eb.cdpUrl,
+    });
+  } finally {
+    await releasePoolEB(eb.runnerId).catch(() => {});
+  }
 }
 
 /**
@@ -1090,5 +1159,21 @@ export async function createTest(
   context: TestGenerationContext,
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   const { agentCreateTest } = await import("@/lib/playwright/generator-agent");
-  return agentCreateTest(repositoryId, context);
+  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
+    () => undefined,
+  );
+  if (!eb) {
+    return {
+      success: false,
+      error:
+        "No embedded browsers available — all browsers are busy. Please try again later.",
+    };
+  }
+  try {
+    return await agentCreateTest(repositoryId, context, {
+      cdpEndpoint: eb.cdpUrl,
+    });
+  } finally {
+    await releasePoolEB(eb.runnerId).catch(() => {});
+  }
 }

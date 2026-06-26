@@ -135,7 +135,15 @@ export function startCleanupLoop(): void {
     }
 
     try {
-      await timeoutStaleCommands(30 * 60 * 1000, 10 * 60 * 1000);
+      // args: (maxPendingAgeMs, maxClaimedAgeMs). The 2nd bound caps a claimed
+      // run_test that is emitting step beacons but never reaches a terminal
+      // status (pass-#3 in timeoutStaleCommands). Raised 10m → 30m so a test
+      // that legitimately waits/holds for a slow response is not reaped before
+      // its budget — 30m aligns with the EB Job activeDeadlineSeconds (1800s).
+      // The 90s no-result reaper (MAX_CLAIMED_NO_RESULT_MS) is unchanged: a
+      // live test still emits a step beacon (a runner_command_results row)
+      // within 90s, so a genuinely silent/hung command is still caught fast.
+      await timeoutStaleCommands(30 * 60 * 1000, 30 * 60 * 1000);
     } catch (error) {
       console.error("[GC] Failed to timeout stale commands:", error);
     }

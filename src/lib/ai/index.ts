@@ -1,4 +1,3 @@
-import path from "path";
 import type { AIProvider, AIProviderConfig, AIProviderType } from "./types";
 import { ClaudeCLIProvider } from "./claude-cli";
 import { createOpenRouterProvider } from "./openrouter";
@@ -110,25 +109,38 @@ export async function generateWithAI(
   systemPrompt?: string,
   options?: GenerateWithAIOptions,
 ): Promise<string> {
-  // When MCP tools are needed and provider is claude-agent-sdk, inject the Playwright MCP server
-  // Note: generator-agent.ts configures MCP servers directly on config for CDP support.
-  // This fallback handles other callers that pass useMCP: true (planner, healer, ai-routes, etc.)
+  // When MCP tools are needed and provider is claude-agent-sdk, inject a
+  // Playwright MCP server bound to an Embedded Browser via CDP.
+  // Note: callers that need browser MCP (generator-agent, quickstart-scout,
+  // healer, enhancer) wire `@playwright/mcp --cdp-endpoint` directly onto the
+  // config and pass `useMCP: false` for the agent-sdk case — so they bypass
+  // this block. This fallback only fires for agent-sdk callers that pass
+  // `useMCP: true` without pre-wiring a server, and it REQUIRES a cdpEndpoint:
+  // the old `run-test-mcp-server` launched a browser in THIS host process,
+  // running user/AI browser actions outside the sandbox.
   const effectiveConfig = { ...config };
   if (options?.useMCP && config.provider === "claude-agent-sdk") {
-    const playwrightCli = path.join(
-      path.dirname(require.resolve("playwright")),
-      "cli.js",
-    );
+    const cdpEndpoint = options?.mcpConfig?.cdpEndpoint;
+    if (!cdpEndpoint) {
+      throw new Error(
+        "MCP browser tools require a cdpEndpoint (Embedded Browser) — refusing to launch a host-process browser. Claim an EB and pass mcpConfig.cdpEndpoint.",
+      );
+    }
     effectiveConfig.agentSdkMcpServers = {
       ...effectiveConfig.agentSdkMcpServers,
-      "playwright-test": {
-        command: "node",
-        args: [playwrightCli, "run-test-mcp-server", "--headless"],
+      playwright: {
+        command: "npx",
+        args: [
+          "@playwright/mcp@latest",
+          "--cdp-endpoint",
+          cdpEndpoint,
+          "--headless",
+        ],
       },
     };
     effectiveConfig.agentSdkAllowedTools = [
       ...(effectiveConfig.agentSdkAllowedTools || []),
-      "mcp__playwright-test__*",
+      "mcp__playwright__*",
     ];
     effectiveConfig.agentSdkDisallowedTools = [
       ...(effectiveConfig.agentSdkDisallowedTools || []),

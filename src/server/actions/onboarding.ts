@@ -28,8 +28,10 @@ export async function setBaseUrl(repositoryId: string, url: string) {
   if (schemeErr) throw new Error(`baseUrl rejected: ${schemeErr}`);
   const branch = repo.defaultBranch || "main";
   const existing = (repo.branchBaseUrls ?? {}) as Record<string, string>;
+  // Write only the branch key. (We used to also write a repo-wide "default"
+  // key, but the per-branch UI never updated it, so it went stale — removed.)
   await queries.updateRepository(repositoryId, {
-    branchBaseUrls: { ...existing, default: url, [branch]: url },
+    branchBaseUrls: { ...existing, [branch]: url },
   });
   // If the only test is an untouched auto-seeded sample (e.g. the herokuapp
   // demo), re-point it at the URL the user just entered so their first test

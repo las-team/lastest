@@ -15,7 +15,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
-  Bot,
   Check,
   ChevronRight,
   Github,
@@ -30,6 +29,7 @@ import {
 import { authClient } from "@/lib/auth/auth-client";
 import { toast } from "sonner";
 import { DiscordIcon } from "@/components/icons/discord-icon";
+import { McpConnect } from "@/components/mcp/mcp-connect";
 import { DISCORD_INVITE_URL } from "@/lib/brand";
 import {
   setOnboardingPath,
@@ -60,6 +60,7 @@ interface OnboardingClientProps {
   initialStep: number;
   initialPath: OnboardingPath | null;
   userName: string;
+  serverUrl: string;
   githubAccount: AccountLite | null;
   gitlabAccount: AccountLite | null;
   repos: RepoLite[];
@@ -78,44 +79,27 @@ const PATHS: Array<{
   Icon: typeof Hand;
 }> = [
   {
-    id: "manual",
-    name: "Manual",
-    tagline: "Record by clicking, own the code.",
-    time: "~3 min setup",
-    bullets: [
-      "No AI keys needed",
-      "Point-and-click recorder",
-      "Edit code by hand",
-    ],
-    bestFor: "Air-gapped · simple flows",
-    Icon: Hand,
-  },
-  {
-    id: "ai",
-    name: "AI-assisted",
-    tagline: "You drive, AI helps.",
-    time: "~5 min setup",
+    id: "mcp",
+    name: "Connect your AI agent",
+    tagline: "Drive Lastest from your own AI.",
+    time: "~4 min setup",
     recommended: true,
     bullets: [
-      "AI generates from URL",
-      "AI fixes broken tests",
-      "You review + approve",
+      "Use Claude Code, Cursor, any MCP client",
+      "Your model, your subscription",
+      "Generate, heal & review over MCP",
     ],
     bestFor: "Day-to-day dev",
     Icon: Sparkles,
   },
   {
-    id: "agent",
-    name: "Play agent",
-    tagline: "One click → full coverage.",
-    time: "~20 min (mostly waiting)",
-    bullets: [
-      "11-step pipeline",
-      "Scans + plans + generates",
-      "Asks when stuck",
-    ],
-    bestFor: "New projects · full coverage",
-    Icon: Bot,
+    id: "manual",
+    name: "Manual",
+    tagline: "Record by clicking, own the code.",
+    time: "~3 min setup",
+    bullets: ["No AI needed", "Point-and-click recorder", "Edit code by hand"],
+    bestFor: "Air-gapped · simple flows",
+    Icon: Hand,
   },
 ];
 
@@ -123,6 +107,7 @@ export function OnboardingClient({
   initialStep,
   initialPath,
   userName,
+  serverUrl,
   githubAccount,
   gitlabAccount,
   repos,
@@ -131,7 +116,7 @@ export function OnboardingClient({
 }: OnboardingClientProps) {
   const router = useRouter();
   const [step, setStep] = useState(initialStep);
-  const [path, setPath] = useState<OnboardingPath | null>(initialPath ?? "ai");
+  const [path, setPath] = useState<OnboardingPath | null>(initialPath ?? "mcp");
   const [pending, startTransition] = useTransition();
   // Captured from createLocalRepo when the sandbox flow picks a known template
   // so Step 5 can deep-link to the seeded test instead of /tests/new?ai=true.
@@ -348,11 +333,9 @@ export function OnboardingClient({
         )}
 
         {step === 4 && path !== "manual" && (
-          <Step4Ai
-            path={path}
-            pending={pending}
+          <Step4Mcp
+            serverUrl={serverUrl}
             onContinue={() => next()}
-            onUseOwnKey={() => router.push("/settings?highlight=ai")}
             onBack={back}
             onSkip={next}
           />
@@ -360,7 +343,7 @@ export function OnboardingClient({
 
         {step === 5 && (
           <Step5Launch
-            path={path ?? "ai"}
+            path={path ?? "mcp"}
             selectedRepoId={selectedRepoId}
             selectedRepoBaseUrl={selectedRepoBaseUrl}
             seededTestId={seededTestId}
@@ -1016,47 +999,38 @@ function Step3Url({
 
 // ─── Step 4: AI confirm (only ai-assisted + agent paths) ─────────────────────
 
-function Step4Ai({
-  path,
-  pending,
+function Step4Mcp({
+  serverUrl,
   onContinue,
-  onUseOwnKey,
   onBack,
   onSkip,
 }: {
-  path: OnboardingPath | null;
-  pending: boolean;
+  serverUrl: string;
   onContinue: () => void;
-  onUseOwnKey: () => void;
   onBack: () => void;
   onSkip: () => void;
 }) {
-  const isAgent = path === "agent";
+  const [connected, setConnected] = useState(false);
   return (
     <div className="space-y-6">
       <div className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">
-          {isAgent ? "Ready to fire up the agent?" : "AI is on by default"}
+          Connect your AI agent
         </h1>
         <p className="text-sm text-muted-foreground">
-          {isAgent
-            ? "We'll kick off the play agent on your repo. It scans, plans, generates, and runs — you can watch from the activity feed."
-            : "Lastest's hosted Claude is ready to generate and heal tests. Sound good?"}
+          Lastest works as an MCP server. Generate a key, paste one command into
+          your agent, and it can generate, heal, and review tests for you —
+          using your own model.
         </p>
       </div>
 
       <Card>
-        <CardContent className="space-y-3 py-4">
-          <div className="flex items-center gap-3">
-            <Sparkles className="h-5 w-5 text-primary" />
-            <div className="flex-1">
-              <div className="text-sm font-medium">Lastest hosted AI</div>
-              <div className="text-xs text-muted-foreground">
-                Free during beta. No API key needed.
-              </div>
-            </div>
-            <Badge variant="default">Default</Badge>
-          </div>
+        <CardContent className="py-4">
+          <McpConnect
+            serverUrl={serverUrl}
+            pollForConnection
+            onConnected={() => setConnected(true)}
+          />
         </CardContent>
       </Card>
 
@@ -1065,15 +1039,11 @@ function Step4Ai({
           Back
         </Button>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={onUseOwnKey}>
-            Use my own key →
-          </Button>
           <Button variant="ghost" size="sm" onClick={onSkip}>
-            Disable AI
+            I&apos;ll connect later
           </Button>
-          <Button onClick={onContinue} disabled={pending} size="lg">
-            {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            {isAgent ? "Continue" : "Yes, continue"}
+          <Button onClick={onContinue} size="lg">
+            {connected ? "Continue" : "Skip for now"}
             <ChevronRight className="ml-1 h-4 w-4" />
           </Button>
         </div>
@@ -1117,10 +1087,26 @@ function Step5Launch({
         target: `/record${repoQuery}${urlQuery ? "&" + urlQuery.slice(1) : ""}`,
       };
     }
+    if (path === "mcp") {
+      // If the sandbox flow seeded a real test, open it; otherwise land on the
+      // dashboard where the user can drive everything from their connected agent.
+      if (seededTestId) {
+        return {
+          title: "Your first test is ready",
+          body: "We seeded a real Playwright test against the sandbox template. Open it, hit run, and watch the diff — or ask your agent to add more.",
+          cta: "Open the test",
+          target: `/tests?test=${encodeURIComponent(seededTestId)}`,
+        };
+      }
+      return {
+        title: "You're connected",
+        body: "Ask your AI agent to generate, heal, and review tests over MCP. Your dashboard shows everything it does.",
+        cta: "Go to dashboard",
+        target: "/",
+      };
+    }
     if (path === "ai") {
-      // If the sandbox flow already seeded a real test, skip /tests/new
-      // (which kicks off AI generation against an MCP it may not reach) and
-      // drop the user straight into a ready-to-run test.
+      // Legacy in-product-AI path (pre-MCP onboarding rows).
       if (seededTestId) {
         return {
           title: "Your first test is ready",

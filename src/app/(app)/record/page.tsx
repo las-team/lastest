@@ -74,6 +74,8 @@ export default async function RecordPage({ searchParams }: RecordPageProps) {
     name: s.name,
   }));
 
+  const serverUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+
   return (
     <div className="flex flex-col h-full">
       <TestCreationTabs
@@ -81,6 +83,8 @@ export default async function RecordPage({ searchParams }: RecordPageProps) {
         settings={settings}
         repositoryId={selectedRepo?.id}
         defaultBaseUrl={rerecordTest?.targetUrl || envConfig.baseUrl}
+        serverUrl={serverUrl}
+        repoName={selectedRepo?.name}
         rerecordTest={rerecordTest}
         repositorySetupSteps={repositorySetupSteps}
         availableTests={availableTests}

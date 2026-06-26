@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Loader2,
   Download,
+  Webhook,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { NetworkRequest, DownloadRecord } from "@/lib/db/schema";
@@ -18,6 +19,9 @@ interface RuntimeErrorsPanelProps {
   networkRequests?: NetworkRequest[] | null;
   networkBodiesPath?: string | null;
   downloads?: DownloadRecord[] | null;
+  /** When provided, each expanded network row offers a "Create API test"
+   *  action that hands back the (fully-loaded) request to reproduce. */
+  onCreateApiTest?: (req: NetworkRequest) => void;
 }
 
 /** Strip "Console errors detected: ..." and "Network failures detected: ..." from an errorMessage. */
@@ -100,10 +104,12 @@ function NetworkRequestDetail({
   req,
   index,
   networkBodiesPath,
+  onCreateApiTest,
 }: {
   req: NetworkRequest;
   index: number;
   networkBodiesPath?: string | null;
+  onCreateApiTest?: (req: NetworkRequest) => void;
 }) {
   // Lazy-load body data from file when bodies aren't inline
   const hasInlineBodies = !!(
@@ -151,6 +157,20 @@ function NetworkRequestDetail({
 
   return (
     <div className="px-3 py-2 border-t border-border/30 bg-muted/20 text-xs space-y-2">
+      {/* Reproduce this request as an API test */}
+      {onCreateApiTest && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => onCreateApiTest(detail)}
+            className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-[11px] font-medium hover:bg-muted transition-colors"
+          >
+            <Webhook className="w-3 h-3" />
+            Create API test
+          </button>
+        </div>
+      )}
+
       {/* Full URL */}
       <div>
         <span className="font-medium text-muted-foreground">URL</span>
@@ -273,9 +293,11 @@ function tryFormatJson(str: string): string {
 function NetworkTraceTable({
   requests,
   networkBodiesPath,
+  onCreateApiTest,
 }: {
   requests: NetworkRequest[];
   networkBodiesPath?: string | null;
+  onCreateApiTest?: (req: NetworkRequest) => void;
 }) {
   const [errorsOnly, setErrorsOnly] = useState(false);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
@@ -363,6 +385,7 @@ function NetworkTraceTable({
                   req={req}
                   index={i}
                   networkBodiesPath={networkBodiesPath}
+                  onCreateApiTest={onCreateApiTest}
                 />
               )}
             </div>
@@ -423,6 +446,7 @@ export function RuntimeErrorsPanel({
   networkRequests,
   networkBodiesPath,
   downloads,
+  onCreateApiTest,
 }: RuntimeErrorsPanelProps) {
   const hasConsole = consoleErrors && consoleErrors.length > 0;
   const hasNetwork = networkRequests && networkRequests.length > 0;
@@ -490,6 +514,7 @@ export function RuntimeErrorsPanel({
           <NetworkTraceTable
             requests={networkRequests!}
             networkBodiesPath={networkBodiesPath}
+            onCreateApiTest={onCreateApiTest}
           />
         </details>
       )}
@@ -521,6 +546,7 @@ export function RuntimeErrorsPanel({
           <NetworkTraceTable
             requests={networkRequests!}
             networkBodiesPath={networkBodiesPath}
+            onCreateApiTest={onCreateApiTest}
           />
         </details>
       )}

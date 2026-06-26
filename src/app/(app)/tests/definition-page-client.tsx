@@ -50,6 +50,9 @@ import { AICreateTestDialog } from "@/components/ai/ai-create-test-dialog";
 import { AIScanRoutesDialog } from "@/components/ai/ai-scan-routes-dialog";
 import { ImportFromSpecDialog } from "@/components/ai/import-from-spec-dialog";
 import { CodeDiffScanDialog } from "@/components/ai/code-diff-scan-dialog";
+import { useAiEnabled } from "@/components/ai/ai-availability-context";
+import { McpCtaHint } from "@/components/mcp/mcp-cta-hint";
+import { ValidateDiffDialog } from "@/components/api-tests/validate-diff-dialog";
 import {
   createArea,
   deleteArea,
@@ -87,6 +90,7 @@ import {
   Loader2,
   BookOpen,
   GitCompare,
+  ShieldCheck,
   Download,
   FlaskConical,
   Plus,
@@ -116,6 +120,24 @@ interface TestWithStatus extends Test {
   lastRunAt: Date | null;
   // Denormalized from test_specs.title (1:1 LEFT JOIN). Short-form display string.
   specTitle?: string | null;
+}
+
+/**
+ * Distinguishes headless API tests (E1) from browser tests at a glance.
+ * Browser tests render nothing to avoid badge noise.
+ */
+function TestTypeBadge({ test }: { test: Pick<Test, "testType"> }) {
+  if (test.testType !== "api") return null;
+  return (
+    <span className="flex items-center gap-1 shrink-0">
+      <Badge
+        variant="outline"
+        className="h-4 px-1.5 text-[10px] font-medium uppercase tracking-wide"
+      >
+        API
+      </Badge>
+    </span>
+  );
 }
 
 interface DefinitionPageClientProps {
@@ -193,6 +215,10 @@ export function DefinitionPageClient({
   deletedTests,
 }: DefinitionPageClientProps) {
   const router = useRouter();
+  // In-product AI gate (MCP-first): true only when AI isn't banned AND BYOK is
+  // configured. `banAiMode` already folds into this server-side, so CTAs gate on
+  // `aiEnabled` and offer an MCP hint when it's off.
+  const aiEnabled = useAiEnabled();
   const searchParams = useSearchParams();
   const notifyJobStarted = useNotifyJobStarted();
   const isMobile = useIsMobile();
@@ -218,6 +244,7 @@ export function DefinitionPageClient({
     null,
   );
   const [showCodeDiffDialog, setShowCodeDiffDialog] = useState(false);
+  const [showValidateDiffDialog, setShowValidateDiffDialog] = useState(false);
 
   // --- Area CRUD state ---
   const [isNewAreaOpen, setIsNewAreaOpen] = useState(false);
@@ -1165,7 +1192,7 @@ export function DefinitionPageClient({
         </TooltipTrigger>
         <TooltipContent side="bottom">Scan Routes</TooltipContent>
       </Tooltip>
-      {!banAiMode && (
+      {aiEnabled ? (
         <>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -1206,7 +1233,30 @@ export function DefinitionPageClient({
             </TooltipTrigger>
             <TooltipContent side="bottom">Code Diff</TooltipContent>
           </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={() => setShowValidateDiffDialog(true)}
+              >
+                <ShieldCheck className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Validate a diff</TooltipContent>
+          </Tooltip>
         </>
+      ) : (
+        <McpCtaHint
+          promptKey="discover"
+          size="icon"
+          label=""
+          variant="ghost"
+          className="h-6 w-6"
+          repositoryId={repositoryId}
+          targetUrl={baseUrl}
+        />
       )}
     </>
   );
@@ -1371,20 +1421,27 @@ export function DefinitionPageClient({
                           <div className="w-px h-5 bg-border" />
                         </>
                       )}
-                      {!banAiMode && failedScopedTests.length > 0 && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 text-sm"
-                          onClick={handleFixAllFailed}
-                          disabled={isFixingAll}
-                        >
-                          <Wrench className="h-4 w-4 mr-1.5" />
-                          {isFixingAll
-                            ? "Fixing..."
-                            : `Fix Failed (${failedScopedTests.length})`}
-                        </Button>
-                      )}
+                      {failedScopedTests.length > 0 &&
+                        (aiEnabled ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 text-sm"
+                            onClick={handleFixAllFailed}
+                            disabled={isFixingAll}
+                          >
+                            <Wrench className="h-4 w-4 mr-1.5" />
+                            {isFixingAll
+                              ? "Fixing..."
+                              : `Fix Failed (${failedScopedTests.length})`}
+                          </Button>
+                        ) : (
+                          <McpCtaHint
+                            promptKey="heal"
+                            label="Fix with agent"
+                            repositoryId={repositoryId}
+                          />
+                        ))}
                       <Button
                         variant="outline"
                         size="sm"
@@ -1395,7 +1452,7 @@ export function DefinitionPageClient({
                         <FlaskConical className="h-4 w-4 mr-1.5" />
                         Add Basic
                       </Button>
-                      {!banAiMode && (
+                      {aiEnabled ? (
                         <Button
                           variant="outline"
                           size="sm"
@@ -1405,6 +1462,13 @@ export function DefinitionPageClient({
                           <Sparkles className="h-4 w-4 mr-1.5" />
                           Generate
                         </Button>
+                      ) : (
+                        <McpCtaHint
+                          promptKey="generate"
+                          label="Generate with agent"
+                          repositoryId={repositoryId}
+                          targetUrl={baseUrl}
+                        />
                       )}
                       <Button
                         asChild
@@ -1831,7 +1895,7 @@ export function DefinitionPageClient({
                             <Trash2 className="h-3.5 w-3.5 mr-1.5" />
                             Trash
                           </Button>
-                          {!banAiMode && selectedFailedTests.length > 0 && (
+                          {aiEnabled && selectedFailedTests.length > 0 && (
                             <Button
                               variant="outline"
                               size="sm"
@@ -1844,25 +1908,24 @@ export function DefinitionPageClient({
                                 : `Fix (${selectedFailedTests.length})`}
                             </Button>
                           )}
-                          {!banAiMode &&
-                            selectedPlaceholderTests.length > 0 && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={handleBulkGeneratePlaceholders}
-                                disabled={isBulkGeneratingPlaceholders}
-                                title="Generate full tests for selected placeholders using AI"
-                              >
-                                {isBulkGeneratingPlaceholders ? (
-                                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                                ) : (
-                                  <Sparkles className="h-3.5 w-3.5 mr-1.5" />
-                                )}
-                                {isBulkGeneratingPlaceholders
-                                  ? "Generating..."
-                                  : `Generate (${selectedPlaceholderTests.length})`}
-                              </Button>
-                            )}
+                          {aiEnabled && selectedPlaceholderTests.length > 0 && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleBulkGeneratePlaceholders}
+                              disabled={isBulkGeneratingPlaceholders}
+                              title="Generate full tests for selected placeholders using AI"
+                            >
+                              {isBulkGeneratingPlaceholders ? (
+                                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                              ) : (
+                                <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                              )}
+                              {isBulkGeneratingPlaceholders
+                                ? "Generating..."
+                                : `Generate (${selectedPlaceholderTests.length})`}
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="sm"
@@ -1946,8 +2009,11 @@ export function DefinitionPageClient({
                                   }}
                                 />
                                 <div className="min-w-0 flex-1">
-                                  <div className="font-medium text-sm truncate group-hover:text-primary transition-colors">
-                                    {test.name}
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <div className="font-medium text-sm truncate group-hover:text-primary transition-colors">
+                                      {test.name}
+                                    </div>
+                                    <TestTypeBadge test={test} />
                                   </div>
                                   {!treeSelection?.type &&
                                     getAreaName(test.functionalAreaId) && (
@@ -2165,6 +2231,15 @@ export function DefinitionPageClient({
       </ResizablePanel>
 
       {/* ─── Dialogs ─── */}
+
+      {/* Validate a diff */}
+      {showValidateDiffDialog && (
+        <ValidateDiffDialog
+          open={showValidateDiffDialog}
+          onOpenChange={setShowValidateDiffDialog}
+          repositoryId={repositoryId}
+        />
+      )}
 
       {/* New Area */}
       <Dialog open={isNewAreaOpen} onOpenChange={setIsNewAreaOpen}>
@@ -2416,7 +2491,7 @@ export function DefinitionPageClient({
       />
 
       {/* AI Create Test */}
-      {!banAiMode && (
+      {aiEnabled && (
         <AICreateTestDialog
           open={isAICreateOpen}
           onOpenChange={setIsAICreateOpen}

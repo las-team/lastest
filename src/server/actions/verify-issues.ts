@@ -479,10 +479,13 @@ export async function confirmCase(
   //    lands. Reuses the per-layer baseline / review-todo side effects
   //    that already power the existing approve/reject flow.
   const decision = KIND_TO_DECISION[kind];
-  const evidenceLayers: EvidenceLayer[] =
-    step.evidence.length > 0
-      ? Array.from(new Set(step.evidence.map((e) => e.layer)))
-      : ["visual"];
+  // Seed "visual" whenever a visual diff exists: a first-run/0px diff carries
+  // no "visual" evidence row, so mirroring only step.evidence would skip the
+  // baseline write. Falls back to ["visual"] when there's no evidence at all.
+  const layerSet = new Set<EvidenceLayer>(step.evidence.map((e) => e.layer));
+  if (step.visualDiffId) layerSet.add("visual");
+  if (layerSet.size === 0) layerSet.add("visual");
+  const evidenceLayers: EvidenceLayer[] = Array.from(layerSet);
   await Promise.all(
     evidenceLayers.map((layer) =>
       decideLayer({

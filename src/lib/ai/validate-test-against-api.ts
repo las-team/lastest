@@ -10,8 +10,8 @@
  * wrong arg arity, calling a method on the wrong type (e.g. Page methods on a
  * Locator), referring to a name not in the runner's injected variable bag.
  *
- * Does NOT catch: whether a selector resolves on the live page — that is the
- * job of mcp-validator.validateSelectorsOnPage, called after this passes.
+ * Does NOT catch: whether a selector resolves on the live page — that is
+ * verified by the Embedded Browser run, not at validation time.
  */
 
 import * as ts from "typescript";

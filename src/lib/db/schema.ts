@@ -121,6 +121,10 @@ export interface DomSnapshotElement {
   textContent?: string;
   boundingBox: { x: number; y: number; width: number; height: number };
   selectors: Array<{ type: string; value: string }>;
+  // Curated computed styles (color, padding, font, …), captured by the
+  // embedded browser only when style capture is enabled. Drives RCA CSS-delta
+  // drill-down; absent on snapshots predating the feature.
+  styles?: Record<string, string>;
 }
 
 // Full DOM snapshot with page context
@@ -140,6 +144,72 @@ export interface DomDiffResult {
     changes: ("text" | "position" | "size" | "selector")[];
   }>;
   unchangedCount: number;
+}
+
+// ---------------------------------------------------------------------------
+// Root Cause Analysis (RCA) — "is this diff the TEST or the CODE?"
+// ---------------------------------------------------------------------------
+//
+// A per-visual-diff verdict that fuses signals already computed elsewhere
+// (pixel-diff metadata, optional DOM diff, the build's Change Map) into a
+// rich-taxonomy classification. Computed by `src/lib/rca/` after the build's
+// Change Map is available and persisted into `DiffMetadata.rca` below. The
+// `headline` drives the badge color; `signals` explain the verdict; the
+// element-level `regionCauses` are populated by the (later) correlation phase.
+
+export type RcaCategory =
+  // Application changed because the code changed (real regression or an
+  // intended UI change to approve).
+  | "code:structural" // DOM nodes/attributes added, removed, or re-selected
+  | "code:style" // CSS/visual change (color, spacing, size) tied to a code change
+  | "code:content" // copy/content changed and it is NOT a dynamic-data pattern
+  // Diff is noise from the test/environment, not a code change.
+  | "test:flake" // non-deterministic render with no DOM/code change
+  | "test:dynamic-data" // dates, counters, ids, currency — data, not code
+  | "test:animation" // transient/mid-animation frame or anti-aliasing
+  | "test:environment" // page shift, cross-branch baseline, locale/viewport
+  | "test:never-passed" // test has no green history — its baseline isn't trustworthy
+  // Not enough signal to commit to test-vs-code.
+  | "uncertain";
+
+export interface RcaSignal {
+  category: RcaCategory;
+  /** 0..1 — strength of THIS signal, not a probability across categories. */
+  confidence: number;
+  /** One short plain-English sentence explaining the signal. */
+  reason: string;
+}
+
+/** Element-level cause for one changed pixel region (populated by the
+ *  correlation phase; empty in the Phase-1 classifier-only path). */
+export interface RcaRegionCause {
+  region: { x: number; y: number; width: number; height: number };
+  selector: string;
+  changeType: (
+    | "text"
+    | "position"
+    | "size"
+    | "selector"
+    | "added"
+    | "removed"
+  )[];
+  cssDeltas?: Array<{ property: string; baseline: string; current: string }>;
+}
+
+export interface RcaVerdict {
+  /** Headline bucket that drives the badge: code change, test noise, or unsure. */
+  headline: "code" | "test" | "uncertain";
+  /** Ranked contributing signals (strongest first). */
+  signals: RcaSignal[];
+  /** Build-level files that changed (from the Change Map), surfaced for `code`. */
+  changedFiles: string[];
+  /** Element-level region→cause mapping (correlation phase). */
+  regionCauses?: RcaRegionCause[];
+  /** One-sentence human-readable root cause (AI, best-effort; Phase 4). */
+  narrative?: string;
+  /** Schema/heuristic version, so stale verdicts can be recomputed. */
+  version: number;
+  computedAt: string;
 }
 
 export interface DiffMetadata {
@@ -164,6 +234,10 @@ export interface DiffMetadata {
   // branch, surface where the user DOES have an approved baseline so they
   // know it's not lost. Empty when there's no approved baseline anywhere.
   baselineExistsOn?: { branch: string; createdAt: string };
+  // Root Cause Analysis verdict — "is this diff the test or the code?".
+  // Computed post-build by src/lib/rca/ and read by the diff badge + Source
+  // filter. Absent on diffs predating the feature (UI treats it as unknown).
+  rca?: RcaVerdict;
 }
 
 /** Capabilities that a test requires from Playwright settings (detected during recording). */
@@ -232,6 +306,7 @@ export interface TestPlaywrightOverrides {
   designMode?: "enforce" | "log" | "disable";
   perfMode?: "enforce" | "log" | "disable";
   urlMode?: "enforce" | "log" | "disable";
+  apiMode?: "enforce" | "log" | "disable";
   acceptAnyCertificate?: boolean;
   maxParallelTests?: number;
   baseUrl?: string;
@@ -296,6 +371,78 @@ export const functionalAreas = pgTable("functional_areas", {
   deletedAt: timestamp("deleted_at"),
 });
 
+// ---------------------------------------------------------------------------
+// API tests (E1) — headless HTTP test definition + assertions.
+// A standalone request executed without a browser; results flow through the
+// same test_results / step_comparisons / evidence pipeline as browser tests
+// under the `api` check layer.
+// ---------------------------------------------------------------------------
+
+export type ApiAuth =
+  | { type: "none" }
+  | { type: "bearer"; token: string }
+  | { type: "basic"; username: string; password: string }
+  | { type: "custom"; headers: Record<string, string> };
+
+export type ApiAssertionKind =
+  | "status"
+  | "header"
+  | "jsonPath"
+  | "jsonSchema"
+  | "bodyContains"
+  | "latencyMs";
+
+export interface ApiAssertion {
+  kind: ApiAssertionKind;
+  /** status: exact status code, or `in` for a set of acceptable codes. */
+  equals?: number;
+  in?: number[];
+  /** header: header name to assert on (case-insensitive). */
+  header?: string;
+  /** jsonPath: dot-path into the JSON response body. */
+  path?: string;
+  /** Expected value (jsonPath / header) or substring (bodyContains). */
+  value?: string | number | boolean;
+  /** jsonSchema: a JSON Schema object validated with ajv. */
+  schema?: unknown;
+  /** latencyMs: max acceptable round-trip latency. */
+  maxMs?: number;
+  /** header/jsonPath: require an exact same-type match (no string coercion).
+   *  Default comparison is type-aware, keyed off the expected value's type. */
+  strict?: boolean;
+  description?: string;
+}
+
+export interface ApiTestDefinition {
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  url: string;
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
+  body?: unknown;
+  auth?: ApiAuth;
+  assertions: ApiAssertion[];
+  /** Optional per-request timeout (ms). Falls back to DEFAULT_API_TEST_SETTINGS. */
+  timeoutMs?: number;
+}
+
+export interface ApiAssertionResultData {
+  kind: ApiAssertionKind;
+  passed: boolean;
+  description: string;
+  expected?: unknown;
+  actual?: unknown;
+}
+
+/** Persisted result of a headless API test (stored on test_results.apiResult). */
+export interface ApiTestResultData {
+  passed: boolean;
+  statusCode: number | null;
+  latencyMs: number;
+  assertionResults: ApiAssertionResultData[];
+  error?: string;
+  responseSnippet?: string;
+}
+
 export const tests = pgTable("tests", {
   id: text("id").primaryKey(),
   repositoryId: text("repository_id"),
@@ -350,6 +497,9 @@ export const tests = pgTable("tests", {
   // here so 'fixed' refresh-mode reuses it across runs and 'random' mode can
   // fall back to it when AI is misconfigured / rate-limited.
   aiVarLastValues: jsonb("ai_var_last_values").$type<Record<string, string>>(),
+  // E1: test type discriminator. 'browser' (Playwright, default) | 'api' (headless HTTP).
+  testType: text("test_type").default("browser"),
+  apiDefinition: jsonb("api_definition").$type<ApiTestDefinition>(),
   executionMode: text("execution_mode").default("procedural"), // 'procedural' | 'agent'
   quarantined: boolean("quarantined").default(false), // quarantined tests run but don't block builds
   domSnapshot: jsonb("dom_snapshot").$type<DomSnapshotData>(), // DOM state captured during recording
@@ -711,6 +861,8 @@ export const testResults = pgTable("test_results", {
   testId: text("test_id").references(() => tests.id),
   testVersionId: text("test_version_id"), // links to testVersions.id — which version was executed
   status: text("status"), // 'passed', 'failed', 'skipped'
+  // E1: result of a headless API test (null for browser tests).
+  apiResult: jsonb("api_result").$type<ApiTestResultData>(),
   screenshotPath: text("screenshot_path"),
   screenshots: jsonb("screenshots").$type<CapturedScreenshot[]>(),
   diffPath: text("diff_path"),
@@ -1373,6 +1525,7 @@ export const playwrightSettings = pgTable("playwright_settings", {
   designMode: text("design_mode"), // token compliance (legacy enableDesignSystem)
   perfMode: text("perf_mode"), // web vitals capture
   urlMode: text("url_mode"), // URL trajectory comparison
+  apiMode: text("api_mode"), // API-test request/response assertions (E1)
   createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 });
@@ -1512,6 +1665,12 @@ export const DEFAULT_DIFF_THRESHOLDS = {
   textDiffEnabled: false,
 };
 
+// Default settings for API tests (E1). Used when a field is unset on the
+// ApiTestDefinition.
+export const DEFAULT_API_TEST_SETTINGS = {
+  timeoutMs: 15000,
+};
+
 // Diff classification type
 export type DiffClassification = "unchanged" | "flaky" | "changed";
 
@@ -1532,7 +1691,12 @@ export type DiffStatus =
   | "rejected"
   | "auto_approved"
   | "todo";
-export type TriggerType = "webhook" | "manual" | "push" | "scheduled";
+export type TriggerType =
+  | "webhook"
+  | "manual"
+  | "push"
+  | "scheduled"
+  | "validate_diff";
 
 // AI Provider settings for test generation
 export type AIProvider =
@@ -1615,7 +1779,8 @@ export type AIActionType =
   | "agent_heal"
   | "agent_play"
   | "triage"
-  | "generate_var_value";
+  | "generate_var_value"
+  | "suggest_app_fix";
 export type AILogStatus = "pending" | "success" | "error";
 
 export const aiPromptLogs = pgTable("ai_prompt_logs", {
@@ -1886,7 +2051,9 @@ export const teams = pgTable("teams", {
 export type Team = typeof teams.$inferSelect;
 export type NewTeam = typeof teams.$inferInsert;
 
-export type OnboardingPath = "manual" | "ai" | "agent";
+// "ai" / "agent" are legacy in-product-AI paths kept for back-compat with rows
+// written before the MCP-first onboarding; new onboardings pick "manual" or "mcp".
+export type OnboardingPath = "manual" | "ai" | "agent" | "mcp";
 
 // Users - Core identity
 export const users = pgTable("users", {
@@ -2378,7 +2545,7 @@ export type AgentSessionStatus =
   | "failed"
   | "cancelled";
 
-export type AgentSessionKind = "play" | "quickstart";
+export type AgentSessionKind = "play" | "quickstart" | "ranger";
 
 export type AgentStepId =
   | "settings_check"
@@ -2402,7 +2569,10 @@ export type AgentStepId =
   | "qs_run_and_notes"
   | "qs_approve_baselines"
   | "qs_rerun_after_approval"
-  | "qs_publish_share";
+  | "qs_publish_share"
+  // Ranger (EB-backed live page scout, MCP-driven)
+  | "ranger_provision"
+  | "ranger_browse";
 
 export type AgentStepStatus =
   | "pending"
@@ -2419,7 +2589,8 @@ export type PwAgentType =
   | "diver"
   | "generator"
   | "healer"
-  | "quickstart";
+  | "quickstart"
+  | "ranger";
 
 export interface AgentSubstep {
   label: string;
@@ -2513,6 +2684,7 @@ export interface QuickstartAuthClassification {
    */
   classification:
     | "email_password"
+    | "login_email_password"
     | "magic_link_only"
     | "oauth_only"
     | "captcha_gated"
@@ -2538,6 +2710,27 @@ export interface QuickstartPublicScout extends QuickstartAuthClassification {
   concept?: string;
   navLinks: Array<{ path: string; label: string }>;
   registerPath?: string | null;
+  /** Login page URL observed in the DOM (distinct from registerPath). Relative
+   *  path (starting with /) or full https URL for cross-subdomain auth. Used by
+   *  the user-credential login path when no automatable signup exists. */
+  loginPath?: string | null;
+  /** Auth library's REST sign-in endpoint when detectable (e.g.
+   *  "/api/auth/sign-in/email" for better-auth). Drives the api-login bypass in
+   *  the login template when the React form doesn't persist a session cookie. */
+  apiLoginEndpoint?: string | null;
+  /** Best-effort auth library guess (better-auth | nextauth | supabase | firebase
+   *  | clerk | lucia | unknown). Informational — surfaced in demo notes + used as
+   *  authFlavor provenance on the captured storage state. */
+  authLibrary?: string;
+  /** Where the session token persists, best-effort. Informs storage-capture and
+   *  re-auth strategy; replay accepts any of these so a precise value isn't
+   *  required for correctness. */
+  tokenLocation?:
+    | "cookie"
+    | "localstorage"
+    | "indexeddb"
+    | "sessionstorage"
+    | "unknown";
   cookieBannerSelectorHint?: string;
   friction?: Array<{ kind: string; note: string }>;
   businessInteraction?: QuickstartBusinessInteraction;
@@ -2555,6 +2748,9 @@ export interface QuickstartAuthSetupMeta {
   storageStateId?: string;
   captured: boolean;
   failureReason?: string;
+  /** Which handshake produced the session: "login" (user-supplied creds) or
+   *  "signup" (fresh demo account). Surfaced in demo notes. */
+  mode?: "login" | "signup";
 }
 
 export interface AgentSessionMetadata {
@@ -2573,12 +2769,28 @@ export interface AgentSessionMetadata {
   skipAI?: boolean;
   // QuickStart-only fields
   quickstartEmail?: string;
+  /** User's real app-login password (QuickStart against their own baseURL).
+   *  Encrypted at rest (AES-256-GCM) via the agent-session query layer in
+   *  queries/integrations.ts — callers always see the decrypted plaintext. */
   quickstartPassword?: string;
   quickstartSlug?: string;
   quickstartStamp?: string;
+  /** True when the user supplied real app login credentials for their own
+   *  baseURL (QuickStart runs against the user's own app). When set,
+   *  quickstartEmail/quickstartPassword hold those creds and the auth-setup runs
+   *  a LOGIN handshake instead of registering a fresh demo account. */
+  credsProvided?: boolean;
+  /** Resolved auth handshake for this run, decided at auth-setup time. */
+  authMode?: "login" | "signup" | "public_only";
   publicScout?: QuickstartPublicScout;
   authedScout?: QuickstartAuthedScout;
   authSetup?: QuickstartAuthSetupMeta;
+  /** Live CDP screencast URL of the EB the scout is currently driving. Set while
+   *  a scout step holds an EB, cleared when it releases. Powers the panel's live
+   *  browser view. */
+  streamUrl?: string;
+  /** True while an agent step is blocked waiting for an EB from the pool. */
+  queuedForBrowser?: boolean;
   walkthroughTestId?: string;
   buildId?: string;
   /** Build id of the second walkthrough run (after baselines are approved). Replaces
@@ -2591,6 +2803,11 @@ export interface AgentSessionMetadata {
   shareSlug?: string;
   shareUrl?: string;
   disabledReason?: string;
+  // Ranger-only fields
+  /** URL the ranger session is browsing. */
+  rangerUrl?: string;
+  /** Deterministic rendered page map produced by the ranger EB browse. */
+  rangerPageMap?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -2804,7 +3021,7 @@ export type NewRemoteRecordingEventRow =
 // GitHub Actions Configs
 // ============================================
 
-export type GithubActionMode = "persistent" | "ephemeral" | "auto";
+export type GithubActionMode = "persistent" | "auto";
 export type GithubActionTriggerEvent =
   | "push"
   | "pull_request"
@@ -2848,7 +3065,7 @@ export type NewGithubActionConfig = typeof githubActionConfigs.$inferInsert;
 // GitLab Pipeline Configs
 // ============================================
 
-export type GitlabPipelineMode = "persistent" | "ephemeral" | "auto";
+export type GitlabPipelineMode = "persistent" | "auto";
 export type GitlabPipelineTriggerEvent =
   | "push"
   | "merge_request"
@@ -3433,7 +3650,8 @@ export type EvidenceLayer =
   | "console"
   | "url"
   | "perf"
-  | "variable";
+  | "variable"
+  | "api";
 
 export interface EvidenceItem {
   layer: EvidenceLayer;
@@ -3927,6 +4145,50 @@ export const buildDemoNotes = pgTable("build_demo_notes", {
 
 export type BuildDemoNotesRow = typeof buildDemoNotes.$inferSelect;
 export type NewBuildDemoNotesRow = typeof buildDemoNotes.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// App-fix suggestions — "Fix the app" loop (E5)
+// ---------------------------------------------------------------------------
+//
+// When a failure is classified `real_regression`, the advisor produces a
+// structured *application-code* fix recommendation that is returned to the
+// calling coding agent (never auto-applied). Distinct from the test healer,
+// which patches test code.
+
+export interface AppFixSuggestionFile {
+  path: string;
+  startLine?: number;
+  endLine?: number;
+  currentSnippet?: string;
+  suggestedSnippet?: string;
+  rationale: string;
+}
+
+export interface AppFixSuggestion {
+  summary: string;
+  classification: "real_regression";
+  confidence: number;
+  files: AppFixSuggestionFile[];
+  /** Files from the build's change map that likely introduced the regression. */
+  relatedChangeMapFiles?: string[];
+  generatedAt: string;
+  modelId: string;
+}
+
+export const appFixSuggestions = pgTable("app_fix_suggestions", {
+  id: text("id").primaryKey(),
+  buildId: text("build_id").references(() => builds.id, {
+    onDelete: "cascade",
+  }),
+  testId: text("test_id").references(() => tests.id, { onDelete: "cascade" }),
+  payload: jsonb("payload").$type<AppFixSuggestion>().notNull(),
+  createdAt: timestamp("created_at")
+    .$defaultFn(() => new Date())
+    .notNull(),
+});
+
+export type AppFixSuggestionRow = typeof appFixSuggestions.$inferSelect;
+export type NewAppFixSuggestionRow = typeof appFixSuggestions.$inferInsert;
 
 // ---------------------------------------------------------------------------
 // Verify phase — Per-layer baselines (v1.14+)

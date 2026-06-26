@@ -6,7 +6,6 @@ import {
   ChevronRight,
   Trash2,
   Rocket,
-  Cloud,
   Server,
   Zap,
   AlertTriangle,
@@ -43,18 +42,18 @@ import { toast } from "sonner";
 
 interface ConfigListProps {
   configs: GitlabPipelineConfig[];
-  runners: Runner[];
   hasGitlabAccount: boolean;
+  runners: Runner[];
 }
 
 function ConfigCard({
   config,
-  runners,
   hasGitlabAccount,
+  runners,
 }: {
   config: GitlabPipelineConfig;
-  runners: Runner[];
   hasGitlabAccount: boolean;
+  runners: Runner[];
 }) {
   const [expanded, setExpanded] = useState(false);
   const [deployOpen, setDeployOpen] = useState(false);
@@ -63,7 +62,6 @@ function ConfigCard({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const runner = runners.find((r) => r.id === config.runnerId);
   const mode = config.mode as GitlabPipelineMode;
   const deliveryMode = config.deliveryMode as GitlabPipelineDeliveryMode;
 
@@ -121,27 +119,14 @@ function ConfigCard({
                     </>
                   )}
                 </Badge>
-                <Badge
-                  variant={
-                    mode === "ephemeral"
-                      ? "default"
-                      : mode === "auto"
-                        ? "default"
-                        : "secondary"
-                  }
-                  className="text-xs"
-                >
-                  {mode === "ephemeral" ? (
+                <Badge variant="default" className="text-xs">
+                  {mode === "persistent" ? (
                     <>
-                      <Cloud className="h-3 w-3 mr-1" /> Ephemeral
-                    </>
-                  ) : mode === "auto" ? (
-                    <>
-                      <Zap className="h-3 w-3 mr-1" /> Auto
+                      <Server className="h-3 w-3 mr-1" /> Persistent
                     </>
                   ) : (
                     <>
-                      <Server className="h-3 w-3 mr-1" /> Persistent
+                      <Zap className="h-3 w-3 mr-1" /> Auto
                     </>
                   )}
                 </Badge>
@@ -154,11 +139,6 @@ function ConfigCard({
                   </Badge>
                 )}
               </div>
-              {runner && (
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Runner: {runner.name}
-                </p>
-              )}
             </div>
             <div
               className="flex items-center gap-0.5"
@@ -271,8 +251,9 @@ function ConfigCard({
                     <li>Remove the project webhook</li>
                   </>
                 )}
-                {(mode === "ephemeral" || mode === "auto") &&
-                  config.runnerId && <li>Delete the auto-created runner</li>}
+                {mode === "auto" && config.runnerId && (
+                  <li>Delete the auto-created runner</li>
+                )}
                 <li>Delete this configuration</li>
               </ul>
             </div>
@@ -303,8 +284,8 @@ function ConfigCard({
 
 export function ConfigList({
   configs,
-  runners,
   hasGitlabAccount,
+  runners,
 }: ConfigListProps) {
   return (
     <div className="space-y-3">
@@ -312,8 +293,8 @@ export function ConfigList({
         <ConfigCard
           key={config.id}
           config={config}
-          runners={runners}
           hasGitlabAccount={hasGitlabAccount}
+          runners={runners}
         />
       ))}
     </div>

@@ -74,6 +74,7 @@ export async function agentEnhanceTest(
   repositoryId: string,
   testId: string,
   userPrompt?: string,
+  options?: { cdpEndpoint?: string },
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   await requireRepoAccess(repositoryId);
   try {
@@ -110,7 +111,19 @@ ${seed.seedPrompt}`;
     // The system prompt above expects browser_snapshot/browser_navigate from
     // @playwright/mcp — NOT the test-runner MCP that generateWithAI's fallback
     // would otherwise inject for claude-agent-sdk.
-    const mcpArgs = ["@playwright/mcp@latest", "--headless"];
+    // A CDP endpoint (Embedded Browser) is mandatory — without it
+    // @playwright/mcp launches Chromium in THIS host process.
+    if (!options?.cdpEndpoint) {
+      throw new Error(
+        "[EnhancerAgent] cdpEndpoint is required — refusing to launch a host-process browser. Claim an Embedded Browser first.",
+      );
+    }
+    const mcpArgs = [
+      "@playwright/mcp@latest",
+      "--cdp-endpoint",
+      options.cdpEndpoint,
+      "--headless",
+    ];
 
     if (config.provider === "claude-agent-sdk") {
       config.agentSdkStrictMcpConfig = true;
@@ -157,7 +170,6 @@ ${seed.seedPrompt}`;
 
     const validated = await runValidationWithRetry(
       initial,
-      seed.baseUrl,
       async (feedback, attempt) => {
         console.log(
           `[EnhancerAgent] Validation failed, retry ${attempt}/2 with feedback`,

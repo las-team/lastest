@@ -1,5 +1,5 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.las-team/lastest",
   "description": "Run visual regression tests, review diffs, and manage baselines on a Lastest instance.",
   "repository": {
@@ -7,13 +7,13 @@
     "source": "github",
     "subfolder": "packages/mcp-server"
   },
-  "version": "0.3.4",
+  "version": "0.3.7",
   "websiteUrl": "https://github.com/las-team/lastest/wiki/MCP-Server",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@lastest/mcp-server",
-      "version": "0.3.4",
+      "version": "0.3.7",
       "transport": { "type": "stdio" },
       "runtimeArguments": [
         {

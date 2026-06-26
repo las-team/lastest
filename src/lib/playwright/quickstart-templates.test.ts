@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   renderAuthSetupCode,
+  renderAuthLoginCode,
   renderWalkthroughCode,
   renderQuickstartEmail,
   renderQuickstartPassword,
@@ -9,6 +10,7 @@ import {
   SAFE_CTA_PATTERN,
   DESTRUCTIVE_CTA_PATTERN,
   CAPTCHA_LOCATOR,
+  AUTH_CHAIN_FAILED_MARKER,
 } from "./quickstart-templates";
 
 const sampleEmail = "viktor+postbox202604030915@lastest.cloud";
@@ -105,8 +107,22 @@ describe("renderWalkthroughCode — authed (chained storage state) mode", () => 
     expect(code).not.toMatch(/CHAINED_AUTH/);
   });
 
-  it("verifies storage-state auth via Sign-in CTA absence after navigation", () => {
-    expect(code).toMatch(/Storage state did not authenticate the browser/);
+  it("reds the build via the auth-fail marker when the chain doesn't authenticate", () => {
+    expect(code).toContain(AUTH_CHAIN_FAILED_MARKER);
+    // The marker throw must sit OUTSIDE the best-effort try/catch so it surfaces
+    // as a failed test rather than a swallowed warning. It captures an
+    // 'auth-failed' frame just before throwing.
+    expect(code).toMatch(/shot\(publicScenario, 'auth-failed'\)/);
+    const markerIdx = code.indexOf(AUTH_CHAIN_FAILED_MARKER);
+    // The authed-phase best-effort walk is wrapped in a try/catch that opens
+    // right after the `authed = true;` gate. The marker throw must sit BEFORE
+    // that try so a failed chain reds the build instead of being swallowed.
+    // (A separate public-phase canvas-draw try exists earlier in the body — the
+    // gate is not inside it.)
+    const authedTryIdx = code.indexOf("try {", code.indexOf("authed = true;"));
+    expect(markerIdx).toBeGreaterThan(-1);
+    expect(authedTryIdx).toBeGreaterThan(-1);
+    expect(markerIdx).toBeLessThan(authedTryIdx);
   });
 
   it("takes every screenshot at fullPage: true", () => {
@@ -161,6 +177,110 @@ describe("renderWalkthroughCode — public-only mode", () => {
     expect(code).toMatch(/Scenario 1: Homepage/);
     expect(code).toMatch(/page\.\$\$eval\('a\[href\]'/);
   });
+
+  it("performs a coordinate-based canvas draw when a canvas is present", () => {
+    // Drawing/canvas apps (e.g. Excalidraw) expose no form input — the walk must
+    // demonstrate the product by selecting the rectangle tool and dragging a
+    // square with real mouse coordinates, then screenshot the result.
+    expect(code).toMatch(/page\.locator\('canvas'\)/);
+    expect(code).toMatch(/page\.keyboard\.press\('r'\)/);
+    expect(code).toMatch(/page\.mouse\.down\(\)/);
+    expect(code).toMatch(/page\.mouse\.move\(/);
+    expect(code).toMatch(/page\.mouse\.up\(\)/);
+    expect(code).toMatch(/Drew a square on the canvas/);
+    expect(code).toMatch(/shot\(publicScenario, 'draw-square'\)/);
+    // Runs in the public phase (before the AUTH_AUTOMATABLE branch) so public
+    // canvas apps like Excalidraw get the interaction without auth.
+    expect(code.indexOf("Drew a square")).toBeLessThan(
+      code.indexOf("if (AUTH_AUTOMATABLE)"),
+    );
+  });
+});
+
+describe("renderAuthLoginCode (user-credential login)", () => {
+  const withApi = renderAuthLoginCode({
+    email: "owner@myapp.com",
+    password: "s3cret-pass",
+    loginUrl: "/login",
+    apiLoginEndpoint: "/api/auth/sign-in/email",
+  });
+  const noApi = renderAuthLoginCode({
+    email: "owner@myapp.com",
+    password: "s3cret-pass",
+    loginUrl: "https://auth.example.com/sign-in",
+  });
+
+  it("exports the canonical 4-arg test function", () => {
+    expect(withApi).toMatch(
+      /export async function test\(page, baseUrl, screenshotPath, stepLogger\)/,
+    );
+  });
+
+  it("inlines the supplied credentials", () => {
+    expect(withApi).toContain("owner@myapp.com");
+    expect(withApi).toContain("s3cret-pass");
+  });
+
+  it("navigates relative loginUrl via baseUrl and absolute loginUrl directly", () => {
+    expect(withApi).toMatch(/await page\.goto\(`\$\{baseUrl\}\/login`/);
+    expect(noApi).toMatch(
+      /await page\.goto\('https:\/\/auth\.example\.com\/sign-in'/,
+    );
+  });
+
+  it("does the api-login POST bypass when an endpoint is provided", () => {
+    expect(withApi).toContain("/api/auth/sign-in/email");
+    expect(withApi).toMatch(/fetch\(args\.url/);
+  });
+
+  it("bakes an empty API_LOGIN when no endpoint is provided", () => {
+    expect(noApi).toMatch(/const API_LOGIN = '';/);
+  });
+
+  it("ships the EB bootstrap + hoisted settle", () => {
+    expect(withApi).toMatch(/setExtraHTTPHeaders\(\{ 'User-Agent':/);
+    expect(withApi).toContain("email-decode.min.js");
+    expect(withApi).toMatch(/async function settle\(\)/);
+  });
+
+  it("screenshots fullPage everywhere", () => {
+    const matches = withApi.match(/page\.screenshot\([\s\S]*?\)\s*;/g) ?? [];
+    expect(matches.length).toBeGreaterThan(0);
+    for (const m of matches) expect(m).toMatch(/fullPage:\s*true/);
+  });
+});
+
+describe("EB Chromium bootstrap (both renderers)", () => {
+  const authCode = renderAuthSetupCode({
+    email: sampleEmail,
+    password: samplePassword,
+    registerUrl: "/sign-up",
+  });
+  const walkCode = renderWalkthroughCode({
+    authAutomatable: true,
+    chainedAuth: true,
+  });
+
+  for (const [label, code] of [
+    ["auth-setup", authCode],
+    ["walkthrough", walkCode],
+  ] as const) {
+    it(`${label}: overrides the HeadlessChrome User-Agent before navigation`, () => {
+      expect(code).toMatch(/setExtraHTTPHeaders\(\{ 'User-Agent':/);
+      expect(code).toMatch(/Chrome\/\d/);
+    });
+
+    it(`${label}: route-blocks known third-party console-noise scripts`, () => {
+      expect(code).toContain("email-decode.min.js");
+      expect(code).toMatch(/page\.route\(pattern, function \(r\)/);
+    });
+
+    it(`${label}: settle is a hoisted function (not a scoped-out const arrow), with a hydration wait`, () => {
+      expect(code).toMatch(/async function settle\(\)/);
+      expect(code).not.toMatch(/const settle = \(\) =>/);
+      expect(code).toMatch(/\[role="main"\]/);
+    });
+  }
 });
 
 describe("SAFE_CTA_PATTERN / DESTRUCTIVE_CTA_PATTERN", () => {
