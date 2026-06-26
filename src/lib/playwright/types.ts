@@ -116,6 +116,11 @@ export interface DebugConsoleEntry {
   timestamp: number;
 }
 
+export type RecordingAnchorReason =
+  | "cursor"
+  | "last_passing"
+  | "fallback_cursor";
+
 export interface DebugState {
   sessionId: string;
   testId: string;
@@ -137,6 +142,14 @@ export interface DebugState {
   codeVersion: number;
   isRecording: boolean;
   recordedEventCount: number;
+  recordingAnchorIndex?: number;
+  recordingAnchorReason?: RecordingAnchorReason;
+  spliceMode?: "replace" | "insert";
+  targetUrl?: string;
+  // Raw recorder events delivered exactly once, on the state tick right
+  // after stop_recording finishes — drained server-side in
+  // consumeStopRecording, never persisted onward.
+  pendingRecordingEvents?: import("@/lib/playwright/event-to-code").CodeGenEvent[];
 }
 
 export type DebugCommand =
@@ -145,8 +158,9 @@ export type DebugCommand =
   | { type: "run_to_end" }
   | { type: "run_to_step"; stepIndex: number }
   | { type: "update_code"; code: string }
-  | { type: "start_recording" }
+  | { type: "start_recording"; spliceMode: "replace" | "insert" }
   | { type: "stop_recording" }
+  | { type: "cancel_recording" }
   | { type: "stop" }
   | { type: "_execution_complete" };
 

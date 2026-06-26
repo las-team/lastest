@@ -44,17 +44,42 @@ fi
 
 kubectl config use-context "k3d-${CLUSTER_NAME}" >/dev/null
 
-# 1b. host.k3d.internal → Docker bridge gateway.
-#     k3d's auto-injection is unreliable across versions/host OSes (especially
-#     Linux without Docker Desktop). We install a CoreDNS override so EB pods
-#     can always resolve the host (used by LASTEST_URL=host.k3d.internal:3000
-#     when the host is running `pnpm dev`).
+# 1b. host.k3d.internal → host running `pnpm dev`.
+#     k3d's auto-injection is unreliable across versions/host OSes. We install a
+#     CoreDNS override so EB pods can always resolve the host (used by
+#     LASTEST_URL=host.k3d.internal:3000 when the host runs `pnpm dev`).
 #     Must be a `.server` (own server block) — a `.override` would try to add a
-#     second `hosts{}` plugin to the main block, which CoreDNS rejects.
-HOST_GATEWAY_IP="$(docker network inspect "k3d-${CLUSTER_NAME}" -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || true)"
-if [ -n "${HOST_GATEWAY_IP}" ]; then
-  echo "==> Pinning host.k3d.internal → ${HOST_GATEWAY_IP} in CoreDNS"
-  kubectl apply -f - <<YAML >/dev/null
+#     second plugin to the main block, which CoreDNS rejects.
+#
+#     The right target differs by host OS:
+#       - Linux (no Docker Desktop): the Docker bridge gateway IS the host, so
+#         pin host.k3d.internal → <bridge gateway IP>.
+#       - macOS/Windows (Docker Desktop): the bridge gateway lives inside the
+#         Docker Desktop VM and nothing on it listens on :3000. The host is
+#         reachable at host.docker.internal, so we CNAME host.k3d.internal to it.
+DOCKER_OS="$(docker info -f '{{.OperatingSystem}}' 2>/dev/null || true)"
+if printf '%s' "${DOCKER_OS}" | grep -qi 'docker desktop'; then
+  echo "==> Docker Desktop detected — aliasing host.k3d.internal → host.docker.internal in CoreDNS"
+  kubectl apply -f - <<'YAML' >/dev/null
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  host-k3d-internal.server: |
+    host.k3d.internal:53 {
+      rewrite name host.k3d.internal host.docker.internal
+      forward . 127.0.0.1:53
+    }
+YAML
+  kubectl -n kube-system rollout restart deploy/coredns >/dev/null 2>&1 || true
+  kubectl -n kube-system rollout status deploy/coredns --timeout=60s >/dev/null 2>&1 || true
+else
+  HOST_GATEWAY_IP="$(docker network inspect "k3d-${CLUSTER_NAME}" -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || true)"
+  if [ -n "${HOST_GATEWAY_IP}" ]; then
+    echo "==> Pinning host.k3d.internal → ${HOST_GATEWAY_IP} (bridge gateway) in CoreDNS"
+    kubectl apply -f - <<YAML >/dev/null
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -68,10 +93,11 @@ data:
       }
     }
 YAML
-  kubectl -n kube-system rollout restart deploy/coredns >/dev/null 2>&1 || true
-  kubectl -n kube-system rollout status deploy/coredns --timeout=60s >/dev/null 2>&1 || true
-else
-  echo "==> WARN: could not read k3d network gateway — EB pods may fail to reach host.k3d.internal"
+    kubectl -n kube-system rollout restart deploy/coredns >/dev/null 2>&1 || true
+    kubectl -n kube-system rollout status deploy/coredns --timeout=60s >/dev/null 2>&1 || true
+  else
+    echo "==> WARN: could not read k3d network gateway — EB pods may fail to reach host.k3d.internal"
+  fi
 fi
 
 # 2. Namespace + RBAC. EB Jobs spawned by the host provisioner inherit the

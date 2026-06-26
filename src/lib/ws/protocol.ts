@@ -547,6 +547,13 @@ export interface StartDebugCommandPayload {
   storageState?: string;
   setupVariables?: Record<string, unknown>;
   stabilization?: StabilizationPayload;
+  selectorPriority?: Array<{
+    type: string;
+    enabled: boolean;
+    priority: number;
+  }>;
+  pointerGestures?: boolean;
+  cursorFPS?: number;
 }
 
 export interface StartDebugCommand extends BaseMessage {
@@ -561,11 +568,15 @@ export interface DebugActionCommandPayload {
     | "step_back"
     | "run_to_end"
     | "run_to_step"
-    | "update_code";
+    | "update_code"
+    | "start_recording"
+    | "stop_recording"
+    | "cancel_recording";
   stepIndex?: number;
   code?: string;
   cleanBody?: string;
   steps?: DebugStep[];
+  spliceMode?: "replace" | "insert";
 }
 
 export interface DebugActionCommand extends BaseMessage {
@@ -581,6 +592,11 @@ export interface StopDebugCommand extends BaseMessage {
   type: "command:stop_debug";
   payload: StopDebugCommandPayload;
 }
+
+export type DebugRecordingAnchorReason =
+  | "cursor"
+  | "last_passing"
+  | "fallback_cursor";
 
 export interface DebugStateResponsePayload {
   sessionId: string;
@@ -598,6 +614,13 @@ export interface DebugStateResponsePayload {
   code: string;
   error?: string;
   codeVersion: number;
+  isRecording: boolean;
+  recordedEventCount: number;
+  recordingAnchorIndex?: number;
+  recordingAnchorReason?: DebugRecordingAnchorReason;
+  spliceMode?: "replace" | "insert";
+  targetUrl?: string;
+  pendingRecordingEvents?: RecordingEventPayload["events"];
 }
 
 export interface DebugStateResponse extends BaseMessage {
