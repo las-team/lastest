@@ -278,10 +278,36 @@ export async function getPublicShareContext(
   const share = await getPublicShareBySlug(slug);
   if (!share || share.status !== "public") return null;
 
-  const [build] = await db
-    .select()
-    .from(builds)
-    .where(eq(builds.id, share.buildId));
+  // Test-scoped shares auto-follow the latest completed build that actually ran
+  // this test, so re-running the test surfaces on the existing /r/<slug>
+  // without a manual republish — share.buildId is just the initial anchor.
+  // Build-wide shares (share.testId null) stay pinned to their immutable
+  // snapshot. See publishBuildShare() for the matching intent.
+  let build: typeof builds.$inferSelect | undefined;
+  if (share.testId) {
+    const [latest] = await db
+      .select({ build: builds })
+      .from(builds)
+      .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
+      .innerJoin(testResults, eq(testResults.testRunId, testRuns.id))
+      .where(
+        and(
+          eq(testResults.testId, share.testId),
+          isNotNull(builds.completedAt),
+        ),
+      )
+      .orderBy(desc(builds.createdAt))
+      .limit(1);
+    build = latest?.build;
+  }
+  // Fallback: build-wide shares, or a test-scoped share whose test has no
+  // surviving completed run — render the originally-pinned build.
+  if (!build) {
+    [build] = await db
+      .select()
+      .from(builds)
+      .where(eq(builds.id, share.buildId));
+  }
   if (!build) return null;
 
   const test = share.testId
