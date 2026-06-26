@@ -35,7 +35,7 @@ import {
   ChevronDown,
   ChevronRight,
   MousePointerClick,
-  Save,
+  X,
 } from "lucide-react";
 import {
   startDebugSession,
@@ -113,12 +113,6 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   // "Record from here" state
   const [showSpliceDialog, setShowSpliceDialog] = useState(false);
   const [recordingStopPending, setRecordingStopPending] = useState(false);
-  const [savingRecording, setSavingRecording] = useState(false);
-  // True once a splice has landed and not yet been saved or superseded by a
-  // manual edit — gates the Save button so it only appears after a real
-  // recording result, not after every keystroke in the code editor.
-  const justSplicedRef = useRef(false);
-  const [showSaveAffordance, setShowSaveAffordance] = useState(false);
 
   // Track sessionId in a ref so cleanup/effect can access latest value
   const sessionIdRef = useRef<string | null>(null);
@@ -284,12 +278,6 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   const handleCodeChange = useCallback(
     (newCode: string) => {
       setLocalCode(newCode);
-      // A manual edit supersedes whatever a prior splice produced — the Save
-      // button should only ever offer to save an unmodified recording result.
-      if (justSplicedRef.current) {
-        justSplicedRef.current = false;
-        setShowSaveAffordance(false);
-      }
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         debounceRef.current = null;
@@ -520,27 +508,18 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
         debounceRef.current = null;
       }
       codeVersionRef.current = -1;
-      justSplicedRef.current = true;
-      setShowSaveAffordance(true);
+      // Auto-save the spliced result as a new test version — no manual Save.
+      const saveResult = await saveDebugSessionCode(sessionId);
+      if (saveResult.ok) {
+        toast.success("Saved as a new test version");
+      } else {
+        toast.error(saveResult.error ?? "Failed to save");
+      }
     } else {
       toast.error("Timed out waiting for recording to stop");
     }
     setRecordingStopPending(false);
   }, [sessionId, sendCmd]);
-
-  const handleSaveRecording = useCallback(async () => {
-    if (!sessionId) return;
-    setSavingRecording(true);
-    const result = await saveDebugSessionCode(sessionId);
-    setSavingRecording(false);
-    if (result.ok) {
-      toast.success("Saved as a new test version");
-      justSplicedRef.current = false;
-      setShowSaveAffordance(false);
-    } else {
-      toast.error(result.error ?? "Failed to save");
-    }
-  }, [sessionId]);
 
   const statusColor = {
     initializing: "bg-yellow-500",
@@ -626,7 +605,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
             onClick={handleStop}
             title="Stop (Escape)"
           >
-            <Square className="h-4 w-4" />
+            <X className="h-4 w-4" />
           </Button>
           {streamUrl && !isRecording && (
             <Button
@@ -637,7 +616,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
               title="Record from here"
             >
               <Circle className="h-3 w-3 mr-1 text-red-500" />
-              Record from here
+              Record
             </Button>
           )}
           {isRecording && (
@@ -659,7 +638,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                 ) : (
                   <Square className="h-4 w-4 mr-1" />
                 )}
-                Stop recording
+                Stop
               </Button>
               <Button
                 variant="ghost"
@@ -671,22 +650,6 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                 Cancel
               </Button>
             </>
-          )}
-          {showSaveAffordance && (
-            <Button
-              variant="default"
-              size="sm"
-              onClick={handleSaveRecording}
-              disabled={savingRecording}
-              title="Save recorded changes as a new test version"
-            >
-              {savingRecording ? (
-                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4 mr-1" />
-              )}
-              Save
-            </Button>
           )}
           {streamUrl && (
             <>
