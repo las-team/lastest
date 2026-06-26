@@ -46,6 +46,18 @@ export function JobPollingProvider({ children }: { children: ReactNode }) {
       eventSourceRef.current = null;
     }
 
+    // Don't hold an SSE slot while the tab is backgrounded. On HTTP/1.1 the
+    // browser caps connections at 6 per origin (shared across tabs), so idle
+    // background tabs each holding an open stream can starve a foreground
+    // navigation for tens of seconds. We reconnect on refocus (see the
+    // visibilitychange handler below), re-snapshotting jobs at that point.
+    if (
+      typeof document !== "undefined" &&
+      document.visibilityState === "hidden"
+    ) {
+      return;
+    }
+
     const es = new EventSource("/api/jobs/events");
     eventSourceRef.current = es;
 
@@ -112,6 +124,13 @@ export function JobPollingProvider({ children }: { children: ReactNode }) {
     es.onerror = () => {
       es.close();
       eventSourceRef.current = null;
+      // Don't reconnect while hidden — visibilitychange reconnects on refocus.
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      ) {
+        return;
+      }
       // Reconnect with exponential backoff (max 30s)
       const attempt = reconnectAttemptRef.current++;
       const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
@@ -128,7 +147,37 @@ export function JobPollingProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     connect();
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        // Refocused — reopen the stream (and re-snapshot) if it was released.
+        if (
+          !eventSourceRef.current ||
+          eventSourceRef.current.readyState === EventSource.CLOSED
+        ) {
+          reconnectAttemptRef.current = 0;
+          if (reconnectTimerRef.current) {
+            clearTimeout(reconnectTimerRef.current);
+            reconnectTimerRef.current = null;
+          }
+          connect();
+        }
+      } else {
+        // Backgrounded — release the connection slot for other tabs / navigations.
+        if (eventSourceRef.current) {
+          eventSourceRef.current.close();
+          eventSourceRef.current = null;
+        }
+        if (reconnectTimerRef.current) {
+          clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = null;
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
     return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
         eventSourceRef.current = null;
