@@ -432,6 +432,7 @@ export async function POST(request: NextRequest) {
                 capturedAt: payload.capturedAt,
                 atMs: payload.atMs,
                 title: payload.title,
+                domSnapshot: payload.domSnapshot,
               },
             });
           }

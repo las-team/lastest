@@ -121,6 +121,9 @@ export interface EmbeddedTestResult {
     atMs?: number;
     /** Cosmetic chapter title (screenshot-path slug); not the diff key. */
     title?: string;
+    /** Per-step DOM snapshot captured at this screenshot's moment, for the
+     *  host's aligned per-step DOM diff. */
+    domSnapshot?: DomSnapshotResult;
   }>;
   /** Page innerText captured alongside each screenshot when textCaptureEnabled.
    *  Filename is the screenshot's filename with `.txt` extension so the host
@@ -509,6 +512,10 @@ export class EmbeddedTestExecutor {
       // Cosmetic chapter title from the test's screenshot-path slug; NOT the
       // diff/baseline key (that's the filename/label).
       title?: string;
+      // Per-step DOM snapshot captured at this screenshot's settled moment, so
+      // the host diffs THIS step's page state instead of one end-of-test
+      // snapshot reused across every step.
+      domSnapshot?: DomSnapshotResult;
     }> = [];
     const texts: Array<{ filename: string; data: string }> = [];
     const softErrors: string[] = [];
@@ -1244,6 +1251,24 @@ export class EmbeddedTestExecutor {
               ? Math.max(0, capturedAt - videoStartMs)
               : undefined;
           const buffer = await captureFullPageBuffer();
+          // Per-step DOM snapshot at this same settled frame. Interactive
+          // elements only, computed styles OFF (the overlay needs box/selector/
+          // text, not styles — skipping them keeps the per-step payload lean;
+          // RCA still uses the styled end-of-test snapshot). Best-effort: a
+          // failure just means this step has no DOM overlay.
+          let stepDomSnapshot: DomSnapshotResult | undefined;
+          try {
+            stepDomSnapshot = await getAllDomSelectors(
+              page,
+              DEFAULT_DOM_SNAPSHOT_PRIORITY,
+              false,
+            );
+          } catch (domErr) {
+            logFn(
+              "warn",
+              `Per-step DOM snapshot failed for ${label}: ${domErr}`,
+            );
+          }
           const filename = `${command.testRunId}-${command.testId}-${label.replace(/ /g, "_")}.png`;
           const base64 = buffer.toString("base64");
           screenshots.push({
@@ -1254,6 +1279,7 @@ export class EmbeddedTestExecutor {
             capturedAt,
             atMs,
             title,
+            domSnapshot: stepDomSnapshot,
           });
 
           // Capture page text alongside the screenshot. Best-effort: failures

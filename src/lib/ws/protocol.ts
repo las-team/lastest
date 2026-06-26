@@ -627,6 +627,9 @@ export interface ScreenshotUploadPayload {
   // Cosmetic chapter title from the test's screenshot-path slug. Decorative
   // only — the diff/baseline key stays the filename/label.
   title?: string;
+  // Per-step DOM snapshot captured at this screenshot's moment, so the host can
+  // compute a per-step DOM diff aligned with this screenshot. Optional.
+  domSnapshot?: import("@/lib/db/schema").DomSnapshotData;
 }
 
 export interface ScreenshotUploadResponse extends BaseMessage {

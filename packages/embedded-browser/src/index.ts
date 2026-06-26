@@ -678,6 +678,8 @@ async function startup(): Promise<void> {
                       atMs: screenshot.atMs,
                       // Cosmetic chapter title (screenshot-path slug); not the diff key.
                       title: screenshot.title,
+                      // Per-step DOM snapshot for the aligned per-step DOM diff.
+                      domSnapshot: screenshot.domSnapshot,
                     },
                   }),
                 ),

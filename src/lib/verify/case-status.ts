@@ -37,11 +37,20 @@ interface DeriveInput {
    *  must use the mode-aware value or a `log`-mode high-signal layer lands the
    *  card in Broken with no red chip. Omitted callers fall back to step.verdict. */
   verdictOverride?: StepVerdict;
+  /** True when a screenshot was captured but there's no approved visual
+   *  baseline yet (first run / never approved). A step in this state has
+   *  never been verified against a reference, so it must not auto-settle
+   *  into Verified (green) or Missed (yellow) — it defaults to Unsorted
+   *  until the reviewer approves, which writes the baseline. Callers compute
+   *  this with `isVisualBaselineMissing`, which honors the visual check mode
+   *  (a `disable`d visual layer never sets it). */
+  visualBaselineMissing?: boolean;
 }
 
 export function deriveCaseStatus(input: DeriveInput): CaseStatus {
   const { step, feedback, isInChangedArea, testFailed } = input;
   const verdict = input.verdictOverride ?? step.verdict;
+  const visualBaselineMissing = input.visualBaselineMissing ?? false;
 
   const anyRejected = feedback.some((f) => f.status === "rejected");
   if (anyRejected) return "regression";
@@ -92,6 +101,17 @@ export function deriveCaseStatus(input: DeriveInput): CaseStatus {
     return explicitFullyApproved ? "done" : "regression";
   }
 
+  // A captured-but-never-approved visual layer (no baseline to diff against)
+  // has not actually been verified. Such a step must not auto-classify as
+  // Verified (green) or Missed (yellow) — it defaults to Unsorted until the
+  // reviewer approves, which writes the baseline. Explicit approvals
+  // (fullyApproved), rejections + hard failures (handled above) and red
+  // regressions (below) still surface so real problems aren't hidden behind
+  // "needs a baseline".
+  if (visualBaselineMissing && !fullyApproved && verdict !== "red") {
+    return "unknown";
+  }
+
   if (verdict === "red") {
     return fullyApproved ? "done" : "regression";
   }
@@ -114,4 +134,27 @@ export interface CaseStatusCounts {
 
 export function emptyCounts(): CaseStatusCounts {
   return { regression: 0, done: 0, missed: 0, unknown: 0 };
+}
+
+/**
+ * Whether a step's visual layer was captured but has no approved baseline to
+ * diff against yet (first run / never approved). Used by every board/focus
+ * derivation site to feed `deriveCaseStatus({ visualBaselineMissing })` so a
+ * baseline-less step defaults to Unsorted instead of auto-verifying.
+ *
+ * Honors the visual check mode: a `disable`d visual layer is opted out, so a
+ * missing baseline there is irrelevant and never forces Unsorted.
+ */
+export function isVisualBaselineMissing(
+  visual:
+    | { currentImagePath: string | null; baselineImagePath: string | null }
+    | null
+    | undefined,
+  visualMode: "enforce" | "log" | "disable",
+): boolean {
+  return (
+    visualMode !== "disable" &&
+    !!visual?.currentImagePath &&
+    !visual?.baselineImagePath
+  );
 }

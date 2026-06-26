@@ -909,7 +909,7 @@ async function runBuildAsync(
       failedCount++;
 
     // Build screenshots list: prefer captured screenshots, fall back to single screenshotPath
-    const screenshots =
+    const screenshots: import("@/lib/db/schema").CapturedScreenshot[] =
       result.screenshots.length > 0
         ? result.screenshots
         : result.screenshotPath
@@ -919,6 +919,11 @@ async function runBuildAsync(
     // Look up per-test diff overrides
     const testRecord = tests.find((t) => t.id === result.testId);
     const testDiffOverrides = testRecord?.diffOverrides ?? null;
+
+    // Per-step DOM diff gate (same enableDomDiff setting). When on, the current
+    // run's per-step snapshot (captured alongside each screenshot) is diffed
+    // against that step's baseline snapshot inside processVisualDiff.
+    const domDiffEnabled = playwrightSettings?.enableDomDiff ?? false;
 
     // Generate visual diffs for all screenshots concurrently
     const diffResults = await Promise.all(
@@ -935,6 +940,8 @@ async function runBuildAsync(
           currentBrowserType,
           testDiffOverrides,
           forceAutoApprove,
+          screenshot.domSnapshot,
+          domDiffEnabled,
         ),
       ),
     );
@@ -974,63 +981,19 @@ async function runBuildAsync(
       }
     }
 
-    // DOM diff: bootstrap baseline on first run, otherwise diff against it
-    // and write the result to every visual diff produced by this test result.
-    // Gated by playwrightSettings.enableDomDiff — when off, snapshots may
-    // still be captured for healing/triage but no diffs are persisted to UI.
-    const domDiffEnabled = playwrightSettings?.enableDomDiff ?? false;
+    // DOM baseline bootstrap. The per-step DOM *diff* now lives in
+    // processVisualDiff (current per-step snapshot vs that step's baseline
+    // snapshot). This block only keeps `tests.domSnapshot` populated, which AI
+    // failure-triage and the healer still read (vs the end-of-test
+    // result.domSnapshot). Gated by enableDomDiff.
     const testRecord2 = tests.find((t) => t.id === result.testId);
     if (domDiffEnabled && !testRecord2?.domSnapshot && result.domSnapshot) {
-      // First run for this test (or legacy test created before DOM capture
-      // was wired). Promote the current snapshot to the baseline; nothing to
-      // diff against on this run.
       await queries.updateTest(result.testId, {
         domSnapshot: result.domSnapshot,
       });
       console.info("[dom-diff] bootstrapped baseline DOM snapshot", {
         testId: result.testId,
       });
-    } else if (
-      domDiffEnabled &&
-      testRecord2?.domSnapshot &&
-      result.domSnapshot &&
-      diffResults.length > 0
-    ) {
-      try {
-        const { computeDomDiff } = await import("@/lib/diff/dom-diff");
-        const domDiff = computeDomDiff(
-          testRecord2.domSnapshot,
-          result.domSnapshot,
-        );
-        if (
-          domDiff.added.length > 0 ||
-          domDiff.removed.length > 0 ||
-          domDiff.changed.length > 0
-        ) {
-          // DOM diff is per-test-result, so attach it to every diff that
-          // points at this test result — not just diffResults[0].
-          await Promise.all(
-            diffResults.map(async ({ diffId }) => {
-              const existingDiff = await queries.getVisualDiff(diffId);
-              if (!existingDiff) return;
-              const updatedMetadata = {
-                ...((existingDiff.metadata as import("@/lib/db/schema").DiffMetadata) ?? {
-                  changedRegions: [],
-                }),
-                domDiff,
-              };
-              await queries.updateVisualDiff(diffId, {
-                metadata: updatedMetadata,
-              });
-            }),
-          );
-        }
-      } catch (err) {
-        console.warn("[dom-diff] computation failed", {
-          testId: result.testId,
-          err: err instanceof Error ? err.message : String(err),
-        });
-      }
     }
 
     // Create placeholder diff for failed tests with no screenshots
@@ -1913,6 +1876,11 @@ async function processVisualDiff(
   browser: string = "chromium",
   testDiffOverrides?: import("@/lib/db/schema").TestDiffOverrides | null,
   forceAutoApprove?: boolean,
+  // Current run's DOM snapshot for THIS step (captured with the screenshot).
+  // Diffed against the step's baseline snapshot and stored on the baseline when
+  // one is created. Absent → no DOM overlay for this step.
+  currentDomSnapshot?: import("@/lib/db/schema").DomSnapshotData,
+  domDiffEnabled?: boolean,
 ): Promise<{
   hasChanges: boolean;
   diffId: string;
@@ -2112,6 +2080,29 @@ async function processVisualDiff(
             ? anyBaseline.createdAt.toISOString()
             : String(anyBaseline.createdAt),
       };
+    }
+  }
+
+  // Per-step DOM diff: this step's baseline snapshot vs the current run's
+  // per-step snapshot. Both were captured at their own screenshot's moment with
+  // document-relative boxes, so the overlay lines up with the full-page
+  // screenshot. Only when a baseline snapshot exists; attached to the
+  // normal-diff metadata below (carry-forward / new-test paths have nothing to
+  // diff).
+  let stepDomDiff: import("@/lib/db/schema").DomDiffResult | undefined;
+  if (domDiffEnabled && currentDomSnapshot && baseline?.domSnapshot) {
+    try {
+      const { computeDomDiff } = await import("@/lib/diff/dom-diff");
+      const d = computeDomDiff(baseline.domSnapshot, currentDomSnapshot);
+      if (d.added.length > 0 || d.removed.length > 0 || d.changed.length > 0) {
+        stepDomDiff = d;
+      }
+    } catch (err) {
+      console.warn("[dom-diff] per-step computation failed", {
+        testId,
+        stepLabel,
+        err: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -2369,6 +2360,9 @@ async function processVisualDiff(
         branch,
         browser,
         approvedFromDiffId: diff.id,
+        // Ride the per-step DOM snapshot onto the baseline so later runs can
+        // compute an aligned per-step DOM diff against it.
+        domSnapshot: currentDomSnapshot,
       });
     }
 
@@ -2461,6 +2455,9 @@ async function processVisualDiff(
     if (baselineSourceBranch) {
       metadata.baselineSourceBranch = baselineSourceBranch;
     }
+    if (stepDomDiff) {
+      metadata.domDiff = stepDomDiff;
+    }
 
     const diff = await queries.createVisualDiff({
       buildId,
@@ -2501,6 +2498,9 @@ async function processVisualDiff(
         branch,
         browser,
         approvedFromDiffId: diff.id,
+        // Ride the per-step DOM snapshot onto the baseline so later runs can
+        // compute an aligned per-step DOM diff against it.
+        domSnapshot: currentDomSnapshot,
       });
     }
 

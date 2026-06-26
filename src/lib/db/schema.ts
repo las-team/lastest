@@ -540,6 +540,12 @@ export interface CapturedScreenshot {
   // (baselines.stepLabel) and order steps. `title` is never read by diff/verify
   // — overriding it can't desync pixel comparison. Absent → rail uses `label`.
   title?: string;
+  // Per-step DOM snapshot captured at THIS screenshot's moment (same page
+  // state + scroll), so DOM-diff overlays align with this screenshot instead of
+  // a single end-of-test snapshot reused across every step. Bounding boxes are
+  // document-relative (see selector-utils). Optional/back-compat: jsonb column,
+  // so adding this needs no migration; absent on legacy rows.
+  domSnapshot?: DomSnapshotData;
 }
 
 // Accessibility violation from axe-core.
@@ -1170,6 +1176,11 @@ export const baselines = pgTable("baselines", {
   branch: text("branch").notNull(),
   isActive: boolean("is_active").default(true),
   browser: text("browser").default("chromium"), // browser this baseline applies to
+  // DOM snapshot of the page state this baseline image represents, captured at
+  // the same moment as the screenshot. The per-step DOM diff compares the
+  // current run's per-step snapshot against this. Set when the baseline is
+  // created/approved/carried-forward; null on baselines predating DOM capture.
+  domSnapshot: jsonb("dom_snapshot").$type<DomSnapshotData>(),
   createdAt: timestamp("created_at"),
 });
 

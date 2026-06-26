@@ -1253,6 +1253,7 @@ async function executeViaRunner(
         label: string;
         atMs?: number;
         title?: string;
+        domSnapshot?: import("@/lib/db/schema").DomSnapshotData;
       }[] = sortedScreenshots.map((r, idx) => {
         const sp = r.payload as Record<string, unknown>;
         // Extract step label from filename (e.g. "runId-testId-Step_3.png" → "Step 3").
@@ -1267,7 +1268,12 @@ async function executeViaRunner(
           typeof sp.atMs === "number" ? (sp.atMs as number) : undefined;
         const title =
           typeof sp.title === "string" ? (sp.title as string) : undefined;
-        return { path: sp.path as string, label, atMs, title };
+        // Per-step DOM snapshot (aligned with this screenshot) for the per-step
+        // DOM diff. Absent for ad-hoc captures / legacy runners.
+        const domSnapshot = sp.domSnapshot as
+          | import("@/lib/db/schema").DomSnapshotData
+          | undefined;
+        return { path: sp.path as string, label, atMs, title, domSnapshot };
       });
 
       // Fallback to disk scan if no DB screenshot entries found
