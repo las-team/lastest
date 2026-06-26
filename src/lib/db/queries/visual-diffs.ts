@@ -19,6 +19,7 @@ import type {
   NewIgnoreRegion,
   NewFocusRegion,
   NewPlannedScreenshot,
+  DomSnapshotData,
 } from "../schema";
 import { eq, desc, and, or, inArray, isNull, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
@@ -362,6 +363,27 @@ export async function createBaseline(data: Omit<NewBaseline, "id">) {
   const id = uuid();
   await db.insert(baselines).values({ ...data, id, createdAt: new Date() });
   return { id, ...data, createdAt: new Date() };
+}
+
+/**
+ * Self-heal: adopt a per-step DOM snapshot onto a baseline that has none.
+ * Baselines created before per-step DOM capture (or via approval paths that
+ * don't ride a snapshot on) have a null dom_snapshot, which permanently
+ * disables the per-step DOM diff against them. When the current run is
+ * identical to the baseline (carry-forward / pixel-identical), the current
+ * per-step DOM ≈ the baseline DOM, so it is safe to adopt it. Guarded on
+ * `is null` so a real baseline snapshot is never clobbered, and a no-op when
+ * the snapshot is unavailable (e.g. a legacy runner that doesn't emit it).
+ */
+export async function backfillBaselineDomSnapshot(
+  baselineId: string,
+  domSnapshot: DomSnapshotData | null | undefined,
+): Promise<void> {
+  if (!domSnapshot) return;
+  await db
+    .update(baselines)
+    .set({ domSnapshot })
+    .where(and(eq(baselines.id, baselineId), isNull(baselines.domSnapshot)));
 }
 
 /**

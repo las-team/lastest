@@ -272,18 +272,21 @@ export async function getActiveBaselinesForTest(
     .where(and(eq(baselines.testId, testId), eq(baselines.isActive, true)));
 }
 
-export async function getPublicShareContext(
-  slug: string,
-): Promise<PublicShareContext | null> {
-  const share = await getPublicShareBySlug(slug);
-  if (!share || share.status !== "public") return null;
-
-  // Test-scoped shares auto-follow the latest completed build that actually ran
-  // this test, so re-running the test surfaces on the existing /r/<slug>
-  // without a manual republish — share.buildId is just the initial anchor.
-  // Build-wide shares (share.testId null) stay pinned to their immutable
-  // snapshot. See publishBuildShare() for the matching intent.
-  let build: typeof builds.$inferSelect | undefined;
+/**
+ * Resolve which build a share renders. Test-scoped shares auto-follow the
+ * latest completed build that actually ran the test, so re-running the test
+ * surfaces on the existing /r/<slug> without a manual republish —
+ * share.buildId is just the initial anchor. Build-wide shares (share.testId
+ * null) stay pinned to their immutable snapshot. See publishBuildShare() for
+ * the matching intent.
+ *
+ * SINGLE SOURCE OF TRUTH: the share page (getPublicShareContext) AND the
+ * /share/<slug>/<path> media route must resolve the SAME build, or the page
+ * emits image URLs that the media allow-list rejects with 404.
+ */
+export async function resolveShareBuild(
+  share: Pick<PublicShare, "testId" | "buildId">,
+): Promise<typeof builds.$inferSelect | null> {
   if (share.testId) {
     const [latest] = await db
       .select({ build: builds })
@@ -298,16 +301,24 @@ export async function getPublicShareContext(
       )
       .orderBy(desc(builds.createdAt))
       .limit(1);
-    build = latest?.build;
+    if (latest?.build) return latest.build;
   }
   // Fallback: build-wide shares, or a test-scoped share whose test has no
   // surviving completed run — render the originally-pinned build.
-  if (!build) {
-    [build] = await db
-      .select()
-      .from(builds)
-      .where(eq(builds.id, share.buildId));
-  }
+  const [pinned] = await db
+    .select()
+    .from(builds)
+    .where(eq(builds.id, share.buildId));
+  return pinned ?? null;
+}
+
+export async function getPublicShareContext(
+  slug: string,
+): Promise<PublicShareContext | null> {
+  const share = await getPublicShareBySlug(slug);
+  if (!share || share.status !== "public") return null;
+
+  const build = await resolveShareBuild(share);
   if (!build) return null;
 
   const test = share.testId

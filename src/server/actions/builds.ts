@@ -2269,6 +2269,17 @@ async function processVisualDiff(
     }
 
     if (carryForwardValid) {
+      // Self-heal per-step DOM: a valid carry-forward means the current image
+      // is identical to this baseline, so the current per-step DOM ≈ the
+      // baseline DOM. Adopt it when the baseline has none (e.g. baselines
+      // created before per-step DOM capture), so later runs can compute an
+      // aligned per-step DOM diff against it. No-op if already set or absent.
+      if (domDiffEnabled) {
+        await queries.backfillBaselineDomSnapshot(
+          matchingBaseline.id,
+          currentDomSnapshot,
+        );
+      }
       // Auto-approve: identical to previously approved baseline
       const plannedDiff = await generatePlannedDiff(currentScreenshotPath);
       const mainDiff = await generateMainBaselineDiff(currentScreenshotPath);
@@ -2479,6 +2490,16 @@ async function processVisualDiff(
       ...plannedDiff,
       ...mainDiff,
     });
+
+    // Self-heal per-step DOM for the pixel-identical case that didn't match a
+    // baseline hash (e.g. metadata-only PNG differences): current ≈ baseline,
+    // so adopt the current per-step DOM when the existing baseline lacks one.
+    if (domDiffEnabled && baseline && diffResult.pixelDifference === 0) {
+      await queries.backfillBaselineDomSnapshot(
+        baseline.id,
+        currentDomSnapshot,
+      );
+    }
 
     if (shouldAutoApprove && classification !== "unchanged") {
       const autoHash = hashImageWithDimensions(
