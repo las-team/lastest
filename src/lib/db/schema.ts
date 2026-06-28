@@ -526,6 +526,26 @@ export const testRuns = pgTable("test_runs", {
 export interface CapturedScreenshot {
   path: string;
   label?: string;
+  // Offset of this capture into the test recording, in milliseconds (capture
+  // wall-clock minus the video-recording start). Powers the public share page's
+  // "In this video" chapter rail, which seeks the recording to each step.
+  // Optional/back-compat: legacy rows lack it, and the share page falls back to
+  // distributing steps evenly across the recording duration. jsonb column, so
+  // adding this field needs no migration.
+  atMs?: number;
+  // Purely-cosmetic display name for the "In this video" chapter rail, derived
+  // from the test's screenshot-path slug (e.g. shot(2,'new-project') → "New
+  // project"). MUST stay decorative: the structural step key is `label`
+  // ("Step N") / the filename, which the diff pipeline uses to match baselines
+  // (baselines.stepLabel) and order steps. `title` is never read by diff/verify
+  // — overriding it can't desync pixel comparison. Absent → rail uses `label`.
+  title?: string;
+  // Per-step DOM snapshot captured at THIS screenshot's moment (same page
+  // state + scroll), so DOM-diff overlays align with this screenshot instead of
+  // a single end-of-test snapshot reused across every step. Bounding boxes are
+  // document-relative (see selector-utils). Optional/back-compat: jsonb column,
+  // so adding this needs no migration; absent on legacy rows.
+  domSnapshot?: DomSnapshotData;
 }
 
 // Accessibility violation from axe-core.
@@ -1156,6 +1176,11 @@ export const baselines = pgTable("baselines", {
   branch: text("branch").notNull(),
   isActive: boolean("is_active").default(true),
   browser: text("browser").default("chromium"), // browser this baseline applies to
+  // DOM snapshot of the page state this baseline image represents, captured at
+  // the same moment as the screenshot. The per-step DOM diff compares the
+  // current run's per-step snapshot against this. Set when the baseline is
+  // created/approved/carried-forward; null on baselines predating DOM capture.
+  domSnapshot: jsonb("dom_snapshot").$type<DomSnapshotData>(),
   createdAt: timestamp("created_at"),
 });
 
@@ -2018,6 +2043,12 @@ export const teams = pgTable("teams", {
     "viktor+{slug}{stamp}@lastest.cloud",
   ),
   banAiMode: boolean("ban_ai_mode").default(false),
+  /** AI mode switch (MCP-first). false = MCP mode: in-product AI CTAs +
+   *  background AI are hidden and users drive Lastest from their own agent over
+   *  MCP. true = built-in AI: Lastest runs AI server-side. Default MCP.
+   *  This is the dedicated gate; it replaces inferring availability from whether
+   *  an AI key/provider happens to be configured. */
+  builtInAiEnabled: boolean("built_in_ai_enabled").default(false),
   gamificationEnabled: boolean("gamification_enabled").default(true),
   /** Verify phase (v1.14+) — when true, /verify is the primary surface and
    *  appears as the first sidebar entry. /run and /review are demoted. */

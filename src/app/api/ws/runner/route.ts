@@ -430,6 +430,9 @@ export async function POST(request: NextRequest) {
                 width: payload.width,
                 height: payload.height,
                 capturedAt: payload.capturedAt,
+                atMs: payload.atMs,
+                title: payload.title,
+                domSnapshot: payload.domSnapshot,
               },
             });
           }

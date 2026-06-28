@@ -569,6 +569,13 @@ export async function getAllDomSelectors(
       const MAX_ELEMENTS = 5000;
       let count = 0;
 
+      // Page scroll at capture time. getBoundingClientRect() is viewport-
+      // relative; adding the scroll offset makes bounding boxes DOCUMENT-
+      // relative so they line up with the full-page screenshot's document
+      // origin regardless of how far the page is scrolled when captured.
+      const scrollX = window.scrollX || window.pageXOffset || 0;
+      const scrollY = window.scrollY || window.pageYOffset || 0;
+
       for (const node of nodeList) {
         if (count >= MAX_ELEMENTS) break;
         const el = node as HTMLElement;
@@ -596,8 +603,8 @@ export async function getAllDomSelectors(
           id: el.id || undefined,
           textContent: el.textContent?.trim().slice(0, 100) || undefined,
           boundingBox: {
-            x: rect.x,
-            y: rect.y,
+            x: rect.x + scrollX,
+            y: rect.y + scrollY,
             width: rect.width,
             height: rect.height,
           },

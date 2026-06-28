@@ -18,7 +18,7 @@
  * - Removal of test-local function definitions
  */
 
-import type { Browser, BrowserContext, Page } from "playwright";
+import type { Browser, BrowserContext, CDPSession, Page } from "playwright";
 import type { StabilizationPayload } from "./protocol.js";
 import {
   setupFreezeScripts,
@@ -93,6 +93,19 @@ export interface EmbeddedNetworkRequest {
   responseSize?: number;
 }
 
+// Derive a cosmetic chapter title from a test's screenshot-path slug, e.g.
+// ".../<runId>-<testId>-2-new-project.png" → "New project". Returns undefined
+// when the path has no "-<n>-<slug>" suffix (the bare final screenshot). Purely
+// decorative for the share "In this video" rail — never the diff/baseline key.
+function titleFromScreenshotPath(path?: string): string | undefined {
+  if (!path) return undefined;
+  const file = path.split("/").pop() ?? "";
+  const m = file.match(/-\d{1,3}-([a-z][a-z0-9-]*)\.png$/i);
+  if (!m) return undefined;
+  const words = m[1].replace(/[-_]+/g, " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : undefined;
+}
+
 export interface EmbeddedTestResult {
   status: "passed" | "failed" | "error" | "timeout" | "cancelled";
   durationMs: number;
@@ -103,6 +116,14 @@ export interface EmbeddedTestResult {
     data: string;
     width: number;
     height: number;
+    /** Real capture time + offset into the recording (ms) for share chapters. */
+    capturedAt?: number;
+    atMs?: number;
+    /** Cosmetic chapter title (screenshot-path slug); not the diff key. */
+    title?: string;
+    /** Per-step DOM snapshot captured at this screenshot's moment, for the
+     *  host's aligned per-step DOM diff. */
+    domSnapshot?: DomSnapshotResult;
   }>;
   /** Page innerText captured alongside each screenshot when textCaptureEnabled.
    *  Filename is the screenshot's filename with `.txt` extension so the host
@@ -484,6 +505,17 @@ export class EmbeddedTestExecutor {
       data: string;
       width: number;
       height: number;
+      // Real capture time + offset into the recording (ms) for the share page's
+      // "In this video" chapter rail. EB previously dropped timing entirely.
+      capturedAt?: number;
+      atMs?: number;
+      // Cosmetic chapter title from the test's screenshot-path slug; NOT the
+      // diff/baseline key (that's the filename/label).
+      title?: string;
+      // Per-step DOM snapshot captured at this screenshot's settled moment, so
+      // the host diffs THIS step's page state instead of one end-of-test
+      // snapshot reused across every step.
+      domSnapshot?: DomSnapshotResult;
     }> = [];
     const texts: Array<{ filename: string; data: string }> = [];
     const softErrors: string[] = [];
@@ -584,8 +616,13 @@ export class EmbeddedTestExecutor {
     // Limitations: per-test video + context-level stabilization overrides can't be applied.
     let testContext: BrowserContext;
     let reusedPersistentContext = false;
+    // Wall-clock anchor for per-step chapter offsets (atMs): Playwright starts
+    // the webm at context creation. Set inside buildFreshContext when recording.
+    let videoStartMs: number | null = null;
+    // Cached CDP session for resize-free full-page capture (Chromium only).
+    let cdpScreenshotSession: CDPSession | null = null;
     const buildFreshContext = async (state: unknown) => {
-      return browser.newContext({
+      const freshContext = await browser.newContext({
         viewport,
         acceptDownloads: true,
         ...(state
@@ -618,6 +655,9 @@ export class EmbeddedTestExecutor {
           ? { userAgent: command.userAgentOverride }
           : {}),
       });
+      // Anchor the recording start for chapter offsets (only when recording).
+      if (videoDir) videoStartMs = Date.now();
+      return freshContext;
     };
     if (persistentSetupId) {
       const entry = this.setupContexts.get(persistentSetupId);
@@ -1148,12 +1188,87 @@ export class EmbeddedTestExecutor {
       const rawScreenshot = page.screenshot.bind(page);
       let screenshotStep = 1;
 
-      // Screenshot helper with stabilization
-      const captureScreenshot = async (label: string) => {
+      // Resize-free full-page capture for the recording. CDP
+      // captureBeyondViewport (Chromium) renders the whole page off-surface
+      // WITHOUT resizing the live viewport the webm records — unlike
+      // page.screenshot({fullPage}), which resizes the layout to full document
+      // height (1×1 in some Playwright builds). Only used while recording; on any
+      // CDP error we fall back to page.screenshot so non-recorded runs and
+      // existing baselines are unaffected.
+      const captureFullPageBuffer = async (): Promise<Buffer> => {
+        if (videoDir) {
+          try {
+            if (!cdpScreenshotSession) {
+              cdpScreenshotSession = await page.context().newCDPSession(page);
+            }
+            const lm = (await cdpScreenshotSession.send(
+              "Page.getLayoutMetrics",
+            )) as {
+              cssContentSize?: { width: number; height: number };
+              contentSize?: { width: number; height: number };
+            };
+            const cs = lm.cssContentSize ?? lm.contentSize;
+            if (cs) {
+              const res = (await cdpScreenshotSession.send(
+                "Page.captureScreenshot",
+                {
+                  format: "png",
+                  captureBeyondViewport: true,
+                  fromSurface: true,
+                  clip: {
+                    x: 0,
+                    y: 0,
+                    width: Math.ceil(cs.width),
+                    height: Math.ceil(cs.height),
+                    scale: 1,
+                  },
+                },
+              )) as { data: string };
+              return Buffer.from(res.data, "base64");
+            }
+          } catch (cdpErr) {
+            logFn(
+              "warn",
+              `CDP full-page capture failed, using page.screenshot fallback: ${cdpErr}`,
+            );
+          }
+        }
+        return rawScreenshot({ fullPage: true });
+      };
+
+      // Screenshot helper with stabilization. `title` is the cosmetic chapter
+      // name (from the test's screenshot-path slug); it never touches `filename`
+      // / `label`, so the diff/baseline key is unchanged.
+      const captureScreenshot = async (label: string, title?: string) => {
         try {
           // Apply pre-screenshot stabilization (network idle, images, fonts, DOM)
           await applyPreScreenshotStabilization(page, command.stabilization);
-          const buffer = await rawScreenshot({ fullPage: true });
+          // Stamp at the actual capture moment (post-stabilization) so the
+          // "In this video" chapter marker lands on the settled frame.
+          const capturedAt = Date.now();
+          const atMs =
+            videoStartMs != null
+              ? Math.max(0, capturedAt - videoStartMs)
+              : undefined;
+          const buffer = await captureFullPageBuffer();
+          // Per-step DOM snapshot at this same settled frame. Interactive
+          // elements only, computed styles OFF (the overlay needs box/selector/
+          // text, not styles — skipping them keeps the per-step payload lean;
+          // RCA still uses the styled end-of-test snapshot). Best-effort: a
+          // failure just means this step has no DOM overlay.
+          let stepDomSnapshot: DomSnapshotResult | undefined;
+          try {
+            stepDomSnapshot = await getAllDomSelectors(
+              page,
+              DEFAULT_DOM_SNAPSHOT_PRIORITY,
+              false,
+            );
+          } catch (domErr) {
+            logFn(
+              "warn",
+              `Per-step DOM snapshot failed for ${label}: ${domErr}`,
+            );
+          }
           const filename = `${command.testRunId}-${command.testId}-${label.replace(/ /g, "_")}.png`;
           const base64 = buffer.toString("base64");
           screenshots.push({
@@ -1161,6 +1276,10 @@ export class EmbeddedTestExecutor {
             data: base64,
             width: viewport.width,
             height: viewport.height,
+            capturedAt,
+            atMs,
+            title,
+            domSnapshot: stepDomSnapshot,
           });
 
           // Capture page text alongside the screenshot. Best-effort: failures
@@ -1220,11 +1339,17 @@ export class EmbeddedTestExecutor {
         }
       };
 
-      // Override page.screenshot to intercept screenshot calls
+      // Override page.screenshot to intercept screenshot calls. `label`
+      // ("Step N") stays the structural diff/baseline key; `title` is a cosmetic
+      // chapter name derived from the test's screenshot-path slug
+      // (e.g. shot(2,'new-project') → "New project").
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (page as any).screenshot = async (options?: any) => {
         const label = `Step ${screenshotStep++}`;
-        await captureScreenshot(label);
+        const title = titleFromScreenshotPath(
+          typeof options?.path === "string" ? options.path : undefined,
+        );
+        await captureScreenshot(label, title);
         return rawScreenshot(options);
       };
 

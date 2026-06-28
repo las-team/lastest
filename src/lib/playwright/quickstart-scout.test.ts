@@ -46,15 +46,20 @@ const HAPPY_JSON = JSON.stringify({
   friction: [],
 });
 
+// Arbitrary test fixtures — NOT production defaults. The scout takes
+// repositoryId, baseUrl and cdpEndpoint as explicit arguments (see
+// runQuickstartScoutPublic), so any non-empty values exercise the same code
+// path. They're factored out here so the call sites read as "scout this URL".
+const REPO_ID = "repo-1";
+const CDP_OPTS = { cdpEndpoint: "http://eb.test:9222" } as const;
+const scout = (baseUrl = "https://www.featurely.no") =>
+  runQuickstartScoutPublic(REPO_ID, baseUrl, CDP_OPTS);
+
 describe("runQuickstartScoutPublic — happy path", () => {
   it("returns the classification from valid JSON on the first try", async () => {
     mockGen.mockResolvedValueOnce(HAPPY_JSON);
 
-    const { data } = await runQuickstartScoutPublic(
-      "repo-1",
-      "https://www.featurely.no",
-      { cdpEndpoint: "http://eb.test:9222" },
-    );
+    const { data } = await scout();
 
     expect(data.classification).toBe("email_password");
     expect(data.authAutomatable).toBe(true);
@@ -70,11 +75,7 @@ describe("runQuickstartScoutPublic — tolerant JSON extraction", () => {
       `${HAPPY_JSON}\n\nI have completed the reconnaissance and classified the sign-up flow as email_password.`,
     );
 
-    const { data } = await runQuickstartScoutPublic(
-      "repo-1",
-      "https://www.featurely.no",
-      { cdpEndpoint: "http://eb.test:9222" },
-    );
+    const { data } = await scout();
 
     expect(data.classification).toBe("email_password");
     expect(data.registerPath).toBe("/sign-up");
@@ -87,11 +88,7 @@ describe("runQuickstartScoutPublic — tolerant JSON extraction", () => {
       `Here is what I found:\n\n\`\`\`json\n${HAPPY_JSON}\n\`\`\`\n\nDone.`,
     );
 
-    const { data } = await runQuickstartScoutPublic(
-      "repo-1",
-      "https://www.featurely.no",
-      { cdpEndpoint: "http://eb.test:9222" },
-    );
+    const { data } = await scout();
 
     expect(data.classification).toBe("email_password");
     expect(mockGen).toHaveBeenCalledTimes(1);
@@ -100,11 +97,7 @@ describe("runQuickstartScoutPublic — tolerant JSON extraction", () => {
   it("parses JSON preceded by prose when there is no fence", async () => {
     mockGen.mockResolvedValueOnce(`Sure — the result is ${HAPPY_JSON}`);
 
-    const { data } = await runQuickstartScoutPublic(
-      "repo-1",
-      "https://www.featurely.no",
-      { cdpEndpoint: "http://eb.test:9222" },
-    );
+    const { data } = await scout();
 
     expect(data.classification).toBe("email_password");
     expect(mockGen).toHaveBeenCalledTimes(1);
@@ -119,11 +112,7 @@ describe("runQuickstartScoutPublic — retry on non-JSON", () => {
       )
       .mockResolvedValueOnce(HAPPY_JSON);
 
-    const { data } = await runQuickstartScoutPublic(
-      "repo-1",
-      "https://www.featurely.no",
-      { cdpEndpoint: "http://eb.test:9222" },
-    );
+    const { data } = await scout();
 
     expect(data.classification).toBe("email_password");
     expect(mockGen).toHaveBeenCalledTimes(2);
@@ -137,11 +126,9 @@ describe("runQuickstartScoutPublic — retry on non-JSON", () => {
       .mockResolvedValueOnce("Browser locked.")
       .mockResolvedValueOnce("Still locked, sorry.");
 
-    await expect(
-      runQuickstartScoutPublic("repo-1", "https://example.com", {
-        cdpEndpoint: "http://eb.test:9222",
-      }),
-    ).rejects.toThrow(/non-JSON on both attempts/i);
+    await expect(scout("https://example.com")).rejects.toThrow(
+      /non-JSON on both attempts/i,
+    );
     expect(mockGen).toHaveBeenCalledTimes(2);
   });
 });
@@ -158,11 +145,7 @@ describe("runQuickstartScoutPublic — validation gate downgrades empty no_publi
       }),
     );
 
-    const { data } = await runQuickstartScoutPublic(
-      "repo-1",
-      "https://example.com",
-      { cdpEndpoint: "http://eb.test:9222" },
-    );
+    const { data } = await scout("https://example.com");
 
     expect(data.classification).toBe("unknown");
     expect(data.authAutomatable).toBe(false);
@@ -180,11 +163,7 @@ describe("runQuickstartScoutPublic — validation gate downgrades empty no_publi
       }),
     );
 
-    const { data } = await runQuickstartScoutPublic(
-      "repo-1",
-      "https://example.com",
-      { cdpEndpoint: "http://eb.test:9222" },
-    );
+    const { data } = await scout("https://example.com");
 
     expect(data.classification).toBe("no_public_register");
     expect(data.tagline).toBe("A brochure site");
@@ -202,11 +181,7 @@ describe("runQuickstartScoutPublic — classifier coercion", () => {
       }),
     );
 
-    const { data } = await runQuickstartScoutPublic(
-      "repo-1",
-      "https://example.com",
-      { cdpEndpoint: "http://eb.test:9222" },
-    );
+    const { data } = await scout("https://example.com");
 
     expect(data.classification).toBe("unknown");
     expect(data.authAutomatable).toBe(false);
@@ -221,11 +196,7 @@ describe("runQuickstartScoutPublic — classifier coercion", () => {
       }),
     );
 
-    const { data } = await runQuickstartScoutPublic(
-      "repo-1",
-      "https://example.com",
-      { cdpEndpoint: "http://eb.test:9222" },
-    );
+    const { data } = await scout("https://example.com");
 
     expect(data.classification).toBe("unknown");
   });
@@ -242,11 +213,7 @@ describe("runQuickstartScoutPublic — authAutomatable guard", () => {
       }),
     );
 
-    const { data } = await runQuickstartScoutPublic(
-      "repo-1",
-      "https://example.com",
-      { cdpEndpoint: "http://eb.test:9222" },
-    );
+    const { data } = await scout("https://example.com");
 
     expect(data.classification).toBe("oauth_only");
     expect(data.authAutomatable).toBe(false);

@@ -26,7 +26,7 @@ import { resolveTestVideoUrl } from "@/lib/share/video-fallback";
 import { ShareVideoPlayer } from "./share-video-player";
 import { AwardBadgeRow } from "@/components/awards/award-badge-row";
 import { MobileDiffGallery } from "@/components/diff/mobile-diff-gallery-client";
-import { StepStripClient } from "@/components/share/step-strip-client";
+import { ChapterRail, type Chapter } from "@/components/share/chapter-rail";
 import { DomOverlay } from "@/components/share/dom-overlay-client";
 
 // Dynamic — share content is live and render is cheap (pure server HTML).
@@ -302,23 +302,27 @@ export default async function PublicSharePage({ params }: PageProps) {
 
   // VideoObject structured data — surface the test recording to Google per
   // https://support.google.com/webmasters/answer/7552505 so /r/ pages get
-  // video-rich previews instead of plain links.
+  // video-rich previews instead of plain links. One VideoObject per clip, so
+  // every <video> element rendered on the page is described (Google flags
+  // rendered videos that lack structured data).
   const origin = await resolveRequestOrigin();
-  const primaryVideoPath = primaryResult?.videoPath
-    ? toUrl(primaryResult.videoPath)
-    : fallbackVideoUrl;
-  const videoSchema = primaryVideoPath
-    ? buildVideoSchema({
-        origin,
-        slug,
-        videoPath: primaryVideoPath,
-        displayName: test?.name ?? displayDomain,
-        domain: displayDomain,
-        durationMs: primaryResult?.durationMs ?? null,
-        uploadedAt: build.completedAt ?? build.createdAt ?? null,
-        changesDetected: build.changesDetected ?? 0,
-      })
-    : null;
+  // Stable "first published" timestamp. MUST match the sitemap's
+  // publication_date — listPublicSharesForSitemap uses the same
+  // completedAt → createdAt → share.createdAt chain, and Google merges
+  // sitemap + JSON-LD and flags inconsistent uploadDates. Never fall back to
+  // `new Date()`: with `revalidate = 0` that minted a different uploadDate on
+  // every crawl.
+  const videoUploadedAt =
+    build.completedAt ?? build.createdAt ?? share.createdAt ?? null;
+  const videoSchemas = buildVideoSchemas({
+    origin,
+    slug,
+    clips,
+    displayName: test?.name ?? displayDomain,
+    domain: displayDomain,
+    uploadedAt: videoUploadedAt,
+    changesDetected: build.changesDetected ?? 0,
+  });
 
   // Optional AI UI/UX summary captured at the end of a /gtm-lastest-saas-demo
   // run. Prefer the latest notes for the share's repo so re-runs flow into
@@ -337,6 +341,18 @@ export default async function PublicSharePage({ params }: PageProps) {
     : null;
   const showAwardBadges = !!award && award.currentTier !== "none";
 
+  // "In this video" chapters — one per captured step, seeking the recording to
+  // its `atMs` offset. Falls back to even distribution across the recording
+  // duration for legacy runs whose screenshots predate atMs capture.
+  const chapters: Chapter[] = isTestShare
+    ? collectChapters(
+        primaryResult,
+        scopedResults,
+        toUrl,
+        clips[0]?.durationMs ?? primaryResult?.durationMs ?? null,
+      )
+    : [];
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <ShareHeader signInLink={signInLink} claimLink={claimLink} />
@@ -344,7 +360,17 @@ export default async function PublicSharePage({ params }: PageProps) {
       <main className="mx-auto max-w-3xl px-4 sm:px-6 py-10 space-y-8">
         {clips.length > 0 && (
           <section className="space-y-3">
-            <ShareVideoPlayer clips={clips} />
+            {/* <figure>/<figcaption> binds descriptive text to the recording so
+                the page reads as a video watch page (Google's "video is the
+                main content" signal) and the player has an accessible label. */}
+            <figure className="m-0 space-y-2">
+              <ShareVideoPlayer clips={clips} />
+              <figcaption className="text-sm text-muted-foreground">
+                Recording of the visual regression run on {displayDomain}
+                {test?.name ? ` · ${test.name}` : ""}.
+              </figcaption>
+            </figure>
+            {chapters.length > 0 && <ChapterRail chapters={chapters} />}
           </section>
         )}
 
@@ -438,65 +464,80 @@ export default async function PublicSharePage({ params }: PageProps) {
         nonce={nonce}
         suppressHydrationWarning
       />
-      {videoSchema && (
+      {videoSchemas.map((schema, i) => (
         <script
+          key={`video-schema-${i}`}
           type="application/ld+json"
           nonce={nonce}
           suppressHydrationWarning
           dangerouslySetInnerHTML={{
-            __html: JSON.stringify(videoSchema).replace(/</g, "\\u003c"),
+            __html: JSON.stringify(schema).replace(/</g, "\\u003c"),
           }}
         />
-      )}
+      ))}
     </div>
   );
 }
 
-function buildVideoSchema({
+// Builds one VideoObject per rendered clip. The first clip is the canonical
+// recording and keeps the branded OG card as its thumbnail (matches the
+// sitemap's thumbnail_loc + the social card); additional clips use their own
+// first-frame poster so each VideoObject carries a unique, representative
+// thumbnail (Google wants unique text + thumbnail per video), falling back to
+// the OG card when a clip has no captured frame.
+function buildVideoSchemas({
   origin,
   slug,
-  videoPath,
+  clips,
   displayName,
   domain,
-  durationMs,
   uploadedAt,
   changesDetected,
 }: {
   origin: string;
   slug: string;
-  videoPath: string;
+  clips: { src: string; durationMs: number | null; poster: string | null }[];
   displayName: string;
   domain: string;
-  durationMs: number | null;
   uploadedAt: Date | null;
   changesDetected: number;
-}): Record<string, unknown> {
-  const absVideo = videoPath.startsWith("http")
-    ? videoPath
-    : `${origin}${videoPath}`;
-  const thumbnailUrl = `${origin}/api/og/share/${slug}`;
-  const uploadDate = (uploadedAt ?? new Date()).toISOString();
+}): Record<string, unknown>[] {
+  const abs = (p: string): string =>
+    p.startsWith("http") ? p : `${origin}${p}`;
+  const ogThumbnail = `${origin}/api/og/share/${slug}`;
+  // Single ISO 8601 instant shared by every clip; omitted entirely when no
+  // stable timestamp exists rather than emitting a moving `new Date()`.
+  const uploadDate = uploadedAt ? uploadedAt.toISOString() : null;
   const description =
     changesDetected > 0
       ? `Visual regression recording for ${domain} — ${changesDetected} change${changesDetected === 1 ? "" : "s"} detected.`
       : `Visual regression recording for ${domain} — no changes detected against baseline.`;
-  const schema: Record<string, unknown> = {
-    "@context": "https://schema.org",
-    "@type": "VideoObject",
-    name: `${displayName} · Lastest visual regression run`,
-    description,
-    thumbnailUrl: [thumbnailUrl],
-    uploadDate,
-    // contentUrl ONLY — Google prefers it over embedUrl, and an embedUrl
-    // pointing at the page itself makes GSC report "multiple video URLs"
-    // (the page URL gets parsed as a second video). embedUrl is reserved
-    // for a dedicated iframe player URL, which we don't have.
-    contentUrl: absVideo,
-  };
-  if (durationMs && durationMs > 0) {
-    schema.duration = msToIso8601Duration(durationMs);
-  }
-  return schema;
+
+  return clips.map((clip, i) => {
+    const thumbnailUrl =
+      i === 0 ? ogThumbnail : clip.poster ? abs(clip.poster) : ogThumbnail;
+    const name =
+      i === 0
+        ? `${displayName} · Lastest visual regression run`
+        : `${displayName} · Lastest visual regression run (clip ${i + 1})`;
+    const schema: Record<string, unknown> = {
+      "@context": "https://schema.org",
+      "@type": "VideoObject",
+      name,
+      description,
+      thumbnailUrl: [thumbnailUrl],
+      // contentUrl ONLY — Google prefers it over embedUrl, and an embedUrl
+      // pointing at the page itself makes GSC report "multiple video URLs"
+      // (the page URL gets parsed as a second video). embedUrl is reserved
+      // for a dedicated iframe player URL, which we don't have.
+      contentUrl: abs(clip.src),
+    };
+    if (uploadDate) schema.uploadDate = uploadDate;
+    if (clip.durationMs && clip.durationMs > 0) {
+      schema.duration = msToIso8601Duration(clip.durationMs);
+    }
+    return schema;
+  });
 }
 
 function msToIso8601Duration(ms: number): string {
@@ -1665,6 +1706,22 @@ function TestShareBody({
   // DOM-change overlays (Verify > DOM tab, ported): annotated screenshots for
   // steps whose recorded DOM diff has added/removed/changed elements.
   const domOverlays = buildDomOverlays(stepComparisons, diffs, steps, toUrl);
+  // Merge DOM overlays into the matching visual diff: when a step has BOTH a
+  // pixel diff and DOM changes, the overlay renders directly under that step's
+  // slider (same coordinate space — both use the diff's current screenshot)
+  // instead of repeating the step in a separate "DOM changes" section. Only
+  // overlays whose step has no slider diff render standalone below.
+  const domByStepLabel = new Map<string, DomOverlayItem>();
+  for (const o of domOverlays) {
+    if (o.stepLabel && !domByStepLabel.has(o.stepLabel))
+      domByStepLabel.set(o.stepLabel, o);
+  }
+  const sliderLabels = new Set(
+    sliderDiffs.map((d) => d.stepLabel).filter((l): l is string => !!l),
+  );
+  const standaloneDomOverlays = domOverlays.filter(
+    (o) => !o.stepLabel || !sliderLabels.has(o.stepLabel),
+  );
   // No diffs → there's no comparison to show (the step strip, now clickable to
   // fullscreen, is the screenshot surface) so render the captured shots large
   // in the gallery instead of deduping them against the strip.
@@ -1694,7 +1751,9 @@ function TestShareBody({
         signInLink={signInLink}
       />
 
-      {steps.length > 0 && <StepStripClient steps={steps} />}
+      {/* The captured-steps strip now lives at page level as the "In this video"
+          chapter rail (ChapterRail, rendered under the player) with timecodes +
+          click-to-seek. `steps` is still computed below for the DOM overlays. */}
 
       <div
         className={`grid gap-3 ${gridColsClass(
@@ -1743,28 +1802,41 @@ function TestShareBody({
               ? "Visual change"
               : `${sliderDiffs.length} visual changes`}
           </h2>
-          {sliderDiffs.map((d) => (
-            <DiffSlider
-              key={d.id}
-              baseline={d.baseline}
-              current={d.current}
-              diff={d.diff}
-              stepLabel={d.stepLabel}
-              pixelDifference={d.pixelDifference}
-              stepNumber={d.stepNumber}
-            />
-          ))}
+          {sliderDiffs.map((d) => {
+            const dom = d.stepLabel
+              ? domByStepLabel.get(d.stepLabel)
+              : undefined;
+            return (
+              <div key={d.id} className="space-y-3">
+                <DiffSlider
+                  baseline={d.baseline}
+                  current={d.current}
+                  diff={d.diff}
+                  stepLabel={d.stepLabel}
+                  pixelDifference={d.pixelDifference}
+                  stepNumber={d.stepNumber}
+                />
+                {dom && (
+                  <DomOverlay
+                    screenshotSrc={dom.src}
+                    dom={dom.dom}
+                    stepLabel="DOM"
+                  />
+                )}
+              </div>
+            );
+          })}
         </section>
       )}
 
-      {domOverlays.length > 0 && (
+      {standaloneDomOverlays.length > 0 && (
         <section className="space-y-4">
           <h2 className="text-sm font-medium text-muted-foreground">
-            {domOverlays.length === 1
+            {standaloneDomOverlays.length === 1
               ? "DOM change"
-              : `${domOverlays.length} DOM changes`}
+              : `${standaloneDomOverlays.length} DOM changes`}
           </h2>
-          {domOverlays.map((o) => (
+          {standaloneDomOverlays.map((o) => (
             <DomOverlay
               key={o.key}
               screenshotSrc={o.src}
@@ -1807,7 +1879,10 @@ function collectSteps(
   if (!source) return [];
   const out: Step[] = [];
   const seen = new Set<string>();
-  const captured = source.screenshots ?? [];
+  // Capture uploads can persist out of execution order; the step index in each
+  // label ("Step N") is authoritative, so order by it (see also collectChapters
+  // and the host-side screenshot sort in executor.ts).
+  const captured = [...(source.screenshots ?? [])].sort(byStepLabel);
   for (const s of captured) {
     if (!s.path || seen.has(s.path)) continue;
     seen.add(s.path);
@@ -1819,6 +1894,65 @@ function collectSteps(
     const url = toUrl(source.screenshotPath);
     if (url) out.push({ src: url, label: "Final" });
   }
+  return out;
+}
+
+// Build the "In this video" chapters: one per captured step, carrying the
+// recording offset (`atMs`) so the rail can seek the player. When a row lacks
+// `atMs` (legacy runs captured before atMs existed), distribute the steps evenly
+// across the known recording duration; if the duration is also unknown, the
+// chapter renders without a seek target (lightbox-only).
+function collectChapters(
+  primary: ShareTestResult | null,
+  all: ShareTestResult[],
+  toUrl: (p: string | null | undefined) => string | null,
+  durationMs: number | null,
+): Chapter[] {
+  const source = primary ?? all[0] ?? null;
+  if (!source) return [];
+  const ordered: {
+    path: string;
+    label?: string;
+    atMs?: number;
+    title?: string;
+  }[] = [];
+  const seen = new Set<string>();
+  for (const s of source.screenshots ?? []) {
+    if (!s.path || seen.has(s.path)) continue;
+    seen.add(s.path);
+    ordered.push(s);
+  }
+  if (source.screenshotPath && !seen.has(source.screenshotPath)) {
+    ordered.push({ path: source.screenshotPath, label: "Final" });
+  }
+  // Render the rail in execution order even when the stored screenshots array
+  // is scrambled (parallel-upload arrival order). "Final"/unparseable rows sort
+  // last and keep their relative position.
+  ordered.sort(byStepLabel);
+  const n = ordered.length;
+  const durSec = durationMs && durationMs > 0 ? durationMs / 1000 : null;
+  const out: Chapter[] = [];
+  ordered.forEach((s, i) => {
+    const url = toUrl(s.path);
+    if (!url) return;
+    let atSec: number | null = null;
+    if (typeof s.atMs === "number" && s.atMs >= 0) {
+      atSec = s.atMs / 1000;
+    } else if (durSec != null) {
+      atSec = n > 1 ? (durSec * i) / n : 0;
+    }
+    // Never seek past the very end of the clip.
+    if (atSec != null && durSec != null) {
+      atSec = Math.min(atSec, Math.max(0, durSec - 0.1));
+    }
+    // Prefer the cosmetic `title` (from the screenshot-path slug) for the
+    // chapter name; fall back to the structural `label` ("Step N").
+    out.push({
+      src: url,
+      label: s.title || s.label || `Step ${i + 1}`,
+      atSec,
+    });
+  });
   return out;
 }
 
@@ -1970,6 +2104,18 @@ function stepNumberFromLabel(label: string | null | undefined): number {
   if (!label) return Number.POSITIVE_INFINITY;
   const m = label.match(/(\d+)/);
   return m ? parseInt(m[1], 10) : Number.POSITIVE_INFINITY;
+}
+
+/** Ascending sort comparator on the step index parsed from each item's label
+ *  ("Step N"). Unparseable / "Final" rows sort last and keep relative order.
+ *  The equality short-circuit guards the +Infinity − +Infinity → NaN case. */
+function byStepLabel(
+  a: { label?: string | null },
+  b: { label?: string | null },
+): number {
+  const an = stepNumberFromLabel(a.label);
+  const bn = stepNumberFromLabel(b.label);
+  return an === bn ? 0 : an - bn;
 }
 
 // For passing tests — no visual_diffs rows exist, so synthesize sliders from

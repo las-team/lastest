@@ -32,7 +32,10 @@ import type {
   StepComparison,
   StepLayerFeedback,
 } from "@/lib/db/schema";
-import { deriveCaseStatus } from "@/lib/verify/case-status";
+import {
+  deriveCaseStatus,
+  isVisualBaselineMissing,
+} from "@/lib/verify/case-status";
 import {
   effectiveVerdict,
   mergeWithTestOverrides,
@@ -621,6 +624,8 @@ function BoardFocusInner(props: BoardFocusClientProps) {
         checkModes,
         test?.id ? checkModesByTestId[test.id] : null,
       );
+      const visual =
+        visualByStepKey.get(`${step.testId}::${step.stepLabel ?? ""}`) ?? null;
       const status = deriveCaseStatus({
         step,
         feedback: fbByStep.get(step.id) ?? [],
@@ -628,6 +633,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
         testFailed:
           result?.status === "failed" || result?.status === "setup_failed",
         verdictOverride: effectiveVerdict(step.evidence, modes),
+        visualBaselineMissing: isVisualBaselineMissing(visual, modes.visual),
       });
       if (status !== "unknown") n++;
     }
@@ -638,6 +644,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     testById,
     changedAreaIds,
     testResultById,
+    visualByStepKey,
     checkModes,
     checkModesByTestId,
   ]);
@@ -772,12 +779,26 @@ function BoardFocusInner(props: BoardFocusClientProps) {
       const result = step.testResultId
         ? (testResultById.get(step.testResultId) ?? null)
         : null;
+      // Must mirror the board's column assignment EXACTLY — derive with the
+      // mode-aware effective verdict + the missing-baseline gate, not the raw
+      // mode-blind step.verdict. Without the override, "Verify all" targeted a
+      // different set than the column shows: a step whose red comes only from
+      // a `log` layer renders in Unsorted but was skipped here as regression,
+      // so it never got verified. (board-view.tsx uses the same inputs.)
+      const modes = mergeWithTestOverrides(
+        checkModes,
+        test?.id ? checkModesByTestId[test.id] : null,
+      );
+      const visual =
+        visualByStepKey.get(`${step.testId}::${step.stepLabel ?? ""}`) ?? null;
       const derived = deriveCaseStatus({
         step,
         feedback: fbByStep.get(step.id) ?? [],
         isInChangedArea,
         testFailed:
           result?.status === "failed" || result?.status === "setup_failed",
+        verdictOverride: effectiveVerdict(step.evidence, modes),
+        visualBaselineMissing: isVisualBaselineMissing(visual, modes.visual),
       });
       if (derived === column) targets.push(step.id);
     }
