@@ -69,15 +69,12 @@ import {
   Settings2,
   CheckCircle2,
   ChevronDown,
-  ListFilter,
   AlertTriangle,
   Check,
   ShieldCheck,
   Play,
   Pause,
   Download,
-  Maximize2,
-  Minimize2,
   Cookie,
   ScanSearch,
 } from "lucide-react";
@@ -97,9 +94,15 @@ import {
   type ExtraStep,
 } from "@/components/setup/recording-setup-picker";
 import { RecordingTutorialOverlay } from "@/components/recording-tutorial/recording-tutorial-overlay";
+import { RecordingTimeline } from "@/components/recording/recording-timeline";
+import { RecordingControls } from "@/components/recording/recording-controls";
 import { StepCard } from "@/components/recording/step-card";
 import { TraceScrub } from "@/components/recording/trace-scrub";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import {
+  getEventDescription,
+  isActionReplayable,
+} from "@/lib/recording/timeline-events";
 import { track } from "@/lib/analytics/umami";
 import { Events } from "@/lib/analytics/events";
 import { appendStreamToken } from "@/lib/eb/stream-token";
@@ -125,129 +128,6 @@ interface RecordingClientProps {
   availableTests?: { id: string; name: string }[];
   availableScripts?: { id: string; name: string }[];
   onStepChange?: (step: RecordingStep) => void;
-}
-
-// Check if an action event can be replayed by the runner
-function isActionReplayable(event: RecordingEvent): {
-  replayable: boolean;
-  reason?: "valid-selectors" | "coords-only" | "no-selectors";
-} {
-  if (event.type !== "action") {
-    return { replayable: true }; // Non-action events are always replayable
-  }
-
-  const selectors = event.data.selectors || [];
-  const validSelectors = selectors.filter(
-    (sel) => sel.value && sel.value.trim() && !sel.value.includes("undefined"),
-  );
-  const hasCoords = event.data.coordinates !== undefined;
-
-  if (validSelectors.length > 0) {
-    return { replayable: true, reason: "valid-selectors" };
-  }
-
-  if (
-    (event.data.action === "click" || event.data.action === "rightclick") &&
-    hasCoords
-  ) {
-    return { replayable: true, reason: "coords-only" };
-  }
-
-  return { replayable: false, reason: "no-selectors" };
-}
-
-function formatModifiers(modifiers?: KeyboardModifier[]): string {
-  if (!modifiers || modifiers.length === 0) return "";
-  return `[${modifiers.join("+")}] `;
-}
-
-function getEventDescription(event: RecordingEvent): string {
-  const modPrefix = formatModifiers(event.data.modifiers);
-  switch (event.type) {
-    case "navigation":
-      return `Navigate to ${event.data.relativePath || event.data.url || "page"}`;
-    case "action":
-      if (event.data.action === "click") {
-        const dlSuffix = event.data.downloadWrap ? " (download)" : "";
-        return `${modPrefix}Click ${event.data.selector?.slice(0, 40) || "element"}${dlSuffix}`;
-      }
-      if (event.data.action === "rightclick") {
-        const coords = event.data.coordinates;
-        const target =
-          event.data.selector?.slice(0, 40) ||
-          (coords ? `at (${coords.x}, ${coords.y})` : "element");
-        return `${modPrefix}Right-click ${target}`;
-      }
-      if (event.data.action === "fill") {
-        return `Fill ${event.data.selector?.slice(0, 30) || "input"} with "${event.data.value?.slice(0, 20) || ""}"`;
-      }
-      if (event.data.action === "selectOption") {
-        return `Select "${event.data.value?.slice(0, 20) || ""}"`;
-      }
-      return event.data.action || "action";
-    case "screenshot":
-      return "Screenshot captured";
-    case "assertion":
-      // Handle element assertions from Shift+right-click
-      if (event.data.elementAssertion) {
-        const ea = event.data.elementAssertion;
-        const assertLabel = ea.type
-          .replace(/^to/, "")
-          .replace(/([A-Z])/g, " $1")
-          .trim();
-        const selectorHint = ea.selectors[0]?.value?.slice(0, 25) || "element";
-        return `Assert: ${assertLabel} on ${selectorHint}`;
-      }
-      // Page-level assertions
-      const labels: Record<string, string> = {
-        pageLoad: "Page Load",
-        networkIdle: "Network Idle",
-        urlMatch: "URL Match",
-        domContentLoaded: "DOM Ready",
-      };
-      return `Assert: ${labels[event.data.assertionType || ""] || event.data.assertionType}`;
-    case "download":
-      return "Download expected";
-    case "insert-timestamp":
-      return "Insert timestamp";
-    case "mouse-down":
-      return `${modPrefix}Mouse down at (${event.data.coordinates?.x}, ${event.data.coordinates?.y})`;
-    case "mouse-up":
-      return `${modPrefix}Mouse up at (${event.data.coordinates?.x}, ${event.data.coordinates?.y})`;
-    case "hover-preview":
-      const info = event.data.elementInfo;
-      if (info) {
-        // Enhanced hover preview: show tagName, id, text, and selector count
-        const parts: string[] = [];
-        parts.push(`<${info.tagName}>`);
-        if (info.id) parts.push(`#${info.id}`);
-        if (info.textContent)
-          parts.push(
-            `"${info.textContent.slice(0, 15)}${info.textContent.length > 15 ? "..." : ""}"`,
-          );
-        const selectorCount = info.selectors?.length || 0;
-        if (selectorCount > 0) parts.push(`(${selectorCount} sel)`);
-        return `${info.potentialAction || "interact"} → ${parts.join(" ")}`;
-      }
-      return "Hovering...";
-    case "keypress":
-      return `${modPrefix}Press "${event.data.key || "key"}"`;
-    case "keydown":
-      return `Hold "${event.data.key || "key"}"`;
-    case "keyup":
-      return `Release "${event.data.key || "key"}"`;
-    case "wait": {
-      if (event.data.waitType === "duration") {
-        return `Wait ${event.data.durationMs ?? 0}ms`;
-      }
-      const sel =
-        event.data.selector || event.data.selectors?.[0]?.value || "element";
-      const cond = event.data.condition || "visible";
-      return `Wait for ${sel.slice(0, 30)} (${cond})`;
-    }
-    default:
-      return event.type;
-  }
 }
 
 interface WaitPopoverBodyProps {
@@ -1078,17 +958,10 @@ export function RecordingClient({
     }
   };
 
-  const handleInsertWait = async () => {
-    const params: WaitParams =
-      waitMode === "duration"
-        ? { waitType: "duration", durationMs: Number(waitDurationMs) }
-        : {
-            waitType: "selector",
-            selector: waitSelector.trim(),
-            condition: waitCondition,
-            timeoutMs: Number(waitTimeoutMs),
-          };
-
+  // Validates + submits a wait. Used both by the shared RecordingControls
+  // (embedded layout, owns its own popover state) and the fallback card layout
+  // below (which builds params from this component's local wait state).
+  const handleInsertWaitParams = async (params: WaitParams) => {
     if (
       params.waitType === "duration" &&
       (!Number.isFinite(params.durationMs) || (params.durationMs ?? -1) < 0)
@@ -1119,6 +992,19 @@ export function RecordingClient({
       console.error("Failed to insert wait:", error);
       toast.error("Failed to insert wait");
     }
+  };
+
+  const handleInsertWait = async () => {
+    const params: WaitParams =
+      waitMode === "duration"
+        ? { waitType: "duration", durationMs: Number(waitDurationMs) }
+        : {
+            waitType: "selector",
+            selector: waitSelector.trim(),
+            condition: waitCondition,
+            timeoutMs: Number(waitTimeoutMs),
+          };
+    await handleInsertWaitParams(params);
   };
 
   const handleTogglePause = async () => {
@@ -1775,198 +1661,40 @@ export function RecordingClient({
               />
             </div>
 
-            {/* Timeline panel (flex sibling, pushes browser left) */}
+            {/* Timeline panel (flex sibling, pushes browser left) — shared with
+                the test debug "record from here" view. The timelineOpen toggle
+                collapses the width to 0. */}
             <div
-              className={`h-full shrink-0 bg-card border-l border-border transition-all duration-200 overflow-hidden ${timelineOpen ? "w-72" : "w-0 border-l-0"}`}
+              className={`h-full shrink-0 transition-all duration-200 overflow-hidden ${timelineOpen ? "w-72" : "w-0"}`}
             >
-              <div className="flex items-center justify-between px-3 py-2.5 border-b border-border w-72">
-                <span className="text-sm font-medium text-foreground">
-                  Timeline
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {events.length} events
-                </span>
-              </div>
-              <TooltipProvider delayDuration={120}>
-                <div
-                  ref={timelineRef}
-                  className="overflow-y-auto overflow-x-hidden p-2.5 space-y-1 w-72"
-                  style={{ maxHeight: "calc(100% - 41px)" }}
-                >
-                  {events.length === 0 ? (
-                    <div className="text-center py-4 text-muted-foreground text-sm">
-                      Waiting for interactions...
-                    </div>
-                  ) : (
-                    events.map((event) => (
-                      <StepCard
-                        key={event.sequence}
-                        event={event}
-                        description={getEventDescription(event)}
-                        replayStatus={isActionReplayable(event)}
-                        repositoryId={repositoryId}
-                        onPromoteOptimistic={handlePromoteOptimistic}
-                      />
-                    ))
-                  )}
-                </div>
-              </TooltipProvider>
+              <RecordingTimeline
+                events={events}
+                repositoryId={repositoryId}
+                onPromoteOptimistic={handlePromoteOptimistic}
+                scrollRef={timelineRef}
+              />
             </div>
           </div>
 
-          {/* Floating mini-menu — fixed at bottom center */}
-          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 layer-playback-controls flex items-center gap-1.5 px-3 py-1.5 bg-card/95 backdrop-blur-sm border border-border rounded-full shadow-2xl">
-            <div className="flex items-center gap-2 px-1">
-              <div
-                className={`h-2.5 w-2.5 rounded-full ${isPaused ? "bg-yellow-500" : "bg-red-500 animate-pulse"}`}
-              />
-              <span className="text-sm font-medium text-foreground">
-                {isPaused ? "Paused" : "Recording"}
-              </span>
-            </div>
-            <div className="w-px h-5 bg-border" />
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={handleTogglePause}
-              title={isPaused ? "Resume recording" : "Pause recording"}
-            >
-              {isPaused ? (
-                <Play className="h-4 w-4" />
-              ) : (
-                <Pause className="h-4 w-4" />
-              )}
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={handleCaptureScreenshot}
-              title="Screenshot"
-              data-tutorial-target="screenshot"
-            >
-              <Camera className="h-4 w-4" />
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 gap-1 px-2"
-                  data-tutorial-target="assertion"
-                >
-                  <CheckCircle2 className="h-4 w-4" />
-                  <ChevronDown className="h-3 w-3" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent>
-                <DropdownMenuItem
-                  onClick={() => handleCreateAssertion("pageLoad")}
-                >
-                  Page Load
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => handleCreateAssertion("networkIdle")}
-                >
-                  Network Idle
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => handleCreateAssertion("urlMatch")}
-                >
-                  URL Match
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => handleCreateAssertion("domContentLoaded")}
-                >
-                  DOM Content Loaded
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={handleFlagDownload}
-              title="Wait for Download"
-              data-tutorial-target="download"
-            >
-              <Download className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={handleInsertTimestamp}
-              title="Insert Timestamp"
-            >
-              <CalendarClock className="h-4 w-4" />
-            </Button>
-            <Popover open={waitPopoverOpen} onOpenChange={setWaitPopoverOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  title="Insert Wait"
-                >
-                  <Timer className="h-4 w-4" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="center" className="w-80">
-                <WaitPopoverBody
-                  mode={waitMode}
-                  setMode={setWaitMode}
-                  durationMs={waitDurationMs}
-                  setDurationMs={setWaitDurationMs}
-                  selector={waitSelector}
-                  setSelector={setWaitSelector}
-                  condition={waitCondition}
-                  setCondition={setWaitCondition}
-                  timeoutMs={waitTimeoutMs}
-                  setTimeoutMs={setWaitTimeoutMs}
-                  onInsert={handleInsertWait}
-                />
-              </PopoverContent>
-            </Popover>
-            <div className="w-px h-5 bg-border" />
-            <Button
-              variant="ghost"
-              size="icon"
-              className={`h-8 w-8 ${timelineOpen ? "bg-muted" : ""}`}
-              onClick={() => setTimelineOpen(!timelineOpen)}
-              title="Toggle timeline"
-              data-tutorial-target="timeline"
-            >
-              <ListFilter className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={toggleRecordingFullscreen}
-              title={isRecordingFullscreen ? "Exit fullscreen" : "Fullscreen"}
-            >
-              {isRecordingFullscreen ? (
-                <Minimize2 className="h-4 w-4" />
-              ) : (
-                <Maximize2 className="h-4 w-4" />
-              )}
-            </Button>
-            <div className="w-px h-5 bg-border" />
-            <Button
-              onClick={handleStopRecording}
-              disabled={isLoading}
-              className="h-8 bg-red-600 hover:bg-red-700 text-white rounded-full px-3 gap-1.5"
-            >
-              {isLoading ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Square className="h-3.5 w-3.5" />
-              )}
-              Stop
-            </Button>
-          </div>
+          {/* Floating mini-menu — shared with the test debug "record from here"
+              view. The timeline-toggle + pause + fullscreen are record-only and
+              passed as optional props. */}
+          <RecordingControls
+            isPaused={isPaused}
+            onTogglePause={handleTogglePause}
+            onScreenshot={handleCaptureScreenshot}
+            onAssertion={handleCreateAssertion}
+            onFlagDownload={handleFlagDownload}
+            onInsertTimestamp={handleInsertTimestamp}
+            onInsertWait={handleInsertWaitParams}
+            onToggleTimeline={() => setTimelineOpen(!timelineOpen)}
+            timelineOpen={timelineOpen}
+            onToggleFullscreen={toggleRecordingFullscreen}
+            isFullscreen={isRecordingFullscreen}
+            onStop={handleStopRecording}
+            stopDisabled={isLoading}
+            stopBusy={isLoading}
+          />
 
           <RecordingTutorialOverlay layout="embedded" />
         </div>

@@ -44,7 +44,15 @@ import {
   stopDebugSession,
   consumeStopRecording,
   saveDebugSessionCode,
+  debugCaptureScreenshot,
+  debugCreateAssertion,
+  debugFlagDownload,
+  debugInsertTimestamp,
+  debugInsertWait,
 } from "@/server/actions/debug";
+import { RecordingTimeline } from "@/components/recording/recording-timeline";
+import { RecordingControls } from "@/components/recording/recording-controls";
+import { codeGenEventToStepCardEvent } from "@/lib/recording/timeline-events";
 import {
   Dialog,
   DialogContent,
@@ -58,6 +66,8 @@ import type {
   DebugState,
   DebugNetworkEntry,
   DebugConsoleEntry,
+  WaitParams,
+  AssertionType,
 } from "@/lib/playwright/types";
 import {
   extractTestBody,
@@ -455,6 +465,40 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   const isRecording = state?.isRecording ?? false;
   const isBusy = state?.status === "stepping" || state?.status === "running";
 
+  // Live recording timeline: adapt the server-driven recorder buffer to the
+  // StepCard shape the shared timeline renders. Empty unless recording.
+  const timelineEvents = useMemo(
+    () =>
+      (state?.recordingEvents ?? []).map((e, i) =>
+        codeGenEventToStepCardEvent(e, i),
+      ),
+    [state?.recordingEvents],
+  );
+
+  // Recording control handlers — fire-and-forget; the resulting recorder event
+  // shows up on the next debug_state tick via recordingEvents.
+  const handleRecScreenshot = useCallback(() => {
+    if (sessionId) void debugCaptureScreenshot(sessionId);
+  }, [sessionId]);
+  const handleRecAssertion = useCallback(
+    (kind: AssertionType) => {
+      if (sessionId) void debugCreateAssertion(sessionId, kind);
+    },
+    [sessionId],
+  );
+  const handleRecFlagDownload = useCallback(() => {
+    if (sessionId) void debugFlagDownload(sessionId);
+  }, [sessionId]);
+  const handleRecInsertTimestamp = useCallback(() => {
+    if (sessionId) void debugInsertTimestamp(sessionId);
+  }, [sessionId]);
+  const handleRecInsertWait = useCallback(
+    (params: WaitParams) => {
+      if (sessionId) void debugInsertWait(sessionId, params);
+    },
+    [sessionId],
+  );
+
   // Past-step edit warning
   const hasPastStepWarning = state?.error?.includes("Step back to apply");
 
@@ -797,23 +841,33 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                       </p>
                     </div>
                   )}
-                  <BrowserViewer
-                    ref={browserViewerRef}
-                    streamUrl={streamUrl}
-                    className="h-full"
-                    interactive={isRecording || inspectMode}
-                    inspectMode={inspectMode}
-                    onInspectResult={(result) => setInspectedElement(result)}
-                    onDomSnapshot={(result) => {
-                      setDomSnapshot(result);
-                      setDomSnapshotLoading(false);
-                    }}
-                    hideControls
-                    hideFullscreenToggle
-                    hideScreenshot
-                    hideViewportSelector
-                    readOnlyUrl
-                  />
+                  <div className="flex flex-1 min-h-0">
+                    <BrowserViewer
+                      ref={browserViewerRef}
+                      streamUrl={streamUrl}
+                      className="h-full flex-1 min-w-0"
+                      interactive={isRecording || inspectMode}
+                      inspectMode={inspectMode}
+                      onInspectResult={(result) => setInspectedElement(result)}
+                      onDomSnapshot={(result) => {
+                        setDomSnapshot(result);
+                        setDomSnapshotLoading(false);
+                      }}
+                      hideControls
+                      hideFullscreenToggle
+                      hideScreenshot
+                      hideViewportSelector
+                      readOnlyUrl
+                    />
+                    {isRecording && (
+                      <div className="w-72 shrink-0">
+                        <RecordingTimeline
+                          events={timelineEvents}
+                          repositoryId={repositoryId}
+                        />
+                      </div>
+                    )}
+                  </div>
                 </TabsContent>
               )}
             </Tabs>
@@ -1092,6 +1146,23 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Floating recording controls (shared with the /record flow). Pause is
+          omitted — the EmbeddedRecorder has no recorder-level pause in a debug
+          session. Stop reuses the splice-and-save flow. */}
+      {isRecording && (
+        <RecordingControls
+          isPaused={false}
+          onScreenshot={handleRecScreenshot}
+          onAssertion={handleRecAssertion}
+          onFlagDownload={handleRecFlagDownload}
+          onInsertTimestamp={handleRecInsertTimestamp}
+          onInsertWait={handleRecInsertWait}
+          onStop={handleStopRecording}
+          stopDisabled={recordingStopPending}
+          stopBusy={recordingStopPending}
+        />
+      )}
     </div>
   );
 }
