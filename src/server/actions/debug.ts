@@ -465,7 +465,11 @@ export async function saveDebugSessionCode(
   const { requireTestOwnership } = await import("@/lib/auth/ownership");
   const { test } = await requireTestOwnership(remoteSession.testId);
 
-  const { updateTestWithVersion } = await import("@/lib/db/queries");
+  const {
+    updateTestWithVersion,
+    deactivateAllBaselinesForTest,
+    deleteStepComparisonsForTest,
+  } = await import("@/lib/db/queries");
   const { getCurrentBranchForRepo } = await import("@/lib/git-utils");
   const branch = await getCurrentBranchForRepo(test.repositoryId);
 
@@ -476,8 +480,22 @@ export async function saveDebugSessionCode(
     branch ?? undefined,
   );
 
+  // Editing the test via Record-from-here effectively makes it a new test: the
+  // steps (and thus screenshots/evidence) changed. So:
+  //  1. Invalidate all baselines — they were captured against the OLD steps and
+  //     would produce meaningless diffs on the next run.
+  //  2. Remove the test's Verify step comparisons (the board cards) so it leaves
+  //     the board entirely and returns to the "untested" state rather than
+  //     lingering as Verified/Unsorted against steps that no longer exist. The
+  //     cascade clears the attached step_layer_feedback. It reappears on the
+  //     board after a re-run.
+  await deactivateAllBaselinesForTest(remoteSession.testId);
+  await deleteStepComparisonsForTest(remoteSession.testId);
+
   revalidatePath("/tests");
   revalidatePath(`/tests/${remoteSession.testId}`);
+  revalidatePath("/builds");
+  revalidatePath("/verify");
   return { ok: true };
 }
 
