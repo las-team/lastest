@@ -150,6 +150,9 @@ export interface DebugState {
   // after stop_recording finishes — drained server-side in
   // consumeStopRecording, never persisted onward.
   pendingRecordingEvents?: import("@/lib/playwright/event-to-code").CodeGenEvent[];
+  // Live, not-yet-spliced recording buffer reported on every tick while
+  // recording so the UI can render the timeline as actions happen.
+  recordingEvents?: import("@/lib/playwright/event-to-code").CodeGenEvent[];
 }
 
 export type DebugCommand =
@@ -161,6 +164,15 @@ export type DebugCommand =
   | { type: "start_recording"; spliceMode: "replace" | "insert" }
   | { type: "stop_recording" }
   | { type: "cancel_recording" }
+  // Floating recording-control equivalents for an active "record from here"
+  // debug session — mirror the repo-scoped recording actions in
+  // src/server/actions/recording.ts.
+  | { type: "recording_screenshot" }
+  | { type: "recording_assertion"; assertionType: AssertionType }
+  | { type: "recording_flag_download" }
+  | { type: "recording_insert_timestamp" }
+  | ({ type: "recording_insert_wait" } & WaitParams)
+  | { type: "recording_toggle_pause" }
   | { type: "stop" }
   | { type: "_execution_complete" };
 

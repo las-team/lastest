@@ -2,7 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
-import type { DebugState, DebugCommand } from "@/lib/playwright/types";
+import type {
+  DebugState,
+  DebugCommand,
+  AssertionType,
+  WaitParams,
+} from "@/lib/playwright/types";
 import {
   getTest,
   getPlaywrightSettings,
@@ -236,6 +241,7 @@ export async function getDebugState(
       traceUrl: undefined,
       isRecording: remoteSession.state.isRecording ?? false,
       recordedEventCount: remoteSession.state.recordedEventCount ?? 0,
+      recordingEvents: remoteSession.state.recordingEvents ?? [],
     } as DebugState;
   }
 
@@ -284,6 +290,20 @@ export async function sendDebugCommand(
           ...("spliceMode" in command
             ? { spliceMode: command.spliceMode }
             : {}),
+          // Floating recording-control payloads (recording_assertion /
+          // recording_insert_wait) — forward their extra fields so the EB's
+          // debug-executor receives them on the debug_action payload.
+          ...("assertionType" in command
+            ? { assertionType: command.assertionType }
+            : {}),
+          ...("waitType" in command ? { waitType: command.waitType } : {}),
+          ...("durationMs" in command
+            ? { durationMs: command.durationMs }
+            : {}),
+          ...("selector" in command ? { selector: command.selector } : {}),
+          ...("selectors" in command ? { selectors: command.selectors } : {}),
+          ...("condition" in command ? { condition: command.condition } : {}),
+          ...("timeoutMs" in command ? { timeoutMs: command.timeoutMs } : {}),
         },
       } as unknown as Message);
     }
@@ -291,6 +311,54 @@ export async function sendDebugCommand(
   }
 
   return { ok: false, error: "Session not found" };
+}
+
+// ============================================================
+// Floating recording-control equivalents for a debug session
+// ------------------------------------------------------------
+// Thin wrappers over sendDebugCommand, mirroring the repo-scoped recording
+// actions in src/server/actions/recording.ts (captureScreenshot,
+// createAssertion, flagDownload, insertTimestamp, createWait,
+// togglePauseRecording). These let the floating recording controls be invoked
+// during an active "record from here" debug session — the command is queued to
+// the EB, where debug-executor.handleAction drives the attached recorder.
+// ============================================================
+
+export async function debugCaptureScreenshot(sessionId: string) {
+  return sendDebugCommand(sessionId, { type: "recording_screenshot" });
+}
+
+export async function debugCreateAssertion(
+  sessionId: string,
+  type: AssertionType,
+) {
+  return sendDebugCommand(sessionId, {
+    type: "recording_assertion",
+    assertionType: type,
+  });
+}
+
+export async function debugFlagDownload(sessionId: string) {
+  return sendDebugCommand(sessionId, { type: "recording_flag_download" });
+}
+
+export async function debugInsertTimestamp(sessionId: string) {
+  return sendDebugCommand(sessionId, { type: "recording_insert_timestamp" });
+}
+
+export async function debugInsertWait(sessionId: string, params: WaitParams) {
+  return sendDebugCommand(sessionId, {
+    type: "recording_insert_wait",
+    ...params,
+  });
+}
+
+// Pause is a no-op for remote/debug recording sessions (the EmbeddedRecorder
+// has no pause/resume; this mirrors recording.ts togglePauseRecording, which
+// returns "Pause is not supported for remote recording sessions"). Exposed for
+// command parity — the EB-side case logs and does nothing.
+export async function debugTogglePause(sessionId: string) {
+  return sendDebugCommand(sessionId, { type: "recording_toggle_pause" });
 }
 
 /**
