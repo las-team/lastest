@@ -9,7 +9,6 @@
  */
 
 import { generateWithAI } from "@/lib/ai";
-import { isByokConfigured } from "@/lib/ai/availability";
 import { aiConfigFromSettings } from "@/lib/ai/provider-config";
 import { parseAiJson } from "@/lib/ai/json-parse";
 import * as queries from "@/lib/db/queries";
@@ -59,10 +58,10 @@ export async function triageTestFailure(
   try {
     const settings = await queries.getAISettings(repositoryId);
 
-    // MCP-first: background AI only runs when the team has configured in-product
-    // AI (BYOK). Otherwise we stay hands-off and let the user's own agent triage
-    // over MCP. (Quickstart uses the provider directly and never reaches here.)
-    if (!isByokConfigured(settings)) {
+    // MCP-first: background AI only runs when the team has switched on built-in
+    // AI. Otherwise we stay hands-off and let the user's own agent triage over
+    // MCP. (Quickstart uses the provider directly and never reaches here.)
+    if (!(await queries.getInProductAiEnabled(repositoryId))) {
       return {
         classification: "unknown",
         confidence: 0,

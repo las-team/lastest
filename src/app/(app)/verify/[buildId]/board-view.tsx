@@ -27,7 +27,10 @@ import type {
   StepLayerFeedback,
   StepIssueState,
 } from "@/lib/db/schema";
-import { deriveCaseStatus } from "@/lib/verify/case-status";
+import {
+  deriveCaseStatus,
+  isVisualBaselineMissing,
+} from "@/lib/verify/case-status";
 import type { StepVerdict } from "@/lib/db/schema";
 import {
   chipToneForLayer,
@@ -214,6 +217,9 @@ export function BoardView(props: BoardViewProps) {
         test?.id ? props.checkModesByTestId?.[test.id] : null,
       );
       const verdict = effectiveVerdict(step.evidence, modes);
+      const visual =
+        props.visualByStepKey.get(`${step.testId}::${step.stepLabel ?? ""}`) ??
+        null;
       const status = deriveCaseStatus({
         step,
         feedback: stepFb,
@@ -221,13 +227,11 @@ export function BoardView(props: BoardViewProps) {
         testFailed:
           result?.status === "failed" || result?.status === "setup_failed",
         verdictOverride: verdict,
+        visualBaselineMissing: isVisualBaselineMissing(visual, modes.visual),
       });
       const area = test?.functionalAreaId
         ? (props.areaById.get(test.functionalAreaId) ?? null)
         : null;
-      const visual =
-        props.visualByStepKey.get(`${step.testId}::${step.stepLabel ?? ""}`) ??
-        null;
       const kind = deriveExecutionKind(result, verdict, visual);
       return {
         step,

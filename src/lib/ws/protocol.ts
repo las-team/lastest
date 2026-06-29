@@ -668,6 +668,17 @@ export interface ScreenshotUploadPayload {
   width: number;
   height: number;
   capturedAt: number;
+  // Offset of this capture into the recording (ms): capture time minus
+  // video-recording start. Persisted onto the screenshot row + used by the
+  // public share page's "In this video" chapter rail. Optional — absent for
+  // non-recorded runs and ad-hoc/recorder captures.
+  atMs?: number;
+  // Cosmetic chapter title from the test's screenshot-path slug. Decorative
+  // only — the diff/baseline key stays the filename/label.
+  title?: string;
+  // Per-step DOM snapshot captured at this screenshot's moment, so the host can
+  // compute a per-step DOM diff aligned with this screenshot. Optional.
+  domSnapshot?: import("@/lib/db/schema").DomSnapshotData;
 }
 
 export interface ScreenshotUploadResponse extends BaseMessage {

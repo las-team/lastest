@@ -1219,25 +1219,62 @@ async function executeViaRunner(
       inFlight.delete(dbCmd.id);
       completedCount++;
 
-      // Sort by capturedAt to restore capture order (parallel uploads arrive out of order)
-      const sortedScreenshots = [...screenshotResults].sort((a, b) => {
-        const aPayload = a.payload as Record<string, unknown>;
-        const bPayload = b.payload as Record<string, unknown>;
-        return (
-          ((aPayload.capturedAt as number) || 0) -
-          ((bPayload.capturedAt as number) || 0)
-        );
-      });
+      // Restore execution order. The step index baked into each screenshot's
+      // filename (`..._Step_3.png`) is authoritative: parallel uploads arrive
+      // scrambled and `capturedAt` is frequently absent (all 0), so sorting on
+      // it alone left the array in arrival order — e.g. 2,1,5,3,4, which then
+      // mis-numbered the share's step rail. Sort on the filename step first,
+      // then capturedAt, then arrival index as tiebreakers.
+      const screenshotStepIndex = (
+        r: (typeof screenshotResults)[number],
+      ): number => {
+        const f =
+          ((r.payload as Record<string, unknown>).filename as string) || "";
+        const m = f.match(/Step_(\d+)/);
+        return m ? parseInt(m[1], 10) : Number.POSITIVE_INFINITY;
+      };
+      const capturedAtOf = (r: (typeof screenshotResults)[number]): number =>
+        ((r.payload as Record<string, unknown>).capturedAt as number) || 0;
+      const sortedScreenshots = screenshotResults
+        .map((r, i) => ({ r, i }))
+        .sort((a, b) => {
+          const ai = screenshotStepIndex(a.r);
+          const bi = screenshotStepIndex(b.r);
+          if (ai !== bi) return ai - bi; // finite − Infinity is safe; equal → 0
+          const ca = capturedAtOf(a.r);
+          const cb = capturedAtOf(b.r);
+          if (ca !== cb) return ca - cb;
+          return a.i - b.i;
+        })
+        .map((x) => x.r);
 
-      let allScreenshots: { path: string; label: string }[] =
-        sortedScreenshots.map((r, idx) => {
-          const sp = r.payload as Record<string, unknown>;
-          // Extract step label from filename (e.g. "runId-testId-Step_3.png" → "Step 3")
-          const filename = (sp.filename as string) || "";
-          const stepMatch = filename.match(/Step_(\d+)/);
-          const label = stepMatch ? `Step ${stepMatch[1]}` : `Step ${idx + 1}`;
-          return { path: sp.path as string, label };
-        });
+      let allScreenshots: {
+        path: string;
+        label: string;
+        atMs?: number;
+        title?: string;
+        domSnapshot?: import("@/lib/db/schema").DomSnapshotData;
+      }[] = sortedScreenshots.map((r, idx) => {
+        const sp = r.payload as Record<string, unknown>;
+        // Extract step label from filename (e.g. "runId-testId-Step_3.png" → "Step 3").
+        // `label` is the diff/baseline + ordering key — keep it stable.
+        const filename = (sp.filename as string) || "";
+        const stepMatch = filename.match(/Step_(\d+)/);
+        const label = stepMatch ? `Step ${stepMatch[1]}` : `Step ${idx + 1}`;
+        // Carry the recording offset + cosmetic chapter title through to
+        // test_results.screenshots. `title` is decorative (rail display only),
+        // never used to match baselines or order steps.
+        const atMs =
+          typeof sp.atMs === "number" ? (sp.atMs as number) : undefined;
+        const title =
+          typeof sp.title === "string" ? (sp.title as string) : undefined;
+        // Per-step DOM snapshot (aligned with this screenshot) for the per-step
+        // DOM diff. Absent for ad-hoc captures / legacy runners.
+        const domSnapshot = sp.domSnapshot as
+          | import("@/lib/db/schema").DomSnapshotData
+          | undefined;
+        return { path: sp.path as string, label, atMs, title, domSnapshot };
+      });
 
       // Fallback to disk scan if no DB screenshot entries found
       if (allScreenshots.length === 0) {

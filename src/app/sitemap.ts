@@ -56,7 +56,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       // <video:video> extension on test-share entries. Title, description,
       // and thumbnail must stay CONSISTENT with the VideoObject JSON-LD the
       // share page emits (Google merges metadata across sources and flags
-      // mismatches), so the strings mirror buildVideoSchema() in
+      // mismatches), so the strings mirror buildVideoSchemas() in
       // src/app/(public)/r/[slug]/page.tsx.
       const displayName = s.testName ?? s.targetDomain ?? "this site";
       const domain = s.targetDomain ?? s.testName ?? "this site";

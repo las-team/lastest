@@ -128,6 +128,16 @@ export function SidebarQuickActions({
 
     const connect = () => {
       if (cancelled) return;
+      // Don't hold an SSE slot while the tab is backgrounded. On HTTP/1.1 the
+      // browser caps connections at 6 per origin (shared across tabs), so idle
+      // background tabs each holding an open stream can starve a foreground
+      // navigation for tens of seconds. Reconnect on refocus instead; the 5s
+      // poll above keeps the indicator fresh while hidden.
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      )
+        return;
       es = new EventSource("/api/runners/status");
       es.onopen = () => {
         backoff = MIN_BACKOFF;
@@ -139,6 +149,11 @@ export function SidebarQuickActions({
         es?.close();
         es = null;
         if (cancelled) return;
+        if (
+          typeof document !== "undefined" &&
+          document.visibilityState === "hidden"
+        )
+          return; // reconnect handled by visibilitychange on refocus
         reconnectTimer = setTimeout(connect, backoff);
         backoff = Math.min(backoff * 2, MAX_BACKOFF);
       };
@@ -146,7 +161,25 @@ export function SidebarQuickActions({
     connect();
 
     const onVisibility = () => {
-      if (document.visibilityState === "visible") refetch();
+      if (document.visibilityState === "visible") {
+        refetch();
+        if (!es) {
+          backoff = MIN_BACKOFF;
+          if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+          }
+          connect();
+        }
+      } else {
+        // Release the connection slot for other tabs / navigations.
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+        es?.close();
+        es = null;
+      }
     };
     document.addEventListener("visibilitychange", onVisibility);
 

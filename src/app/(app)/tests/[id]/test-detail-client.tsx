@@ -1133,6 +1133,7 @@ export function TestDetailClient({
                         <McpCtaHint
                           promptKey="heal"
                           label="Fix with agent"
+                          size="default"
                           testId={test.id}
                           testName={test.name}
                           targetUrl={test.targetUrl}
