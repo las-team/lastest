@@ -1663,16 +1663,19 @@ export function RecordingClient({
 
             {/* Timeline panel (flex sibling, pushes browser left) — shared with
                 the test debug "record from here" view. The timelineOpen toggle
-                collapses the width to 0. */}
+                collapses the width to 0; the inner w-72 keeps the content from
+                reflowing so it slides out cleanly. */}
             <div
-              className={`h-full shrink-0 transition-all duration-200 overflow-hidden ${timelineOpen ? "w-72" : "w-0"}`}
+              className={`h-full shrink-0 border-l border-border transition-all duration-200 overflow-hidden ${timelineOpen ? "w-72" : "w-0 border-l-0"}`}
             >
-              <RecordingTimeline
-                events={events}
-                repositoryId={repositoryId}
-                onPromoteOptimistic={handlePromoteOptimistic}
-                scrollRef={timelineRef}
-              />
+              <div className="w-72 h-full">
+                <RecordingTimeline
+                  events={events}
+                  repositoryId={repositoryId}
+                  onPromoteOptimistic={handlePromoteOptimistic}
+                  scrollRef={timelineRef}
+                />
+              </div>
             </div>
           </div>
 

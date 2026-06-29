@@ -11,6 +11,9 @@ import {
 interface RecordingTimelineProps {
   events: StepCardEvent[];
   repositoryId?: string | null;
+  /** Optional status shown next to the "Timeline" label (e.g. a live recording
+   *  indicator). Replaces the default "{n} events" count when provided. */
+  headerStatus?: React.ReactNode;
   /** Parent owns event state; lets a card optimistically reflect a promoted
    *  selector before the runner round-trips back. Omit in read-only contexts
    *  (e.g. the debug recording view, where the buffer is server-driven). */
@@ -26,21 +29,24 @@ interface RecordingTimelineProps {
 export function RecordingTimeline({
   events,
   repositoryId,
+  headerStatus,
   onPromoteOptimistic,
   scrollRef,
 }: RecordingTimelineProps) {
   return (
-    <div className="h-full bg-card border-l border-border overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border w-72">
+    <div className="h-full w-full bg-card overflow-hidden">
+      <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-b border-border">
         <span className="text-sm font-medium text-foreground">Timeline</span>
-        <span className="text-xs text-muted-foreground">
-          {events.length} events
-        </span>
+        {headerStatus ?? (
+          <span className="text-xs text-muted-foreground">
+            {events.length} events
+          </span>
+        )}
       </div>
       <TooltipProvider delayDuration={120}>
         <div
           ref={scrollRef}
-          className="overflow-y-auto overflow-x-hidden p-2.5 space-y-1 w-72"
+          className="overflow-y-auto overflow-x-hidden p-2.5 space-y-1"
           style={{ maxHeight: "calc(100% - 41px)" }}
         >
           {events.length === 0 ? (

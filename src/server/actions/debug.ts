@@ -375,7 +375,7 @@ export async function debugTogglePause(sessionId: string) {
  */
 export async function consumeStopRecording(
   sessionId: string,
-): Promise<{ ok: boolean; error?: string; spliced?: boolean }> {
+): Promise<{ ok: boolean; error?: string; spliced?: boolean; code?: string }> {
   const remoteSession = await getRemoteDebugSession(sessionId);
   if (!remoteSession) return { ok: false, error: "Session not found" };
   await assertDebugSessionAccess(remoteSession);
@@ -434,7 +434,10 @@ export async function consumeStopRecording(
   // already-spliced code. This closes the window server-side.
   await markRecordingEventsConsumed(sessionId);
 
-  return { ok: true, spliced: true };
+  // Return the spliced code so the caller can persist it without waiting for
+  // the update_code command to round-trip back into remoteSession.state.code
+  // (which lags behind by a poll cycle).
+  return { ok: true, spliced: true, code: result.code };
 }
 
 /**
@@ -446,12 +449,17 @@ export async function consumeStopRecording(
  */
 export async function saveDebugSessionCode(
   sessionId: string,
+  /** Explicit code to persist. Pass the spliced code returned by
+   *  consumeStopRecording to avoid a race where remoteSession.state.code still
+   *  holds the pre-splice code (the update_code command hasn't round-tripped
+   *  yet). Falls back to the session's current code when omitted. */
+  explicitCode?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const remoteSession = await getRemoteDebugSession(sessionId);
   if (!remoteSession) return { ok: false, error: "Session not found" };
   await assertDebugSessionAccess(remoteSession);
 
-  const code = remoteSession.state?.code;
+  const code = explicitCode ?? remoteSession.state?.code;
   if (!code) return { ok: false, error: "No code to save" };
 
   const { requireTestOwnership } = await import("@/lib/auth/ownership");

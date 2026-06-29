@@ -136,6 +136,12 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     releasedRef.current = false;
   }, [sessionId]);
 
+  // Mirrors of recording state + the stop-recording handler, so the stable
+  // handleStop callback (also bound to Escape) can finalize an in-progress
+  // recording without depending on values defined later in the component.
+  const isRecordingRef = useRef(false);
+  const handleStopRecordingRef = useRef<(() => Promise<void>) | null>(null);
+
   const hasMountedRef = useRef(false);
   // Serializes concurrent init attempts (e.g. Strict Mode double-mount in dev) so the
   // second mount waits for the first to finish releasing its claimed EB before claiming again.
@@ -273,6 +279,12 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   );
 
   const handleStop = useCallback(async () => {
+    // If a recording is in progress, finalize it (splice + auto-save) before
+    // tearing down the session — otherwise exiting via X would discard the
+    // just-recorded actions.
+    if (isRecordingRef.current) {
+      await handleStopRecordingRef.current?.();
+    }
     if (sessionId && !releasedRef.current) {
       releasedRef.current = true;
       try {
@@ -553,7 +565,10 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
       }
       codeVersionRef.current = -1;
       // Auto-save the spliced result as a new test version — no manual Save.
-      const saveResult = await saveDebugSessionCode(sessionId);
+      // Pass result.code explicitly: the server's session state still holds the
+      // pre-splice code until the update_code command round-trips, so reading it
+      // there would persist stale code.
+      const saveResult = await saveDebugSessionCode(sessionId, result.code);
       if (saveResult.ok) {
         toast.success("Saved as a new test version");
       } else {
@@ -564,6 +579,14 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     }
     setRecordingStopPending(false);
   }, [sessionId, sendCmd]);
+
+  // Keep the refs handleStop reads in sync with the latest values.
+  useEffect(() => {
+    handleStopRecordingRef.current = handleStopRecording;
+  }, [handleStopRecording]);
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
 
   const statusColor = {
     initializing: "bg-yellow-500",
@@ -665,11 +688,6 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
           )}
           {isRecording && (
             <>
-              <Circle className="h-2 w-2 fill-red-500 animate-pulse flex-shrink-0 ml-2" />
-              <span className="text-xs text-red-600 mr-1">
-                Recording — {state?.recordedEventCount ?? 0} action
-                {state?.recordedEventCount === 1 ? "" : "s"}
-              </span>
               <Button
                 variant="outline"
                 size="sm"
@@ -841,33 +859,23 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                       </p>
                     </div>
                   )}
-                  <div className="flex flex-1 min-h-0">
-                    <BrowserViewer
-                      ref={browserViewerRef}
-                      streamUrl={streamUrl}
-                      className="h-full flex-1 min-w-0"
-                      interactive={isRecording || inspectMode}
-                      inspectMode={inspectMode}
-                      onInspectResult={(result) => setInspectedElement(result)}
-                      onDomSnapshot={(result) => {
-                        setDomSnapshot(result);
-                        setDomSnapshotLoading(false);
-                      }}
-                      hideControls
-                      hideFullscreenToggle
-                      hideScreenshot
-                      hideViewportSelector
-                      readOnlyUrl
-                    />
-                    {isRecording && (
-                      <div className="w-72 shrink-0">
-                        <RecordingTimeline
-                          events={timelineEvents}
-                          repositoryId={repositoryId}
-                        />
-                      </div>
-                    )}
-                  </div>
+                  <BrowserViewer
+                    ref={browserViewerRef}
+                    streamUrl={streamUrl}
+                    className="h-full"
+                    interactive={isRecording || inspectMode}
+                    inspectMode={inspectMode}
+                    onInspectResult={(result) => setInspectedElement(result)}
+                    onDomSnapshot={(result) => {
+                      setDomSnapshot(result);
+                      setDomSnapshotLoading(false);
+                    }}
+                    hideControls
+                    hideFullscreenToggle
+                    hideScreenshot
+                    hideViewportSelector
+                    readOnlyUrl
+                  />
                 </TabsContent>
               )}
             </Tabs>
@@ -875,234 +883,255 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
 
           <ResizableHandle withHandle />
 
-          {/* Right Panel — Tabbed: Steps / Network / Console */}
+          {/* Right Panel — while recording, the timeline takes over the whole
+              panel (replacing Steps / Network / Console); otherwise tabbed. */}
           <ResizablePanel
             defaultSize={40}
             minSize={20}
             className="overflow-hidden"
           >
-            <Tabs
-              value={rightTab}
-              onValueChange={(tab) => {
-                setRightTab(tab);
-                if (tab === "selectors" && streamUrl) {
-                  // Auto-enable inspect mode and switch to live view
-                  setInspectMode(true);
-                  browserViewerRef.current?.sendInspectMode(true);
-                  if (leftTab !== "liveview") setLeftTab("liveview");
-                } else if (rightTab === "selectors" && tab !== "selectors") {
-                  // Leaving selectors tab — disable inspect mode
-                  setInspectMode(false);
-                  browserViewerRef.current?.sendInspectMode(false);
+            {isRecording ? (
+              <RecordingTimeline
+                events={timelineEvents}
+                repositoryId={repositoryId}
+                headerStatus={
+                  <span className="flex items-center gap-1.5 text-xs text-red-600">
+                    <Circle className="h-2 w-2 fill-red-500 animate-pulse flex-shrink-0" />
+                    Recording — {state?.recordedEventCount ?? 0} action
+                    {state?.recordedEventCount === 1 ? "" : "s"}
+                  </span>
                 }
-              }}
-              className="flex flex-col h-full gap-0"
-            >
-              <div className="px-2 py-1.5 border-b bg-muted/50">
-                <TabsList className="h-7">
-                  <TabsTrigger
-                    value="steps"
-                    className="text-xs px-2 py-0.5 h-6"
-                  >
-                    Steps
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="network"
-                    className="text-xs px-2 py-0.5 h-6"
-                  >
-                    <Globe className="h-3 w-3 mr-1" />
-                    Network
-                    {(state?.networkEntries?.length ?? 0) > 0 &&
-                      ` (${state!.networkEntries.length})`}
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="console"
-                    className="text-xs px-2 py-0.5 h-6"
-                  >
-                    <Terminal className="h-3 w-3 mr-1" />
-                    Console
-                    {(state?.consoleEntries?.length ?? 0) > 0 &&
-                      ` (${state!.consoleEntries.length})`}
-                  </TabsTrigger>
-                  {streamUrl && (
+              />
+            ) : (
+              <Tabs
+                value={rightTab}
+                onValueChange={(tab) => {
+                  setRightTab(tab);
+                  if (tab === "selectors" && streamUrl) {
+                    // Auto-enable inspect mode and switch to live view
+                    setInspectMode(true);
+                    browserViewerRef.current?.sendInspectMode(true);
+                    if (leftTab !== "liveview") setLeftTab("liveview");
+                  } else if (rightTab === "selectors" && tab !== "selectors") {
+                    // Leaving selectors tab — disable inspect mode
+                    setInspectMode(false);
+                    browserViewerRef.current?.sendInspectMode(false);
+                  }
+                }}
+                className="flex flex-col h-full gap-0"
+              >
+                <div className="px-2 py-1.5 border-b bg-muted/50">
+                  <TabsList className="h-7">
                     <TabsTrigger
-                      value="selectors"
+                      value="steps"
                       className="text-xs px-2 py-0.5 h-6"
                     >
-                      <Crosshair className="h-3 w-3 mr-1" />
-                      Selectors
+                      Steps
                     </TabsTrigger>
-                  )}
-                </TabsList>
-              </div>
-
-              {/* Steps Tab */}
-              <TabsContent
-                value="steps"
-                className="flex flex-col flex-1 min-h-0 mt-0"
-              >
-                {/* Error banner (non-past-step errors) */}
-                {isError && state?.error && !hasPastStepWarning && (
-                  <div className="mx-3 mt-2 p-2 rounded bg-destructive/10 border border-destructive/20">
-                    <p className="text-xs text-destructive font-mono">
-                      {state.error}
-                    </p>
-                  </div>
-                )}
-
-                {/* Completed banner */}
-                {isCompleted && (
-                  <div className="mx-3 mt-2 p-2 rounded bg-green-500/10 border border-green-500/20">
-                    <p className="text-xs text-green-600">
-                      All steps completed successfully.
-                    </p>
-                  </div>
-                )}
-
-                <ScrollArea className="flex-1 overflow-hidden">
-                  <div ref={stepListRef} className="p-2 space-y-1">
-                    {displaySteps.map((step, idx) => {
-                      const result = state?.stepResults?.[idx];
-                      const isCurrent = idx === (state?.currentStepIndex ?? -1);
-                      const isStepPassed = result?.status === "passed";
-                      const isFailed = result?.status === "failed";
-                      const isPendingStep = result?.status === "pending";
-
-                      return (
-                        <div
-                          key={step.id}
-                          data-step-index={idx}
-                          className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-pointer hover:bg-muted/50 ${
-                            isCurrent
-                              ? "bg-blue-500/10 border border-blue-500/30"
-                              : ""
-                          }`}
-                          onClick={() => {
-                            if (
-                              (isPaused || isError || isCompleted) &&
-                              idx !== (state?.currentStepIndex ?? -1)
-                            ) {
-                              sendCmd({ type: "run_to_step", stepIndex: idx });
-                            }
-                          }}
-                        >
-                          {/* Status icon */}
-                          <div className="w-4 h-4 flex-shrink-0">
-                            {isFailed ? (
-                              <XCircle className="h-4 w-4 text-destructive" />
-                            ) : isStepPassed ? (
-                              <CheckCircle className="h-4 w-4 text-green-500" />
-                            ) : isCurrent &&
-                              (state?.status === "stepping" ||
-                                state?.status === "running") ? (
-                              <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-                            ) : isCurrent ? (
-                              <Play className="h-4 w-4 text-blue-500" />
-                            ) : isPendingStep ? (
-                              <Clock className="h-4 w-4 text-muted-foreground/40" />
-                            ) : (
-                              <Pause className="h-4 w-4 text-muted-foreground/40" />
-                            )}
-                          </div>
-
-                          {/* Step info */}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-muted-foreground">
-                                {idx + 1}.
-                              </span>
-                              <span
-                                className={`truncate ${isCurrent ? "font-medium" : ""}`}
-                              >
-                                {step.label}
-                              </span>
-                              <Badge
-                                variant="outline"
-                                className="text-[10px] px-1 py-0 h-4 flex-shrink-0"
-                              >
-                                {step.type}
-                              </Badge>
-                            </div>
-                            {isFailed && result?.error && (
-                              <p className="text-destructive mt-0.5 truncate font-mono">
-                                {result.error}
-                              </p>
-                            )}
-                          </div>
-
-                          {/* Duration */}
-                          {result && result.durationMs > 0 && (
-                            <span className="text-[10px] text-muted-foreground flex-shrink-0">
-                              {result.durationMs}ms
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </ScrollArea>
-
-                {/* Keyboard shortcuts hint */}
-                <div className="border-t px-3 py-1.5 bg-muted/30">
-                  <p className="text-[10px] text-muted-foreground">
-                    <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">
-                      Ctrl+Enter
-                    </kbd>{" "}
-                    Step{" "}
-                    <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">
-                      Ctrl+Shift+Enter
-                    </kbd>{" "}
-                    Back{" "}
-                    <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">
-                      Ctrl+F5
-                    </kbd>{" "}
-                    Run all{" "}
-                    <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">
-                      Esc
-                    </kbd>{" "}
-                    Stop
-                  </p>
+                    <TabsTrigger
+                      value="network"
+                      className="text-xs px-2 py-0.5 h-6"
+                    >
+                      <Globe className="h-3 w-3 mr-1" />
+                      Network
+                      {(state?.networkEntries?.length ?? 0) > 0 &&
+                        ` (${state!.networkEntries.length})`}
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="console"
+                      className="text-xs px-2 py-0.5 h-6"
+                    >
+                      <Terminal className="h-3 w-3 mr-1" />
+                      Console
+                      {(state?.consoleEntries?.length ?? 0) > 0 &&
+                        ` (${state!.consoleEntries.length})`}
+                    </TabsTrigger>
+                    {streamUrl && (
+                      <TabsTrigger
+                        value="selectors"
+                        className="text-xs px-2 py-0.5 h-6"
+                      >
+                        <Crosshair className="h-3 w-3 mr-1" />
+                        Selectors
+                      </TabsTrigger>
+                    )}
+                  </TabsList>
                 </div>
-              </TabsContent>
 
-              {/* Network Tab */}
-              <TabsContent
-                value="network"
-                className="flex flex-col flex-1 min-h-0 mt-0"
-              >
-                <NetworkPanel entries={state?.networkEntries || []} />
-              </TabsContent>
-
-              {/* Console Tab */}
-              <TabsContent
-                value="console"
-                className="flex flex-col flex-1 min-h-0 mt-0 overflow-hidden"
-              >
-                <ConsolePanel entries={state?.consoleEntries || []} />
-              </TabsContent>
-
-              {/* Selectors Tab */}
-              {streamUrl && (
+                {/* Steps Tab */}
                 <TabsContent
-                  value="selectors"
+                  value="steps"
                   className="flex flex-col flex-1 min-h-0 mt-0"
                 >
-                  <SelectorsPanel
-                    inspectedElement={inspectedElement}
-                    domSnapshot={domSnapshot}
-                    domSnapshotLoading={domSnapshotLoading}
-                    search={selectorSearch}
-                    onSearchChange={setSelectorSearch}
-                    onRequestDomSnapshot={() => {
-                      setDomSnapshotLoading(true);
-                      browserViewerRef.current?.requestDomSnapshot();
-                    }}
-                    onInsertClick={handleInsertClick}
-                    canInsert={(isPaused || isError || isCompleted) && !isBusy}
-                  />
+                  {/* Error banner (non-past-step errors) */}
+                  {isError && state?.error && !hasPastStepWarning && (
+                    <div className="mx-3 mt-2 p-2 rounded bg-destructive/10 border border-destructive/20">
+                      <p className="text-xs text-destructive font-mono">
+                        {state.error}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Completed banner */}
+                  {isCompleted && (
+                    <div className="mx-3 mt-2 p-2 rounded bg-green-500/10 border border-green-500/20">
+                      <p className="text-xs text-green-600">
+                        All steps completed successfully.
+                      </p>
+                    </div>
+                  )}
+
+                  <ScrollArea className="flex-1 overflow-hidden">
+                    <div ref={stepListRef} className="p-2 space-y-1">
+                      {displaySteps.map((step, idx) => {
+                        const result = state?.stepResults?.[idx];
+                        const isCurrent =
+                          idx === (state?.currentStepIndex ?? -1);
+                        const isStepPassed = result?.status === "passed";
+                        const isFailed = result?.status === "failed";
+                        const isPendingStep = result?.status === "pending";
+
+                        return (
+                          <div
+                            key={step.id}
+                            data-step-index={idx}
+                            className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-pointer hover:bg-muted/50 ${
+                              isCurrent
+                                ? "bg-blue-500/10 border border-blue-500/30"
+                                : ""
+                            }`}
+                            onClick={() => {
+                              if (
+                                (isPaused || isError || isCompleted) &&
+                                idx !== (state?.currentStepIndex ?? -1)
+                              ) {
+                                sendCmd({
+                                  type: "run_to_step",
+                                  stepIndex: idx,
+                                });
+                              }
+                            }}
+                          >
+                            {/* Status icon */}
+                            <div className="w-4 h-4 flex-shrink-0">
+                              {isFailed ? (
+                                <XCircle className="h-4 w-4 text-destructive" />
+                              ) : isStepPassed ? (
+                                <CheckCircle className="h-4 w-4 text-green-500" />
+                              ) : isCurrent &&
+                                (state?.status === "stepping" ||
+                                  state?.status === "running") ? (
+                                <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                              ) : isCurrent ? (
+                                <Play className="h-4 w-4 text-blue-500" />
+                              ) : isPendingStep ? (
+                                <Clock className="h-4 w-4 text-muted-foreground/40" />
+                              ) : (
+                                <Pause className="h-4 w-4 text-muted-foreground/40" />
+                              )}
+                            </div>
+
+                            {/* Step info */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-muted-foreground">
+                                  {idx + 1}.
+                                </span>
+                                <span
+                                  className={`truncate ${isCurrent ? "font-medium" : ""}`}
+                                >
+                                  {step.label}
+                                </span>
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] px-1 py-0 h-4 flex-shrink-0"
+                                >
+                                  {step.type}
+                                </Badge>
+                              </div>
+                              {isFailed && result?.error && (
+                                <p className="text-destructive mt-0.5 truncate font-mono">
+                                  {result.error}
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Duration */}
+                            {result && result.durationMs > 0 && (
+                              <span className="text-[10px] text-muted-foreground flex-shrink-0">
+                                {result.durationMs}ms
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </ScrollArea>
+
+                  {/* Keyboard shortcuts hint */}
+                  <div className="border-t px-3 py-1.5 bg-muted/30">
+                    <p className="text-[10px] text-muted-foreground">
+                      <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">
+                        Ctrl+Enter
+                      </kbd>{" "}
+                      Step{" "}
+                      <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">
+                        Ctrl+Shift+Enter
+                      </kbd>{" "}
+                      Back{" "}
+                      <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">
+                        Ctrl+F5
+                      </kbd>{" "}
+                      Run all{" "}
+                      <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">
+                        Esc
+                      </kbd>{" "}
+                      Stop
+                    </p>
+                  </div>
                 </TabsContent>
-              )}
-            </Tabs>
+
+                {/* Network Tab */}
+                <TabsContent
+                  value="network"
+                  className="flex flex-col flex-1 min-h-0 mt-0"
+                >
+                  <NetworkPanel entries={state?.networkEntries || []} />
+                </TabsContent>
+
+                {/* Console Tab */}
+                <TabsContent
+                  value="console"
+                  className="flex flex-col flex-1 min-h-0 mt-0 overflow-hidden"
+                >
+                  <ConsolePanel entries={state?.consoleEntries || []} />
+                </TabsContent>
+
+                {/* Selectors Tab */}
+                {streamUrl && (
+                  <TabsContent
+                    value="selectors"
+                    className="flex flex-col flex-1 min-h-0 mt-0"
+                  >
+                    <SelectorsPanel
+                      inspectedElement={inspectedElement}
+                      domSnapshot={domSnapshot}
+                      domSnapshotLoading={domSnapshotLoading}
+                      search={selectorSearch}
+                      onSearchChange={setSelectorSearch}
+                      onRequestDomSnapshot={() => {
+                        setDomSnapshotLoading(true);
+                        browserViewerRef.current?.requestDomSnapshot();
+                      }}
+                      onInsertClick={handleInsertClick}
+                      canInsert={
+                        (isPaused || isError || isCompleted) && !isBusy
+                      }
+                    />
+                  </TabsContent>
+                )}
+              </Tabs>
+            )}
           </ResizablePanel>
         </ResizablePanelGroup>
       )}
