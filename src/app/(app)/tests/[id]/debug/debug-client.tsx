@@ -153,6 +153,15 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   // recording without depending on values defined later in the component.
   const isRecordingRef = useRef(false);
   const handleStopRecordingRef = useRef<(() => Promise<void>) | null>(null);
+  // Serializes the recording-finalize path. recordingStopPending (state) is set
+  // async and can't be read synchronously, so clicking Stop then hitting Escape
+  // within the ~10s stop poll would start a SECOND stop_recording + save,
+  // producing duplicate test versions and a double baseline/board wipe. This
+  // ref is checked + set synchronously so finalize runs at most once.
+  const stopRecordingInFlightRef = useRef(false);
+  // Likewise serializes handleStop itself (Escape pressed repeatedly, or
+  // Escape racing the unmount cleanup).
+  const handleStopInFlightRef = useRef(false);
 
   const hasMountedRef = useRef(false);
   // Serializes concurrent init attempts (e.g. Strict Mode double-mount in dev) so the
@@ -291,9 +300,14 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   );
 
   const handleStop = useCallback(async () => {
+    // Reentrancy guard: Escape can fire repeatedly (and race the unmount
+    // cleanup). Without this, a second pass could double-finalize / double-save.
+    if (handleStopInFlightRef.current) return;
+    handleStopInFlightRef.current = true;
     // If a recording is in progress, finalize it (splice + auto-save) before
     // tearing down the session — otherwise quitting would discard the
-    // just-recorded actions. handleStopRecording already persists the splice.
+    // just-recorded actions. handleStopRecording already persists the splice
+    // and is itself reentrancy-guarded, so a concurrent Stop click is a no-op.
     if (isRecordingRef.current) {
       await handleStopRecordingRef.current?.();
     } else if (sessionId) {
@@ -451,7 +465,16 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
       // In textarea: only respond to Ctrl-modified shortcuts
       if (inTextarea && !e.ctrlKey && !e.metaKey) return;
 
+      // Step shortcuts trigger replayToStep, which recreates the debug page and
+      // tears down the attached recorder mid-capture. The toolbar step buttons
+      // are disabled while recording; mirror that here so the keys can't
+      // silently kill an active recording. Escape (quit) stays available — it
+      // finalizes the recording first. isRecordingRef is read (not isRecording)
+      // to keep this listener stable across poll-driven state changes.
+      const stepKeysBlocked = isRecordingRef.current;
+
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        if (stepKeysBlocked) return;
         e.preventDefault();
         if (e.shiftKey) {
           sendCmd({ type: "step_back" });
@@ -459,6 +482,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
           sendCmd({ type: "step_forward" });
         }
       } else if (e.key === "F10") {
+        if (stepKeysBlocked) return;
         e.preventDefault();
         if (e.shiftKey) {
           sendCmd({ type: "step_back" });
@@ -466,9 +490,11 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
           sendCmd({ type: "step_forward" });
         }
       } else if (e.key === "F9") {
+        if (stepKeysBlocked) return;
         e.preventDefault();
         sendCmd({ type: "step_back" });
       } else if (e.key === "F5" && (e.ctrlKey || e.metaKey || !inTextarea)) {
+        if (stepKeysBlocked) return;
         e.preventDefault();
         sendCmd({ type: "run_to_end" });
       } else if (e.key === "Escape") {
@@ -559,9 +585,12 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   // Past-step edit warning
   const hasPastStepWarning = state?.error?.includes("Step back to apply");
 
-  // Preview-only: where "Record from here" will anchor if clicked right now.
-  // The server independently computes the authoritative anchor at
-  // start_recording time — this is purely for the dialog's copy.
+  // Whether any step has passed — used ONLY to choose between two pre-start
+  // dialog messages (resume-from-last-passing vs start-from-current). The
+  // authoritative anchor (and its exact step number) is computed server-side
+  // at start_recording time and surfaced in the recording banner; the dialog
+  // deliberately avoids printing a step index here so the preview can't
+  // diverge from the server's choice.
   const lastPassingIdx = useMemo(() => {
     const results = state?.stepResults ?? [];
     for (let i = results.length - 1; i >= 0; i--) {
@@ -583,46 +612,51 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
 
   const handleStopRecording = useCallback(async () => {
     if (!sessionId) return;
+    // Reentrancy guard: a concurrent finalize (e.g. Stop button + Escape) must
+    // not fire a second stop_recording / saveDebugSessionCode.
+    if (stopRecordingInFlightRef.current) return;
+    stopRecordingInFlightRef.current = true;
     setRecordingStopPending(true);
-    await sendCmd({ type: "stop_recording" });
-    // stop_recording only enqueues a runner command — the runner picks it up
-    // on its own poll cycle and the splice lands on a LATER debug_state tick,
-    // not synchronously. Poll consumeStopRecording until it reports spliced.
-    const start = Date.now();
-    let result: Awaited<ReturnType<typeof consumeStopRecording>> | undefined;
-    while (Date.now() - start < 10_000) {
-      result = await consumeStopRecording(sessionId);
-      if (!result.ok) break;
-      if (result.spliced) break;
-      await new Promise((r) => setTimeout(r, 250));
-    }
-    if (result && !result.ok) {
-      toast.error(result.error ?? "Failed to stop recording");
-    } else if (result?.spliced) {
-      // Cancel any in-flight debounced update_code: it carries the PRE-splice
-      // localCode and would clobber the freshly-spliced runner code (with a
-      // newer codeVersion) on the next poll, leaving the removed steps
-      // visible. Pin codeVersionRef back so the next poll re-syncs localCode
-      // from the spliced server state.
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-        debounceRef.current = null;
+    try {
+      await sendCmd({ type: "stop_recording" });
+      // stop_recording only enqueues a runner command — the runner picks it up
+      // on its own poll cycle and the splice lands on a LATER debug_state tick,
+      // not synchronously. Poll consumeStopRecording until it reports spliced.
+      const start = Date.now();
+      let result: Awaited<ReturnType<typeof consumeStopRecording>> | undefined;
+      while (Date.now() - start < 10_000) {
+        result = await consumeStopRecording(sessionId);
+        if (!result.ok) break;
+        if (result.spliced) break;
+        await new Promise((r) => setTimeout(r, 250));
       }
-      codeVersionRef.current = -1;
-      // Auto-save the spliced result as a new test version — no manual Save.
-      // Pass result.code explicitly: the server's session state still holds the
-      // pre-splice code until the update_code command round-trips, so reading it
-      // there would persist stale code.
-      const saveResult = await saveDebugSessionCode(sessionId, result.code);
-      if (saveResult.ok) {
-        toast.success("Saved as a new test version");
+      if (result && !result.ok) {
+        toast.error(result.error ?? "Failed to stop recording");
+      } else if (result?.spliced) {
+        // Cancel any in-flight debounced update_code: it carries the PRE-splice
+        // localCode and would clobber the freshly-spliced runner code (with a
+        // newer codeVersion) on the next poll, leaving the removed steps
+        // visible. Pin codeVersionRef back so the next poll re-syncs localCode
+        // from the spliced server state.
+        if (debounceRef.current) {
+          clearTimeout(debounceRef.current);
+          debounceRef.current = null;
+        }
+        codeVersionRef.current = -1;
+        // consumeStopRecording now persists the spliced code as a new test
+        // version server-side (atomically, before pushing update_code to the
+        // runner) — no separate client save, which would create a duplicate
+        // version. `saved` is true on the call that actually wrote it.
+        if (result.saved) {
+          toast.success("Saved as a new test version");
+        }
       } else {
-        toast.error(saveResult.error ?? "Failed to save");
+        toast.error("Timed out waiting for recording to stop");
       }
-    } else {
-      toast.error("Timed out waiting for recording to stop");
+    } finally {
+      setRecordingStopPending(false);
+      stopRecordingInFlightRef.current = false;
     }
-    setRecordingStopPending(false);
   }, [sessionId, sendCmd]);
 
   // Keep the refs handleStop reads in sync with the latest values.
@@ -1142,9 +1176,10 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
             <DialogDescription>
               {isError
                 ? lastPassingIdx >= 0
-                  ? `Recording will resume from Step ${lastPassingIdx + 1} (last passing). Choose how to apply the new recording when you stop.`
-                  : `No earlier passing step found — recording will start from Step ${(state?.currentStepIndex ?? 0) + 1}.`
-                : `Recording will start after Step ${(state?.currentStepIndex ?? 0) + 1}. Choose how to apply the new recording when you stop.`}
+                  ? `Recording will resume from the last passing step. Choose how to apply the new recording when you stop.`
+                  : `No earlier passing step found — recording will start from the current step.`
+                : `Recording will start after the current step. Choose how to apply the new recording when you stop.`}{" "}
+              The exact step is shown once recording begins.
             </DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-3 py-2">

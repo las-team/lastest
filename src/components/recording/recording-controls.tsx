@@ -38,7 +38,7 @@ import type {
 
 export type AssertionKind = AssertionType;
 
-interface WaitPopoverBodyProps {
+export interface WaitPopoverBodyProps {
   mode: WaitType;
   setMode: (m: WaitType) => void;
   durationMs: string;
@@ -52,7 +52,12 @@ interface WaitPopoverBodyProps {
   onInsert: () => void;
 }
 
-function WaitPopoverBody({
+/**
+ * Shared body of the "Insert Wait" popover — used by the floating
+ * RecordingControls and by the record-flow's fallback card layout
+ * (recording-client). Kept here as the single source of truth.
+ */
+export function WaitPopoverBody({
   mode,
   setMode,
   durationMs,

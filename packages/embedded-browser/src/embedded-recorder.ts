@@ -790,13 +790,21 @@ export class EmbeddedRecorder {
     // borrowed setup-contexts belong to TestExecutor's setupContexts map
     // and stay alive for the sweeper / future test runs.
     this.latestFrame = null;
-    if (closePage && this.page) await this.page.close().catch(() => {});
+    const closedPage = closePage && !!this.page;
+    if (closedPage) await this.page!.close().catch(() => {});
     if (this.context && this.ownsContext)
       await this.context.close().catch(() => {});
+    // When the page is NOT closed (debug "record from here" borrows the live
+    // page), its exposeFunction bindings stay registered. Keep exposedOnPage
+    // pointing at it so a second record-from-here on the same page takes the
+    // re-inject-script branch in setupRecording instead of re-calling
+    // exposeFunction → "Function has been already registered." Only clear it
+    // when the page was actually torn down.
+    const reusablePage = closedPage ? null : this.page;
     this.page = null;
     this.context = null;
     this.ownsContext = true;
-    this.exposedOnPage = null;
+    this.exposedOnPage = closedPage ? null : reusablePage;
 
     console.log(
       `  [EmbeddedRecorder] Recording stopped, ${this.events.length} events captured`,

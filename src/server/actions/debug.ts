@@ -29,7 +29,8 @@ import {
   createRemoteDebugSession,
   getRemoteDebugSession,
   clearRemoteDebugSession,
-  markRecordingEventsConsumed,
+  claimRecordingSplice,
+  releaseRecordingSplice,
 } from "@/app/api/ws/runner/route";
 import { resolveSetupCodeForRunner } from "@/lib/execution/setup-capture";
 import { executeSetupViaRunner } from "@/lib/execution/executor";
@@ -373,12 +374,25 @@ export async function debugTogglePause(sessionId: string) {
  * Returns `{ ok: true, spliced: false }` while the runner hasn't reported
  * the events yet — the caller should keep polling.
  */
-export async function consumeStopRecording(
-  sessionId: string,
-): Promise<{ ok: boolean; error?: string; spliced?: boolean; code?: string }> {
+export async function consumeStopRecording(sessionId: string): Promise<{
+  ok: boolean;
+  error?: string;
+  spliced?: boolean;
+  code?: string;
+  /** True when this call persisted the spliced code as a new test version. */
+  saved?: boolean;
+}> {
   const remoteSession = await getRemoteDebugSession(sessionId);
   if (!remoteSession) return { ok: false, error: "Session not found" };
   await assertDebugSessionAccess(remoteSession);
+
+  // Already spliced + persisted by a prior poll (idempotent). The runner keeps
+  // reporting pendingRecordingEvents until update_code round-trips, so a
+  // re-entrant poll lands here; return the persisted state's code, not a second
+  // splice. Durable across runner state pushes via the splicedAt column.
+  if (remoteSession.splicedAt) {
+    return { ok: true, spliced: true, code: remoteSession.state?.code };
+  }
 
   const state = remoteSession.state;
   if (!state?.pendingRecordingEvents?.length) {
@@ -415,6 +429,26 @@ export async function consumeStopRecording(
     return { ok: false, error: "Failed to splice recorded code" };
   }
 
+  // Atomically claim the splice before doing anything durable. If another poll
+  // (e.g. Stop button + Escape racing) already claimed it, treat as done.
+  const won = await claimRecordingSplice(sessionId);
+  if (!won) {
+    return { ok: true, spliced: true, code: result.code };
+  }
+
+  // Persist FIRST, while we still hold the claim. If the save fails, release
+  // the claim so a later poll retries — otherwise the runner would carry the
+  // spliced code with no testVersions row written (silent edit loss). Only
+  // after the version is durably written do we push update_code to the runner.
+  const saveResult = await saveDebugSessionCode(sessionId, result.code);
+  if (!saveResult.ok) {
+    await releaseRecordingSplice(sessionId);
+    return {
+      ok: false,
+      error: saveResult.error ?? "Failed to save recorded test version",
+    };
+  }
+
   await queueCommandToDB(remoteSession.runnerId, {
     id: crypto.randomUUID(),
     type: "command:debug_action",
@@ -428,16 +462,10 @@ export async function consumeStopRecording(
     },
   } as unknown as Message);
 
-  // Mark events consumed immediately. The runner keeps reporting
-  // pendingRecordingEvents until the spliced update_code round-trips, so
-  // without this a second poll in that window would splice on top of the
-  // already-spliced code. This closes the window server-side.
-  await markRecordingEventsConsumed(sessionId);
-
-  // Return the spliced code so the caller can persist it without waiting for
-  // the update_code command to round-trip back into remoteSession.state.code
-  // (which lags behind by a poll cycle).
-  return { ok: true, spliced: true, code: result.code };
+  // Return the spliced code (already persisted) so the caller can sync local
+  // state without waiting for the update_code command to round-trip back into
+  // remoteSession.state.code (which lags by a poll cycle).
+  return { ok: true, spliced: true, code: result.code, saved: true };
 }
 
 /**

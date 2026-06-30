@@ -95,7 +95,10 @@ import {
 } from "@/components/setup/recording-setup-picker";
 import { RecordingTutorialOverlay } from "@/components/recording-tutorial/recording-tutorial-overlay";
 import { RecordingTimeline } from "@/components/recording/recording-timeline";
-import { RecordingControls } from "@/components/recording/recording-controls";
+import {
+  RecordingControls,
+  WaitPopoverBody,
+} from "@/components/recording/recording-controls";
 import { StepCard } from "@/components/recording/step-card";
 import { TraceScrub } from "@/components/recording/trace-scrub";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -128,117 +131,6 @@ interface RecordingClientProps {
   availableTests?: { id: string; name: string }[];
   availableScripts?: { id: string; name: string }[];
   onStepChange?: (step: RecordingStep) => void;
-}
-
-interface WaitPopoverBodyProps {
-  mode: WaitType;
-  setMode: (m: WaitType) => void;
-  durationMs: string;
-  setDurationMs: (v: string) => void;
-  selector: string;
-  setSelector: (v: string) => void;
-  condition: WaitSelectorCondition;
-  setCondition: (c: WaitSelectorCondition) => void;
-  timeoutMs: string;
-  setTimeoutMs: (v: string) => void;
-  onInsert: () => void;
-}
-
-function WaitPopoverBody({
-  mode,
-  setMode,
-  durationMs,
-  setDurationMs,
-  selector,
-  setSelector,
-  condition,
-  setCondition,
-  timeoutMs,
-  setTimeoutMs,
-  onInsert,
-}: WaitPopoverBodyProps) {
-  return (
-    <div className="space-y-3">
-      <div className="space-y-1">
-        <div className="text-sm font-medium">Insert Wait</div>
-        <div className="text-xs text-muted-foreground">
-          Pause the test at this point — useful for slow async UIs.
-        </div>
-      </div>
-      <div className="flex gap-2 text-xs">
-        <button
-          type="button"
-          onClick={() => setMode("duration")}
-          className={`px-2 py-1 rounded border ${mode === "duration" ? "bg-primary text-primary-foreground border-primary" : "bg-muted/40 border-border"}`}
-        >
-          Duration
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode("selector")}
-          className={`px-2 py-1 rounded border ${mode === "selector" ? "bg-primary text-primary-foreground border-primary" : "bg-muted/40 border-border"}`}
-        >
-          Wait for selector
-        </button>
-      </div>
-      {mode === "duration" ? (
-        <div className="space-y-1">
-          <label className="text-xs font-medium">Duration (ms)</label>
-          <Input
-            type="number"
-            min={0}
-            value={durationMs}
-            onChange={(e) => setDurationMs(e.target.value)}
-            placeholder="3000"
-          />
-          <div className="text-xs text-muted-foreground">
-            e.g. <code>180000</code> = 3 minutes
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          <div className="space-y-1">
-            <label className="text-xs font-medium">Selector</label>
-            <Input
-              value={selector}
-              onChange={(e) => setSelector(e.target.value)}
-              placeholder="#status, .build-done, [data-state='ready']"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <label className="text-xs font-medium">Condition</label>
-              <select
-                className="h-9 w-full rounded-md border bg-background px-2 text-sm"
-                value={condition}
-                onChange={(e) =>
-                  setCondition(e.target.value as WaitSelectorCondition)
-                }
-              >
-                <option value="visible">visible</option>
-                <option value="hidden">hidden</option>
-              </select>
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-medium">Timeout (ms)</label>
-              <Input
-                type="number"
-                min={0}
-                value={timeoutMs}
-                onChange={(e) => setTimeoutMs(e.target.value)}
-                placeholder="30000"
-              />
-            </div>
-          </div>
-        </div>
-      )}
-      <div className="flex justify-end">
-        <Button size="sm" onClick={onInsert}>
-          Insert
-        </Button>
-      </div>
-    </div>
-  );
 }
 
 interface ActionSelector {
