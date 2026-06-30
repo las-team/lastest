@@ -122,7 +122,6 @@ export interface DebugActionPayload {
     | "update_code"
     | "start_recording"
     | "stop_recording"
-    | "cancel_recording"
     // Floating recording-control equivalents — see DebugActionCommandPayload
     // in src/lib/ws/protocol.ts. Act on the attached `this.recorder` during an
     // active "record from here" session.
@@ -277,7 +276,7 @@ export class EmbeddedDebugExecutor {
   // Set once by stopRecordingAndCollect(), drained (nulled) by getState().
   private pendingRecordingEvents: RecordingEventData[] | null = null;
   // Live buffer appended to by the recorder's onEvent callback while recording.
-  // Reported every tick via getState().recordingEvents; reset on start/cancel.
+  // Reported every tick via getState().recordingEvents; reset on each start.
   private liveRecordingEvents: RecordingEventData[] = [];
 
   constructor(browser: Browser) {
@@ -451,17 +450,8 @@ export class EmbeddedDebugExecutor {
     // spliceMode + recordingAnchorIndex/Reason are intentionally retained —
     // getState() must report them alongside pendingRecordingEvents so the
     // server's consumeStopRecording knows whether to replace or insert. They
-    // are cleared on the next start_recording / cancel, not here.
-  }
-
-  private async cancelRecording(): Promise<void> {
-    if (!this.recorder) return;
-    await this.recorder.stop(false); // discard returned events
-    this.spliceMode = null;
-    this.recordingAnchorIndex = -1;
-    this.recordingAnchorReason = null;
-    this.pendingRecordingEvents = null;
-    this.liveRecordingEvents = [];
+    // are cleared when the spliced update_code round-trips, or on the next
+    // start_recording — not here.
   }
 
   async handleAction(
@@ -593,10 +583,6 @@ export class EmbeddedDebugExecutor {
         await this.stopRecordingAndCollect();
         break;
 
-      case "cancel_recording":
-        await this.cancelRecording();
-        break;
-
       // -------- Floating recording-control equivalents --------
       // Each mirrors the repo-scoped recording action in
       // src/server/actions/recording.ts, which (via the EB's normal /record
@@ -681,7 +667,7 @@ export class EmbeddedDebugExecutor {
     // could be missed or overwritten by a later null push, so the splice never
     // ran. The events are now cleared deterministically when the spliced
     // update_code round-trips back (handleAction "update_code"), or on the next
-    // start_recording / cancel_recording.
+    // start_recording.
     return {
       sessionId: this.sessionId,
       testId: this.testId,

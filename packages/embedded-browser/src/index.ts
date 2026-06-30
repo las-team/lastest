@@ -1463,8 +1463,7 @@ async function startup(): Promise<void> {
             | "run_to_step"
             | "update_code"
             | "start_recording"
-            | "stop_recording"
-            | "cancel_recording";
+            | "stop_recording";
           stepIndex?: number;
           code?: string;
           cleanBody?: string;

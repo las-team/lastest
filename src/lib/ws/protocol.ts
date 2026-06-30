@@ -571,7 +571,6 @@ export interface DebugActionCommandPayload {
     | "update_code"
     | "start_recording"
     | "stop_recording"
-    | "cancel_recording"
     // Floating recording-control equivalents for an active "record from here"
     // debug session. These mirror the repo-scoped recording actions in
     // src/server/actions/recording.ts (captureScreenshot / createAssertion /

@@ -163,7 +163,6 @@ export type DebugCommand =
   | { type: "update_code"; code: string }
   | { type: "start_recording"; spliceMode: "replace" | "insert" }
   | { type: "stop_recording" }
-  | { type: "cancel_recording" }
   // Floating recording-control equivalents for an active "record from here"
   // debug session — mirror the repo-scoped recording actions in
   // src/server/actions/recording.ts.

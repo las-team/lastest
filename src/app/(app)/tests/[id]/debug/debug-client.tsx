@@ -15,7 +15,6 @@ import {
   Play,
   StepForward,
   SkipBack,
-  Square,
   ArrowLeft,
   CheckCircle,
   XCircle,
@@ -35,6 +34,7 @@ import {
   ChevronDown,
   ChevronRight,
   MousePointerClick,
+  RefreshCw,
   X,
 } from "lucide-react";
 import {
@@ -111,6 +111,12 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   const [domSnapshotLoading, setDomSnapshotLoading] = useState(false);
   const [selectorSearch, setSelectorSearch] = useState("");
   const browserViewerRef = useRef<BrowserViewerHandle>(null);
+  // Safety timer so a snapshot request that never gets a response (viewer not
+  // yet reconnected, EB busy) clears the loading spinner instead of hanging
+  // forever — the bug behind the old toolbar "DOM" button's infinite load.
+  const domSnapshotTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const [rightTab, setRightTab] = useState("steps");
   const [leftTab, setLeftTab] = useState("code");
 
@@ -119,6 +125,12 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   const lastSentCodeRef = useRef<string>(test.code || "");
   const codeVersionRef = useRef<number>(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mirror of localCode so the stable handleStop callback (also bound to
+  // Escape) can read the latest edits without re-binding on every keystroke.
+  const localCodeRef = useRef<string>(test.code || "");
+  useEffect(() => {
+    localCodeRef.current = localCode;
+  }, [localCode]);
 
   // "Record from here" state
   const [showSpliceDialog, setShowSpliceDialog] = useState(false);
@@ -280,10 +292,28 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
 
   const handleStop = useCallback(async () => {
     // If a recording is in progress, finalize it (splice + auto-save) before
-    // tearing down the session — otherwise exiting via X would discard the
-    // just-recorded actions.
+    // tearing down the session — otherwise quitting would discard the
+    // just-recorded actions. handleStopRecording already persists the splice.
     if (isRecordingRef.current) {
       await handleStopRecordingRef.current?.();
+    } else if (sessionId) {
+      // Persist manual edits (e.g. an inserted click step from the Selectors
+      // tab) as a new test version before quitting. update_code only mutates
+      // the in-memory runner session, so without this the edit is lost on exit.
+      // Flush any pending debounced update first so the runner state matches.
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+      const edited = localCodeRef.current;
+      if (edited && edited !== (test.code || "")) {
+        const saveResult = await saveDebugSessionCode(sessionId, edited);
+        if (saveResult.ok) {
+          toast.success("Saved as a new test version");
+        } else {
+          toast.error(saveResult.error ?? "Failed to save edits");
+        }
+      }
     }
     if (sessionId && !releasedRef.current) {
       releasedRef.current = true;
@@ -294,7 +324,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
       }
     }
     router.push(`/tests?test=${encodeURIComponent(test.id)}`);
-  }, [sessionId, router, test.id]);
+  }, [sessionId, router, test.id, test.code]);
 
   // Debounced code update handler
   const handleCodeChange = useCallback(
@@ -397,6 +427,21 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     },
     [localCode, displaySteps, state?.currentStepIndex, handleCodeChange],
   );
+
+  // Request a DOM-snapshot from the live viewer, arming a safety timeout so the
+  // spinner clears even if the response never arrives (e.g. the viewer hasn't
+  // reconnected yet). Cleared on receipt in the onDomSnapshot handler below.
+  const requestDomSnapshot = useCallback(() => {
+    setDomSnapshotLoading(true);
+    if (domSnapshotTimeoutRef.current)
+      clearTimeout(domSnapshotTimeoutRef.current);
+    domSnapshotTimeoutRef.current = setTimeout(() => {
+      domSnapshotTimeoutRef.current = null;
+      setDomSnapshotLoading(false);
+      toast.error("Could not capture selectors — try again");
+    }, 15_000);
+    browserViewerRef.current?.requestDomSnapshot();
+  }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -670,9 +715,10 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
             variant="destructive"
             size="sm"
             onClick={handleStop}
-            title="Stop (Escape)"
+            title="Quit debug mode (Escape)"
           >
-            <X className="h-4 w-4" />
+            <X className="h-4 w-4 mr-1" />
+            Quit
           </Button>
           {streamUrl && !isRecording && (
             <Button
@@ -685,55 +731,6 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
               <Circle className="h-3 w-3 mr-1 text-red-500" />
               Record
             </Button>
-          )}
-          {isRecording && (
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleStopRecording}
-                disabled={recordingStopPending}
-                title="Stop recording and splice the new actions in"
-              >
-                {recordingStopPending ? (
-                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                ) : (
-                  <Square className="h-4 w-4 mr-1" />
-                )}
-                Stop
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => sendCmd({ type: "cancel_recording" })}
-                disabled={recordingStopPending}
-                title="Discard the recording"
-              >
-                Cancel
-              </Button>
-            </>
-          )}
-          {streamUrl && (
-            <>
-              <div className="w-px h-5 bg-border mx-1" />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setDomSnapshotLoading(true);
-                  browserViewerRef.current?.requestDomSnapshot();
-                }}
-                disabled={!streamUrl || domSnapshotLoading}
-                title="Download all selectors from current page"
-              >
-                {domSnapshotLoading ? (
-                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                ) : (
-                  <FileCode className="h-4 w-4 mr-1" />
-                )}
-                DOM
-              </Button>
-            </>
           )}
         </div>
       </div>
@@ -867,6 +864,10 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                     inspectMode={inspectMode}
                     onInspectResult={(result) => setInspectedElement(result)}
                     onDomSnapshot={(result) => {
+                      if (domSnapshotTimeoutRef.current) {
+                        clearTimeout(domSnapshotTimeoutRef.current);
+                        domSnapshotTimeoutRef.current = null;
+                      }
                       setDomSnapshot(result);
                       setDomSnapshotLoading(false);
                     }}
@@ -1119,10 +1120,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                       domSnapshotLoading={domSnapshotLoading}
                       search={selectorSearch}
                       onSearchChange={setSelectorSearch}
-                      onRequestDomSnapshot={() => {
-                        setDomSnapshotLoading(true);
-                        browserViewerRef.current?.requestDomSnapshot();
-                      }}
+                      onRequestDomSnapshot={requestDomSnapshot}
                       onInsertClick={handleInsertClick}
                       canInsert={
                         (isPaused || isError || isCompleted) && !isBusy
@@ -1677,6 +1675,21 @@ function SelectorsPanel({
             <span className="text-[10px] text-muted-foreground flex-shrink-0">
               {domSnapshot.elements.length} elements
             </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 text-xs px-2"
+              onClick={onRequestDomSnapshot}
+              disabled={domSnapshotLoading}
+              title="Re-capture all selectors from the current page"
+            >
+              {domSnapshotLoading ? (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3 w-3 mr-1" />
+              )}
+              Snapshot
+            </Button>
             <Button
               variant="outline"
               size="sm"
