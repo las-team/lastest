@@ -651,11 +651,21 @@ export async function submitDiffAsIssue(diffId: string): Promise<{
     baseUrl,
   });
 
+  // Tag with `verify` whenever the diff has a step comparison so the issues
+  // webhook recognizes the close event and auto-reruns the test — without it
+  // the diff-submitted ticket falls out of the diff→fix→re-run loop.
+  const labels = stepComparison
+    ? [...payload.labels, "verify"]
+    : payload.labels;
+  // Auto-assign the configured AI engineer so the ticket is picked up
+  // without a human dispatcher.
+  const assignees = notif.issueAssignee ? [notif.issueAssignee] : undefined;
+
   const result = await createVisualDiffIssue(
     ghAccount.accessToken,
     repo.owner,
     repo.name,
-    payload,
+    { ...payload, labels, assignees },
   );
 
   if (!result.success || !result.issueUrl) {
@@ -666,6 +676,18 @@ export async function submitDiffAsIssue(diffId: string): Promise<{
   }
 
   await queries.setDiffIssue(diffId, result.issueUrl, "github");
+
+  // Mirror the link onto the step comparison so the verify board shows the
+  // ticket and the close-webhook can find the case to rerun + reconcile.
+  if (stepComparison && result.issueNumber) {
+    await queries.setStepComparisonIssue(stepComparison.id, {
+      githubIssueUrl: result.issueUrl,
+      githubIssueNumber: result.issueNumber,
+      githubIssueState: "open",
+      githubIssueKind:
+        stepComparison.verdict === "red" ? "bugfix" : "verification",
+    });
+  }
 
   revalidatePath("/builds");
   if (diff.buildId) {

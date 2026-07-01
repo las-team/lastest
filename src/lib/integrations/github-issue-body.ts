@@ -14,8 +14,9 @@
  *  3. Reviewer note (verify only)
  *  4. Top-line evidence chips
  *  5. Per-layer drill-downs (visual / console / network / dom / a11y / url / perf)
- *  6. AI triage + AI diff recommendation
- *  7. Resources (open in Lastest, baseline/current/diff images, video)
+ *  6. Suspected cause (RCA verdict: code vs test, failing selectors, CSS deltas)
+ *  7. AI triage + AI diff recommendation
+ *  8. Resources (open in Lastest, baseline/current/diff images, video)
  *
  * The composer is pure (no DB / fetch). Callers gather the inputs and pass them in.
  */
@@ -32,6 +33,7 @@ import type {
   NetworkDiffSummary,
   NetworkRequest,
   PerfDiffSummary,
+  RcaVerdict,
   StepComparison,
   StepComparisonEvidence,
   Test,
@@ -527,6 +529,64 @@ function renderPerfDrill(diff: PerfDiffSummary | undefined): string[] {
   return lines;
 }
 
+// ── section: suspected cause (RCA verdict) ─────────────────────────────────
+
+/**
+ * "Is this diff the test or the code?" — the post-build RCA verdict from
+ * `diff.metadata.rca`. This is the section an AI engineer keys off: headline
+ * bucket, ranked signals, the build's changed files, and element-level
+ * region causes carrying the failing selector + CSS deltas.
+ */
+function renderRcaDrill(rca: RcaVerdict | null | undefined): string[] {
+  if (!rca) return [];
+  const lines: string[] = ["### Suspected cause", ""];
+  const badge =
+    rca.headline === "code"
+      ? "🔴 code change"
+      : rca.headline === "test"
+        ? "🟡 test / environment noise"
+        : "⚪ uncertain";
+  lines.push(`**Verdict:** ${badge}`);
+  if (rca.narrative) lines.push("", rca.narrative);
+  if (rca.signals.length > 0) {
+    lines.push("", "**Signals:**", "");
+    for (const s of rca.signals.slice(0, 5)) {
+      lines.push(
+        `- \`${s.category}\` (${(s.confidence * 100).toFixed(0)}%): ${s.reason}`,
+      );
+    }
+  }
+  if (rca.changedFiles.length > 0) {
+    lines.push("", "**Changed files in this build:**", "");
+    for (const f of rca.changedFiles.slice(0, 20)) lines.push(`- \`${f}\``);
+    if (rca.changedFiles.length > 20)
+      lines.push(`- _… ${rca.changedFiles.length - 20} more_`);
+  }
+  if (rca.regionCauses && rca.regionCauses.length > 0) {
+    lines.push(
+      "",
+      `<details><summary>Element-level causes (${rca.regionCauses.length})</summary>`,
+      "",
+    );
+    for (const rc of rca.regionCauses.slice(0, 15)) {
+      const css = rc.cssDeltas?.length
+        ? ` — ${rc.cssDeltas
+            .slice(0, 3)
+            .map((cd) => `\`${cd.property}: ${cd.baseline} → ${cd.current}\``)
+            .join(", ")}`
+        : "";
+      lines.push(
+        `- \`${truncate(rc.selector, 140)}\` (${rc.changeType.join("/")})${css}`,
+      );
+    }
+    if (rca.regionCauses.length > 15)
+      lines.push(`- _… ${rca.regionCauses.length - 15} more_`);
+    lines.push("</details>");
+  }
+  lines.push("");
+  return lines;
+}
+
 // ── section: triage ────────────────────────────────────────────────────────
 
 function renderTriage(
@@ -723,6 +783,7 @@ export function buildVisualDiffBody(input: VisualDiffBodyInput): {
 
   // Visual is always emitted for the diff path — that's the whole point.
   lines.push(...renderVisualDrill({ diff, baseUrl }));
+  lines.push(...renderRcaDrill(diff.metadata?.rca));
 
   if (includedLayers.has("console")) {
     lines.push(
@@ -869,6 +930,9 @@ export function buildVerifyCaseBody(input: VerifyCaseBodyInput): {
   if (includedLayers.has("visual") && diff) {
     lines.push(...renderVisualDrill({ diff, baseUrl }));
   }
+  // Suspected cause rides along whenever RCA ran, regardless of the layer
+  // filter — it's the "what do I fix" pointer the assignee needs.
+  lines.push(...renderRcaDrill(diff?.metadata?.rca));
   if (includedLayers.has("console")) {
     lines.push(
       ...renderConsoleDrill(testResult?.consoleErrors, layers.consoleDiff),
