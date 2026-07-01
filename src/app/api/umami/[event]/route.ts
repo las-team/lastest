@@ -2,17 +2,17 @@ import { after, type NextRequest } from "next/server";
 
 // Resilient umami ingest proxy.
 //
-// The umami session-replay recorder (recorder.js) and tracker (script.js) POST
-// batches to /_umami/api/record and /_umami/api/send. next.config rewrites those
-// public paths to this handler. Rather than reverse-proxying straight through to
-// the internal umami server (which made the browser wait for umami's response —
-// a slow/unreachable umami would stall the very navigation that triggered the
-// flush, e.g. submitting the login form), we ACK the beacon immediately and
-// forward to umami in the background.
+// script.js POSTs to /_umami/api/send and reads the JSON response to get a
+// `cache` session token. recorder.js polls window.umami.getSession() for that
+// token before it starts capturing — so /api/send MUST proxy the Umami response
+// back to the browser for session recording to work.
 //
-// Priority: never block the user on analytics. A dropped recording is fine; a
-// stuck login is not. So the forward is best-effort with a hard timeout and the
-// 204 goes back to the browser before umami is ever contacted.
+// /api/record beacons (replay data) are large and non-critical: ACK immediately
+// and forward in the background so a slow Umami never stalls the user.
+//
+// Priority: /send blocks on Umami (small, fast — {"beep":"boop"}) but with a
+// hard timeout so a dead server degrades to no-recording, not a stuck page.
+// /record is always fire-and-forget.
 
 const UMAMI_URL = process.env.UMAMI_INTERNAL_URL?.replace(/\/$/, "");
 const ALLOWED_EVENTS = new Set(["record", "send"]);
@@ -32,11 +32,8 @@ export async function POST(
     return new Response(null, { status: 204 });
   }
 
-  // Read the body now — the request stream is gone by the time after() runs.
+  // Forward only the headers umami uses to attribute the hit.
   const body = await request.text();
-
-  // Forward only the headers umami uses to attribute the hit (device/browser
-  // via UA, geo + cookieless visitor hash via client IP, locale).
   const headers: Record<string, string> = {
     "content-type": request.headers.get("content-type") ?? "application/json",
   };
@@ -49,13 +46,33 @@ export async function POST(
     request.headers.get("x-real-ip") ??
     undefined;
   if (forwardedFor) headers["x-forwarded-for"] = forwardedFor;
+  const umamiCache = request.headers.get("x-umami-cache");
+  if (umamiCache) headers["x-umami-cache"] = umamiCache;
 
-  // after() runs the forward once the response has been sent; the standalone
-  // Node server keeps the process alive for it. A slow umami can no longer
-  // affect the browser.
+  // /send: proxy response back so script.js gets the session cache token that
+  // recorder.js needs. Falls back to 204 on timeout/error.
+  if (event === "send") {
+    try {
+      const res = await fetch(`${UMAMI_URL}/api/send`, {
+        method: "POST",
+        headers,
+        body,
+        signal: AbortSignal.timeout(FORWARD_TIMEOUT_MS),
+      });
+      const text = await res.text();
+      return new Response(text, {
+        status: res.status,
+        headers: { "content-type": "application/json" },
+      });
+    } catch {
+      return new Response(null, { status: 204 });
+    }
+  }
+
+  // /record: large replay beacons — ACK immediately and forward in the background.
   after(async () => {
     try {
-      await fetch(`${UMAMI_URL}/api/${event}`, {
+      await fetch(`${UMAMI_URL}/api/record`, {
         method: "POST",
         headers,
         body,
