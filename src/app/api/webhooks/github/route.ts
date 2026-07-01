@@ -177,11 +177,25 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      const steps = await queries.getStepComparisonsByGithubIssue(
+      // Issue numbers are only unique per repo — never match by number alone.
+      const repositoryId = await resolveRepositoryId(data);
+      if (!repositoryId) {
+        return NextResponse.json({ message: "Repository not tracked" });
+      }
+      const allSteps = await queries.getStepComparisonsByGithubIssueInRepo(
+        repositoryId,
         data.issue.number,
       );
+      // Skip cases already reconciled — when confirm-on-green closed the
+      // issue itself it flipped the state first, so this delivery (caused by
+      // our own PATCH) must not queue another rerun and loop forever.
+      const steps = allSteps.filter((s) => s.githubIssueState !== "closed");
       if (steps.length === 0) {
-        return NextResponse.json({ message: "No linked step comparisons" });
+        return NextResponse.json({
+          message: allSteps.length
+            ? "Cases already reconciled"
+            : "No linked step comparisons",
+        });
       }
 
       // Mark each linked case as closed so the verify board reflects the
@@ -192,19 +206,15 @@ export async function POST(request: NextRequest) {
         ),
       );
 
-      // Kick a focused build per repo grouping. createAndRunBuildCore is the
-      // auth-less variant — webhooks can't carry a user session. The build
-      // executor + verify scoring already populate stepComparisons for the
-      // new build, and the reviewer can drop the resulting card to "done" to
-      // finalize.
-      const repositoryId = await resolveRepositoryId(data);
-      if (repositoryId) {
-        const testIds = Array.from(new Set(steps.map((s) => s.testId)));
-        try {
-          await createAndRunBuildCore("webhook", testIds, repositoryId);
-        } catch (err) {
-          console.error("[webhook] verify rerun failed:", err);
-        }
+      // Kick a focused build. createAndRunBuildCore is the auth-less variant —
+      // webhooks can't carry a user session. When the rerun finalizes as
+      // safe_to_merge, confirm-on-green reconciles any remaining open tickets;
+      // auto-approve marks the green cases Done on the verify board.
+      const testIds = Array.from(new Set(steps.map((s) => s.testId)));
+      try {
+        await createAndRunBuildCore("webhook", testIds, repositoryId);
+      } catch (err) {
+        console.error("[webhook] verify rerun failed:", err);
       }
 
       return NextResponse.json({

@@ -131,6 +131,11 @@ export async function createIssueForCase(
     input.kind ?? (step.verdict === "red" ? "bugfix" : "verification");
   const labels = ["verify", kind, ...(kind === "bugfix" ? ["regression"] : [])];
 
+  // Auto-assign the configured AI engineer (Settings → Notifications → Issue
+  // Tracker) so filed cases are picked up without a human dispatcher.
+  const notif = await queries.getNotificationSettings(repoId);
+  const assignees = notif.issueAssignee ? [notif.issueAssignee] : undefined;
+
   try {
     const response = await fetch(
       `https://api.github.com/repos/${repo.owner}/${repo.name}/issues`,
@@ -142,7 +147,7 @@ export async function createIssueForCase(
           "Content-Type": "application/json",
           "X-GitHub-Api-Version": "2022-11-28",
         },
-        body: JSON.stringify({ title, body, labels }),
+        body: JSON.stringify({ title, body, labels, assignees }),
       },
     );
     if (!response.ok) {

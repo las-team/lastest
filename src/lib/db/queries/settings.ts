@@ -649,6 +649,7 @@ export async function getNotificationSettings(repositoryId?: string | null) {
     customWebhookMethod: DEFAULT_NOTIFICATION_SETTINGS.customWebhookMethod,
     customWebhookHeaders: null,
     issueTrackerProvider: DEFAULT_NOTIFICATION_SETTINGS.issueTrackerProvider,
+    issueAssignee: DEFAULT_NOTIFICATION_SETTINGS.issueAssignee,
     createdAt: null,
     updatedAt: null,
   };

@@ -4,9 +4,9 @@
  */
 
 import { db } from "../index";
-import { stepComparisons } from "../schema";
+import { stepComparisons, builds, testRuns } from "../schema";
 import type { NewStepComparison, StepComparison } from "../schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray, isNotNull } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 
 export async function createStepComparison(
@@ -101,22 +101,6 @@ export async function getStepComparisonForStep(
   return row;
 }
 
-/**
- * Verify-phase reverse lookup: which step has this GH issue linked? Used by
- * the issues webhook to auto-rerun + close the case when the issue closes.
- * Multiple steps may legitimately reference the same issue if a reviewer
- * filed it manually then linked it elsewhere — we return all of them so the
- * webhook can rerun each affected test.
- */
-export async function getStepComparisonsByGithubIssue(
-  issueNumber: number,
-): Promise<StepComparison[]> {
-  return await db
-    .select()
-    .from(stepComparisons)
-    .where(eq(stepComparisons.githubIssueNumber, issueNumber));
-}
-
 export async function updateStepComparisonIssueState(
   id: string,
   state: StepComparison["githubIssueState"],
@@ -125,4 +109,67 @@ export async function updateStepComparisonIssueState(
     .update(stepComparisons)
     .set({ githubIssueState: state })
     .where(eq(stepComparisons.id, id));
+}
+
+/** Link a GitHub issue to a step comparison (url + number + state + kind). */
+export async function setStepComparisonIssue(
+  id: string,
+  issue: {
+    githubIssueUrl: string;
+    githubIssueNumber: number;
+    githubIssueState: StepComparison["githubIssueState"];
+    githubIssueKind: StepComparison["githubIssueKind"];
+  },
+): Promise<void> {
+  await db.update(stepComparisons).set(issue).where(eq(stepComparisons.id, id));
+}
+
+/**
+ * Confirm-on-green lookup: step comparisons in this repo for the given tests
+ * that still carry an open Lastest-filed issue ('auto'/'open' — deliberately
+ * NOT 'linked', which is someone else's issue we must not auto-close).
+ * Scoped through builds → test_runs because step_comparisons has no repo
+ * column; issue numbers are only unique per repo.
+ */
+export async function getOpenIssueStepsForTests(
+  repositoryId: string,
+  testIds: string[],
+): Promise<StepComparison[]> {
+  if (testIds.length === 0) return [];
+  const rows = await db
+    .select({ step: stepComparisons })
+    .from(stepComparisons)
+    .innerJoin(builds, eq(stepComparisons.buildId, builds.id))
+    .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
+    .where(
+      and(
+        eq(testRuns.repositoryId, repositoryId),
+        inArray(stepComparisons.testId, testIds),
+        isNotNull(stepComparisons.githubIssueNumber),
+        inArray(stepComparisons.githubIssueState, ["auto", "open"]),
+      ),
+    );
+  return rows.map((r) => r.step);
+}
+
+/**
+ * Repo-scoped variant of the webhook reverse lookup. Issue numbers repeat
+ * across repos, so the webhook must never match by number alone.
+ */
+export async function getStepComparisonsByGithubIssueInRepo(
+  repositoryId: string,
+  issueNumber: number,
+): Promise<StepComparison[]> {
+  const rows = await db
+    .select({ step: stepComparisons })
+    .from(stepComparisons)
+    .innerJoin(builds, eq(stepComparisons.buildId, builds.id))
+    .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
+    .where(
+      and(
+        eq(testRuns.repositoryId, repositoryId),
+        eq(stepComparisons.githubIssueNumber, issueNumber),
+      ),
+    );
+  return rows.map((r) => r.step);
 }

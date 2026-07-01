@@ -1624,6 +1624,22 @@ async function runBuildAsync(
       })
       .catch(console.error);
 
+    // Fire-and-forget confirm-on-green — when a run comes back safe_to_merge,
+    // close every open Lastest-filed GitHub issue whose test ran fully green,
+    // completing the diff → issue → fix → re-run loop without a human.
+    if (overallStatus === "safe_to_merge") {
+      import("@/lib/verify/confirm-on-green")
+        .then(({ closeIssuesOnGreen }) => {
+          closeIssuesOnGreen(buildId).catch((e) => {
+            console.error(
+              `[verify] confirm-on-green failed for build ${buildId}:`,
+              e,
+            );
+          });
+        })
+        .catch(console.error);
+    }
+
     // Phase 2: If this was a comparison baseline build, chain the feature build
     const completedBuild = await queries.getBuild(buildId);
     if (
