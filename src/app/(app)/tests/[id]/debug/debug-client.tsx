@@ -15,7 +15,6 @@ import {
   Play,
   StepForward,
   SkipBack,
-  Square,
   ArrowLeft,
   CheckCircle,
   XCircle,
@@ -35,19 +34,40 @@ import {
   ChevronDown,
   ChevronRight,
   MousePointerClick,
+  RefreshCw,
+  X,
 } from "lucide-react";
 import {
   startDebugSession,
   getDebugState,
   sendDebugCommand,
   stopDebugSession,
+  consumeStopRecording,
+  saveDebugSessionCode,
+  debugCaptureScreenshot,
+  debugCreateAssertion,
+  debugFlagDownload,
+  debugInsertTimestamp,
+  debugInsertWait,
 } from "@/server/actions/debug";
+import { RecordingTimeline } from "@/components/recording/recording-timeline";
+import { RecordingControls } from "@/components/recording/recording-controls";
+import { codeGenEventToStepCardEvent } from "@/lib/recording/timeline-events";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 import type { Test } from "@/lib/db/schema";
 import type {
   DebugState,
   DebugNetworkEntry,
   DebugConsoleEntry,
+  WaitParams,
+  AssertionType,
 } from "@/lib/playwright/types";
 import {
   extractTestBody,
@@ -91,6 +111,12 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   const [domSnapshotLoading, setDomSnapshotLoading] = useState(false);
   const [selectorSearch, setSelectorSearch] = useState("");
   const browserViewerRef = useRef<BrowserViewerHandle>(null);
+  // Safety timer so a snapshot request that never gets a response (viewer not
+  // yet reconnected, EB busy) clears the loading spinner instead of hanging
+  // forever — the bug behind the old toolbar "DOM" button's infinite load.
+  const domSnapshotTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const [rightTab, setRightTab] = useState("steps");
   const [leftTab, setLeftTab] = useState("code");
 
@@ -99,6 +125,16 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   const lastSentCodeRef = useRef<string>(test.code || "");
   const codeVersionRef = useRef<number>(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mirror of localCode so the stable handleStop callback (also bound to
+  // Escape) can read the latest edits without re-binding on every keystroke.
+  const localCodeRef = useRef<string>(test.code || "");
+  useEffect(() => {
+    localCodeRef.current = localCode;
+  }, [localCode]);
+
+  // "Record from here" state
+  const [showSpliceDialog, setShowSpliceDialog] = useState(false);
+  const [recordingStopPending, setRecordingStopPending] = useState(false);
 
   // Track sessionId in a ref so cleanup/effect can access latest value
   const sessionIdRef = useRef<string | null>(null);
@@ -111,6 +147,21 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   useEffect(() => {
     releasedRef.current = false;
   }, [sessionId]);
+
+  // Mirrors of recording state + the stop-recording handler, so the stable
+  // handleStop callback (also bound to Escape) can finalize an in-progress
+  // recording without depending on values defined later in the component.
+  const isRecordingRef = useRef(false);
+  const handleStopRecordingRef = useRef<(() => Promise<void>) | null>(null);
+  // Serializes the recording-finalize path. recordingStopPending (state) is set
+  // async and can't be read synchronously, so clicking Stop then hitting Escape
+  // within the ~10s stop poll would start a SECOND stop_recording + save,
+  // producing duplicate test versions and a double baseline/board wipe. This
+  // ref is checked + set synchronously so finalize runs at most once.
+  const stopRecordingInFlightRef = useRef(false);
+  // Likewise serializes handleStop itself (Escape pressed repeatedly, or
+  // Escape racing the unmount cleanup).
+  const handleStopInFlightRef = useRef(false);
 
   const hasMountedRef = useRef(false);
   // Serializes concurrent init attempts (e.g. Strict Mode double-mount in dev) so the
@@ -249,6 +300,35 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   );
 
   const handleStop = useCallback(async () => {
+    // Reentrancy guard: Escape can fire repeatedly (and race the unmount
+    // cleanup). Without this, a second pass could double-finalize / double-save.
+    if (handleStopInFlightRef.current) return;
+    handleStopInFlightRef.current = true;
+    // If a recording is in progress, finalize it (splice + auto-save) before
+    // tearing down the session — otherwise quitting would discard the
+    // just-recorded actions. handleStopRecording already persists the splice
+    // and is itself reentrancy-guarded, so a concurrent Stop click is a no-op.
+    if (isRecordingRef.current) {
+      await handleStopRecordingRef.current?.();
+    } else if (sessionId) {
+      // Persist manual edits (e.g. an inserted click step from the Selectors
+      // tab) as a new test version before quitting. update_code only mutates
+      // the in-memory runner session, so without this the edit is lost on exit.
+      // Flush any pending debounced update first so the runner state matches.
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+      const edited = localCodeRef.current;
+      if (edited && edited !== (test.code || "")) {
+        const saveResult = await saveDebugSessionCode(sessionId, edited);
+        if (saveResult.ok) {
+          toast.success("Saved as a new test version");
+        } else {
+          toast.error(saveResult.error ?? "Failed to save edits");
+        }
+      }
+    }
     if (sessionId && !releasedRef.current) {
       releasedRef.current = true;
       try {
@@ -258,7 +338,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
       }
     }
     router.push(`/tests?test=${encodeURIComponent(test.id)}`);
-  }, [sessionId, router, test.id]);
+  }, [sessionId, router, test.id, test.code]);
 
   // Debounced code update handler
   const handleCodeChange = useCallback(
@@ -362,6 +442,21 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
     [localCode, displaySteps, state?.currentStepIndex, handleCodeChange],
   );
 
+  // Request a DOM-snapshot from the live viewer, arming a safety timeout so the
+  // spinner clears even if the response never arrives (e.g. the viewer hasn't
+  // reconnected yet). Cleared on receipt in the onDomSnapshot handler below.
+  const requestDomSnapshot = useCallback(() => {
+    setDomSnapshotLoading(true);
+    if (domSnapshotTimeoutRef.current)
+      clearTimeout(domSnapshotTimeoutRef.current);
+    domSnapshotTimeoutRef.current = setTimeout(() => {
+      domSnapshotTimeoutRef.current = null;
+      setDomSnapshotLoading(false);
+      toast.error("Could not capture selectors — try again");
+    }, 15_000);
+    browserViewerRef.current?.requestDomSnapshot();
+  }, []);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -370,7 +465,16 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
       // In textarea: only respond to Ctrl-modified shortcuts
       if (inTextarea && !e.ctrlKey && !e.metaKey) return;
 
+      // Step shortcuts trigger replayToStep, which recreates the debug page and
+      // tears down the attached recorder mid-capture. The toolbar step buttons
+      // are disabled while recording; mirror that here so the keys can't
+      // silently kill an active recording. Escape (quit) stays available — it
+      // finalizes the recording first. isRecordingRef is read (not isRecording)
+      // to keep this listener stable across poll-driven state changes.
+      const stepKeysBlocked = isRecordingRef.current;
+
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        if (stepKeysBlocked) return;
         e.preventDefault();
         if (e.shiftKey) {
           sendCmd({ type: "step_back" });
@@ -378,6 +482,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
           sendCmd({ type: "step_forward" });
         }
       } else if (e.key === "F10") {
+        if (stepKeysBlocked) return;
         e.preventDefault();
         if (e.shiftKey) {
           sendCmd({ type: "step_back" });
@@ -385,9 +490,11 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
           sendCmd({ type: "step_forward" });
         }
       } else if (e.key === "F9") {
+        if (stepKeysBlocked) return;
         e.preventDefault();
         sendCmd({ type: "step_back" });
       } else if (e.key === "F5" && (e.ctrlKey || e.metaKey || !inTextarea)) {
+        if (stepKeysBlocked) return;
         e.preventDefault();
         sendCmd({ type: "run_to_end" });
       } else if (e.key === "Escape") {
@@ -441,8 +548,124 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
   const isRecording = state?.isRecording ?? false;
   const isBusy = state?.status === "stepping" || state?.status === "running";
 
+  // Live recording timeline: adapt the server-driven recorder buffer to the
+  // StepCard shape the shared timeline renders. Empty unless recording.
+  const timelineEvents = useMemo(
+    () =>
+      (state?.recordingEvents ?? []).map((e, i) =>
+        codeGenEventToStepCardEvent(e, i),
+      ),
+    [state?.recordingEvents],
+  );
+
+  // Recording control handlers — fire-and-forget; the resulting recorder event
+  // shows up on the next debug_state tick via recordingEvents.
+  const handleRecScreenshot = useCallback(() => {
+    if (sessionId) void debugCaptureScreenshot(sessionId);
+  }, [sessionId]);
+  const handleRecAssertion = useCallback(
+    (kind: AssertionType) => {
+      if (sessionId) void debugCreateAssertion(sessionId, kind);
+    },
+    [sessionId],
+  );
+  const handleRecFlagDownload = useCallback(() => {
+    if (sessionId) void debugFlagDownload(sessionId);
+  }, [sessionId]);
+  const handleRecInsertTimestamp = useCallback(() => {
+    if (sessionId) void debugInsertTimestamp(sessionId);
+  }, [sessionId]);
+  const handleRecInsertWait = useCallback(
+    (params: WaitParams) => {
+      if (sessionId) void debugInsertWait(sessionId, params);
+    },
+    [sessionId],
+  );
+
   // Past-step edit warning
   const hasPastStepWarning = state?.error?.includes("Step back to apply");
+
+  // Whether any step has passed — used ONLY to choose between two pre-start
+  // dialog messages (resume-from-last-passing vs start-from-current). The
+  // authoritative anchor (and its exact step number) is computed server-side
+  // at start_recording time and surfaced in the recording banner; the dialog
+  // deliberately avoids printing a step index here so the preview can't
+  // diverge from the server's choice.
+  const lastPassingIdx = useMemo(() => {
+    const results = state?.stepResults ?? [];
+    for (let i = results.length - 1; i >= 0; i--) {
+      if (results[i].status === "passed") return i;
+    }
+    return -1;
+  }, [state?.stepResults]);
+
+  const startRecording = useCallback(
+    (spliceMode: "replace" | "insert") => {
+      setShowSpliceDialog(false);
+      // Auto-switch to Live View so the user doesn't have to manually find
+      // the tab before clicking/typing into the page they're about to record.
+      setLeftTab("liveview");
+      sendCmd({ type: "start_recording", spliceMode });
+    },
+    [sendCmd],
+  );
+
+  const handleStopRecording = useCallback(async () => {
+    if (!sessionId) return;
+    // Reentrancy guard: a concurrent finalize (e.g. Stop button + Escape) must
+    // not fire a second stop_recording / saveDebugSessionCode.
+    if (stopRecordingInFlightRef.current) return;
+    stopRecordingInFlightRef.current = true;
+    setRecordingStopPending(true);
+    try {
+      await sendCmd({ type: "stop_recording" });
+      // stop_recording only enqueues a runner command — the runner picks it up
+      // on its own poll cycle and the splice lands on a LATER debug_state tick,
+      // not synchronously. Poll consumeStopRecording until it reports spliced.
+      const start = Date.now();
+      let result: Awaited<ReturnType<typeof consumeStopRecording>> | undefined;
+      while (Date.now() - start < 10_000) {
+        result = await consumeStopRecording(sessionId);
+        if (!result.ok) break;
+        if (result.spliced) break;
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      if (result && !result.ok) {
+        toast.error(result.error ?? "Failed to stop recording");
+      } else if (result?.spliced) {
+        // Cancel any in-flight debounced update_code: it carries the PRE-splice
+        // localCode and would clobber the freshly-spliced runner code (with a
+        // newer codeVersion) on the next poll, leaving the removed steps
+        // visible. Pin codeVersionRef back so the next poll re-syncs localCode
+        // from the spliced server state.
+        if (debounceRef.current) {
+          clearTimeout(debounceRef.current);
+          debounceRef.current = null;
+        }
+        codeVersionRef.current = -1;
+        // consumeStopRecording now persists the spliced code as a new test
+        // version server-side (atomically, before pushing update_code to the
+        // runner) — no separate client save, which would create a duplicate
+        // version. `saved` is true on the call that actually wrote it.
+        if (result.saved) {
+          toast.success("Saved as a new test version");
+        }
+      } else {
+        toast.error("Timed out waiting for recording to stop");
+      }
+    } finally {
+      setRecordingStopPending(false);
+      stopRecordingInFlightRef.current = false;
+    }
+  }, [sessionId, sendCmd]);
+
+  // Keep the refs handleStop reads in sync with the latest values.
+  useEffect(() => {
+    handleStopRecordingRef.current = handleStopRecording;
+  }, [handleStopRecording]);
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
 
   const statusColor = {
     initializing: "bg-yellow-500",
@@ -526,31 +749,22 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
             variant="destructive"
             size="sm"
             onClick={handleStop}
-            title="Stop (Escape)"
+            title="Quit debug mode (Escape)"
           >
-            <Square className="h-4 w-4" />
+            <X className="h-4 w-4 mr-1" />
+            Quit
           </Button>
-          {streamUrl && (
-            <>
-              <div className="w-px h-5 bg-border mx-1" />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setDomSnapshotLoading(true);
-                  browserViewerRef.current?.requestDomSnapshot();
-                }}
-                disabled={!streamUrl || domSnapshotLoading}
-                title="Download all selectors from current page"
-              >
-                {domSnapshotLoading ? (
-                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                ) : (
-                  <FileCode className="h-4 w-4 mr-1" />
-                )}
-                DOM
-              </Button>
-            </>
+          {streamUrl && !isRecording && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowSpliceDialog(true)}
+              disabled={isBusy || !(isPaused || isError)}
+              title="Record from here"
+            >
+              <Circle className="h-3 w-3 mr-1 text-red-500" />
+              Record
+            </Button>
           )}
         </div>
       </div>
@@ -598,6 +812,24 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                 value="code"
                 className="flex flex-col flex-1 min-h-0 mt-0"
               >
+                {/* Recording banner — informational; Stop/Cancel live in the
+                    always-visible toolbar so they survive the auto-switch to
+                    Live View. */}
+                {isRecording && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border-b border-red-500/20">
+                    <Circle className="h-2 w-2 fill-red-500 animate-pulse flex-shrink-0" />
+                    <p className="text-xs text-red-600 flex-1">
+                      {state?.recordingAnchorReason === "last_passing"
+                        ? `Recording from Step ${(state.recordingAnchorIndex ?? 0) + 1} (last passing)`
+                        : state?.recordingAnchorReason === "fallback_cursor"
+                          ? `No earlier passing step — recording from Step ${(state.recordingAnchorIndex ?? 0) + 1}`
+                          : `Recording from Step ${(state?.recordingAnchorIndex ?? 0) + 1}`}
+                      {" — "}
+                      {state?.recordedEventCount ?? 0} action
+                      {state?.recordedEventCount === 1 ? "" : "s"} captured
+                    </p>
+                  </div>
+                )}
                 {/* Past-step edit warning */}
                 {hasPastStepWarning && (
                   <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/10 border-b border-yellow-500/20">
@@ -631,7 +863,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                       sendCmd({ type: "run_to_step", stepIndex: idx });
                     }
                   }}
-                  disabled={isBusy}
+                  disabled={isBusy || isRecording}
                 />
               </TabsContent>
 
@@ -640,6 +872,24 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                   value="liveview"
                   className="flex flex-col flex-1 min-h-0 mt-0"
                 >
+                  {isRecording && (
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border-b border-red-500/20">
+                      <Circle className="h-2 w-2 fill-red-500 animate-pulse flex-shrink-0" />
+                      <p className="text-xs text-red-600 flex-1">
+                        {state?.recordingAnchorReason === "last_passing"
+                          ? `Recording from Step ${(state.recordingAnchorIndex ?? 0) + 1} (last passing)`
+                          : state?.recordingAnchorReason === "fallback_cursor"
+                            ? `No earlier passing step — recording from Step ${(state.recordingAnchorIndex ?? 0) + 1}`
+                            : `Recording from Step ${(state?.recordingAnchorIndex ?? 0) + 1}`}
+                        {" — "}
+                        {state?.recordedEventCount ?? 0} action
+                        {state?.recordedEventCount === 1 ? "" : "s"} captured.
+                        Drive the browser, then{" "}
+                        <span className="font-medium">Stop recording</span> in
+                        the toolbar.
+                      </p>
+                    </div>
+                  )}
                   <BrowserViewer
                     ref={browserViewerRef}
                     streamUrl={streamUrl}
@@ -648,6 +898,10 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
                     inspectMode={inspectMode}
                     onInspectResult={(result) => setInspectedElement(result)}
                     onDomSnapshot={(result) => {
+                      if (domSnapshotTimeoutRef.current) {
+                        clearTimeout(domSnapshotTimeoutRef.current);
+                        domSnapshotTimeoutRef.current = null;
+                      }
                       setDomSnapshot(result);
                       setDomSnapshotLoading(false);
                     }}
@@ -664,236 +918,312 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
 
           <ResizableHandle withHandle />
 
-          {/* Right Panel — Tabbed: Steps / Network / Console */}
+          {/* Right Panel — while recording, the timeline takes over the whole
+              panel (replacing Steps / Network / Console); otherwise tabbed. */}
           <ResizablePanel
             defaultSize={40}
             minSize={20}
             className="overflow-hidden"
           >
-            <Tabs
-              value={rightTab}
-              onValueChange={(tab) => {
-                setRightTab(tab);
-                if (tab === "selectors" && streamUrl) {
-                  // Auto-enable inspect mode and switch to live view
-                  setInspectMode(true);
-                  browserViewerRef.current?.sendInspectMode(true);
-                  if (leftTab !== "liveview") setLeftTab("liveview");
-                } else if (rightTab === "selectors" && tab !== "selectors") {
-                  // Leaving selectors tab — disable inspect mode
-                  setInspectMode(false);
-                  browserViewerRef.current?.sendInspectMode(false);
+            {isRecording ? (
+              <RecordingTimeline
+                events={timelineEvents}
+                repositoryId={repositoryId}
+                headerStatus={
+                  <span className="flex items-center gap-1.5 text-xs text-red-600">
+                    <Circle className="h-2 w-2 fill-red-500 animate-pulse flex-shrink-0" />
+                    Recording — {state?.recordedEventCount ?? 0} action
+                    {state?.recordedEventCount === 1 ? "" : "s"}
+                  </span>
                 }
-              }}
-              className="flex flex-col h-full gap-0"
-            >
-              <div className="px-2 py-1.5 border-b bg-muted/50">
-                <TabsList className="h-7">
-                  <TabsTrigger
-                    value="steps"
-                    className="text-xs px-2 py-0.5 h-6"
-                  >
-                    Steps
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="network"
-                    className="text-xs px-2 py-0.5 h-6"
-                  >
-                    <Globe className="h-3 w-3 mr-1" />
-                    Network
-                    {(state?.networkEntries?.length ?? 0) > 0 &&
-                      ` (${state!.networkEntries.length})`}
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="console"
-                    className="text-xs px-2 py-0.5 h-6"
-                  >
-                    <Terminal className="h-3 w-3 mr-1" />
-                    Console
-                    {(state?.consoleEntries?.length ?? 0) > 0 &&
-                      ` (${state!.consoleEntries.length})`}
-                  </TabsTrigger>
-                  {streamUrl && (
+              />
+            ) : (
+              <Tabs
+                value={rightTab}
+                onValueChange={(tab) => {
+                  setRightTab(tab);
+                  if (tab === "selectors" && streamUrl) {
+                    // Auto-enable inspect mode and switch to live view
+                    setInspectMode(true);
+                    browserViewerRef.current?.sendInspectMode(true);
+                    if (leftTab !== "liveview") setLeftTab("liveview");
+                  } else if (rightTab === "selectors" && tab !== "selectors") {
+                    // Leaving selectors tab — disable inspect mode
+                    setInspectMode(false);
+                    browserViewerRef.current?.sendInspectMode(false);
+                  }
+                }}
+                className="flex flex-col h-full gap-0"
+              >
+                <div className="px-2 py-1.5 border-b bg-muted/50">
+                  <TabsList className="h-7">
                     <TabsTrigger
-                      value="selectors"
+                      value="steps"
                       className="text-xs px-2 py-0.5 h-6"
                     >
-                      <Crosshair className="h-3 w-3 mr-1" />
-                      Selectors
+                      Steps
                     </TabsTrigger>
-                  )}
-                </TabsList>
-              </div>
-
-              {/* Steps Tab */}
-              <TabsContent
-                value="steps"
-                className="flex flex-col flex-1 min-h-0 mt-0"
-              >
-                {/* Error banner (non-past-step errors) */}
-                {isError && state?.error && !hasPastStepWarning && (
-                  <div className="mx-3 mt-2 p-2 rounded bg-destructive/10 border border-destructive/20">
-                    <p className="text-xs text-destructive font-mono">
-                      {state.error}
-                    </p>
-                  </div>
-                )}
-
-                {/* Completed banner */}
-                {isCompleted && (
-                  <div className="mx-3 mt-2 p-2 rounded bg-green-500/10 border border-green-500/20">
-                    <p className="text-xs text-green-600">
-                      All steps completed successfully.
-                    </p>
-                  </div>
-                )}
-
-                <ScrollArea className="flex-1 overflow-hidden">
-                  <div ref={stepListRef} className="p-2 space-y-1">
-                    {displaySteps.map((step, idx) => {
-                      const result = state?.stepResults?.[idx];
-                      const isCurrent = idx === (state?.currentStepIndex ?? -1);
-                      const isStepPassed = result?.status === "passed";
-                      const isFailed = result?.status === "failed";
-                      const isPendingStep = result?.status === "pending";
-
-                      return (
-                        <div
-                          key={step.id}
-                          data-step-index={idx}
-                          className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-pointer hover:bg-muted/50 ${
-                            isCurrent
-                              ? "bg-blue-500/10 border border-blue-500/30"
-                              : ""
-                          }`}
-                          onClick={() => {
-                            if (
-                              (isPaused || isError || isCompleted) &&
-                              idx !== (state?.currentStepIndex ?? -1)
-                            ) {
-                              sendCmd({ type: "run_to_step", stepIndex: idx });
-                            }
-                          }}
-                        >
-                          {/* Status icon */}
-                          <div className="w-4 h-4 flex-shrink-0">
-                            {isFailed ? (
-                              <XCircle className="h-4 w-4 text-destructive" />
-                            ) : isStepPassed ? (
-                              <CheckCircle className="h-4 w-4 text-green-500" />
-                            ) : isCurrent &&
-                              (state?.status === "stepping" ||
-                                state?.status === "running") ? (
-                              <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-                            ) : isCurrent ? (
-                              <Play className="h-4 w-4 text-blue-500" />
-                            ) : isPendingStep ? (
-                              <Clock className="h-4 w-4 text-muted-foreground/40" />
-                            ) : (
-                              <Pause className="h-4 w-4 text-muted-foreground/40" />
-                            )}
-                          </div>
-
-                          {/* Step info */}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-muted-foreground">
-                                {idx + 1}.
-                              </span>
-                              <span
-                                className={`truncate ${isCurrent ? "font-medium" : ""}`}
-                              >
-                                {step.label}
-                              </span>
-                              <Badge
-                                variant="outline"
-                                className="text-[10px] px-1 py-0 h-4 flex-shrink-0"
-                              >
-                                {step.type}
-                              </Badge>
-                            </div>
-                            {isFailed && result?.error && (
-                              <p className="text-destructive mt-0.5 truncate font-mono">
-                                {result.error}
-                              </p>
-                            )}
-                          </div>
-
-                          {/* Duration */}
-                          {result && result.durationMs > 0 && (
-                            <span className="text-[10px] text-muted-foreground flex-shrink-0">
-                              {result.durationMs}ms
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </ScrollArea>
-
-                {/* Keyboard shortcuts hint */}
-                <div className="border-t px-3 py-1.5 bg-muted/30">
-                  <p className="text-[10px] text-muted-foreground">
-                    <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">
-                      Ctrl+Enter
-                    </kbd>{" "}
-                    Step{" "}
-                    <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">
-                      Ctrl+Shift+Enter
-                    </kbd>{" "}
-                    Back{" "}
-                    <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">
-                      Ctrl+F5
-                    </kbd>{" "}
-                    Run all{" "}
-                    <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">
-                      Esc
-                    </kbd>{" "}
-                    Stop
-                  </p>
+                    <TabsTrigger
+                      value="network"
+                      className="text-xs px-2 py-0.5 h-6"
+                    >
+                      <Globe className="h-3 w-3 mr-1" />
+                      Network
+                      {(state?.networkEntries?.length ?? 0) > 0 &&
+                        ` (${state!.networkEntries.length})`}
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="console"
+                      className="text-xs px-2 py-0.5 h-6"
+                    >
+                      <Terminal className="h-3 w-3 mr-1" />
+                      Console
+                      {(state?.consoleEntries?.length ?? 0) > 0 &&
+                        ` (${state!.consoleEntries.length})`}
+                    </TabsTrigger>
+                    {streamUrl && (
+                      <TabsTrigger
+                        value="selectors"
+                        className="text-xs px-2 py-0.5 h-6"
+                      >
+                        <Crosshair className="h-3 w-3 mr-1" />
+                        Selectors
+                      </TabsTrigger>
+                    )}
+                  </TabsList>
                 </div>
-              </TabsContent>
 
-              {/* Network Tab */}
-              <TabsContent
-                value="network"
-                className="flex flex-col flex-1 min-h-0 mt-0"
-              >
-                <NetworkPanel entries={state?.networkEntries || []} />
-              </TabsContent>
-
-              {/* Console Tab */}
-              <TabsContent
-                value="console"
-                className="flex flex-col flex-1 min-h-0 mt-0 overflow-hidden"
-              >
-                <ConsolePanel entries={state?.consoleEntries || []} />
-              </TabsContent>
-
-              {/* Selectors Tab */}
-              {streamUrl && (
+                {/* Steps Tab */}
                 <TabsContent
-                  value="selectors"
+                  value="steps"
                   className="flex flex-col flex-1 min-h-0 mt-0"
                 >
-                  <SelectorsPanel
-                    inspectedElement={inspectedElement}
-                    domSnapshot={domSnapshot}
-                    domSnapshotLoading={domSnapshotLoading}
-                    search={selectorSearch}
-                    onSearchChange={setSelectorSearch}
-                    onRequestDomSnapshot={() => {
-                      setDomSnapshotLoading(true);
-                      browserViewerRef.current?.requestDomSnapshot();
-                    }}
-                    onInsertClick={handleInsertClick}
-                    canInsert={(isPaused || isError || isCompleted) && !isBusy}
-                  />
+                  {/* Error banner (non-past-step errors) */}
+                  {isError && state?.error && !hasPastStepWarning && (
+                    <div className="mx-3 mt-2 p-2 rounded bg-destructive/10 border border-destructive/20">
+                      <p className="text-xs text-destructive font-mono">
+                        {state.error}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Completed banner */}
+                  {isCompleted && (
+                    <div className="mx-3 mt-2 p-2 rounded bg-green-500/10 border border-green-500/20">
+                      <p className="text-xs text-green-600">
+                        All steps completed successfully.
+                      </p>
+                    </div>
+                  )}
+
+                  <ScrollArea className="flex-1 overflow-hidden">
+                    <div ref={stepListRef} className="p-2 space-y-1">
+                      {displaySteps.map((step, idx) => {
+                        const result = state?.stepResults?.[idx];
+                        const isCurrent =
+                          idx === (state?.currentStepIndex ?? -1);
+                        const isStepPassed = result?.status === "passed";
+                        const isFailed = result?.status === "failed";
+                        const isPendingStep = result?.status === "pending";
+
+                        return (
+                          <div
+                            key={step.id}
+                            data-step-index={idx}
+                            className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-pointer hover:bg-muted/50 ${
+                              isCurrent
+                                ? "bg-blue-500/10 border border-blue-500/30"
+                                : ""
+                            }`}
+                            onClick={() => {
+                              if (
+                                (isPaused || isError || isCompleted) &&
+                                idx !== (state?.currentStepIndex ?? -1)
+                              ) {
+                                sendCmd({
+                                  type: "run_to_step",
+                                  stepIndex: idx,
+                                });
+                              }
+                            }}
+                          >
+                            {/* Status icon */}
+                            <div className="w-4 h-4 flex-shrink-0">
+                              {isFailed ? (
+                                <XCircle className="h-4 w-4 text-destructive" />
+                              ) : isStepPassed ? (
+                                <CheckCircle className="h-4 w-4 text-green-500" />
+                              ) : isCurrent &&
+                                (state?.status === "stepping" ||
+                                  state?.status === "running") ? (
+                                <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                              ) : isCurrent ? (
+                                <Play className="h-4 w-4 text-blue-500" />
+                              ) : isPendingStep ? (
+                                <Clock className="h-4 w-4 text-muted-foreground/40" />
+                              ) : (
+                                <Pause className="h-4 w-4 text-muted-foreground/40" />
+                              )}
+                            </div>
+
+                            {/* Step info */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-muted-foreground">
+                                  {idx + 1}.
+                                </span>
+                                <span
+                                  className={`truncate ${isCurrent ? "font-medium" : ""}`}
+                                >
+                                  {step.label}
+                                </span>
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] px-1 py-0 h-4 flex-shrink-0"
+                                >
+                                  {step.type}
+                                </Badge>
+                              </div>
+                              {isFailed && result?.error && (
+                                <p className="text-destructive mt-0.5 truncate font-mono">
+                                  {result.error}
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Duration */}
+                            {result && result.durationMs > 0 && (
+                              <span className="text-[10px] text-muted-foreground flex-shrink-0">
+                                {result.durationMs}ms
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </ScrollArea>
+
+                  {/* Keyboard shortcuts hint */}
+                  <div className="border-t px-3 py-1.5 bg-muted/30">
+                    <p className="text-[10px] text-muted-foreground">
+                      <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">
+                        Ctrl+Enter
+                      </kbd>{" "}
+                      Step{" "}
+                      <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">
+                        Ctrl+Shift+Enter
+                      </kbd>{" "}
+                      Back{" "}
+                      <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">
+                        Ctrl+F5
+                      </kbd>{" "}
+                      Run all{" "}
+                      <kbd className="px-1 py-0.5 bg-muted rounded text-[9px]">
+                        Esc
+                      </kbd>{" "}
+                      Stop
+                    </p>
+                  </div>
                 </TabsContent>
-              )}
-            </Tabs>
+
+                {/* Network Tab */}
+                <TabsContent
+                  value="network"
+                  className="flex flex-col flex-1 min-h-0 mt-0"
+                >
+                  <NetworkPanel entries={state?.networkEntries || []} />
+                </TabsContent>
+
+                {/* Console Tab */}
+                <TabsContent
+                  value="console"
+                  className="flex flex-col flex-1 min-h-0 mt-0 overflow-hidden"
+                >
+                  <ConsolePanel entries={state?.consoleEntries || []} />
+                </TabsContent>
+
+                {/* Selectors Tab */}
+                {streamUrl && (
+                  <TabsContent
+                    value="selectors"
+                    className="flex flex-col flex-1 min-h-0 mt-0"
+                  >
+                    <SelectorsPanel
+                      inspectedElement={inspectedElement}
+                      domSnapshot={domSnapshot}
+                      domSnapshotLoading={domSnapshotLoading}
+                      search={selectorSearch}
+                      onSearchChange={setSelectorSearch}
+                      onRequestDomSnapshot={requestDomSnapshot}
+                      onInsertClick={handleInsertClick}
+                      canInsert={
+                        (isPaused || isError || isCompleted) && !isBusy
+                      }
+                    />
+                  </TabsContent>
+                )}
+              </Tabs>
+            )}
           </ResizablePanel>
         </ResizablePanelGroup>
+      )}
+
+      {/* Record from here: Replace/Insert splice-mode choice */}
+      <Dialog open={showSpliceDialog} onOpenChange={setShowSpliceDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Record from here</DialogTitle>
+            <DialogDescription>
+              {isError
+                ? lastPassingIdx >= 0
+                  ? `Recording will resume from the last passing step. Choose how to apply the new recording when you stop.`
+                  : `No earlier passing step found — recording will start from the current step.`
+                : `Recording will start after the current step. Choose how to apply the new recording when you stop.`}{" "}
+              The exact step is shown once recording begins.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-2">
+            <button
+              type="button"
+              className="flex flex-col items-start gap-1 rounded-md border p-3 text-left hover:bg-muted/50 transition-colors"
+              onClick={() => startRecording("replace")}
+            >
+              <span className="text-sm font-medium">Replace to end</span>
+              <span className="text-xs text-muted-foreground">
+                Drop all steps from here onward and replace with the new
+                recording.
+              </span>
+            </button>
+            <button
+              type="button"
+              className="flex flex-col items-start gap-1 rounded-md border p-3 text-left hover:bg-muted/50 transition-colors"
+              onClick={() => startRecording("insert")}
+            >
+              <span className="text-sm font-medium">Insert here</span>
+              <span className="text-xs text-muted-foreground">
+                Keep existing steps after this point; insert the new recording
+                before them.
+              </span>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Floating recording controls (shared with the /record flow). Pause is
+          omitted — the EmbeddedRecorder has no recorder-level pause in a debug
+          session. Stop reuses the splice-and-save flow. */}
+      {isRecording && (
+        <RecordingControls
+          isPaused={false}
+          onScreenshot={handleRecScreenshot}
+          onAssertion={handleRecAssertion}
+          onFlagDownload={handleRecFlagDownload}
+          onInsertTimestamp={handleRecInsertTimestamp}
+          onInsertWait={handleRecInsertWait}
+          onStop={handleStopRecording}
+          stopDisabled={recordingStopPending}
+          stopBusy={recordingStopPending}
+        />
       )}
     </div>
   );
@@ -1380,6 +1710,21 @@ function SelectorsPanel({
             <span className="text-[10px] text-muted-foreground flex-shrink-0">
               {domSnapshot.elements.length} elements
             </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 text-xs px-2"
+              onClick={onRequestDomSnapshot}
+              disabled={domSnapshotLoading}
+              title="Re-capture all selectors from the current page"
+            >
+              {domSnapshotLoading ? (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3 w-3 mr-1" />
+              )}
+              Snapshot
+            </Button>
             <Button
               variant="outline"
               size="sm"

@@ -67,6 +67,23 @@ export async function deleteStepComparisonsByBuild(
   await db.delete(stepComparisons).where(eq(stepComparisons.buildId, buildId));
 }
 
+/**
+ * Delete every step comparison for a test, across all builds. Used when a
+ * test's steps change (Record-from-here): the old comparisons reference the
+ * previous steps' screenshots/evidence, so the test should leave the Verify
+ * board entirely (back to "untested") until it is re-run. Cascades remove the
+ * attached step_layer_feedback rows. Returns the number of rows removed.
+ */
+export async function deleteStepComparisonsForTest(
+  testId: string,
+): Promise<number> {
+  const result = await db
+    .delete(stepComparisons)
+    .where(eq(stepComparisons.testId, testId))
+    .returning({ id: stepComparisons.id });
+  return result.length;
+}
+
 export async function getStepComparisonForStep(
   buildId: string,
   testId: string,

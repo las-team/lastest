@@ -547,6 +547,13 @@ export interface StartDebugCommandPayload {
   storageState?: string;
   setupVariables?: Record<string, unknown>;
   stabilization?: StabilizationPayload;
+  selectorPriority?: Array<{
+    type: string;
+    enabled: boolean;
+    priority: number;
+  }>;
+  pointerGestures?: boolean;
+  cursorFPS?: number;
 }
 
 export interface StartDebugCommand extends BaseMessage {
@@ -561,11 +568,37 @@ export interface DebugActionCommandPayload {
     | "step_back"
     | "run_to_end"
     | "run_to_step"
-    | "update_code";
+    | "update_code"
+    | "start_recording"
+    | "stop_recording"
+    // Floating recording-control equivalents for an active "record from here"
+    // debug session. These mirror the repo-scoped recording actions in
+    // src/server/actions/recording.ts (captureScreenshot / createAssertion /
+    // flagDownload / insertTimestamp / createWait / togglePauseRecording) but
+    // route through the debug command queue and act on the debug executor's
+    // attached recorder rather than a standalone recording session.
+    | "recording_screenshot"
+    | "recording_assertion"
+    | "recording_flag_download"
+    | "recording_insert_timestamp"
+    | "recording_insert_wait"
+    | "recording_toggle_pause";
   stepIndex?: number;
   code?: string;
   cleanBody?: string;
   steps?: DebugStep[];
+  spliceMode?: "replace" | "insert";
+  // recording_assertion — which page-level assertion to record (matches
+  // AssertionType in src/lib/playwright/types.ts).
+  assertionType?: "pageLoad" | "networkIdle" | "urlMatch" | "domContentLoaded";
+  // recording_insert_wait — wait params (matches WaitParams in
+  // src/lib/playwright/types.ts and the existing CreateWaitCommand payload).
+  waitType?: "duration" | "selector";
+  durationMs?: number;
+  selector?: string;
+  selectors?: Array<{ type: string; value: string }>;
+  condition?: "visible" | "hidden";
+  timeoutMs?: number;
 }
 
 export interface DebugActionCommand extends BaseMessage {
@@ -581,6 +614,11 @@ export interface StopDebugCommand extends BaseMessage {
   type: "command:stop_debug";
   payload: StopDebugCommandPayload;
 }
+
+export type DebugRecordingAnchorReason =
+  | "cursor"
+  | "last_passing"
+  | "fallback_cursor";
 
 export interface DebugStateResponsePayload {
   sessionId: string;
@@ -598,6 +636,16 @@ export interface DebugStateResponsePayload {
   code: string;
   error?: string;
   codeVersion: number;
+  isRecording: boolean;
+  recordedEventCount: number;
+  recordingAnchorIndex?: number;
+  recordingAnchorReason?: DebugRecordingAnchorReason;
+  spliceMode?: "replace" | "insert";
+  targetUrl?: string;
+  pendingRecordingEvents?: RecordingEventPayload["events"];
+  // Live, not-yet-spliced recording buffer reported on every tick while
+  // recording so the UI can render the timeline as actions happen.
+  recordingEvents?: RecordingEventPayload["events"];
 }
 
 export interface DebugStateResponse extends BaseMessage {

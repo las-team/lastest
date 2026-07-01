@@ -55,13 +55,13 @@ interface StartRecordingPayload {
   storageStateJson?: string;
 }
 
-interface RecordingSelectorMatch {
+export interface RecordingSelectorMatch {
   type: string;
   value: string;
   count: number;
 }
 
-interface RecordingEventData {
+export interface RecordingEventData {
   type: string;
   timestamp: number;
   sequence: number;
@@ -75,6 +75,19 @@ interface RecordingEventData {
     autoRepaired?: boolean;
   };
   data: Record<string, unknown>;
+}
+
+export interface AttachToPageOptions {
+  selectorPriority?: Array<{
+    type: string;
+    enabled: boolean;
+    priority: number;
+  }>;
+  pointerGestures?: boolean;
+  cursorFPS?: number;
+  // Debug-mode recordings don't render thumbnails anywhere in the UI —
+  // skip the crop work and the base64 payload bloat for that path.
+  captureThumbnails?: boolean;
 }
 
 export class EmbeddedRecorder {
@@ -91,6 +104,12 @@ export class EmbeddedRecorder {
   private pendingEvents: RecordingEventData[] = [];
   private onEvent: ((events: RecordingEventData[]) => void) | null = null;
   private nextClickIsDownload = false;
+  private captureThumbnails = true;
+  // Tracks which Page has already had __recordAction etc. exposed onto it —
+  // Playwright throws if exposeFunction is called twice for the same name on
+  // the same Page. Recording-from-here can attach to the same live debug
+  // page more than once in a session without an intervening rewind.
+  private exposedOnPage: Page | null = null;
   // Latest CDP screencast frame (base64 JPEG + device dims), fed by index.ts's
   // screencast callback. Element thumbnails are CROPPED FROM THIS FRAME instead
   // of taking a fresh screenshot of the page: any page capture
@@ -220,27 +239,6 @@ export class EmbeddedRecorder {
       }
     });
 
-    // Detect page crash/close to prevent using a dead page
-    this.page.on("crash", () => {
-      console.error("  [EmbeddedRecorder] Recording page crashed!");
-      this.isRecording = false;
-      if (this.eventBatchInterval) {
-        clearInterval(this.eventBatchInterval);
-        this.eventBatchInterval = null;
-      }
-    });
-
-    this.page.on("close", () => {
-      if (this.isRecording) {
-        console.warn("  [EmbeddedRecorder] Recording page closed unexpectedly");
-        this.isRecording = false;
-        if (this.eventBatchInterval) {
-          clearInterval(this.eventBatchInterval);
-          this.eventBatchInterval = null;
-        }
-      }
-    });
-
     // Setup chain already ran via testExecutor.runSetup in the caller
     // (packages/embedded-browser/src/index.ts case 'command:start_recording')
     // and its captured storageState is seeded into this.context above. We
@@ -251,12 +249,10 @@ export class EmbeddedRecorder {
       timeout: 30000,
     });
 
-    // Set up recording event capture (exposeFunction + inject script)
-    await this.setupRecording(payload);
+    await this.attachToPage(this.page, this.baseOrigin, payload, onEvent);
 
-    this.isRecording = true;
-
-    // Record initial navigation
+    // Record initial navigation — debug-mode attaches mid-session (the page
+    // is already wherever the user/test left it), so this is start()-only.
     const relativePath = this.getRelativePath(payload.targetUrl);
     this.addEvent("navigation", { url: payload.targetUrl, relativePath });
 
@@ -269,11 +265,68 @@ export class EmbeddedRecorder {
       }
     });
 
+    console.log(
+      `  [EmbeddedRecorder] Recording started, viewport: ${viewport.width}x${viewport.height}`,
+    );
+    return this.page;
+  }
+
+  /**
+   * Wire event capture (exposeFunction + script injection + download/crash
+   * handling + batching) onto an EXTERNALLY-OWNED, already-live page. Used
+   * by debug-mode "Record from here" to attach to the live debugPage rather
+   * than creating a fresh one (which is what `start()` does). `start()`
+   * itself calls this after creating + navigating its own page, so both
+   * flows share one capture implementation.
+   *
+   * Does NOT take ownership of the page/context — callers that borrow a
+   * page must call `stop(false)` so cleanup doesn't close it.
+   */
+  async attachToPage(
+    page: Page,
+    baseOrigin: string,
+    options: AttachToPageOptions,
+    onEvent: (events: RecordingEventData[]) => void,
+  ): Promise<void> {
+    this.page = page;
+    this.baseOrigin = baseOrigin;
+    this.onEvent = onEvent;
+    this.events = [];
+    this.sequenceCounter = 0;
+    this.pendingEvents = [];
+    this.captureThumbnails = options.captureThumbnails ?? true;
+
+    // Detect page crash/close to prevent using a dead page
+    page.on("crash", () => {
+      console.error("  [EmbeddedRecorder] Recording page crashed!");
+      this.isRecording = false;
+      if (this.eventBatchInterval) {
+        clearInterval(this.eventBatchInterval);
+        this.eventBatchInterval = null;
+      }
+    });
+
+    page.on("close", () => {
+      if (this.isRecording) {
+        console.warn("  [EmbeddedRecorder] Recording page closed unexpectedly");
+        this.isRecording = false;
+        if (this.eventBatchInterval) {
+          clearInterval(this.eventBatchInterval);
+          this.eventBatchInterval = null;
+        }
+      }
+    });
+
+    // Set up recording event capture (exposeFunction + inject script)
+    await this.setupRecording(page, options);
+
+    this.isRecording = true;
+
     // Auto-detect downloads: retroactively mark the last click/mouse-down as download-triggering
     // and auto-save the file so the download completes without a file dialog
     const dlDir = path.join(os.tmpdir(), "lastest-eb-downloads");
     fs.mkdirSync(dlDir, { recursive: true });
-    this.page.on("download", async (download) => {
+    page.on("download", async (download) => {
       if (!this.isRecording) return;
       for (let i = this.events.length - 1; i >= 0; i--) {
         const ev = this.events[i];
@@ -311,21 +364,33 @@ export class EmbeddedRecorder {
     this.eventBatchInterval = setInterval(() => {
       this.flushPendingEvents();
     }, 150);
-
-    console.log(
-      `  [EmbeddedRecorder] Recording started, viewport: ${viewport.width}x${viewport.height}`,
-    );
-    return this.page;
   }
 
-  private async setupRecording(payload: StartRecordingPayload): Promise<void> {
-    if (!this.page) return;
+  private async setupRecording(
+    page: Page,
+    options: AttachToPageOptions,
+  ): Promise<void> {
+    const selectorPriority = options.selectorPriority ?? [];
+    const pointerGestures = options.pointerGestures ?? false;
 
-    const selectorPriority = payload.selectorPriority ?? [];
-    const pointerGestures = payload.pointerGestures ?? false;
+    if (this.exposedOnPage === page) {
+      // Already exposed __recordAction etc. on this exact Page object (a
+      // second "record from here" on the same live debug page, with no
+      // rewind in between) — exposeFunction would throw on re-registration.
+      // Re-run the script injection only, which resets in-page listener
+      // state for the new recording pass.
+      const initArgs = {
+        pointerGestures,
+        cursorFPS: options.cursorFPS ?? 30,
+        selectorPriority,
+      };
+      await page.addInitScript(browserRecordingScript, initArgs);
+      await page.evaluate(browserRecordingScript, initArgs);
+      return;
+    }
 
     // Expose recording functions that forward events to the server
-    await this.page.exposeFunction(
+    await page.exposeFunction(
       "__recordAction",
       (
         action: string,
@@ -397,21 +462,24 @@ export class EmbeddedRecorder {
         );
 
         // Best-effort element thumbnail (see runner recorder for rationale).
-        if (actionId && boundingBox) {
+        // Skipped entirely for debug-mode recording — nothing in the debug
+        // UI renders these, so there's no reason to pay the crop work or
+        // grow the payload.
+        if (actionId && boundingBox && this.captureThumbnails) {
           void this.captureElementThumbnail(actionId, boundingBox);
         }
       },
     );
 
     if (pointerGestures) {
-      await this.page.exposeFunction(
+      await page.exposeFunction(
         "__recordCursorMove",
         (x: number, y: number) => {
           this.addEvent("cursor-move", { coordinates: { x, y } });
         },
       );
 
-      await this.page.exposeFunction(
+      await page.exposeFunction(
         "__recordMouseEvent",
         (
           type: string,
@@ -436,7 +504,7 @@ export class EmbeddedRecorder {
       );
     }
 
-    await this.page.exposeFunction(
+    await page.exposeFunction(
       "__recordKeypress",
       (key: string, modifiers?: string[]) => {
         this.addEvent("keypress", {
@@ -447,7 +515,7 @@ export class EmbeddedRecorder {
     );
 
     // Scroll tracking with coalescing (mirrors server-side recorder logic)
-    await this.page.exposeFunction(
+    await page.exposeFunction(
       "__recordScroll",
       (deltaX: number, deltaY: number, modifiers?: string[]) => {
         const mods = modifiers && modifiers.length > 0 ? modifiers : undefined;
@@ -469,7 +537,7 @@ export class EmbeddedRecorder {
       },
     );
 
-    await this.page.exposeFunction(
+    await page.exposeFunction(
       "__recordHoverPreview",
       (elementInfo: Record<string, unknown>) => {
         // Replace previous hover-preview in pending batch
@@ -491,18 +559,18 @@ export class EmbeddedRecorder {
       },
     );
 
-    await this.page.exposeFunction(
+    await page.exposeFunction(
       "__recordElementAssertion",
       (assertion: Record<string, unknown>) => {
         this.addEvent("assertion", { elementAssertion: assertion });
       },
     );
 
-    await this.page.exposeFunction("__recordScreenshot", () => {
+    await page.exposeFunction("__recordScreenshot", () => {
       this.takeScreenshot();
     });
 
-    await this.page.exposeFunction(
+    await page.exposeFunction(
       "__updateVerification",
       (
         actionId: string,
@@ -533,12 +601,13 @@ export class EmbeddedRecorder {
     // Inject the browser-side recording script
     const initArgs = {
       pointerGestures,
-      cursorFPS: payload.cursorFPS ?? 30,
+      cursorFPS: options.cursorFPS ?? 30,
       selectorPriority,
     };
 
-    await this.page.addInitScript(browserRecordingScript, initArgs);
-    await this.page.evaluate(browserRecordingScript, initArgs);
+    await page.addInitScript(browserRecordingScript, initArgs);
+    await page.evaluate(browserRecordingScript, initArgs);
+    this.exposedOnPage = page;
   }
 
   private addEvent(
@@ -694,7 +763,14 @@ export class EmbeddedRecorder {
     return url;
   }
 
-  async stop(): Promise<RecordingEventData[]> {
+  /**
+   * @param closePage Pass `false` when the page is borrowed (debug-mode
+   * "Record from here") and owned/closed by someone else — e.g. the live
+   * debug session keeps running on it, or `replayToStep` is about to tear
+   * it down for an unrelated reason. Defaults to `true`, preserving the
+   * full `/record` flow's existing behavior unchanged.
+   */
+  async stop(closePage = true): Promise<RecordingEventData[]> {
     console.log("  [EmbeddedRecorder] Stopping recording...");
     this.isRecording = false;
 
@@ -714,12 +790,21 @@ export class EmbeddedRecorder {
     // borrowed setup-contexts belong to TestExecutor's setupContexts map
     // and stay alive for the sweeper / future test runs.
     this.latestFrame = null;
-    if (this.page) await this.page.close().catch(() => {});
+    const closedPage = closePage && !!this.page;
+    if (closedPage) await this.page!.close().catch(() => {});
     if (this.context && this.ownsContext)
       await this.context.close().catch(() => {});
+    // When the page is NOT closed (debug "record from here" borrows the live
+    // page), its exposeFunction bindings stay registered. Keep exposedOnPage
+    // pointing at it so a second record-from-here on the same page takes the
+    // re-inject-script branch in setupRecording instead of re-calling
+    // exposeFunction → "Function has been already registered." Only clear it
+    // when the page was actually torn down.
+    const reusablePage = closedPage ? null : this.page;
     this.page = null;
     this.context = null;
     this.ownsContext = true;
+    this.exposedOnPage = closedPage ? null : reusablePage;
 
     console.log(
       `  [EmbeddedRecorder] Recording stopped, ${this.events.length} events captured`,
@@ -823,6 +908,7 @@ export class EmbeddedRecorder {
     this.page = null;
     this.context = null;
     this.ownsContext = true;
+    this.exposedOnPage = null;
   }
 
   isActive(): boolean {
@@ -831,5 +917,9 @@ export class EmbeddedRecorder {
 
   getPage(): Page | null {
     return this.page;
+  }
+
+  getEventCount(): number {
+    return this.events.length;
   }
 }

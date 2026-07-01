@@ -1,25 +1,36 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
-import type { DebugState, DebugCommand } from "@/lib/playwright/types";
+import type {
+  DebugState,
+  DebugCommand,
+  AssertionType,
+  WaitParams,
+} from "@/lib/playwright/types";
 import {
   getTest,
   getPlaywrightSettings,
   getEnvironmentConfig,
   getRepository,
 } from "@/lib/db/queries";
+import { DEFAULT_SELECTOR_PRIORITY } from "@/lib/db/schema";
 import {
   extractTestBody,
   removeInlineLocateWithFallback,
   removeInlineReplayCursorPath,
   parseSteps,
+  spliceRecordedSteps,
 } from "@/lib/playwright/debug-parser";
+import { eventsToCodeLines } from "@/lib/playwright/event-to-code";
 import { stripTypeAnnotations } from "@/lib/playwright/types";
 import { queueCommandToDB } from "@/app/api/ws/runner/route";
 import {
   createRemoteDebugSession,
   getRemoteDebugSession,
   clearRemoteDebugSession,
+  claimRecordingSplice,
+  releaseRecordingSplice,
 } from "@/app/api/ws/runner/route";
 import { resolveSetupCodeForRunner } from "@/lib/execution/setup-capture";
 import { executeSetupViaRunner } from "@/lib/execution/executor";
@@ -184,6 +195,12 @@ export async function startDebugSession(
       storageState,
       setupVariables,
       stabilization: settings?.stabilization ?? undefined,
+      // Forwarded so "Record from here" can attach the recorder with the
+      // same selector-priority/pointer-gesture settings the full /record
+      // flow uses — settings is already loaded above for stabilization.
+      selectorPriority: settings?.selectorPriority ?? undefined,
+      pointerGestures: settings?.pointerGestures ?? undefined,
+      cursorFPS: settings?.cursorFPS ?? undefined,
     },
   } as unknown as Message);
 
@@ -214,14 +231,18 @@ export async function getDebugState(
         recordedEventCount: 0,
       } as DebugState;
     }
-    // Convert to DebugState format (add empty network/console/trace fields)
+    // Convert to DebugState format (add empty network/console/trace fields).
+    // isRecording/recordedEventCount/recordingAnchor*/spliceMode/targetUrl
+    // are real fields on the runner's payload now — the ?? fallback only
+    // guards against in-flight sessions whose state blob predates this.
     return {
       ...remoteSession.state,
       networkEntries: [],
       consoleEntries: [],
       traceUrl: undefined,
-      isRecording: false,
-      recordedEventCount: 0,
+      isRecording: remoteSession.state.isRecording ?? false,
+      recordedEventCount: remoteSession.state.recordedEventCount ?? 0,
+      recordingEvents: remoteSession.state.recordingEvents ?? [],
     } as DebugState;
   }
 
@@ -267,6 +288,23 @@ export async function sendDebugCommand(
           sessionId,
           action: command.type,
           ...("stepIndex" in command ? { stepIndex: command.stepIndex } : {}),
+          ...("spliceMode" in command
+            ? { spliceMode: command.spliceMode }
+            : {}),
+          // Floating recording-control payloads (recording_assertion /
+          // recording_insert_wait) — forward their extra fields so the EB's
+          // debug-executor receives them on the debug_action payload.
+          ...("assertionType" in command
+            ? { assertionType: command.assertionType }
+            : {}),
+          ...("waitType" in command ? { waitType: command.waitType } : {}),
+          ...("durationMs" in command
+            ? { durationMs: command.durationMs }
+            : {}),
+          ...("selector" in command ? { selector: command.selector } : {}),
+          ...("selectors" in command ? { selectors: command.selectors } : {}),
+          ...("condition" in command ? { condition: command.condition } : {}),
+          ...("timeoutMs" in command ? { timeoutMs: command.timeoutMs } : {}),
         },
       } as unknown as Message);
     }
@@ -274,6 +312,219 @@ export async function sendDebugCommand(
   }
 
   return { ok: false, error: "Session not found" };
+}
+
+// ============================================================
+// Floating recording-control equivalents for a debug session
+// ------------------------------------------------------------
+// Thin wrappers over sendDebugCommand, mirroring the repo-scoped recording
+// actions in src/server/actions/recording.ts (captureScreenshot,
+// createAssertion, flagDownload, insertTimestamp, createWait,
+// togglePauseRecording). These let the floating recording controls be invoked
+// during an active "record from here" debug session — the command is queued to
+// the EB, where debug-executor.handleAction drives the attached recorder.
+// ============================================================
+
+export async function debugCaptureScreenshot(sessionId: string) {
+  return sendDebugCommand(sessionId, { type: "recording_screenshot" });
+}
+
+export async function debugCreateAssertion(
+  sessionId: string,
+  type: AssertionType,
+) {
+  return sendDebugCommand(sessionId, {
+    type: "recording_assertion",
+    assertionType: type,
+  });
+}
+
+export async function debugFlagDownload(sessionId: string) {
+  return sendDebugCommand(sessionId, { type: "recording_flag_download" });
+}
+
+export async function debugInsertTimestamp(sessionId: string) {
+  return sendDebugCommand(sessionId, { type: "recording_insert_timestamp" });
+}
+
+export async function debugInsertWait(sessionId: string, params: WaitParams) {
+  return sendDebugCommand(sessionId, {
+    type: "recording_insert_wait",
+    ...params,
+  });
+}
+
+// Pause is a no-op for remote/debug recording sessions (the EmbeddedRecorder
+// has no pause/resume; this mirrors recording.ts togglePauseRecording, which
+// returns "Pause is not supported for remote recording sessions"). Exposed for
+// command parity — the EB-side case logs and does nothing.
+export async function debugTogglePause(sessionId: string) {
+  return sendDebugCommand(sessionId, { type: "recording_toggle_pause" });
+}
+
+/**
+ * Poll after sending a "stop_recording" command. The stop only enqueues a
+ * runner command — the runner's response:debug_state tick that actually
+ * carries the captured events back arrives later, asynchronously. Once
+ * `pendingRecordingEvents` shows up on the session's state, this splices the
+ * recorded code into the test body, re-parses, and pushes the result back to
+ * the runner via the existing `update_code` action (no new runner-side
+ * splice logic — same path `update_code` already takes for manual edits).
+ *
+ * Returns `{ ok: true, spliced: false }` while the runner hasn't reported
+ * the events yet — the caller should keep polling.
+ */
+export async function consumeStopRecording(sessionId: string): Promise<{
+  ok: boolean;
+  error?: string;
+  spliced?: boolean;
+  code?: string;
+  /** True when this call persisted the spliced code as a new test version. */
+  saved?: boolean;
+}> {
+  const remoteSession = await getRemoteDebugSession(sessionId);
+  if (!remoteSession) return { ok: false, error: "Session not found" };
+  await assertDebugSessionAccess(remoteSession);
+
+  // Already spliced + persisted by a prior poll (idempotent). The runner keeps
+  // reporting pendingRecordingEvents until update_code round-trips, so a
+  // re-entrant poll lands here; return the persisted state's code, not a second
+  // splice. Durable across runner state pushes via the splicedAt column.
+  if (remoteSession.splicedAt) {
+    return { ok: true, spliced: true, code: remoteSession.state?.code };
+  }
+
+  const state = remoteSession.state;
+  if (!state?.pendingRecordingEvents?.length) {
+    return { ok: true, spliced: false };
+  }
+
+  if (!state.targetUrl) {
+    return { ok: false, error: "Recording session is missing a target URL" };
+  }
+  const spliceMode = state.spliceMode ?? "insert";
+
+  const settings = await getPlaywrightSettings(remoteSession.repositoryId);
+  const selectorPriority =
+    settings?.selectorPriority ?? DEFAULT_SELECTOR_PRIORITY;
+  const coordsEnabled =
+    selectorPriority.find((s) => s.type === "coords")?.enabled ?? true;
+  const baseOrigin = new URL(state.targetUrl).origin;
+
+  const newBodyLines = eventsToCodeLines(
+    state.pendingRecordingEvents,
+    baseOrigin,
+    coordsEnabled,
+    { indent: "  " },
+  );
+
+  const anchorIndex = state.recordingAnchorIndex ?? state.currentStepIndex;
+  const result = spliceRecordedSteps(
+    state.code,
+    anchorIndex,
+    newBodyLines,
+    spliceMode,
+  );
+  if (!result) {
+    return { ok: false, error: "Failed to splice recorded code" };
+  }
+
+  // Atomically claim the splice before doing anything durable. If another poll
+  // (e.g. Stop button + Escape racing) already claimed it, treat as done.
+  const won = await claimRecordingSplice(sessionId);
+  if (!won) {
+    return { ok: true, spliced: true, code: result.code };
+  }
+
+  // Persist FIRST, while we still hold the claim. If the save fails, release
+  // the claim so a later poll retries — otherwise the runner would carry the
+  // spliced code with no testVersions row written (silent edit loss). Only
+  // after the version is durably written do we push update_code to the runner.
+  const saveResult = await saveDebugSessionCode(sessionId, result.code);
+  if (!saveResult.ok) {
+    await releaseRecordingSplice(sessionId);
+    return {
+      ok: false,
+      error: saveResult.error ?? "Failed to save recorded test version",
+    };
+  }
+
+  await queueCommandToDB(remoteSession.runnerId, {
+    id: crypto.randomUUID(),
+    type: "command:debug_action",
+    timestamp: Date.now(),
+    payload: {
+      sessionId,
+      action: "update_code",
+      code: result.code,
+      cleanBody: result.cleanBody,
+      steps: result.steps,
+    },
+  } as unknown as Message);
+
+  // Return the spliced code (already persisted) so the caller can sync local
+  // state without waiting for the update_code command to round-trip back into
+  // remoteSession.state.code (which lags by a poll cycle).
+  return { ok: true, spliced: true, code: result.code, saved: true };
+}
+
+/**
+ * Persist the debug session's current code as a new test version. Modeled
+ * on updateRerecordedTest (src/server/actions/recording.ts) — the
+ * established pattern for "write a recording-session's code into a new
+ * testVersions row." Debug has no other save-back-to-test path; update_code
+ * only mutates the in-memory runner session until this is called.
+ */
+export async function saveDebugSessionCode(
+  sessionId: string,
+  /** Explicit code to persist. Pass the spliced code returned by
+   *  consumeStopRecording to avoid a race where remoteSession.state.code still
+   *  holds the pre-splice code (the update_code command hasn't round-tripped
+   *  yet). Falls back to the session's current code when omitted. */
+  explicitCode?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const remoteSession = await getRemoteDebugSession(sessionId);
+  if (!remoteSession) return { ok: false, error: "Session not found" };
+  await assertDebugSessionAccess(remoteSession);
+
+  const code = explicitCode ?? remoteSession.state?.code;
+  if (!code) return { ok: false, error: "No code to save" };
+
+  const { requireTestOwnership } = await import("@/lib/auth/ownership");
+  const { test } = await requireTestOwnership(remoteSession.testId);
+
+  const {
+    updateTestWithVersion,
+    deactivateAllBaselinesForTest,
+    deleteStepComparisonsForTest,
+  } = await import("@/lib/db/queries");
+  const { getCurrentBranchForRepo } = await import("@/lib/git-utils");
+  const branch = await getCurrentBranchForRepo(test.repositoryId);
+
+  await updateTestWithVersion(
+    remoteSession.testId,
+    { code },
+    "debug_rerecord",
+    branch ?? undefined,
+  );
+
+  // Editing the test via Record-from-here effectively makes it a new test: the
+  // steps (and thus screenshots/evidence) changed. So:
+  //  1. Invalidate all baselines — they were captured against the OLD steps and
+  //     would produce meaningless diffs on the next run.
+  //  2. Remove the test's Verify step comparisons (the board cards) so it leaves
+  //     the board entirely and returns to the "untested" state rather than
+  //     lingering as Verified/Unsorted against steps that no longer exist. The
+  //     cascade clears the attached step_layer_feedback. It reappears on the
+  //     board after a re-run.
+  await deactivateAllBaselinesForTest(remoteSession.testId);
+  await deleteStepComparisonsForTest(remoteSession.testId);
+
+  revalidatePath("/tests");
+  revalidatePath(`/tests/${remoteSession.testId}`);
+  revalidatePath("/builds");
+  revalidatePath("/verify");
+  return { ok: true };
 }
 
 export async function stopDebugSession(sessionId: string): Promise<void> {
