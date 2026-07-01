@@ -4569,7 +4569,7 @@ export const DEFAULT_LAUNCH = {
   commentsPerAccountPerHour: 20,
   commentMaxLength: 2000,
   // Reactions
-  allowedReactions: ["🔥", "❤️", "👍", "🚀", "✨", "🎉", "👀", "💡"],
+  allowedReactions: ["🔥", "❤️", "🚀", "👏", "🤯"],
   // Analytics events
   eventsPerIpPerMinute: 30,
   eventDedupeWindowSec: 1800,
