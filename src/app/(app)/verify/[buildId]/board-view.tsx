@@ -20,7 +20,12 @@ import {
   Github,
   CheckCircle as CheckCircleIcon,
   AlertCircle,
+  ChevronRight,
+  SkipForward,
+  Sparkles,
+  X,
 } from "lucide-react";
+import { toast } from "sonner";
 import type {
   EvidenceLayer,
   StepComparison,
@@ -44,6 +49,7 @@ import {
 } from "@/lib/verify/check-modes";
 import type { VisualDiffLite, TestResultLite } from "./board-focus-client";
 import { RcaBadge } from "@/components/diff/rca-badge";
+import { useSwipeTriage } from "./use-swipe-triage";
 
 export type CaseStatus = "regression" | "done" | "missed" | "unknown";
 
@@ -199,6 +205,8 @@ export function BoardView(props: BoardViewProps) {
   // row instead, wired to the same onDropCase path the desktop drag uses.
   const isMobile = useIsMobile();
   const [mobileCol, setMobileCol] = useState<CaseStatus>("unknown");
+  // Full-screen card-stack for burning down the Unsorted queue (mobile only).
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   const cases = useMemo<CaseCardData[]>(() => {
     const fbByStep = new Map<string, StepLayerFeedback[]>();
@@ -349,6 +357,25 @@ export function BoardView(props: BoardViewProps) {
   const verified =
     statusTotals.done + statusTotals.regression + statusTotals.missed;
   const wPct = (n: number) => (total > 0 ? (n / total) * 100 : 0);
+
+  // Mobile move path (tap-to-move row, swipe gesture, review mode). Same
+  // onDropCase pipeline as desktop drag, plus an undo toast that restores
+  // the previous column — the touch equivalent of "oops, drag it back".
+  const columnLabelFor = (s: CaseStatus) =>
+    COLUMN_ORDER.find((c) => c.status === s)?.label ?? s;
+  const handleMobileMove = (stepId: string, target: CaseStatus) => {
+    const cur = cases.find((c) => c.step.id === stepId);
+    if (!cur || cur.status === target) return;
+    const from = cur.status;
+    props.onDropCase(stepId, target);
+    toast(`Moved to ${columnLabelFor(target)}`, {
+      description: cur.test?.name ?? undefined,
+      action: {
+        label: "Undo",
+        onClick: () => props.onDropCase(stepId, from),
+      },
+    });
+  };
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -594,6 +621,24 @@ export function BoardView(props: BoardViewProps) {
           </div>
         )}
 
+        {/* Review-mode entry — burn down the Unsorted queue one case at a
+            time (Tinder-style stack). Mobile only; desktop has the full
+            board + Focus view for the same job. */}
+        {isMobile && mobileCol === "unknown" && grouped.unknown.length > 0 && (
+          <div style={{ padding: "8px 8px 0" }}>
+            <button
+              type="button"
+              className="v-btn tinted"
+              style={{ width: "100%" }}
+              onClick={() => setReviewOpen(true)}
+            >
+              <Sparkles size={13} />
+              Review {grouped.unknown.length} unsorted
+              <ChevronRight size={13} />
+            </button>
+          </div>
+        )}
+
         {/* board */}
         <div
           style={{
@@ -619,7 +664,7 @@ export function BoardView(props: BoardViewProps) {
               onOpenCase={props.onOpenCase}
               onOpenIssuePicker={props.onOpenIssuePicker}
               onColumnAction={props.onColumnAction}
-              onMoveCase={isMobile ? props.onDropCase : undefined}
+              onMoveCase={isMobile ? handleMobileMove : undefined}
               cardsLoaded={props.cardsLoaded}
               // Show in-flight skeletons in the Unsorted column while running.
               runningTests={
@@ -674,6 +719,19 @@ export function BoardView(props: BoardViewProps) {
           </span>
         </div>
       </div>
+      {isMobile && reviewOpen && (
+        <ReviewMode
+          queue={grouped.unknown}
+          checkModes={props.checkModes ?? defaultCheckModes()}
+          checkModesByTestId={props.checkModesByTestId ?? {}}
+          onDecide={handleMobileMove}
+          onOpenCase={(stepId) => {
+            setReviewOpen(false);
+            props.onOpenCase(stepId);
+          }}
+          onClose={() => setReviewOpen(false)}
+        />
+      )}
       {/* Portal-rendered drag preview — escapes column overflow boundaries. */}
       <DragOverlay dropAnimation={null}>
         {activeDragCase ? (
@@ -1342,18 +1400,100 @@ function DraggableCaseCard({
     // columns squash thumbnails into a few px each.
     flexShrink: 0,
   };
+  const card = (
+    <CaseCard
+      data={data}
+      colStatus={colStatus}
+      onOpen={onOpen}
+      onOpenIssuePicker={onOpenIssuePicker}
+      dragging={false}
+      checkModes={checkModes}
+      checkModesByTestId={checkModesByTestId}
+      onMove={onMove}
+    />
+  );
+  // Mobile: swipe-to-triage row (mail-app pattern) instead of dnd. Swipe
+  // right → Verified, left → Broken; the move row below the card covers
+  // Missed/Unsorted and doubles as the discoverable fallback.
+  if (onMove) {
+    return (
+      <SwipeTriageRow colStatus={colStatus} onMove={onMove}>
+        {card}
+      </SwipeTriageRow>
+    );
+  }
   return (
     <div ref={setNodeRef} style={style} {...listeners} {...attributes}>
-      <CaseCard
-        data={data}
-        colStatus={colStatus}
-        onOpen={onOpen}
-        onOpenIssuePicker={onOpenIssuePicker}
-        dragging={false}
-        checkModes={checkModes}
-        checkModesByTestId={checkModesByTestId}
-        onMove={onMove}
-      />
+      {card}
+    </div>
+  );
+}
+
+function SwipeTriageRow({
+  colStatus,
+  onMove,
+  children,
+}: {
+  colStatus: CaseStatus;
+  onMove: (target: CaseStatus) => void;
+  children: React.ReactNode;
+}) {
+  const { dx, swiping, progress, handlers } = useSwipeTriage({
+    onCommit: (dir) => onMove(dir === "right" ? "done" : "regression"),
+    disableRight: colStatus === "done",
+    disableLeft: colStatus === "regression",
+  });
+  return (
+    <div
+      style={{
+        position: "relative",
+        flexShrink: 0,
+        // Browser keeps vertical scrolling; horizontal pans reach the hook.
+        touchAction: "pan-y",
+      }}
+      {...handlers}
+    >
+      {dx !== 0 && (
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            inset: 0,
+            borderRadius: 8,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: dx > 0 ? "flex-start" : "flex-end",
+            padding: "0 14px",
+            gap: 6,
+            fontSize: 12,
+            fontWeight: 600,
+            opacity: 0.35 + progress * 0.65,
+            background:
+              dx > 0
+                ? "color-mix(in oklab, var(--c-teal) 18%, white)"
+                : "color-mix(in oklab, var(--c-red) 14%, white)",
+            color: dx > 0 ? "var(--c-teal-text)" : "var(--c-red-text)",
+          }}
+        >
+          {dx > 0 ? (
+            <>
+              <CheckCircleIcon size={14} /> Verified
+            </>
+          ) : (
+            <>
+              <AlertOctagon size={14} /> Broken
+            </>
+          )}
+        </div>
+      )}
+      <div
+        style={{
+          transform: `translateX(${dx}px)`,
+          transition: swiping ? "none" : "transform 160ms ease",
+        }}
+      >
+        {children}
+      </div>
     </div>
   );
 }
@@ -1923,5 +2063,373 @@ function IssueChipReal({
     >
       <CircleDot size={10} />#{step.githubIssueNumber} · {state ?? "linked"}
     </a>
+  );
+}
+
+/* ------------------------------------------------------------------------ */
+/* Review mode — full-screen Tinder-style stack for the Unsorted queue.     */
+/* Mobile only: entered from the "Review N unsorted" button under the       */
+/* column switcher. Swipe right → Verified, left → Broken (same commit      */
+/* threshold + undo toast as the board rows); the button bar covers          */
+/* Missed/Skip and doubles as the discoverable, accessible fallback.        */
+/* ------------------------------------------------------------------------ */
+
+interface ReviewModeProps {
+  /** Live Unsorted cases — decided cases leave the queue via the parent's
+   *  optimistic feedback update, so the next card surfaces automatically. */
+  queue: CaseCardData[];
+  checkModes: CheckModeMap;
+  checkModesByTestId: Record<string, Partial<CheckModeMap>>;
+  /** Board's mobile move handler — fires the undo toast itself. */
+  onDecide: (stepId: string, target: CaseStatus) => void;
+  onOpenCase: (stepId: string) => void;
+  onClose: () => void;
+}
+
+function ReviewMode({
+  queue,
+  checkModes,
+  checkModesByTestId,
+  onDecide,
+  onOpenCase,
+  onClose,
+}: ReviewModeProps) {
+  // Skipped cases stay Unsorted but drop to the back of THIS session's
+  // queue; the set resets when the user re-enters review mode.
+  const [skipped, setSkipped] = useState<Set<string>>(new Set());
+  const visible = queue.filter((c) => !skipped.has(c.step.id));
+  const current = visible[0] ?? null;
+  const next = visible[1] ?? null;
+
+  const { dx, swiping, progress, handlers } = useSwipeTriage({
+    onCommit: (dir) =>
+      current &&
+      onDecide(current.step.id, dir === "right" ? "done" : "regression"),
+    commitPx: 110,
+  });
+
+  const layerSummaries = useMemo(
+    () =>
+      current
+        ? summarizeLayersForCard(
+            current.step,
+            current.result,
+            current.visual,
+            checkModes,
+            checkModesByTestId[current.test?.id ?? ""] ?? null,
+          )
+        : [],
+    [current, checkModes, checkModesByTestId],
+  );
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 60,
+        background: "var(--c-soft-2)",
+        display: "flex",
+        flexDirection: "column",
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Review unsorted cases"
+    >
+      {/* Header */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "10px 12px",
+          borderBottom: "1px solid var(--border)",
+          background: "var(--c-white)",
+        }}
+      >
+        <Sparkles size={14} />
+        <span style={{ fontSize: 13, fontWeight: 600 }}>Review unsorted</span>
+        <span className="label">
+          {visible.length} left
+          {skipped.size > 0 ? ` · ${skipped.size} skipped` : ""}
+        </span>
+        <span style={{ flex: 1 }} />
+        {current && (
+          <button
+            className="v-btn sm ghost"
+            onClick={() => onOpenCase(current.step.id)}
+          >
+            Open case
+          </button>
+        )}
+        <button
+          className="v-btn ghost icon"
+          onClick={onClose}
+          aria-label="Close review mode"
+        >
+          <X size={14} />
+        </button>
+      </div>
+
+      {/* Card stack */}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          position: "relative",
+          padding: 16,
+        }}
+      >
+        {current ? (
+          <>
+            {next && (
+              <div
+                aria-hidden
+                style={{
+                  position: "absolute",
+                  inset: 16,
+                  transform: "scale(0.95) translateY(10px)",
+                  opacity: 0.45,
+                  pointerEvents: "none",
+                }}
+              >
+                <ReviewCard data={next} layers={[]} />
+              </div>
+            )}
+            <div
+              style={{
+                position: "relative",
+                height: "100%",
+                touchAction: "pan-y",
+                transform: `translateX(${dx}px) rotate(${dx * 0.04}deg)`,
+                transition: swiping ? "none" : "transform 160ms ease",
+              }}
+              {...handlers}
+            >
+              <ReviewCard
+                data={current}
+                layers={layerSummaries}
+                stamp={dx === 0 ? null : dx > 0 ? "done" : "regression"}
+                stampOpacity={progress}
+              />
+            </div>
+          </>
+        ) : (
+          <div
+            style={{
+              height: "100%",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 12,
+              textAlign: "center",
+              padding: 24,
+            }}
+          >
+            <CheckCircleIcon size={40} style={{ color: "var(--c-teal)" }} />
+            <div style={{ fontSize: 15, fontWeight: 600 }}>
+              {skipped.size > 0
+                ? "Queue done — some cases skipped"
+                : "All unsorted cases reviewed"}
+            </div>
+            {skipped.size > 0 && (
+              <button className="v-btn" onClick={() => setSkipped(new Set())}>
+                <SkipForward size={13} />
+                Review {skipped.size} skipped
+              </button>
+            )}
+            <button className="v-btn tinted" onClick={onClose}>
+              Back to board
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Action bar — the visible/accessible equivalent of the gestures. */}
+      <div
+        style={{
+          borderTop: "1px solid var(--border)",
+          background: "var(--c-white)",
+          padding: "10px 12px calc(10px + env(safe-area-inset-bottom))",
+        }}
+      >
+        <div
+          className="label"
+          style={{ fontSize: 9, textAlign: "center", marginBottom: 8 }}
+        >
+          swipe right to verify · swipe left to mark broken
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button
+            className="v-btn danger"
+            style={{ flex: 1 }}
+            disabled={!current}
+            onClick={() => current && onDecide(current.step.id, "regression")}
+          >
+            <AlertOctagon size={13} />
+            Broken
+          </button>
+          <button
+            className="v-btn warning"
+            style={{ flex: 1 }}
+            disabled={!current}
+            onClick={() => current && onDecide(current.step.id, "missed")}
+          >
+            <AlertCircle size={13} />
+            Missed
+          </button>
+          <button
+            className="v-btn ghost"
+            disabled={!current}
+            aria-label="Skip this case"
+            onClick={() =>
+              current &&
+              setSkipped((prev) => new Set(prev).add(current.step.id))
+            }
+          >
+            <SkipForward size={13} />
+            Skip
+          </button>
+          <button
+            className="v-btn success"
+            style={{ flex: 1 }}
+            disabled={!current}
+            onClick={() => current && onDecide(current.step.id, "done")}
+          >
+            <CheckCircleIcon size={13} />
+            Verified
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReviewCard({
+  data,
+  layers,
+  stamp,
+  stampOpacity = 0,
+}: {
+  data: CaseCardData;
+  layers: LayerCardSummary[];
+  /** Swipe verdict preview — "done" stamps VERIFIED, "regression" BROKEN. */
+  stamp?: "done" | "regression" | null;
+  stampOpacity?: number;
+}) {
+  const src =
+    data.visual?.diffImagePath ??
+    data.visual?.currentImagePath ??
+    data.visual?.baselineImagePath ??
+    null;
+  return (
+    <div
+      className="v-card"
+      style={{
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        padding: 14,
+        overflow: "hidden",
+        position: "relative",
+      }}
+    >
+      {stamp && (
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            top: 16,
+            left: stamp === "done" ? 16 : undefined,
+            right: stamp === "regression" ? 16 : undefined,
+            zIndex: 1,
+            padding: "4px 10px",
+            borderRadius: 6,
+            fontSize: 14,
+            fontWeight: 800,
+            letterSpacing: "0.08em",
+            transform: `rotate(${stamp === "done" ? -8 : 8}deg)`,
+            opacity: stampOpacity,
+            border: `2px solid ${stamp === "done" ? "var(--c-teal)" : "var(--c-red)"}`,
+            color:
+              stamp === "done" ? "var(--c-teal-text)" : "var(--c-red-text)",
+            background: "var(--c-white)",
+          }}
+        >
+          {stamp === "done" ? "VERIFIED" : "BROKEN"}
+        </div>
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span className="label" style={{ fontSize: 9 }}>
+          {data.area?.name ?? "Unscoped"}
+        </span>
+        <span style={{ flex: 1 }} />
+        {data.visual?.rca && <RcaBadge rca={data.visual.rca} size="xs" />}
+        <ErrorChip result={data.result} />
+      </div>
+      <div style={{ fontSize: 15, fontWeight: 600, color: "var(--fg-1)" }}>
+        {data.test?.name ?? "Unknown test"}
+        {data.step.stepLabel && (
+          <span style={{ color: "var(--fg-3)", fontWeight: 400 }}>
+            {" "}
+            · {data.step.stepLabel}
+          </span>
+        )}
+      </div>
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          borderRadius: 6,
+          overflow: "hidden",
+          border: "1px solid var(--border)",
+          background: "white",
+        }}
+      >
+        {src ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={src}
+            alt=""
+            loading="lazy"
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "contain",
+              display: "block",
+            }}
+          />
+        ) : (
+          <div
+            className="label"
+            style={{
+              height: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            no screenshot for this case
+          </div>
+        )}
+      </div>
+      {layers.length > 0 && (
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          {layers.map((s) => (
+            <span
+              key={s.layer}
+              className={`v-chip ${s.tone}`}
+              style={{ fontSize: 9, padding: "1px 6px" }}
+              title={`${s.layer}: ${s.summary}`}
+            >
+              {s.layer.toUpperCase()}
+              {s.delta ? ` · ${s.delta}` : ""}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

@@ -9,16 +9,16 @@ desktop-first and remain hidden from the mobile nav for non-EA teams anyway.
 
 ## Functions that must work on mobile
 
-| Function        | Route              | Mobile job-to-be-done                                  |
-| --------------- | ------------------ | ------------------------------------------------------ |
-| Dashboard       | `/`                | Glance at health/last build on the go                  |
-| Verify (board)  | `/verify/[id]`     | Triage cases: Unsorted → Verified/Broken/Missed        |
-| Verify (focus)  | `/verify/[id]`     | Inspect one case, decide OK / Needs improvement / Reject |
-| Runs            | `/run`             | Kick off a run, watch progress                         |
-| Review / Builds | `/review`, `/builds` | Approve/reject visual diffs                          |
-| Tests           | `/tests`           | Browse definitions, open a test                        |
-| Leaderboard     | `/leaderboard`     | Check scores (gamification-enabled teams)              |
-| Settings        | `/settings`        | Flip team toggles, manage account                      |
+| Function        | Route                | Mobile job-to-be-done                                    |
+| --------------- | -------------------- | -------------------------------------------------------- |
+| Dashboard       | `/`                  | Glance at health/last build on the go                    |
+| Verify (board)  | `/verify/[id]`       | Triage cases: Unsorted → Verified/Broken/Missed          |
+| Verify (focus)  | `/verify/[id]`       | Inspect one case, decide OK / Needs improvement / Reject |
+| Runs            | `/run`               | Kick off a run, watch progress                           |
+| Review / Builds | `/review`, `/builds` | Approve/reject visual diffs                              |
+| Tests           | `/tests`             | Browse definitions, open a test                          |
+| Leaderboard     | `/leaderboard`       | Check scores (gamification-enabled teams)                |
+| Settings        | `/settings`          | Flip team toggles, manage account                        |
 
 The app shell already ships a mobile top bar + bottom nav
 (`src/components/layout/mobile-*.tsx`); pages inside it were desktop-only.
@@ -47,6 +47,22 @@ The app shell already ships a mobile top bar + bottom nav
   **mobile-only "move" row**: tap-targets that call the same `onDropCase`
   server path the desktop drag uses (e.g. from Unsorted: ✓ Verified,
   ✗ Broken, ⚠ Missed). Desktop keeps drag as-is.
+- **Swipe-to-triage** (mail-app pattern, `use-swipe-triage.ts`): swipe a
+  card right → Verified, left → Broken, with a colored backdrop reveal and
+  a ~96 px commit threshold. A direction lock (12 px slop, horizontal must
+  dominate) plus `touch-action: pan-y` keeps vertical scrolling intact; the
+  side matching the card's current column rubber-bands instead of
+  committing. Every mobile move — swipe, move row, or review mode — fires
+  an **undo toast** that restores the previous column (dropping back on
+  Unsorted clears feedback, so undo is lossless).
+- **Review mode** (Tinder-style stack): a "Review N unsorted" button under
+  the column switcher opens a full-screen card stack for burning down the
+  Unsorted queue. Swipe commits the same Verified/Broken decisions (with
+  VERIFIED/BROKEN stamps scaling with swipe progress); a pinned button bar
+  (Broken · Missed · Skip · Verified) is the visible, accessible fallback.
+  Skipped cases drop to the back of the session's queue; a done state
+  offers "Review skipped" / "Back to board". Mobile-only — desktop has the
+  full board + Focus view for the same job.
 - Column bulk actions (Verify all / Report all) stay — they're already
   buttons.
 
@@ -87,8 +103,5 @@ The app shell already ships a mobile top bar + bottom nav
 
 ## Out of scope (follow-ups)
 
-- Swipe-to-triage gestures + undo toast on Verify cards (v2 — the move row
-  covers the interaction; gestures are additive).
-- Tinder-style full-screen "review mode" for burning down Unsorted.
 - Recording/EB live-streaming on mobile (desktop-class workflows).
 - Early-Adopter pages (Compose, Compare, Impact, URL Diff).
