@@ -445,27 +445,29 @@ export function MetricsRow({
         })()}
       </div>
 
-      {/* Metrics Grid */}
-      <div className="flex items-start gap-4">
+      {/* Metrics Grid — Tests and Cases sit side-by-side with a divider on
+          md+, and stack vertically on phones where a 6-across row would
+          leave ~60px per card. */}
+      <div className="flex flex-col md:flex-row md:items-start gap-4">
         {/* Tests section */}
         <div>
           <div className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wider">
             Tests
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-3 md:gap-4">
             {metrics.slice(0, 2).map(renderCard)}
           </div>
         </div>
 
         {/* Vertical Divider */}
-        <div className="w-px bg-border self-stretch min-h-[80px]" />
+        <div className="hidden md:block w-px bg-border self-stretch min-h-[80px]" />
 
         {/* Cases section */}
         <div className="flex-1">
           <div className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wider">
             Cases
           </div>
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
             {metrics.slice(2).map(renderCard)}
           </div>
         </div>
@@ -473,7 +475,7 @@ export function MetricsRow({
 
       {/* AI Metrics Row */}
       {hasAIMetrics && (
-        <div className="grid grid-cols-3 gap-3 p-3 bg-purple-50/50 rounded-lg border border-purple-100">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 bg-purple-50/50 rounded-lg border border-purple-100">
           {aiMetrics.map((metric) => {
             const Icon = metric.icon;
             const isActive = activeFilter && metric.filterKey === activeFilter;

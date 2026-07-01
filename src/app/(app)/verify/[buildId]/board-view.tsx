@@ -31,6 +31,7 @@ import {
   deriveCaseStatus,
   isVisualBaselineMissing,
 } from "@/lib/verify/case-status";
+import { useIsMobile } from "@/lib/hooks/use-is-mobile";
 import type { StepVerdict } from "@/lib/db/schema";
 import {
   chipToneForLayer,
@@ -192,6 +193,13 @@ interface CaseCardData {
 }
 
 export function BoardView(props: BoardViewProps) {
+  // Trello-style mobile board: phones show ONE column at a time, picked via
+  // the segmented strip below the progress bar. Drag-and-drop is disabled
+  // there (only one drop target would be visible) — cards grow a tap-to-move
+  // row instead, wired to the same onDropCase path the desktop drag uses.
+  const isMobile = useIsMobile();
+  const [mobileCol, setMobileCol] = useState<CaseStatus>("unknown");
+
   const cases = useMemo<CaseCardData[]>(() => {
     const fbByStep = new Map<string, StepLayerFeedback[]>();
     for (const f of props.feedback) {
@@ -523,17 +531,82 @@ export function BoardView(props: BoardViewProps) {
           </div>
         )}
 
+        {/* Mobile column switcher — one column visible at a time. */}
+        {isMobile && (
+          <div
+            style={{
+              display: "flex",
+              gap: 4,
+              padding: "8px 8px 0",
+              overflowX: "auto",
+            }}
+          >
+            {COLUMN_ORDER.map((col) => {
+              const count =
+                grouped[col.status].length +
+                (col.status === "unknown" && props.isRunning
+                  ? props.runningTests.length
+                  : 0);
+              const active = mobileCol === col.status;
+              return (
+                <button
+                  key={col.status}
+                  type="button"
+                  onClick={() => setMobileCol(col.status)}
+                  aria-pressed={active}
+                  style={{
+                    flex: 1,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 5,
+                    padding: "7px 8px",
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: active ? 600 : 500,
+                    whiteSpace: "nowrap",
+                    cursor: "pointer",
+                    border: active
+                      ? `1px solid color-mix(in oklab, ${col.accent} 55%, var(--border))`
+                      : "1px solid var(--border)",
+                    background: active
+                      ? `color-mix(in oklab, ${col.accent} 12%, var(--c-white))`
+                      : "var(--c-white)",
+                    color: "var(--fg-1)",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 7,
+                      height: 7,
+                      borderRadius: "50%",
+                      background: col.accent,
+                      flexShrink: 0,
+                    }}
+                  />
+                  {col.label}
+                  <span className="mono" style={{ color: "var(--fg-2)" }}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {/* board */}
         <div
           style={{
             flex: 1,
-            padding: 16,
+            padding: isMobile ? 8 : 16,
             display: "flex",
             gap: 12,
             minHeight: 0,
           }}
         >
-          {COLUMN_ORDER.map((col) => (
+          {COLUMN_ORDER.filter(
+            (col) => !isMobile || col.status === mobileCol,
+          ).map((col) => (
             <KCol
               key={col.status}
               label={col.label}
@@ -546,6 +619,7 @@ export function BoardView(props: BoardViewProps) {
               onOpenCase={props.onOpenCase}
               onOpenIssuePicker={props.onOpenIssuePicker}
               onColumnAction={props.onColumnAction}
+              onMoveCase={isMobile ? props.onDropCase : undefined}
               cardsLoaded={props.cardsLoaded}
               // Show in-flight skeletons in the Unsorted column while running.
               runningTests={
@@ -571,6 +645,7 @@ export function BoardView(props: BoardViewProps) {
             display: "flex",
             alignItems: "center",
             gap: 14,
+            flexWrap: "wrap",
           }}
         >
           <Github size={14} />
@@ -702,6 +777,9 @@ interface KColProps {
   /** Column-level bulk action — Verify all on Unsorted/Broken/Missed,
    *  Report all on Broken/Missed. Verified column has none (already done). */
   onColumnAction: (column: CaseStatus, action: "verify" | "report") => void;
+  /** Mobile only: tap-to-move replacement for drag-and-drop. When set, cards
+   *  render a move row and dragging is disabled. */
+  onMoveCase?: (stepId: string, target: CaseStatus) => void;
   /** False until the first /verify-status fetch lands. */
   cardsLoaded: boolean;
   /** Live in-flight tests; rendered as non-draggable skeleton cards. */
@@ -727,6 +805,7 @@ function KCol({
   onOpenCase,
   onOpenIssuePicker,
   onColumnAction,
+  onMoveCase,
   cardsLoaded,
   runningTests,
   testById,
@@ -887,6 +966,7 @@ function KCol({
               onOpenIssuePicker,
               checkModes,
               checkModesByTestId,
+              onMoveCase,
             )
           : visible.map((c) => (
               <DraggableCaseCard
@@ -897,6 +977,11 @@ function KCol({
                 colStatus={status}
                 checkModes={checkModes}
                 checkModesByTestId={checkModesByTestId}
+                onMove={
+                  onMoveCase
+                    ? (target) => onMoveCase(c.step.id, target)
+                    : undefined
+                }
               />
             ))}
         {cases.length > visible.length && (
@@ -994,6 +1079,7 @@ function renderVerifiedGrouped(
   onOpenIssuePicker: (id: string) => void,
   checkModes: CheckModeMap,
   checkModesByTestId: Record<string, Partial<CheckModeMap>>,
+  onMoveCase?: (stepId: string, target: CaseStatus) => void,
 ): React.ReactNode {
   const byArea = new Map<
     string,
@@ -1067,6 +1153,11 @@ function renderVerifiedGrouped(
                 colStatus="done"
                 checkModes={checkModes}
                 checkModesByTestId={checkModesByTestId}
+                onMove={
+                  onMoveCase
+                    ? (target) => onMoveCase(c.step.id, target)
+                    : undefined
+                }
               />
             ))}
           </div>
@@ -1083,6 +1174,9 @@ function renderVerifiedGrouped(
         colStatus="done"
         checkModes={checkModes}
         checkModesByTestId={checkModesByTestId}
+        onMove={
+          onMoveCase ? (target) => onMoveCase(c.step.id, target) : undefined
+        }
       />
     ));
   });
@@ -1217,6 +1311,9 @@ interface DraggableProps {
   onOpenIssuePicker: () => void;
   checkModes: CheckModeMap;
   checkModesByTestId: Record<string, Partial<CheckModeMap>>;
+  /** Mobile tap-to-move handler — when present the card is NOT draggable
+   *  (dragging would fight touch scrolling with a single visible column). */
+  onMove?: (target: CaseStatus) => void;
 }
 
 function DraggableCaseCard({
@@ -1226,9 +1323,11 @@ function DraggableCaseCard({
   onOpenIssuePicker,
   checkModes,
   checkModesByTestId,
+  onMove,
 }: DraggableProps) {
   const { setNodeRef, listeners, attributes, isDragging } = useDraggable({
     id: data.step.id,
+    disabled: !!onMove,
   });
   // While dragging, the source slot fades out — DragOverlay portals the
   // visual preview above all columns so it never gets clipped.
@@ -1253,6 +1352,7 @@ function DraggableCaseCard({
         dragging={false}
         checkModes={checkModes}
         checkModesByTestId={checkModesByTestId}
+        onMove={onMove}
       />
     </div>
   );
@@ -1266,6 +1366,8 @@ interface CardProps {
   dragging?: boolean;
   checkModes: CheckModeMap;
   checkModesByTestId: Record<string, Partial<CheckModeMap>>;
+  /** Mobile: render a tap-to-move row (drag replacement). */
+  onMove?: (target: CaseStatus) => void;
 }
 
 function CaseCard({
@@ -1276,6 +1378,7 @@ function CaseCard({
   dragging,
   checkModes,
   checkModesByTestId,
+  onMove,
 }: CardProps) {
   const layerSummaries = useMemo(
     () =>
@@ -1386,6 +1489,49 @@ function CaseCard({
           stepId={data.step.id}
           initial={data.step.reviewerNote ?? ""}
         />
+      )}
+      {onMove && (
+        <div
+          style={{
+            display: "flex",
+            gap: 4,
+            marginTop: 8,
+            flexWrap: "wrap",
+          }}
+        >
+          {COLUMN_ORDER.filter((col) => col.status !== colStatus).map((col) => (
+            <button
+              key={col.status}
+              type="button"
+              className={`v-btn sm ${
+                col.status === "done"
+                  ? "success"
+                  : col.status === "regression"
+                    ? "danger"
+                    : col.status === "missed"
+                      ? "warning"
+                      : ""
+              }`}
+              style={{ flex: 1 }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onMove(col.status);
+              }}
+              title={`Move to ${col.label}`}
+            >
+              {col.status === "done" ? (
+                <CheckCircleIcon size={11} />
+              ) : col.status === "regression" ? (
+                <AlertOctagon size={11} />
+              ) : col.status === "missed" ? (
+                <AlertCircle size={11} />
+              ) : (
+                <CircleDot size={11} />
+              )}
+              {col.label}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );

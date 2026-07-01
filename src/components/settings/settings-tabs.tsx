@@ -152,7 +152,9 @@ export function SettingsTabs({
               className="flex-1 px-2 md:px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm"
             >
               <Icon />
-              <span>{tab.label}</span>
+              {/* Icon-only below sm — five labelled tabs don't fit a 360px
+                  row; sr-only keeps the accessible name. */}
+              <span className="sr-only sm:not-sr-only">{tab.label}</span>
             </TabsTrigger>
           );
         })}

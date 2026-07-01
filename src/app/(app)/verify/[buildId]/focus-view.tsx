@@ -87,6 +87,7 @@ import {
   isVisualBaselineMissing,
   type CaseStatus,
 } from "@/lib/verify/case-status";
+import { useIsMobile } from "@/lib/hooks/use-is-mobile";
 import type { VisualDiffLite, TestResultLite } from "./board-focus-client";
 import { RcaBadge } from "@/components/diff/rca-badge";
 
@@ -310,6 +311,10 @@ const RUN_STEP_STYLE: Record<RunStepStatus, { dot: string; label: string }> = {
 
 export function FocusView(props: FocusViewProps) {
   const [tab, setTab] = useState<CompareTab>("visual");
+  // On phones the 260px case list can't sit beside the compare pane — it
+  // becomes an overlay drawer toggled from the "Cases" button in the top bar.
+  const isMobile = useIsMobile();
+  const [caseListOpen, setCaseListOpen] = useState(false);
   // Issue panel is hidden by default — only opens when the reviewer takes a
   // negative action (Needs Improvement / Reject) or explicitly toggles it.
   const [intentOpen, setIntentOpen] = useState(false);
@@ -748,12 +753,52 @@ export function FocusView(props: FocusViewProps) {
   }, []);
 
   return (
-    <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-      <CaseSidebar
-        groupedByArea={groupedByArea}
-        activeId={activeCase?.step.id ?? null}
-        onPick={props.onSelect}
-      />
+    <div
+      style={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}
+    >
+      {!isMobile && (
+        <CaseSidebar
+          groupedByArea={groupedByArea}
+          activeId={activeCase?.step.id ?? null}
+          onPick={props.onSelect}
+        />
+      )}
+      {isMobile && caseListOpen && (
+        <>
+          <div
+            onClick={() => setCaseListOpen(false)}
+            aria-hidden
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 40,
+              background: "rgba(31, 42, 51, 0.35)",
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              bottom: 0,
+              left: 0,
+              zIndex: 41,
+              width: "min(300px, 85vw)",
+              display: "flex",
+              boxShadow: "0 8px 24px rgba(31,42,51,0.25)",
+            }}
+          >
+            <CaseSidebar
+              groupedByArea={groupedByArea}
+              activeId={activeCase?.step.id ?? null}
+              onPick={(id) => {
+                props.onSelect(id);
+                setCaseListOpen(false);
+              }}
+              width="100%"
+            />
+          </div>
+        </>
+      )}
       <div
         style={{
           flex: 1,
@@ -771,8 +816,20 @@ export function FocusView(props: FocusViewProps) {
             display: "flex",
             alignItems: "center",
             gap: 10,
+            flexWrap: "wrap",
           }}
         >
+          {isMobile && (
+            <button
+              className="v-btn sm"
+              onClick={() => setCaseListOpen(true)}
+              style={{ flexShrink: 0 }}
+              aria-expanded={caseListOpen}
+            >
+              <Layers size={12} />
+              Cases
+            </button>
+          )}
           <span className="label" style={{ flexShrink: 0 }}>
             Verify · {activeCase?.area?.name ?? "unscoped"}
           </span>
@@ -1288,6 +1345,7 @@ export function FocusView(props: FocusViewProps) {
         onOpenPicker={handleOpenPicker}
         onCloseIssue={handleCloseIssue}
         onAfterCreate={props.onRefresh}
+        overlay={isMobile}
       />
       <CheckModesDialog
         open={checkModesOpen}
@@ -1552,14 +1610,22 @@ interface CaseSidebarProps {
   groupedByArea: { area: AreaLite | null; rows: CaseRow[] }[];
   activeId: string | null;
   onPick: (id: string) => void;
+  /** Rail width — 260px desktop rail by default; "100%" inside the mobile
+   *  overlay drawer so the list fills the drawer instead of underhanging. */
+  width?: number | string;
 }
 
-function CaseSidebar({ groupedByArea, activeId, onPick }: CaseSidebarProps) {
+function CaseSidebar({
+  groupedByArea,
+  activeId,
+  onPick,
+  width = 260,
+}: CaseSidebarProps) {
   const total = groupedByArea.reduce((n, g) => n + g.rows.length, 0);
   return (
     <div
       style={{
-        width: 260,
+        width,
         background: "var(--c-white)",
         borderRight: "1px solid var(--border)",
         display: "flex",
@@ -4277,67 +4343,73 @@ function NetworkPane({
               )}
             </div>
           </div>
-          {/* Column header */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "20px 60px 1fr 70px 70px 70px 70px",
-              columnGap: 10,
-              padding: "6px 12px",
-              borderBottom: "1px solid var(--border)",
-              background: "var(--c-soft)",
-            }}
-          >
-            <span />
-            <span className="label" style={{ fontSize: 9 }}>
-              Method
-            </span>
-            <span className="label" style={{ fontSize: 9 }}>
-              URL
-            </span>
-            <span className="label" style={{ fontSize: 9 }}>
-              Status
-            </span>
-            <span className="label" style={{ fontSize: 9 }}>
-              Type
-            </span>
-            <span className="label" style={{ fontSize: 9 }}>
-              Dur
-            </span>
-            <span className="label" style={{ fontSize: 9 }}>
-              Size
-            </span>
-          </div>
-          <div style={{ maxHeight: 480, overflowY: "auto" }}>
-            {filtered.length === 0 && (
-              <div
-                className="label"
-                style={{ padding: 16, textAlign: "center", fontSize: 10 }}
-              >
-                No requests match the current filters
-              </div>
-            )}
-            {filtered.slice(0, 500).map(({ r, i }) => (
-              <NetworkRequestRow
-                key={i}
-                req={r}
-                expanded={expanded.has(i)}
-                onToggle={() => toggleExpanded(i)}
-                onCreateApiTest={
-                  repositoryId
-                    ? () => setApiSeed(networkRequestToApiTest(r))
-                    : undefined
-                }
-              />
-            ))}
-            {filtered.length > 500 && (
-              <div
-                className="label"
-                style={{ padding: 8, textAlign: "center", fontSize: 10 }}
-              >
-                +{filtered.length - 500} more not shown
-              </div>
-            )}
+          {/* Header + rows share one horizontal scroll container so the
+              7-column grid stays aligned (and usable) on narrow viewports
+              instead of crushing every track to a few px. */}
+          <div style={{ overflowX: "auto" }}>
+            {/* Column header */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "20px 60px 1fr 70px 70px 70px 70px",
+                columnGap: 10,
+                padding: "6px 12px",
+                borderBottom: "1px solid var(--border)",
+                background: "var(--c-soft)",
+                minWidth: 560,
+              }}
+            >
+              <span />
+              <span className="label" style={{ fontSize: 9 }}>
+                Method
+              </span>
+              <span className="label" style={{ fontSize: 9 }}>
+                URL
+              </span>
+              <span className="label" style={{ fontSize: 9 }}>
+                Status
+              </span>
+              <span className="label" style={{ fontSize: 9 }}>
+                Type
+              </span>
+              <span className="label" style={{ fontSize: 9 }}>
+                Dur
+              </span>
+              <span className="label" style={{ fontSize: 9 }}>
+                Size
+              </span>
+            </div>
+            <div style={{ maxHeight: 480, overflowY: "auto", minWidth: 560 }}>
+              {filtered.length === 0 && (
+                <div
+                  className="label"
+                  style={{ padding: 16, textAlign: "center", fontSize: 10 }}
+                >
+                  No requests match the current filters
+                </div>
+              )}
+              {filtered.slice(0, 500).map(({ r, i }) => (
+                <NetworkRequestRow
+                  key={i}
+                  req={r}
+                  expanded={expanded.has(i)}
+                  onToggle={() => toggleExpanded(i)}
+                  onCreateApiTest={
+                    repositoryId
+                      ? () => setApiSeed(networkRequestToApiTest(r))
+                      : undefined
+                  }
+                />
+              ))}
+              {filtered.length > 500 && (
+                <div
+                  className="label"
+                  style={{ padding: 8, textAlign: "center", fontSize: 10 }}
+                >
+                  +{filtered.length - 500} more not shown
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -5854,6 +5926,8 @@ interface IntentPanelProps {
   /** Called after a successful "Create issue" submission so the parent can
    *  refresh case state — the chip flips to "auto" without a reload. */
   onAfterCreate?: () => void;
+  /** Mobile: float over the compare pane instead of docking beside it. */
+  overlay?: boolean;
 }
 
 type EvidenceItemType = StepComparison["evidence"][number];
@@ -6015,6 +6089,7 @@ function IntentPanel({
   onOpenPicker,
   onCloseIssue,
   onAfterCreate,
+  overlay,
 }: IntentPanelProps) {
   if (!open) return null;
   const evidence = activeCase?.step.evidence ?? [];
@@ -6030,6 +6105,19 @@ function IntentPanel({
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
+        // On phones the 320px rail would leave the compare pane a ~40px
+        // sliver — float it over the right edge instead (root is relative).
+        ...(overlay
+          ? {
+              position: "absolute" as const,
+              top: 0,
+              bottom: 0,
+              right: 0,
+              zIndex: 42,
+              width: "min(320px, 90vw)",
+              boxShadow: "0 8px 24px rgba(31,42,51,0.25)",
+            }
+          : null),
       }}
     >
       <div
