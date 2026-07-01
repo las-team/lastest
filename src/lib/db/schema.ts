@@ -4565,6 +4565,14 @@ export const DEFAULT_LAUNCH = {
   // Vote-clearing: votes sharing an IP beyond this count in a cohort are flagged
   // as a suspicious cluster and excluded from the winner decision.
   suspiciousIpClusterThreshold: 5,
+  // Comments
+  commentsPerAccountPerHour: 20,
+  commentMaxLength: 2000,
+  // Reactions
+  allowedReactions: ["🔥", "❤️", "👍", "🚀", "✨", "🎉", "👀", "💡"],
+  // Analytics events
+  eventsPerIpPerMinute: 30,
+  eventDedupeWindowSec: 1800,
 } as const;
 
 // Weekly cohort: open (accepting/queued) → voting (live Mon–Sun) →
@@ -4695,6 +4703,84 @@ export const launchMonthlyWinners = pgTable(
 
 export type LaunchMonthlyWinner = typeof launchMonthlyWinners.$inferSelect;
 export type NewLaunchMonthlyWinner = typeof launchMonthlyWinners.$inferInsert;
+
+export const launchComments = pgTable(
+  "launch_comments",
+  {
+    id: text("id").primaryKey(),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => launchProfiles.id, { onDelete: "cascade" }),
+    authorUserId: text("author_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    body: text("body").notNull(),
+    ipAddress: text("ip_address"),
+    flagged: boolean("flagged").notNull().default(false),
+    deletedAt: timestamp("deleted_at"),
+    createdAt: timestamp("created_at"),
+    updatedAt: timestamp("updated_at"),
+  },
+  (table) => [
+    index("idx_launch_comments_profile").on(table.profileId),
+    index("idx_launch_comments_author").on(table.authorUserId),
+  ],
+);
+
+export type LaunchComment = typeof launchComments.$inferSelect;
+export type NewLaunchComment = typeof launchComments.$inferInsert;
+
+export const launchReactions = pgTable(
+  "launch_reactions",
+  {
+    id: text("id").primaryKey(),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => launchProfiles.id, { onDelete: "cascade" }),
+    reactorUserId: text("reactor_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    emoji: text("emoji").notNull(),
+    createdAt: timestamp("created_at"),
+  },
+  (table) => [
+    uniqueIndex("uq_launch_reactions_profile_reactor_emoji").on(
+      table.profileId,
+      table.reactorUserId,
+      table.emoji,
+    ),
+  ],
+);
+
+export type LaunchReaction = typeof launchReactions.$inferSelect;
+export type NewLaunchReaction = typeof launchReactions.$inferInsert;
+
+export const launchEvents = pgTable(
+  "launch_events",
+  {
+    id: text("id").primaryKey(),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => launchProfiles.id, { onDelete: "cascade" }),
+    type: text("type").$type<"view" | "visit">().notNull(),
+    // sha256(ip + YYYY-MM-DD) — never store raw IP
+    ipHash: text("ip_hash").notNull(),
+    uaHash: text("ua_hash"),
+    createdAt: timestamp("created_at"),
+  },
+  (table) => [
+    index("idx_launch_events_profile_type").on(table.profileId, table.type),
+    index("idx_launch_events_created_at").on(table.createdAt),
+    uniqueIndex("uq_launch_events_dedupe").on(
+      table.profileId,
+      table.type,
+      table.ipHash,
+    ),
+  ],
+);
+
+export type LaunchEvent = typeof launchEvents.$inferSelect;
+export type NewLaunchEvent = typeof launchEvents.$inferInsert;
 
 // ============================================
 // Billing — Stripe integration
