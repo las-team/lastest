@@ -50,3 +50,17 @@ export async function assertCanSubmit(
   }
   return null;
 }
+
+export async function assertCanComment(
+  userId: string,
+  emailVerified: boolean,
+): Promise<GateError | null> {
+  if (!emailVerified) return { status: 403, code: "email_unverified" };
+
+  const since = new Date(Date.now() - ONE_HOUR_MS);
+  const recent = await queries.countCommentsByUserSince(userId, since);
+  if (recent >= DEFAULT_LAUNCH.commentsPerAccountPerHour) {
+    return { status: 429, code: "velocity_exceeded", retryAfterSec: 3600 };
+  }
+  return null;
+}

@@ -18,6 +18,7 @@ import {
   Sparkles,
   AlertTriangle,
   AlertOctagon,
+  RotateCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { runVerifyBuild } from "@/server/actions/smart-run";
@@ -1153,6 +1154,8 @@ function BoardFocusInner(props: BoardFocusClientProps) {
         completedAt={completedAt}
         runResultCount={testResults.length}
         scoredCaseCount={stepComparisons.length}
+        onRetry={props.repositoryId ? handleRefresh : undefined}
+        retrying={refreshing}
       />
 
       <CoverageGapsBanner
@@ -1277,6 +1280,10 @@ interface BuildAbortedBannerProps {
   completedAt: string | null;
   runResultCount: number;
   scoredCaseCount: number;
+  // Re-runs the build (same path as the toolbar Run button). Undefined when no
+  // repo is resolved, in which case no retry affordance is shown.
+  onRetry?: () => void;
+  retrying?: boolean;
 }
 
 // Surfaces non-success terminal states so users don't mistake a partial
@@ -1288,6 +1295,8 @@ function BuildAbortedBanner({
   completedAt,
   runResultCount,
   scoredCaseCount,
+  onRetry,
+  retrying,
 }: BuildAbortedBannerProps) {
   // Still running → the running-state chip in the header already handles it.
   if (!completedAt) return null;
@@ -1298,28 +1307,31 @@ function BuildAbortedBanner({
   if (!isExecutorFailed && !isBlocked) return null;
 
   // 'blocked' covers two distinct meanings on builds: (a) the diff-driven
-  // "needs review" state, (b) the runBuildAsync catch fallback when results
-  // landed but the run threw. We can only distinguish by inspecting whether
-  // executorError or executorFailedAt is set, or by inferring from totals.
-  // Heuristic: if totalTests > 0 and we got fewer test_results than tests
-  // were planned, the build was aborted mid-execution.
+  // "needs review" state, (b) a terminal failure (executor crash, watchdog
+  // timeout, EB-starvation) that recorded no usable results. We distinguish by
+  // result count, NOT by totalTests — an EB-starved build can have
+  // totalTests=0, and gating on planned>0 there would hide the failure entirely
+  // (the exact "don't hide it" case). A clean fail = nothing ran; a partial
+  // abort = some results landed but fewer than planned.
   const planned = build.totalTests ?? 0;
-  const isPartial =
-    isExecutorFailed || (isBlocked && planned > 0 && runResultCount < planned);
-  if (!isPartial) return null;
+  const isCleanFail = isExecutorFailed || runResultCount === 0;
+  const isPartialAbort =
+    isBlocked && runResultCount > 0 && planned > 0 && runResultCount < planned;
+  // A normal fully-populated blocked build (diffs awaiting review) hits neither
+  // branch, so it never shows this banner.
+  if (!isCleanFail && !isPartialAbort) return null;
 
   const errorBody = (build.executorError ?? "").trim();
   const errorHead =
     errorBody.length > 0 ? errorBody.split("\n")[0]?.slice(0, 240) : null;
 
-  const isCleanFail = isExecutorFailed || runResultCount === 0;
   const accent = isCleanFail ? "var(--c-red)" : "var(--c-amber)";
   const bg = `color-mix(in oklab, ${accent} 10%, var(--c-white))`;
   const heading = isCleanFail
     ? "Build failed — no tests ran"
     : `Build aborted mid-run — recovered ${scoredCaseCount} of ${planned} cases`;
   const detail = isCleanFail
-    ? "The executor crashed before any test produced a result. Re-run to retry."
+    ? "No test produced a result before the build stopped."
     : `${runResultCount} test result${runResultCount === 1 ? "" : "s"} were captured; the rest were lost when the run was interrupted.`;
 
   return (
@@ -1361,6 +1373,24 @@ function BuildAbortedBanner({
           </div>
         )}
       </div>
+      {onRetry && (
+        <button
+          className="v-btn"
+          onClick={onRetry}
+          disabled={retrying}
+          style={{ flexShrink: 0, alignSelf: "flex-start" }}
+        >
+          {retrying ? (
+            <Loader2
+              size={13}
+              style={{ animation: "verify-spin 1s linear infinite" }}
+            />
+          ) : (
+            <RotateCw size={13} />
+          )}
+          {retrying ? "Retrying…" : "Retry build"}
+        </button>
+      )}
     </div>
   );
 }

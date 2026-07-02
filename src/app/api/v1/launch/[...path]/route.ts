@@ -25,11 +25,17 @@ import { NextRequest, NextResponse } from "next/server";
 import * as queries from "@/lib/db/queries";
 import { getCurrentSession } from "@/lib/auth";
 import { extractSourceIp } from "@/lib/url-diff/ssrf";
-import { assertCanVote, assertCanSubmit } from "@/lib/launch/gating";
+import {
+  assertCanVote,
+  assertCanSubmit,
+  assertCanComment,
+} from "@/lib/launch/gating";
 import {
   serializeCohort,
   serializeProfile,
   serializeMonthlyWinner,
+  serializeComment,
+  serializeReactions,
 } from "@/lib/launch/serialize";
 import { rankProfiles } from "@/lib/launch/velocity";
 import {
@@ -38,11 +44,14 @@ import {
 } from "@/lib/launch/cohort-engine";
 import { scopeIncludes } from "@/lib/launch/oauth-config";
 import { DuplicateVoteError, normalizeDomain } from "@/lib/db/queries/launch";
+import { check as rateLimitCheck } from "@/lib/rate-limit/limiter";
+import { hashIp, hashUa, isBot } from "@/lib/launch/analytics";
 import type {
   LaunchCohort,
   LaunchCohortState,
   LaunchProfileStatus,
 } from "@/lib/db/schema";
+import { DEFAULT_LAUNCH } from "@/lib/db/schema";
 
 export const dynamic = "force-dynamic";
 
@@ -186,6 +195,38 @@ export async function GET(
     return NextResponse.json(serializeProfile(profile, { hasVoted }));
   }
 
+  // GET /profiles/:slug/comments
+  if (resource === "profiles" && a && b === "comments") {
+    const profile = await queries.getProfileBySlug(a);
+    if (!profile) return err(404, "Not found");
+    const rows = await queries.getCommentsForProfile(profile.id);
+    const comments = rows.map((r) => serializeComment(r, actor?.userId));
+    return NextResponse.json({ comments, total: comments.length });
+  }
+
+  // GET /profiles/:slug/reactions
+  if (resource === "profiles" && a && b === "reactions") {
+    const profile = await queries.getProfileBySlug(a);
+    if (!profile) return err(404, "Not found");
+    const summary = await queries.getReactionsForProfile(
+      profile.id,
+      actor?.userId,
+    );
+    return NextResponse.json(serializeReactions(summary));
+  }
+
+  // GET /profiles/:slug/stats — owner or admin only
+  if (resource === "profiles" && a && b === "stats") {
+    if (!actor) return err(401, "Unauthorized");
+    const profile = await queries.getProfileBySlug(a);
+    if (!profile) return err(404, "Not found");
+    if (profile.submittedByUserId !== actor.userId && !isAdmin(actor)) {
+      return err(403, "Forbidden");
+    }
+    const stats = await queries.getProfileEventStats(profile.id);
+    return NextResponse.json({ slug: profile.slug, ...stats });
+  }
+
   if (resource === "cohorts") {
     // GET /cohorts/current
     if (a === "current") {
@@ -255,6 +296,57 @@ export async function POST(
 ) {
   const path = (await params).path ?? [];
   const [resource, a, b] = path;
+
+  // POST /profiles/:slug/events — unauthenticated; must be handled before actor check.
+  if (resource === "profiles" && a && b === "events") {
+    try {
+      const body = await request.json().catch(() => null);
+      const type = body?.type as string | undefined;
+      if (type !== "view" && type !== "visit")
+        return new NextResponse(null, { status: 204 });
+
+      const ip = extractSourceIp(request.headers) ?? "unknown";
+      const ua = request.headers.get("user-agent");
+
+      if (isBot(ua)) return new NextResponse(null, { status: 204 });
+
+      const ipHash = hashIp(ip);
+      const rl = rateLimitCheck(
+        `launch-event:${ipHash}`,
+        DEFAULT_LAUNCH.eventsPerIpPerMinute,
+        60_000,
+      );
+      if (!rl.allowed) return new NextResponse(null, { status: 204 });
+
+      const profile = await queries.getProfileBySlug(a);
+      if (!profile) return new NextResponse(null, { status: 204 });
+
+      // Skip self-views: resolve actor but don't require it
+      const actor = await resolveActor(request).catch(() => null);
+      if (actor && profile.submittedByUserId === actor.userId) {
+        return new NextResponse(null, { status: 204 });
+      }
+
+      const alreadySeen = await queries.hasRecentEvent({
+        profileId: profile.id,
+        type,
+        ipHash,
+        windowSec: DEFAULT_LAUNCH.eventDedupeWindowSec,
+      });
+      if (alreadySeen) return new NextResponse(null, { status: 204 });
+
+      await queries.recordEvent({
+        profileId: profile.id,
+        type,
+        ipHash,
+        uaHash: ua ? hashUa(ua) : undefined,
+      });
+    } catch {
+      // fail-soft: always 204
+    }
+    return new NextResponse(null, { status: 204 });
+  }
+
   const actor = await resolveActor(request);
   if (!actor) return err(401, "Unauthorized");
 
@@ -321,6 +413,86 @@ export async function POST(
       },
       { status: 201 },
     );
+  }
+
+  // POST /profiles/:slug/comments
+  if (resource === "profiles" && a && b === "comments") {
+    if (!hasScope(actor, "launch:vote")) return fail(403, "insufficient_scope");
+    const profile = await queries.getProfileBySlug(a);
+    if (!profile) return err(404, "Not found");
+
+    const gate = await assertCanComment(actor.userId, actor.emailVerified);
+    if (gate) {
+      return fail(
+        gate.status,
+        gate.code,
+        undefined,
+        gate.retryAfterSec
+          ? { "Retry-After": String(gate.retryAfterSec) }
+          : undefined,
+      );
+    }
+
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== "object") return err(422, "invalid body");
+    const text = (body as Record<string, unknown>).body;
+    if (typeof text !== "string" || !text.trim())
+      return err(422, "body required");
+    if (text.trim().length > DEFAULT_LAUNCH.commentMaxLength) {
+      return err(
+        422,
+        `body must be ${DEFAULT_LAUNCH.commentMaxLength} chars or fewer`,
+      );
+    }
+
+    const row = await queries.createComment({
+      profileId: profile.id,
+      authorUserId: actor.userId,
+      body: text,
+      ipAddress: extractSourceIp(request.headers),
+    });
+    const rows = await queries.getCommentsForProfile(profile.id);
+    return NextResponse.json(
+      {
+        comment: serializeComment(row, actor.userId),
+        total: rows.length,
+      },
+      { status: 201 },
+    );
+  }
+
+  // POST /profiles/:slug/reactions
+  if (resource === "profiles" && a && b === "reactions") {
+    if (!hasScope(actor, "launch:vote")) return fail(403, "insufficient_scope");
+    if (!actor.emailVerified) return fail(403, "email_unverified");
+    const profile = await queries.getProfileBySlug(a);
+    if (!profile) return err(404, "Not found");
+
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== "object") return err(422, "invalid body");
+    const emoji = (body as Record<string, unknown>).emoji;
+    if (typeof emoji !== "string") return err(422, "emoji required");
+    if (
+      !(DEFAULT_LAUNCH.allowedReactions as readonly string[]).includes(emoji)
+    ) {
+      return err(422, "emoji not allowed");
+    }
+
+    await queries.addReaction({
+      profileId: profile.id,
+      reactorUserId: actor.userId,
+      emoji,
+    });
+    const summary = await queries.getReactionsForProfile(
+      profile.id,
+      actor.userId,
+    );
+    return NextResponse.json({
+      emoji,
+      counts: summary.counts,
+      hasReacted: true,
+      mine: summary.mine,
+    });
   }
 
   // POST /profiles/:slug/upvote
@@ -401,6 +573,47 @@ export async function DELETE(
       slug: profile.slug,
       upvoteCount,
       hasVoted: false,
+    });
+  }
+
+  // DELETE /comments/:id — soft-delete; author or admin only
+  if (resource === "comments" && a && !b) {
+    if (!hasScope(actor, "launch:vote")) return fail(403, "insufficient_scope");
+    const comment = await queries.getCommentById(a);
+    if (!comment || comment.deletedAt) return err(404, "Not found");
+    if (comment.authorUserId !== actor.userId && !isAdmin(actor)) {
+      return err(403, "Forbidden");
+    }
+    await queries.softDeleteComment(a);
+    return NextResponse.json({ ok: true });
+  }
+
+  // DELETE /profiles/:slug/reactions
+  if (resource === "profiles" && a && b === "reactions") {
+    if (!hasScope(actor, "launch:vote")) return fail(403, "insufficient_scope");
+    if (!actor.emailVerified) return fail(403, "email_unverified");
+    const profile = await queries.getProfileBySlug(a);
+    if (!profile) return err(404, "Not found");
+
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== "object") return err(422, "invalid body");
+    const emoji = (body as Record<string, unknown>).emoji;
+    if (typeof emoji !== "string") return err(422, "emoji required");
+
+    await queries.removeReaction({
+      profileId: profile.id,
+      reactorUserId: actor.userId,
+      emoji,
+    });
+    const summary = await queries.getReactionsForProfile(
+      profile.id,
+      actor.userId,
+    );
+    return NextResponse.json({
+      emoji,
+      counts: summary.counts,
+      hasReacted: false,
+      mine: summary.mine,
     });
   }
 
