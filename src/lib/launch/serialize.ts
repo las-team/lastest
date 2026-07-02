@@ -10,6 +10,7 @@ import type {
   LaunchProfile,
   LaunchMonthlyWinner,
 } from "@/lib/db/schema";
+import type { CommentRow, ReactionSummary } from "@/lib/db/queries/launch";
 
 export interface SerializedCohort {
   id: string;
@@ -79,4 +80,38 @@ export function serializeMonthlyWinner(w: LaunchMonthlyWinner): {
   month: string;
 } {
   return { slug: w.profileSlug, month: w.month };
+}
+
+export interface SerializedComment {
+  id: string;
+  body: string;
+  authorName: string | null;
+  authorHandle: string | null;
+  createdAtISO: string | null;
+  isOwn: boolean;
+}
+
+export function serializeComment(
+  row: CommentRow,
+  viewerUserId?: string,
+): SerializedComment {
+  return {
+    id: row.id,
+    body: row.body,
+    authorName: row.authorName ?? null,
+    authorHandle: null, // users table has no handle field
+    createdAtISO: row.createdAt?.toISOString() ?? null,
+    isOwn: Boolean(viewerUserId && row.authorUserId === viewerUserId),
+  };
+}
+
+export interface SerializedReactions {
+  counts: Record<string, number>;
+  mine: string[];
+}
+
+export function serializeReactions(
+  summary: ReactionSummary,
+): SerializedReactions {
+  return { counts: summary.counts, mine: summary.mine };
 }

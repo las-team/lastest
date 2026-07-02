@@ -4,6 +4,10 @@ import {
   launchProfiles,
   launchVotes,
   launchMonthlyWinners,
+  launchComments,
+  launchReactions,
+  launchEvents,
+  users,
 } from "../schema";
 import type {
   NewLaunchCohort,
@@ -14,7 +18,18 @@ import type {
   LaunchMonthlyWinner,
 } from "../schema";
 import { DEFAULT_LAUNCH } from "../schema";
-import { eq, and, desc, asc, gte, inArray, sql, count } from "drizzle-orm";
+import {
+  eq,
+  and,
+  desc,
+  asc,
+  gte,
+  lt,
+  inArray,
+  isNull,
+  sql,
+  count,
+} from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 
 // ============================================
@@ -444,6 +459,277 @@ export async function clearSuspiciousVotes(cohortId: string): Promise<number> {
     await recomputeUpvoteCount(id);
   }
   return cleared.length;
+}
+
+// ============================================
+// Comments
+// ============================================
+
+export interface CommentRow {
+  id: string;
+  body: string;
+  authorUserId: string;
+  authorName: string | null;
+  createdAt: Date | null;
+}
+
+export async function getCommentsForProfile(
+  profileId: string,
+): Promise<CommentRow[]> {
+  return db
+    .select({
+      id: launchComments.id,
+      body: launchComments.body,
+      authorUserId: launchComments.authorUserId,
+      authorName: users.name,
+      createdAt: launchComments.createdAt,
+    })
+    .from(launchComments)
+    .leftJoin(users, eq(launchComments.authorUserId, users.id))
+    .where(
+      and(
+        eq(launchComments.profileId, profileId),
+        isNull(launchComments.deletedAt),
+      ),
+    )
+    .orderBy(asc(launchComments.createdAt));
+}
+
+export async function getCommentById(id: string): Promise<
+  | {
+      id: string;
+      profileId: string;
+      authorUserId: string;
+      deletedAt: Date | null;
+    }
+  | undefined
+> {
+  const [row] = await db
+    .select({
+      id: launchComments.id,
+      profileId: launchComments.profileId,
+      authorUserId: launchComments.authorUserId,
+      deletedAt: launchComments.deletedAt,
+    })
+    .from(launchComments)
+    .where(eq(launchComments.id, id));
+  return row;
+}
+
+export async function createComment(data: {
+  profileId: string;
+  authorUserId: string;
+  body: string;
+  ipAddress: string | null;
+}): Promise<CommentRow> {
+  const id = uuid();
+  const now = new Date();
+  await db.insert(launchComments).values({
+    id,
+    profileId: data.profileId,
+    authorUserId: data.authorUserId,
+    body: data.body.trim(),
+    ipAddress: data.ipAddress,
+    createdAt: now,
+    updatedAt: now,
+  });
+  const [row] = await db
+    .select({
+      id: launchComments.id,
+      body: launchComments.body,
+      authorUserId: launchComments.authorUserId,
+      authorName: users.name,
+      createdAt: launchComments.createdAt,
+    })
+    .from(launchComments)
+    .leftJoin(users, eq(launchComments.authorUserId, users.id))
+    .where(eq(launchComments.id, id));
+  return row;
+}
+
+export async function softDeleteComment(id: string): Promise<void> {
+  await db
+    .update(launchComments)
+    .set({ deletedAt: new Date(), updatedAt: new Date() })
+    .where(eq(launchComments.id, id));
+}
+
+export async function countCommentsByUserSince(
+  authorUserId: string,
+  since: Date,
+): Promise<number> {
+  const [row] = await db
+    .select({ n: count() })
+    .from(launchComments)
+    .where(
+      and(
+        eq(launchComments.authorUserId, authorUserId),
+        gte(launchComments.createdAt, since),
+        isNull(launchComments.deletedAt),
+      ),
+    );
+  return row?.n ?? 0;
+}
+
+// ============================================
+// Reactions
+// ============================================
+
+export interface ReactionSummary {
+  counts: Record<string, number>;
+  mine: string[];
+}
+
+export async function getReactionsForProfile(
+  profileId: string,
+  reactorUserId?: string,
+): Promise<ReactionSummary> {
+  const rows = await db
+    .select({
+      emoji: launchReactions.emoji,
+      reactorUserId: launchReactions.reactorUserId,
+    })
+    .from(launchReactions)
+    .where(eq(launchReactions.profileId, profileId));
+
+  const counts: Record<string, number> = {};
+  const mine: string[] = [];
+  for (const row of rows) {
+    counts[row.emoji] = (counts[row.emoji] ?? 0) + 1;
+    if (reactorUserId && row.reactorUserId === reactorUserId) {
+      mine.push(row.emoji);
+    }
+  }
+  return { counts, mine };
+}
+
+export async function addReaction(data: {
+  profileId: string;
+  reactorUserId: string;
+  emoji: string;
+}): Promise<void> {
+  try {
+    await db.insert(launchReactions).values({
+      id: uuid(),
+      profileId: data.profileId,
+      reactorUserId: data.reactorUserId,
+      emoji: data.emoji,
+      createdAt: new Date(),
+    });
+  } catch (err) {
+    // 23505 = unique violation — already reacted, treat as success
+    if (!isUniqueViolation(err)) throw err;
+  }
+}
+
+export async function removeReaction(data: {
+  profileId: string;
+  reactorUserId: string;
+  emoji: string;
+}): Promise<void> {
+  await db
+    .delete(launchReactions)
+    .where(
+      and(
+        eq(launchReactions.profileId, data.profileId),
+        eq(launchReactions.reactorUserId, data.reactorUserId),
+        eq(launchReactions.emoji, data.emoji),
+      ),
+    );
+}
+
+// ============================================
+// Events (analytics)
+// ============================================
+
+export async function hasRecentEvent(data: {
+  profileId: string;
+  type: "view" | "visit";
+  ipHash: string;
+  windowSec: number;
+}): Promise<boolean> {
+  const since = new Date(Date.now() - data.windowSec * 1000);
+  const [row] = await db
+    .select({ id: launchEvents.id })
+    .from(launchEvents)
+    .where(
+      and(
+        eq(launchEvents.profileId, data.profileId),
+        eq(launchEvents.type, data.type),
+        eq(launchEvents.ipHash, data.ipHash),
+        gte(launchEvents.createdAt, since),
+      ),
+    )
+    .limit(1);
+  return Boolean(row);
+}
+
+export async function recordEvent(data: {
+  profileId: string;
+  type: "view" | "visit";
+  ipHash: string;
+  uaHash?: string;
+}): Promise<void> {
+  try {
+    await db.insert(launchEvents).values({
+      id: uuid(),
+      profileId: data.profileId,
+      type: data.type,
+      ipHash: data.ipHash,
+      uaHash: data.uaHash ?? null,
+      createdAt: new Date(),
+    });
+  } catch (err) {
+    // 23505 = already recorded (same day dedup via unique index) — fine
+    if (!isUniqueViolation(err)) throw err;
+  }
+}
+
+// ============================================
+// Stats (owner/admin)
+// ============================================
+
+export async function getProfileEventStats(profileId: string): Promise<{
+  views: number;
+  visits: number;
+  viewsByDay: { date: string; count: number }[];
+  visitsByDay: { date: string; count: number }[];
+}> {
+  const totals = await db
+    .select({ type: launchEvents.type, n: count() })
+    .from(launchEvents)
+    .where(eq(launchEvents.profileId, profileId))
+    .groupBy(launchEvents.type);
+
+  const views = totals.find((r) => r.type === "view")?.n ?? 0;
+  const visits = totals.find((r) => r.type === "visit")?.n ?? 0;
+
+  const byDay = await db
+    .select({
+      type: launchEvents.type,
+      date: sql<string>`to_char(${launchEvents.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`,
+      n: count(),
+    })
+    .from(launchEvents)
+    .where(eq(launchEvents.profileId, profileId))
+    .groupBy(
+      launchEvents.type,
+      sql`to_char(${launchEvents.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`,
+    )
+    .orderBy(
+      sql`to_char(${launchEvents.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`,
+    );
+
+  return {
+    views,
+    visits,
+    viewsByDay: byDay
+      .filter((r) => r.type === "view")
+      .map((r) => ({ date: r.date, count: r.n })),
+    visitsByDay: byDay
+      .filter((r) => r.type === "visit")
+      .map((r) => ({ date: r.date, count: r.n })),
+  };
 }
 
 // ============================================

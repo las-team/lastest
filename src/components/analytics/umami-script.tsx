@@ -30,7 +30,7 @@ export function UmamiScript({ nonce }: { nonce?: string }) {
           data-sample-rate={sampleRate}
           data-mask-level={maskLevel}
           data-max-duration={maxDuration}
-          strategy="afterInteractive"
+          strategy="lazyOnload"
           nonce={nonce}
         />
       )}

@@ -20,8 +20,23 @@ export async function GET(
   const teamId = session.team.id;
 
   const { buildId } = await params;
-  const build = await queries.getBuild(buildId);
+  let build = await queries.getBuild(buildId);
   if (!build) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  // The verify page polls this endpoint, not the jobs endpoints that run the
+  // global stale-job sweep — so an EB-starved build (job stalled because no
+  // embedded browser could be assigned) would otherwise sit at completedAt=null
+  // forever and the failure banner would stay hidden behind the "running"
+  // state. Reconcile this build's job here so the timeout surfaces on the
+  // verify board. Idempotent and scoped to one build (no global sweep).
+  if (!build.completedAt) {
+    const finalized = await queries
+      .reconcileBuildJobIfStale(buildId)
+      .catch(() => false);
+    if (finalized) {
+      build = (await queries.getBuild(buildId)) ?? build;
+    }
+  }
 
   // Authorize via the build's repo and remember repoId for downstream
   // lookups (playwright settings).
