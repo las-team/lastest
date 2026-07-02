@@ -63,6 +63,7 @@ import {
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { getDomain } from "tldts";
 
 const DEFAULT_DOM_SNAPSHOT_PRIORITY: SelectorPriorityConfig = [
   { type: "data-testid", enabled: true, priority: 1 },
@@ -1389,11 +1390,42 @@ export class EmbeddedTestExecutor {
       const POST_GOTO_TRACK_MS = 3000;
       const MAX_SUBRESOURCE_RELOADS = 2;
 
+      // Registrable domain (eTLD+1) of a host, via the Public Suffix List
+      // (tldts). Used to decide whether a failed sub-resource is FIRST-PARTY to
+      // the page under test. A third-party host failing DNS (analytics, ads,
+      // external CDNs) says nothing about whether the EB's network is healthy
+      // — only first-party failures should condemn the pod. Without this, a
+      // fire-and-forget tracker beacon (e.g. *.log.optimizely.com on
+      // the-internet.herokuapp.com) re-fires on every reload, never resolves,
+      // and falsely trips "EB network unhealthy". A naive last-two-labels
+      // heuristic misclassified multi-label public suffixes (.co.uk,
+      // .github.io, .vercel.app) in BOTH directions; getDomain() handles them
+      // correctly. Returns "" for IPs / unknown suffixes — treated as
+      // first-party (stay strict) by isFirstParty.
+      const registrableDomain = (host: string): string =>
+        getDomain(host)?.toLowerCase() ?? "";
+      // Set per-navigation inside the goto wrapper below, so the first-party
+      // check always reflects the page currently being navigated to.
+      let pageBaseDomain = "";
+      const isFirstParty = (reqUrl: string): boolean => {
+        if (!pageBaseDomain) return true; // can't tell — stay strict
+        try {
+          const reqDomain = registrableDomain(new URL(reqUrl).hostname);
+          if (!reqDomain) return true; // unknown/IP — stay strict
+          return reqDomain === pageBaseDomain;
+        } catch {
+          return true;
+        }
+      };
+
       let trackingActive = false;
       let criticalSubresourceFailures: string[] = [];
       page.on("requestfailed", (req) => {
         if (!trackingActive) return;
         if (!CRITICAL_RESOURCE_TYPES.has(req.resourceType())) return;
+        // Only first-party sub-resource failures indicate a broken EB network.
+        // Third-party hosts (trackers/ads/CDNs) failing DNS are ignorable.
+        if (!isFirstParty(req.url())) return;
         const failure = req.failure();
         if (failure && TRANSIENT_NET_RX.test(failure.errorText)) {
           criticalSubresourceFailures.push(
@@ -1405,6 +1437,11 @@ export class EmbeddedTestExecutor {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (page as any).goto = async (url: string, options?: any) => {
         logFn("info", `Navigating to ${url}...`);
+        try {
+          pageBaseDomain = registrableDomain(new URL(url).hostname);
+        } catch {
+          pageBaseDomain = "";
+        }
         const delays = [1000, 2000, 4000];
         let lastErr: unknown;
         let response: Awaited<ReturnType<typeof originalGoto>> | null = null;

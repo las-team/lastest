@@ -1902,7 +1902,8 @@ export type TestChangeReason =
   | "restored"
   | "branch_merge"
   | "assertion_sync"
-  | "spec_regeneration";
+  | "spec_regeneration"
+  | "debug_rerecord";
 
 export const testVersions = pgTable("test_versions", {
   id: text("id").primaryKey(),
@@ -3650,6 +3651,13 @@ export const remoteDebugSessions = pgTable(
     repositoryId: text("repository_id"),
     testId: text("test_id").notNull(),
     state: jsonb("state"),
+    // Durable "this recording's events have been spliced + persisted" marker.
+    // Lives OUTSIDE `state` because the runner overwrites the whole `state`
+    // blob on every debug_state push (and keeps reporting pendingRecordingEvents
+    // until update_code round-trips), which would otherwise re-arm a consumed
+    // splice. Set once by consumeStopRecording after the test version is saved;
+    // makes the consume idempotent so a re-entrant poll can't splice twice.
+    splicedAt: timestamp("spliced_at"),
     startedAt: timestamp("started_at")
       .$defaultFn(() => new Date())
       .notNull(),

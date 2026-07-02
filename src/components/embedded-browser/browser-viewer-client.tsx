@@ -301,6 +301,20 @@ export const BrowserViewer = forwardRef<
     [sendWs],
   );
 
+  // Sync the inspect-mode prop to the EB whenever the socket is connected.
+  // Parents that flip inspect mode in the same render they mount this viewer
+  // (e.g. the debug Selectors tab, which switches to Live View AND enables
+  // inspect at once) can't reach a not-yet-mounted imperative handle, so the
+  // EB's CDP highlight overlay never turned on until an unrelated re-toggle.
+  // Driving it from here makes it self-healing across first mount + reconnect.
+  useEffect(() => {
+    if (connectionStatus !== "connected") return;
+    sendWs({
+      type: "stream:inspect_mode",
+      payload: { enabled: !!inspectMode },
+    });
+  }, [connectionStatus, inspectMode, sendWs]);
+
   // Ref to hold the connect function so onclose can call it without circular deps
   const connectWsRef = useRef<(attempt: number) => void>(() => {});
 

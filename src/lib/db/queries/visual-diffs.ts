@@ -389,6 +389,22 @@ export async function backfillBaselineDomSnapshot(
 /**
  * Deactivate baselines. If branch is provided, only deactivates for that branch.
  */
+/**
+ * Deactivate EVERY active baseline for a test — all steps, branches, browsers.
+ * Used when a test's steps change (e.g. Record-from-here splices new actions
+ * in): the old baselines were captured against the previous steps and would
+ * produce misaligned/meaningless diffs, so they're invalidated wholesale.
+ * Unlike deactivateBaselines, this does not pin stepLabel to NULL.
+ */
+export async function deactivateAllBaselinesForTest(testId: string) {
+  const result = await db
+    .update(baselines)
+    .set({ isActive: false })
+    .where(and(eq(baselines.testId, testId), eq(baselines.isActive, true)))
+    .returning({ id: baselines.id });
+  return result.length;
+}
+
 export async function deactivateBaselines(
   testId: string,
   stepLabel?: string | null,

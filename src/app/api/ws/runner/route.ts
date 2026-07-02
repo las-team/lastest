@@ -1216,7 +1216,11 @@ export async function clearRemoteRecordingSession(
 import type { DebugStateResponsePayload } from "@/lib/ws/protocol";
 import { db } from "@/lib/db";
 import { remoteDebugSessions } from "@/lib/db/schema";
-import { eq as drizzleEq } from "drizzle-orm";
+import {
+  eq as drizzleEq,
+  and as drizzleAnd,
+  isNull as drizzleIsNull,
+} from "drizzle-orm";
 
 export interface RemoteDebugSession {
   sessionId: string;
@@ -1225,6 +1229,10 @@ export interface RemoteDebugSession {
   testId: string;
   state: DebugStateResponsePayload | null;
   startedAt: Date;
+  /** Set once the stop-recording splice has been persisted as a test version.
+   *  Durable across runner state pushes — used by consumeStopRecording as an
+   *  idempotency guard so a re-entrant poll can't splice/persist twice. */
+  splicedAt: Date | null;
 }
 
 export async function createRemoteDebugSession(
@@ -1275,6 +1283,7 @@ export async function getRemoteDebugSession(
     testId: row.testId,
     state: row.state as DebugStateResponsePayload | null,
     startedAt: row.startedAt,
+    splicedAt: row.splicedAt ?? null,
   };
 }
 
@@ -1295,5 +1304,43 @@ export async function clearRemoteDebugSession(
 ): Promise<void> {
   await db
     .delete(remoteDebugSessions)
+    .where(drizzleEq(remoteDebugSessions.sessionId, sessionId));
+}
+
+/**
+ * Atomically claim the stop-recording splice for a session by setting
+ * `splicedAt` — but only if it is still null. Returns true if THIS call won
+ * the claim (caller should proceed to splice + persist), false if another call
+ * already claimed it (caller must treat the splice as already done).
+ *
+ * `splicedAt` lives in its own column, not inside `state`, so the runner's
+ * debug_state pushes (which overwrite the whole `state` blob and keep
+ * reporting pendingRecordingEvents until update_code round-trips) cannot
+ * re-arm a consumed splice. This is the durable double-splice guard.
+ */
+export async function claimRecordingSplice(
+  sessionId: string,
+): Promise<boolean> {
+  const result = await db
+    .update(remoteDebugSessions)
+    .set({ splicedAt: new Date(), updatedAt: new Date() })
+    .where(
+      drizzleAnd(
+        drizzleEq(remoteDebugSessions.sessionId, sessionId),
+        drizzleIsNull(remoteDebugSessions.splicedAt),
+      ),
+    )
+    .returning({ sessionId: remoteDebugSessions.sessionId });
+  return result.length > 0;
+}
+
+/**
+ * Release a splice claim — used when the persist step fails so a later poll can
+ * retry the splice. Pairs with claimRecordingSplice.
+ */
+export async function releaseRecordingSplice(sessionId: string): Promise<void> {
+  await db
+    .update(remoteDebugSessions)
+    .set({ splicedAt: null, updatedAt: new Date() })
     .where(drizzleEq(remoteDebugSessions.sessionId, sessionId));
 }

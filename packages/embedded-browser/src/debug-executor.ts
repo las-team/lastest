@@ -10,6 +10,7 @@ import type { Browser, Page, BrowserContext } from "playwright";
 import type { StabilizationPayload } from "./protocol.js";
 import { setupFreezeScripts } from "./stabilization.js";
 import { isUsableSelectorValue } from "@lastest/shared";
+import { EmbeddedRecorder } from "./embedded-recorder.js";
 
 // Types matching the protocol definitions
 export interface DebugStep {
@@ -36,6 +37,31 @@ export interface DebugStepResult {
   error?: string;
 }
 
+export type RecordingAnchorReason =
+  | "cursor"
+  | "last_passing"
+  | "fallback_cursor";
+
+// Mirrors the inline event shape on RecordingEventPayload.events in
+// src/lib/ws/protocol.ts / EmbeddedRecorder's RecordingEventData — kept as a
+// separate declaration here since packages/embedded-browser has no
+// dependency on app-side or ws-protocol code.
+export interface RecordingEventData {
+  type: string;
+  timestamp: number;
+  sequence: number;
+  status: "preview" | "committed";
+  verification?: {
+    syntaxValid: boolean;
+    domVerified?: boolean;
+    lastChecked?: number;
+    selectorMatches?: Array<{ type: string; value: string; count: number }>;
+    chosenSelector?: string;
+    autoRepaired?: boolean;
+  };
+  data: Record<string, unknown>;
+}
+
 export interface DebugStatePayload {
   sessionId: string;
   testId: string;
@@ -52,6 +78,18 @@ export interface DebugStatePayload {
   code: string;
   error?: string;
   codeVersion: number;
+  isRecording: boolean;
+  recordedEventCount: number;
+  recordingAnchorIndex?: number;
+  recordingAnchorReason?: RecordingAnchorReason;
+  spliceMode?: "replace" | "insert";
+  targetUrl?: string;
+  // Set exactly once, on the first getState() tick after stop_recording
+  // finishes. Drained (nulled) by getState() itself right after reading it.
+  pendingRecordingEvents?: RecordingEventData[];
+  // Live, not-yet-spliced recording buffer, reported on EVERY tick while
+  // recording so the UI can render a timeline as actions happen.
+  recordingEvents?: RecordingEventData[];
 }
 
 export interface StartDebugPayload {
@@ -65,6 +103,13 @@ export interface StartDebugPayload {
   storageState?: string;
   setupVariables?: Record<string, unknown>;
   stabilization?: StabilizationPayload;
+  selectorPriority?: Array<{
+    type: string;
+    enabled: boolean;
+    priority: number;
+  }>;
+  pointerGestures?: boolean;
+  cursorFPS?: number;
 }
 
 export interface DebugActionPayload {
@@ -74,11 +119,32 @@ export interface DebugActionPayload {
     | "step_back"
     | "run_to_end"
     | "run_to_step"
-    | "update_code";
+    | "update_code"
+    | "start_recording"
+    | "stop_recording"
+    // Floating recording-control equivalents — see DebugActionCommandPayload
+    // in src/lib/ws/protocol.ts. Act on the attached `this.recorder` during an
+    // active "record from here" session.
+    | "recording_screenshot"
+    | "recording_assertion"
+    | "recording_flag_download"
+    | "recording_insert_timestamp"
+    | "recording_insert_wait"
+    | "recording_toggle_pause";
   stepIndex?: number;
   code?: string;
   cleanBody?: string;
   steps?: DebugStep[];
+  spliceMode?: "replace" | "insert";
+  // recording_assertion
+  assertionType?: string;
+  // recording_insert_wait
+  waitType?: "duration" | "selector";
+  durationMs?: number;
+  selector?: string;
+  selectors?: Array<{ type: string; value: string }>;
+  condition?: "visible" | "hidden";
+  timeoutMs?: number;
 }
 
 // -------- Pause Controller --------
@@ -188,6 +254,13 @@ export class EmbeddedDebugExecutor {
   private storageState?: string;
   private setupVariables?: Record<string, unknown>;
   private stabilization?: StabilizationPayload;
+  private selectorPriority?: Array<{
+    type: string;
+    enabled: boolean;
+    priority: number;
+  }>;
+  private pointerGestures?: boolean;
+  private cursorFPS?: number;
   private generation = 0;
   // Set when update_code changes the step list while an execution built from
   // the OLD instrumented body is still alive. Resuming that body would run
@@ -195,11 +268,36 @@ export class EmbeddedDebugExecutor {
   // resume while stale triggers a replay with the new code instead.
   private staleCode = false;
 
+  // -------- Recording ("Record from here") state --------
+  private recorder: EmbeddedRecorder | null = null;
+  private spliceMode: "replace" | "insert" | null = null;
+  private recordingAnchorIndex = -1;
+  private recordingAnchorReason: RecordingAnchorReason | null = null;
+  // Set once by stopRecordingAndCollect(), drained (nulled) by getState().
+  private pendingRecordingEvents: RecordingEventData[] | null = null;
+  // Live buffer appended to by the recorder's onEvent callback while recording.
+  // Reported every tick via getState().recordingEvents; reset on each start.
+  private liveRecordingEvents: RecordingEventData[] = [];
+
   constructor(browser: Browser) {
     this.browser = browser;
   }
 
   async start(payload: StartDebugPayload): Promise<void> {
+    // A new debug session is starting (or this executor instance is being
+    // reused) — any recorder left attached to the OLD page must be stopped
+    // before that page is torn down, or its page.on("close") handler fires
+    // defensively but the recorder's internal state is left dangling.
+    if (this.recorder) {
+      await this.recorder.forceCleanup();
+      this.recorder = null;
+    }
+    this.spliceMode = null;
+    this.recordingAnchorIndex = -1;
+    this.recordingAnchorReason = null;
+    this.pendingRecordingEvents = null;
+    this.liveRecordingEvents = [];
+
     this.sessionId = payload.sessionId;
     this.testId = payload.testId;
     this.code = payload.code;
@@ -220,6 +318,9 @@ export class EmbeddedDebugExecutor {
     this.storageState = payload.storageState;
     this.setupVariables = payload.setupVariables;
     this.stabilization = payload.stabilization;
+    this.selectorPriority = payload.selectorPriority;
+    this.pointerGestures = payload.pointerGestures;
+    this.cursorFPS = payload.cursorFPS;
     this.generation++;
 
     await this.createContextAndPage();
@@ -281,6 +382,76 @@ export class EmbeddedDebugExecutor {
         this.error = err?.message || String(err);
       }
     });
+  }
+
+  private findLastPassingStepIndex(): number {
+    for (let i = this.stepResults.length - 1; i >= 0; i--) {
+      if (this.stepResults[i].status === "passed") return i;
+    }
+    return -1;
+  }
+
+  /**
+   * Begin "Record from here". On a failed step, rewinds to the last
+   * passing step (or falls back to the cursor step if none passed) so the
+   * live page has a clean DOM to record against. On a paused-not-failed
+   * step, anchors at the cursor with no rewind.
+   */
+  private async startRecordingFromHere(
+    spliceMode: "replace" | "insert",
+  ): Promise<void> {
+    this.spliceMode = spliceMode;
+    // Fresh start — drop any events from a prior recording so the live buffer
+    // only reflects this session.
+    this.liveRecordingEvents = [];
+
+    if (this.status === "error") {
+      const lastPassing = this.findLastPassingStepIndex();
+      if (lastPassing >= 0) {
+        this.recordingAnchorIndex = lastPassing;
+        this.recordingAnchorReason = "last_passing";
+        // +1: replayToStep's target is "pause BEFORE this step index runs",
+        // which is the same instant as "right after step lastPassing
+        // finished" — the same convention step_forward's stale-code branch
+        // already uses (Math.max(0, currentStepIndex + 1) above).
+        await this.replayToStep(lastPassing + 1);
+      } else {
+        this.recordingAnchorIndex = Math.max(0, this.currentStepIndex);
+        this.recordingAnchorReason = "fallback_cursor";
+      }
+    } else {
+      this.recordingAnchorIndex = Math.max(0, this.currentStepIndex);
+      this.recordingAnchorReason = "cursor";
+    }
+
+    if (!this.debugPage) return;
+    this.recorder ??= new EmbeddedRecorder();
+    await this.recorder.attachToPage(
+      this.debugPage,
+      new URL(this.targetUrl).origin,
+      {
+        selectorPriority: this.selectorPriority,
+        pointerGestures: this.pointerGestures,
+        cursorFPS: this.cursorFPS,
+        captureThumbnails: false,
+      },
+      (events) => {
+        // Append each freshly-flushed event to the live buffer so getState()
+        // can report the full not-yet-spliced timeline on every tick.
+        this.liveRecordingEvents.push(...events);
+      },
+    );
+  }
+
+  private async stopRecordingAndCollect(): Promise<void> {
+    if (!this.recorder) return;
+    const events = await this.recorder.stop(false);
+    this.pendingRecordingEvents = events;
+    // spliceMode + recordingAnchorIndex/Reason are intentionally retained —
+    // getState() must report them alongside pendingRecordingEvents so the
+    // server's consumeStopRecording knows whether to replace or insert. They
+    // are cleared when the spliced update_code round-trips, or on the next
+    // start_recording — not here.
   }
 
   async handleAction(
@@ -348,6 +519,13 @@ export class EmbeddedDebugExecutor {
           this.cleanBody = payload.cleanBody;
           if (payload.code) this.code = payload.code;
           this.codeVersion++;
+          // The spliced code has now round-tripped back from the server — the
+          // recording is consumed. Clear the splice metadata so getState() stops
+          // re-reporting the events (which would make the server re-splice).
+          this.pendingRecordingEvents = null;
+          this.spliceMode = null;
+          this.recordingAnchorIndex = -1;
+          this.recordingAnchorReason = null;
           // The live execution (if any) was instrumented from the OLD body —
           // resuming it would silently run stale code. Any subsequent control
           // action replays with the new code instead (see staleCode checks).
@@ -394,10 +572,88 @@ export class EmbeddedDebugExecutor {
           }
         }
         break;
+
+      case "start_recording":
+        if (payload?.spliceMode) {
+          await this.startRecordingFromHere(payload.spliceMode);
+        }
+        break;
+
+      case "stop_recording":
+        await this.stopRecordingAndCollect();
+        break;
+
+      // -------- Floating recording-control equivalents --------
+      // Each mirrors the repo-scoped recording action in
+      // src/server/actions/recording.ts, which (via the EB's normal /record
+      // command handler in index.ts) calls the same recorder method we call
+      // here against the debug session's attached recorder.
+
+      // recording.ts captureScreenshot -> command:capture_screenshot ->
+      // index.ts recorder.takeScreenshot() (index.ts ~L1187). Buffers a
+      // "screenshot" event into the recorder, spliced into the test on stop.
+      case "recording_screenshot":
+        if (this.recorder?.isActive()) {
+          await this.recorder.takeScreenshot();
+        }
+        break;
+
+      // recording.ts createAssertion -> command:create_assertion ->
+      // index.ts recorder.createAssertion(assertionType) (index.ts ~L1218).
+      case "recording_assertion":
+        if (this.recorder?.isActive() && payload?.assertionType) {
+          this.recorder.createAssertion(payload.assertionType);
+        }
+        break;
+
+      // recording.ts flagDownload -> command:flag_download ->
+      // index.ts recorder.flagDownload() (index.ts ~L1256).
+      case "recording_flag_download":
+        if (this.recorder?.isActive()) {
+          this.recorder.flagDownload();
+        }
+        break;
+
+      // recording.ts insertTimestamp -> command:insert_timestamp ->
+      // index.ts recorder.insertTimestamp() (index.ts ~L1263).
+      case "recording_insert_timestamp":
+        if (this.recorder?.isActive()) {
+          await this.recorder.insertTimestamp();
+        }
+        break;
+
+      // recording.ts createWait -> command:create_wait ->
+      // index.ts recorder.createWait({...}) (index.ts ~L1236).
+      case "recording_insert_wait":
+        if (this.recorder?.isActive() && payload?.waitType) {
+          this.recorder.createWait({
+            waitType: payload.waitType,
+            durationMs: payload.durationMs,
+            selector: payload.selector,
+            selectors: payload.selectors,
+            condition: payload.condition,
+            timeoutMs: payload.timeoutMs,
+          });
+        }
+        break;
+
+      // recording.ts togglePauseRecording is a no-op for remote sessions
+      // ("Pause is not supported for remote recording sessions"), and
+      // EmbeddedRecorder exposes no pause/resume — there is nothing to call.
+      // Kept as an explicit, non-faked no-op for command parity.
+      case "recording_toggle_pause":
+        console.log(
+          "[DebugExecutor] recording_toggle_pause is unsupported (EmbeddedRecorder has no pause/resume; mirrors recording.ts togglePauseRecording)",
+        );
+        break;
     }
   }
 
   async stop(): Promise<void> {
+    if (this.recorder) {
+      await this.recorder.forceCleanup();
+      this.recorder = null;
+    }
     this.pauseController?.stop();
     this.pauseController = null;
     this.status = "completed";
@@ -405,6 +661,13 @@ export class EmbeddedDebugExecutor {
   }
 
   getState(): DebugStatePayload {
+    // pendingRecordingEvents is reported on EVERY tick until the splice lands.
+    // It used to be drained here (one-shot), but the server reads state on its
+    // own poll cycle that races the runner's WS push — a single drained push
+    // could be missed or overwritten by a later null push, so the splice never
+    // ran. The events are now cleared deterministically when the spliced
+    // update_code round-trips back (handleAction "update_code"), or on the next
+    // start_recording.
     return {
       sessionId: this.sessionId,
       testId: this.testId,
@@ -415,6 +678,15 @@ export class EmbeddedDebugExecutor {
       code: this.code,
       error: this.error,
       codeVersion: this.codeVersion,
+      isRecording: this.recorder?.isActive() ?? false,
+      recordedEventCount: this.recorder?.getEventCount() ?? 0,
+      recordingAnchorIndex:
+        this.recordingAnchorIndex >= 0 ? this.recordingAnchorIndex : undefined,
+      recordingAnchorReason: this.recordingAnchorReason ?? undefined,
+      spliceMode: this.spliceMode ?? undefined,
+      targetUrl: this.targetUrl || undefined,
+      pendingRecordingEvents: this.pendingRecordingEvents ?? undefined,
+      recordingEvents: this.liveRecordingEvents,
     };
   }
 
