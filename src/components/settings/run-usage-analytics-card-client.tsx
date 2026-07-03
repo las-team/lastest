@@ -95,7 +95,7 @@ export function RunUsageAnalyticsCard({
   const isEmpty = totalMinutes <= 0 || repos.length === 0;
 
   return (
-    <Card id="run-usage-analytics" className="overflow-hidden py-0 gap-0">
+    <Card className="overflow-hidden py-0 gap-0">
       {/* header */}
       <div className="flex flex-wrap items-start justify-between gap-4 border-b p-5">
         <div>

@@ -83,7 +83,7 @@ export function RunUsageBanner({
           </span>
         </div>
         <Link
-          href="/settings/billing#run-usage-analytics"
+          href="/settings#run-usage-analytics"
           className="hidden whitespace-nowrap text-[12.5px] font-medium text-[color:var(--chart-2)] hover:underline sm:inline"
         >
           View usage
