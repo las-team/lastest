@@ -104,8 +104,8 @@ export function RunUsageAnalyticsCard({
             Run usage analytics
           </div>
           <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-            Where your run-minutes go — last {analytics.days} days by project,
-            drill in to per-test cost.
+            Where your run-minutes go this billing cycle by project — drill in
+            to per-test cost.
           </p>
         </div>
         <div className="flex items-center gap-1.5 whitespace-nowrap pt-0.5 font-mono text-[10.5px] uppercase tracking-wider text-muted-foreground">

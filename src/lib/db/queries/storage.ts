@@ -210,17 +210,17 @@ function buildDaySeries(
 
 export async function getTeamRunUsageAnalytics(
   teamId: string,
-  days = 30,
 ): Promise<RunUsageAnalytics> {
   const now = new Date();
-  // Inclusive window: midnight UTC (days-1) days ago through today.
+  // Window aligned to the run-minute billing cycle rather than a rolling 30
+  // days: from the 1st of the current UTC month (when the monthly counters +
+  // quota reset — see getTeamRunUsage / recordTeamRunCompletion) through
+  // today. `days` is the day-of-month elapsed, so the chart, the monthly
+  // run-minute counter, and the projection all cover the same period.
   const startDay = new Date(
-    Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate() - (days - 1),
-    ),
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
   );
+  const days = now.getUTCDate();
 
   const empty: RunUsageAnalytics = {
     days,
