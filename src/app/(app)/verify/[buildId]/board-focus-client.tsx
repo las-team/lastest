@@ -1036,13 +1036,17 @@ function BoardFocusInner(props: BoardFocusClientProps) {
         fontFamily: "var(--font-sans)",
       }}
     >
-      {/* Header — no secondary logo (sidebar already shows the brand). */}
+      {/* Header — no secondary logo (sidebar already shows the brand).
+          Wraps on narrow viewports so the mode tabs + Filter/Branch/Run
+          controls drop to a second row instead of overflowing. */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "14px 20px",
+          flexWrap: "wrap",
+          gap: 8,
+          padding: "12px 16px",
           borderBottom: "1px solid var(--border)",
           background: "var(--c-white)",
           position: "relative",
@@ -1081,7 +1085,14 @@ function BoardFocusInner(props: BoardFocusClientProps) {
                 : `${totalCases} cases`}
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: "wrap",
+          }}
+        >
           <div className="v-tabs">
             <button
               className={`v-tab ${mode === "board" ? "active" : ""}`}
@@ -1494,12 +1505,12 @@ function FilterPanel({ filters, areas, onChange, onClose }: FilterPanelProps) {
         style={{ position: "fixed", inset: 0, zIndex: 50 }}
       />
       <div
-        className="v-card"
+        className="v-card v-popover"
         style={{
           position: "absolute",
           top: "calc(100% + 6px)",
           right: 0,
-          width: 320,
+          width: "min(320px, calc(100vw - 24px))",
           padding: 14,
           zIndex: 51,
           display: "flex",
@@ -1675,12 +1686,12 @@ function BranchPicker({
         style={{ position: "fixed", inset: 0, zIndex: 50 }}
       />
       <div
-        className="v-card"
+        className="v-card v-popover"
         style={{
           position: "absolute",
           top: "calc(100% + 6px)",
           right: 0,
-          width: 280,
+          width: "min(280px, calc(100vw - 24px))",
           padding: 8,
           zIndex: 51,
           display: "flex",

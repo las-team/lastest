@@ -428,9 +428,7 @@ export default async function PublicSharePage({ params }: PageProps) {
           </>
         )}
 
-        {showAwardBadges && award && (
-          <AwardBadgeRow award={award} slug={slug} />
-        )}
+        {showAwardBadges && award && <AwardBadgeRow award={award} />}
 
         <ClaimCTA claimLink={claimLink} signInLink={signInLink} />
 

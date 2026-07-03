@@ -247,3 +247,25 @@
   background: rgba(31, 42, 51, 0.06);
   border-radius: 2px;
 }
+
+/* ---- Mobile (< 768px — same breakpoint as useIsMobile) ---------------- */
+@media (max-width: 767.98px) {
+  /* The shared 132px floor exists so desktop action bars line up; on a
+   * 360px viewport it forces header rows to wrap after two buttons. */
+  .verify-page .v-btn {
+    min-width: 0;
+  }
+  /* Anchored dropdowns (filter panel, branch picker) re-anchor to the
+   * viewport on phones — a 280–320px panel hanging off `right: 0` of a
+   * button that can sit anywhere in a wrapped header would otherwise land
+   * partly offscreen. */
+  .verify-page .v-popover {
+    position: fixed !important;
+    left: 12px !important;
+    right: 12px !important;
+    top: 7rem !important;
+    width: auto !important;
+    max-height: calc(100dvh - 12rem);
+    overflow-y: auto;
+  }
+}

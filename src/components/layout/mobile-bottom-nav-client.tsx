@@ -3,33 +3,55 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Play, Sparkles, Menu } from "lucide-react";
+import { Play, Sparkles, Menu, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
 interface MobileBottomNavProps {
   sidebar: React.ReactNode;
+  /** Team flag — when the Verify phase is on, the triage board is the core
+   *  mobile job and earns a first-class tab next to Run/Review. */
+  verifyEnabled?: boolean;
 }
 
-const TABS = [
-  {
-    name: "Run",
-    href: "/run",
-    icon: Play,
-    match: (p: string) => p === "/run" || p.startsWith("/run/"),
-  },
-  {
-    name: "Review",
-    href: "/review",
-    icon: Sparkles,
-    match: (p: string) =>
-      p === "/review" || p.startsWith("/review/") || p.startsWith("/builds/"),
-  },
-] as const;
+interface Tab {
+  name: string;
+  href: string;
+  icon: typeof Play;
+  match: (p: string) => boolean;
+}
 
-export function MobileBottomNav({ sidebar }: MobileBottomNavProps) {
+const RUN_TAB: Tab = {
+  name: "Run",
+  href: "/run",
+  icon: Play,
+  match: (p) => p === "/run" || p.startsWith("/run/"),
+};
+
+const VERIFY_TAB: Tab = {
+  name: "Verify",
+  href: "/verify",
+  icon: ShieldCheck,
+  match: (p) => p === "/verify" || p.startsWith("/verify/"),
+};
+
+const REVIEW_TAB: Tab = {
+  name: "Review",
+  href: "/review",
+  icon: Sparkles,
+  match: (p) =>
+    p === "/review" || p.startsWith("/review/") || p.startsWith("/builds/"),
+};
+
+export function MobileBottomNav({
+  sidebar,
+  verifyEnabled = false,
+}: MobileBottomNavProps) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
+  const tabs = verifyEnabled
+    ? [RUN_TAB, VERIFY_TAB, REVIEW_TAB]
+    : [RUN_TAB, REVIEW_TAB];
 
   return (
     <>
@@ -39,7 +61,7 @@ export function MobileBottomNav({ sidebar }: MobileBottomNavProps) {
           "h-14 pb-[env(safe-area-inset-bottom)]",
         )}
       >
-        {TABS.map((tab) => {
+        {tabs.map((tab) => {
           const active = tab.match(pathname);
           return (
             <Link
