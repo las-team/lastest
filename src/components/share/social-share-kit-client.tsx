@@ -1,0 +1,752 @@
+"use client";
+
+// Social share kit for the public /r/<slug> page. Replaces the old plain-text
+// SocialShareRow with icon buttons and platform-specific "share assistants":
+// X, YouTube, and TikTok have no web intent that can carry media or upload
+// metadata, so each dialog prepopulates every field the platform's composer
+// asks for (copy-to-clipboard), prepares the media (MP4 conversion for X /
+// TikTok video, a zip of step screenshots for TikTok slideshows), and
+// deep-links into the platform's uploader.
+
+import { useMemo, useState } from "react";
+import {
+  Check,
+  Copy,
+  Download,
+  ExternalLink,
+  Images,
+  Link2,
+  Loader2,
+  Video,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { buildZip, type ZipEntry } from "@/lib/share/client-zip";
+import {
+  convertWebmToMp4,
+  mp4ConversionSupported,
+} from "@/lib/share/mp4-convert";
+import type { SocialCopy } from "@/lib/share/social-copy";
+
+export interface ShareSlide {
+  url: string;
+  label: string;
+}
+
+export interface SocialShareKitProps {
+  shareUrl: string;
+  /** Basis for downloaded filenames, e.g. the test name or domain. */
+  title: string;
+  copy: SocialCopy;
+  /** Same-origin /share/<slug>/... URL of the run recording, when one exists. */
+  videoUrl: string | null;
+  videoDurationMs: number | null;
+  /** Step screenshots for the TikTok slideshow flow, in capture order. */
+  slides: ShareSlide[];
+}
+
+export function SocialShareKit({
+  shareUrl,
+  title,
+  copy,
+  videoUrl,
+  videoDurationMs,
+  slides,
+}: SocialShareKitProps) {
+  const fileStem = useMemo(() => slugify(title), [title]);
+  const linkedin = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl)}`;
+
+  return (
+    <section className="space-y-2 pt-2 border-t">
+      <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        Share this run
+      </h2>
+      <div className="flex flex-wrap items-center gap-2">
+        <XShareDialog
+          copy={copy}
+          videoUrl={videoUrl}
+          videoDurationMs={videoDurationMs}
+          fileStem={fileStem}
+        />
+        <YouTubeShareDialog
+          copy={copy}
+          videoUrl={videoUrl}
+          videoDurationMs={videoDurationMs}
+          fileStem={fileStem}
+        />
+        <TikTokShareDialog
+          copy={copy}
+          videoUrl={videoUrl}
+          videoDurationMs={videoDurationMs}
+          slides={slides}
+          fileStem={fileStem}
+        />
+        <ShareChip asChild>
+          <a href={linkedin} target="_blank" rel="noopener noreferrer">
+            <LinkedInLogo className="size-3.5" />
+            LinkedIn
+          </a>
+        </ShareChip>
+        <CopyLinkChip shareUrl={shareUrl} />
+      </div>
+    </section>
+  );
+}
+
+// --- X ------------------------------------------------------------------------
+
+function XShareDialog({
+  copy,
+  videoUrl,
+  videoDurationMs,
+  fileStem,
+}: {
+  copy: SocialCopy;
+  videoUrl: string | null;
+  videoDurationMs: number | null;
+  fileStem: string;
+}) {
+  const intent = `https://x.com/intent/post?text=${encodeURIComponent(copy.x)}`;
+
+  // Without a recording there is nothing to attach — keep the one-click intent.
+  if (!videoUrl) {
+    return (
+      <ShareChip asChild>
+        <a href={intent} target="_blank" rel="noopener noreferrer">
+          <XLogo className="size-3.5" />
+          Post to X
+        </a>
+      </ShareChip>
+    );
+  }
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <ShareChip>
+          <XLogo className="size-3.5" />
+          Post to X
+        </ShareChip>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Post to X with the recording</DialogTitle>
+          <DialogDescription>
+            X can&apos;t receive a video through a share link, so grab the clip
+            first and attach it to the prefilled post.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <StepBlock n={1} label="Download the recording (X needs MP4)">
+            <VideoDownloadButton
+              videoUrl={videoUrl}
+              videoDurationMs={videoDurationMs}
+              fileStem={fileStem}
+              preferMp4
+            />
+          </StepBlock>
+          <StepBlock n={2} label="Post text (prefilled — edit away)">
+            <CopyField value={copy.x} rows={5} ariaLabel="X post text" />
+          </StepBlock>
+          <StepBlock n={3} label="Open the composer and attach the video">
+            <Button asChild size="sm">
+              <a href={intent} target="_blank" rel="noopener noreferrer">
+                <XLogo className="size-3.5" />
+                Open X composer
+                <ExternalLink className="size-3.5" />
+              </a>
+            </Button>
+          </StepBlock>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// --- YouTube --------------------------------------------------------------------
+
+function YouTubeShareDialog({
+  copy,
+  videoUrl,
+  videoDurationMs,
+  fileStem,
+}: {
+  copy: SocialCopy;
+  videoUrl: string | null;
+  videoDurationMs: number | null;
+  fileStem: string;
+}) {
+  if (!videoUrl) return null;
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <ShareChip>
+          <YouTubeLogo className="size-3.5" />
+          YouTube
+        </ShareChip>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Upload to YouTube</DialogTitle>
+          <DialogDescription>
+            Everything below is prefilled from this run — download the
+            recording, then paste the metadata into YouTube&apos;s upload form.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <StepBlock n={1} label="Download the recording">
+            <VideoDownloadButton
+              videoUrl={videoUrl}
+              videoDurationMs={videoDurationMs}
+              fileStem={fileStem}
+              webmNote="YouTube accepts .webm uploads directly."
+            />
+          </StepBlock>
+          <StepBlock n={2} label="Copy the metadata">
+            <div className="space-y-3">
+              <LabeledCopyField label="Title" value={copy.youtube.title} />
+              <LabeledCopyField
+                label="Description (includes chapters + report link)"
+                value={copy.youtube.description}
+                rows={8}
+              />
+              <LabeledCopyField label="Tags" value={copy.youtube.tags} />
+            </div>
+          </StepBlock>
+          <StepBlock n={3} label="Upload">
+            <Button asChild size="sm">
+              <a
+                href="https://www.youtube.com/upload"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <YouTubeLogo className="size-3.5" />
+                Open YouTube upload
+                <ExternalLink className="size-3.5" />
+              </a>
+            </Button>
+          </StepBlock>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// --- TikTok ---------------------------------------------------------------------
+
+function TikTokShareDialog({
+  copy,
+  videoUrl,
+  videoDurationMs,
+  slides,
+  fileStem,
+}: {
+  copy: SocialCopy;
+  videoUrl: string | null;
+  videoDurationMs: number | null;
+  slides: ShareSlide[];
+  fileStem: string;
+}) {
+  const hasVideo = !!videoUrl;
+  const hasSlides = slides.length >= 2;
+  if (!hasVideo && !hasSlides) return null;
+
+  const uploadButton = (
+    <Button asChild size="sm">
+      <a
+        href="https://www.tiktok.com/tiktokstudio/upload"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <TikTokLogo className="size-3.5" />
+        Open TikTok upload
+        <ExternalLink className="size-3.5" />
+      </a>
+    </Button>
+  );
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <ShareChip>
+          <TikTokLogo className="size-3.5" />
+          TikTok
+        </ShareChip>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Share on TikTok</DialogTitle>
+          <DialogDescription>
+            Post the run as a video, or as a swipeable photo slideshow built
+            from the step screenshots. Caption is prefilled below.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <LabeledCopyField
+            label="Caption (hashtags + report link included)"
+            value={copy.tiktok}
+            rows={6}
+          />
+          <Tabs defaultValue={hasVideo ? "video" : "slideshow"}>
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="video" disabled={!hasVideo}>
+                <Video className="size-3.5" />
+                Video
+              </TabsTrigger>
+              <TabsTrigger value="slideshow" disabled={!hasSlides}>
+                <Images className="size-3.5" />
+                Slideshow
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="video" className="space-y-4 pt-3">
+              {videoUrl && (
+                <>
+                  <StepBlock n={1} label="Download the recording">
+                    <VideoDownloadButton
+                      videoUrl={videoUrl}
+                      videoDurationMs={videoDurationMs}
+                      fileStem={fileStem}
+                      preferMp4
+                    />
+                  </StepBlock>
+                  <StepBlock
+                    n={2}
+                    label="Upload the video and paste the caption"
+                  >
+                    {uploadButton}
+                  </StepBlock>
+                </>
+              )}
+            </TabsContent>
+            <TabsContent value="slideshow" className="space-y-4 pt-3">
+              <StepBlock
+                n={1}
+                label={`Download the ${slides.length} step screenshots`}
+              >
+                <SlideshowDownload slides={slides} fileStem={fileStem} />
+              </StepBlock>
+              <StepBlock
+                n={2}
+                label="Upload — select all images and TikTok builds the slideshow"
+              >
+                {uploadButton}
+              </StepBlock>
+            </TabsContent>
+          </Tabs>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SlideshowDownload({
+  slides,
+  fileStem,
+}: {
+  slides: ShareSlide[];
+  fileStem: string;
+}) {
+  const [state, setState] = useState<"idle" | "working" | "done" | "error">(
+    "idle",
+  );
+
+  const download = async () => {
+    setState("working");
+    try {
+      const entries: ZipEntry[] = [];
+      for (let i = 0; i < slides.length; i++) {
+        const s = slides[i];
+        const res = await fetch(s.url);
+        if (!res.ok) continue;
+        const buf = new Uint8Array(await res.arrayBuffer());
+        const ext = extensionOf(s.url) ?? "png";
+        const idx = `${i + 1}`.padStart(2, "0");
+        entries.push({ name: `${idx}-${slugify(s.label)}.${ext}`, data: buf });
+      }
+      if (entries.length === 0) throw new Error("no slides fetched");
+      triggerDownload(buildZip(entries), `${fileStem}-slides.zip`);
+      setState("done");
+    } catch {
+      setState("error");
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-1.5">
+        {slides.slice(0, 8).map((s, i) => (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={i}
+            src={s.url}
+            alt={s.label}
+            loading="lazy"
+            className="h-12 w-9 rounded border object-cover object-top"
+          />
+        ))}
+        {slides.length > 8 && (
+          <span className="flex h-12 w-9 items-center justify-center rounded border text-[10px] text-muted-foreground">
+            +{slides.length - 8}
+          </span>
+        )}
+      </div>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={download}
+        disabled={state === "working"}
+      >
+        {state === "working" ? (
+          <Loader2 className="size-3.5 animate-spin" />
+        ) : state === "done" ? (
+          <Check className="size-3.5" />
+        ) : (
+          <Download className="size-3.5" />
+        )}
+        {state === "working"
+          ? "Bundling…"
+          : state === "done"
+            ? "Downloaded"
+            : "Download slides (.zip)"}
+      </Button>
+      {state === "error" && (
+        <p className="text-xs text-destructive">
+          Couldn&apos;t bundle the screenshots — try again.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// --- video download (with best-effort MP4 conversion) ---------------------------
+
+function VideoDownloadButton({
+  videoUrl,
+  videoDurationMs,
+  fileStem,
+  preferMp4 = false,
+  webmNote,
+}: {
+  videoUrl: string;
+  videoDurationMs: number | null;
+  fileStem: string;
+  /** True when the target platform (X, TikTok app) rejects .webm. */
+  preferMp4?: boolean;
+  webmNote?: string;
+}) {
+  const [state, setState] = useState<
+    "idle" | "converting" | "done" | "fallback"
+  >("idle");
+  const [progress, setProgress] = useState(0);
+  const canConvert = typeof window !== "undefined" && mp4ConversionSupported();
+
+  const downloadWebm = async () => {
+    try {
+      const res = await fetch(videoUrl);
+      if (!res.ok) throw new Error(String(res.status));
+      triggerDownload(await res.blob(), `${fileStem}.webm`);
+    } catch {
+      // Last resort: hand the URL to the browser directly.
+      window.open(videoUrl, "_blank", "noopener");
+    }
+  };
+
+  const downloadMp4 = async () => {
+    setState("converting");
+    setProgress(0);
+    try {
+      const blob = await convertWebmToMp4(videoUrl, {
+        durationMs: videoDurationMs,
+        onProgress: setProgress,
+      });
+      triggerDownload(blob, `${fileStem}.mp4`);
+      setState("done");
+    } catch {
+      await downloadWebm();
+      setState("fallback");
+    }
+  };
+
+  const wantMp4 = preferMp4 && canConvert;
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={wantMp4 ? downloadMp4 : downloadWebm}
+          disabled={state === "converting"}
+        >
+          {state === "converting" ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : state === "done" ? (
+            <Check className="size-3.5" />
+          ) : (
+            <Download className="size-3.5" />
+          )}
+          {state === "converting"
+            ? `Converting… ${Math.round(progress * 100)}%`
+            : wantMp4
+              ? "Download video (MP4)"
+              : "Download video (.webm)"}
+        </Button>
+        {wantMp4 && (
+          <button
+            type="button"
+            onClick={downloadWebm}
+            className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+          >
+            original .webm
+          </button>
+        )}
+      </div>
+      {state === "converting" && (
+        <p className="text-xs text-muted-foreground">
+          Re-encoding in your browser — takes about the clip&apos;s length.
+        </p>
+      )}
+      {preferMp4 && !canConvert && (
+        <p className="text-xs text-muted-foreground">
+          This browser can&apos;t convert to MP4 — the platform may reject
+          .webm, so convert it first (e.g. with an online converter).
+        </p>
+      )}
+      {state === "fallback" && (
+        <p className="text-xs text-muted-foreground">
+          MP4 conversion failed — downloaded the original .webm instead.
+        </p>
+      )}
+      {!preferMp4 && webmNote && (
+        <p className="text-xs text-muted-foreground">{webmNote}</p>
+      )}
+    </div>
+  );
+}
+
+// --- shared bits ----------------------------------------------------------------
+
+function ShareChip({
+  asChild,
+  children,
+  ...props
+}: React.ComponentProps<typeof Button> & { asChild?: boolean }) {
+  return (
+    <Button
+      asChild={asChild}
+      variant="outline"
+      size="sm"
+      className="h-8 gap-1.5 rounded-md bg-card px-3 text-xs font-medium"
+      {...props}
+    >
+      {children}
+    </Button>
+  );
+}
+
+function CopyLinkChip({ shareUrl }: { shareUrl: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard unavailable (e.g. insecure context) — select-and-copy is
+      // still possible from the address bar; do nothing.
+    }
+  };
+  return (
+    <ShareChip onClick={copy} aria-label="Copy share link">
+      {copied ? <Check className="size-3.5" /> : <Link2 className="size-3.5" />}
+      {copied ? "Copied" : "Copy link"}
+    </ShareChip>
+  );
+}
+
+function StepBlock({
+  n,
+  label,
+  children,
+}: {
+  n: number;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold">
+          {n}
+        </span>
+        {label}
+      </div>
+      <div className="pl-7">{children}</div>
+    </div>
+  );
+}
+
+function LabeledCopyField({
+  label,
+  value,
+  rows,
+}: {
+  label: string;
+  value: string;
+  rows?: number;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs text-muted-foreground">{label}</Label>
+      <CopyField value={value} rows={rows} ariaLabel={label} />
+    </div>
+  );
+}
+
+function CopyField({
+  value,
+  rows,
+  ariaLabel,
+}: {
+  value: string;
+  rows?: number;
+  ariaLabel: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Field stays selectable for manual copy.
+    }
+  };
+  return (
+    <div className="flex items-start gap-2">
+      {rows && rows > 1 ? (
+        <Textarea
+          readOnly
+          value={value}
+          rows={rows}
+          aria-label={ariaLabel}
+          className="text-xs font-mono"
+          onFocus={(e) => e.currentTarget.select()}
+        />
+      ) : (
+        <Input
+          readOnly
+          value={value}
+          aria-label={ariaLabel}
+          className="text-xs font-mono"
+          onFocus={(e) => e.currentTarget.select()}
+        />
+      )}
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={copy}
+        aria-label={`Copy ${ariaLabel}`}
+        className="shrink-0"
+      >
+        {copied ? (
+          <Check className="size-3.5" />
+        ) : (
+          <Copy className="size-3.5" />
+        )}
+      </Button>
+    </div>
+  );
+}
+
+function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Give the browser a beat to start the download before revoking.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+function slugify(s: string): string {
+  return (
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60) || "lastest-run"
+  );
+}
+
+function extensionOf(url: string): string | null {
+  const m = url.split("?")[0].match(/\.([a-z0-9]{2,5})$/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
+// --- brand marks (lucide dropped brand icons, so inline the SVGs) ---------------
+
+function XLogo({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden
+      fill="currentColor"
+      className={className}
+    >
+      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+    </svg>
+  );
+}
+
+function LinkedInLogo({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden
+      fill="currentColor"
+      className={className}
+    >
+      <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.225 0z" />
+    </svg>
+  );
+}
+
+function YouTubeLogo({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden
+      fill="currentColor"
+      className={className}
+    >
+      <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+    </svg>
+  );
+}
+
+function TikTokLogo({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden
+      fill="currentColor"
+      className={className}
+    >
+      <path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z" />
+    </svg>
+  );
+}
