@@ -10,7 +10,14 @@ import { ActivityFeedPanel } from "@/components/activity-feed/activity-feed-pane
 import { CelebrationListener } from "@/components/gamification/celebration-listener-client";
 import { UmamiIdentifyClient } from "@/components/analytics/umami-identify-client";
 import { AiAvailabilityProvider } from "@/components/ai/ai-availability-context";
+import { RunUsageBanner } from "@/components/layout/run-usage-banner-client";
 import { getCurrentSession } from "@/lib/auth";
+import * as queries from "@/lib/db/queries";
+import {
+  computeRunUsageProjection,
+  deriveRunUsageBannerState,
+  nextRunUsageResetLabel,
+} from "@/lib/billing/run-usage";
 
 export default async function AppLayout({
   children,
@@ -36,10 +43,32 @@ export default async function AppLayout({
   // `<ActivityFeedProvider>`, mismatching the client tree that wraps it in
   // `<div className="flex h-screen">`. Awaiting here also dedupes the
   // sidebar's DB/GitHub calls that used to run twice.
-  const [sidebarEl, mobileTopBarEl] = await Promise.all([
+  const teamId = session?.team?.id;
+  const [sidebarEl, mobileTopBarEl, runUsage] = await Promise.all([
     SidebarServer(),
     MobileTopBarServer(),
+    teamId ? queries.getTeamRunUsage(teamId) : Promise.resolve(null),
   ]);
+
+  // App-wide run-minute usage banner. Enforcement is env-gated (off by
+  // default); the derived state decides which banner (if any) renders — the
+  // client component handles per-month dismissal.
+  const runEnforcementEnabled = process.env.ENFORCE_RUN_LIMITS === "true";
+  const runProjection = runUsage
+    ? computeRunUsageProjection(
+        runUsage.runMinutesThisMonth,
+        runUsage.monthlyRunQuota,
+      )
+    : null;
+  const runBannerState =
+    runUsage && runProjection
+      ? deriveRunUsageBannerState({
+          used: runUsage.runMinutesThisMonth,
+          quota: runUsage.monthlyRunQuota,
+          projected: runProjection.projected,
+          enforcementEnabled: runEnforcementEnabled,
+        })
+      : "ok";
 
   // In-product AI ("agent functions") is available only when the team hasn't
   // banned AI and has explicitly switched on built-in AI. Otherwise CTAs across
@@ -62,6 +91,15 @@ export default async function AppLayout({
               <div className="hidden md:flex">{sidebarEl}</div>
               <div className="flex-1 flex flex-col overflow-hidden">
                 {mobileTopBarEl}
+                {runUsage && runProjection && runBannerState !== "ok" && (
+                  <RunUsageBanner
+                    state={runBannerState}
+                    quota={runUsage.monthlyRunQuota}
+                    projected={runProjection.projected}
+                    usageMonth={runUsage.usageMonth ?? ""}
+                    resetLabel={nextRunUsageResetLabel()}
+                  />
+                )}
                 <main className="flex-1 overflow-auto relative pb-14 md:pb-0">
                   {children}
                 </main>

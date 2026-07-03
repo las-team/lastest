@@ -7,6 +7,8 @@ import { getCatalog, toUiCatalog } from "@/lib/billing/catalog";
 import { BillingCard } from "@/components/settings/billing-card-client";
 import { StorageUsageCard } from "@/components/settings/storage-usage-card-client";
 import { RunUsageCard } from "@/components/settings/run-usage-card-client";
+import { RunUsageAnalyticsCard } from "@/components/settings/run-usage-analytics-card-client";
+import { computeRunUsageProjection } from "@/lib/billing/run-usage";
 
 export default async function BillingSettingsPage({
   searchParams,
@@ -21,10 +23,11 @@ export default async function BillingSettingsPage({
   }
 
   const teamId = session.team!.id;
-  const [billing, runUsage, storageUsage] = await Promise.all([
+  const [billing, runUsage, storageUsage, runAnalytics] = await Promise.all([
     queries.getTeamBilling(teamId),
     queries.getTeamRunUsage(teamId),
     queries.getTeamStorageUsage(teamId),
+    queries.getTeamRunUsageAnalytics(teamId),
   ]);
 
   const stripeConfigured = isStripeConfigured();
@@ -111,6 +114,15 @@ export default async function BillingSettingsPage({
             runUsage.runUsageLastCalculatedAt?.toISOString() ?? null
           }
           enforcementEnabled={runEnforcementEnabled}
+        />
+      )}
+      {runUsage && (
+        <RunUsageAnalyticsCard
+          analytics={runAnalytics}
+          projection={computeRunUsageProjection(
+            runUsage.runMinutesThisMonth,
+            runUsage.monthlyRunQuota,
+          )}
         />
       )}
     </div>
