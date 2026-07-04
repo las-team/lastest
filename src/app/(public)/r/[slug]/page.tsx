@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import type { CSSProperties } from "react";
 import {
   getPublicShareContext,
+  getPublicShareStats,
   getShareDataBySlug,
   type PublicShareContext,
   type ShareVisualDiff,
@@ -363,6 +364,11 @@ export default async function PublicSharePage({ params }: PageProps) {
     : null;
   const showAwardBadges = !!award && award.currentTier !== "none";
 
+  // Platform-wide activity numbers for the social-proof strip near the claim
+  // CTA. Rendering is threshold-gated inside SocialProofStrip so early-days
+  // counts never read as embarrassing.
+  const shareStats = await getPublicShareStats();
+
   // "In this video" chapters — one per captured step, seeking the recording to
   // its `atMs` offset. Falls back to even distribution across the recording
   // duration for legacy runs whose screenshots predate atMs capture.
@@ -451,6 +457,8 @@ export default async function PublicSharePage({ params }: PageProps) {
             build={build}
             perfScore={perfScore}
             testResult={primaryResult}
+            domain={displayDomain}
+            testCode={test?.code ?? null}
             pixelsChanged={totalPixelsChanged}
             stepComparisons={scopedStepComparisons}
             demoNotes={demoNotes}
@@ -492,7 +500,14 @@ export default async function PublicSharePage({ params }: PageProps) {
 
         {showAwardBadges && award && <AwardBadgeRow award={award} />}
 
-        <ClaimCTA claimLink={claimLink} signInLink={signInLink} />
+        <SocialProofStrip stats={shareStats} />
+
+        <ClaimCTA
+          claimLink={claimLink}
+          signInLink={signInLink}
+          domain={displayDomain}
+          variant={isTestShare ? "test" : "build"}
+        />
 
         <MoreDemosLink />
 
@@ -874,16 +889,26 @@ function OutcomeHeader({
               {metaBits.join(" · ")}
             </p>
           )}
+          {/* "Built for you" framing, above the fold. The dedicated claim CTA
+              sections below carry the conversion ask; the outbound product link
+              stays a quiet text link. */}
+          <p className="text-sm text-muted-foreground">
+            {variant === "test"
+              ? `We built this regression test for ${domain} — it's yours to keep, free.`
+              : `We ran this regression suite against ${domain} — the tests are yours to keep, free.`}
+          </p>
           {productUrl && (
-            <a
-              href={productUrl}
-              target="_blank"
-              rel="noopener noreferrer nofollow"
-              className="inline-flex items-center gap-1.5 rounded-md border bg-background/60 px-3 py-1.5 text-sm font-medium hover:bg-background"
-            >
-              Visit site
-              <ExternalLinkIcon />
-            </a>
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <a
+                href={productUrl}
+                target="_blank"
+                rel="noopener noreferrer nofollow"
+                className="inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 hover:underline hover:text-foreground"
+              >
+                Visit site
+                <ExternalLinkIcon />
+              </a>
+            </div>
           )}
         </div>
         {shortCommit && (
@@ -1275,7 +1300,6 @@ function LayerOutcomesGrid({
     diffs,
     stepComparisons,
   });
-  const loginHint = "Log in for more details";
   return (
     <section className="space-y-2">
       <div className="flex items-baseline justify-between gap-3">
@@ -1285,20 +1309,29 @@ function LayerOutcomesGrid({
         {signInLink && (
           <a
             href={signInLink}
-            title={loginHint}
             className="text-[11px] text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
           >
             Log in for details
           </a>
         )}
       </div>
+      {/* Chips are informational, not links. Routing a cold visitor who clicks
+          "A11y: C" into a login form converts worse than telling them what the
+          number means — the single header link above is the auth entry point. */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
         {outcomes.map((o) => {
           const t = layerToneClasses(o.tone);
-          const tip = o.title ? `${o.title} — ${loginHint}` : loginHint;
-          const cardClasses = `block rounded-md px-3 py-2 text-center ${t.card}`;
-          const body = (
-            <>
+          const tip =
+            o.title ??
+            (o.value === "—"
+              ? `${o.label} wasn't measured in this run — enable it when you claim the test`
+              : undefined);
+          return (
+            <div
+              key={o.key}
+              title={tip}
+              className={`block rounded-md px-3 py-2 text-center ${t.card}`}
+            >
               <div className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground">
                 {o.label}
               </div>
@@ -1307,20 +1340,6 @@ function LayerOutcomesGrid({
               >
                 {o.value}
               </div>
-            </>
-          );
-          return signInLink ? (
-            <a
-              key={o.key}
-              href={signInLink}
-              title={tip}
-              className={`${cardClasses} hover:border-foreground/40 transition-colors`}
-            >
-              {body}
-            </a>
-          ) : (
-            <div key={o.key} title={tip} className={cardClasses}>
-              {body}
             </div>
           );
         })}
@@ -1737,6 +1756,8 @@ function TestShareBody({
   build,
   perfScore,
   testResult,
+  domain,
+  testCode,
   pixelsChanged,
   stepComparisons,
   demoNotes,
@@ -1749,6 +1770,8 @@ function TestShareBody({
   build: Build;
   perfScore: number | null;
   testResult: ShareTestResult | null;
+  domain: string;
+  testCode: string | null;
   pixelsChanged: number;
   stepComparisons: ShareStepComparison[];
   demoNotes: DemoNotes | null;
@@ -1798,7 +1821,12 @@ function TestShareBody({
     <>
       {/* Recording player renders at page level (first element in <main>)
           so Google classifies /r/<slug> as a video watch page. */}
-      <PostVideoCTA claimLink={claimLink} signInLink={signInLink} />
+      <PostVideoCTA
+        claimLink={claimLink}
+        signInLink={signInLink}
+        domain={domain}
+        testCode={testCode}
+      />
 
       <LayerOutcomesGrid
         variant="test"
@@ -2374,64 +2402,150 @@ function DiffSlider({
   );
 }
 
+const CODE_TEASER_LINES = 12;
+
+type CodeTeaser = { lines: string[]; hiddenCount: number };
+
+// First lines of the real Playwright test, safe to render publicly. Typed-in
+// payloads (.fill/.type second string argument) are redacted so credentials or
+// emails recorded during authoring never appear on a public page. The tail of
+// the file stays behind the signup gate — the teaser's job is to prove the
+// test is real code the visitor can walk away with.
+function buildCodeTeaser(code: string | null | undefined): CodeTeaser | null {
+  if (!code) return null;
+  const redacted = code.replace(
+    /(\.(?:fill|type)\(\s*(['"`])(?:\\.|(?!\2).)*\2\s*,\s*)(['"`])(?:\\.|(?!\3).)*\3/g,
+    "$1$3•••$3",
+  );
+  const all = redacted.replace(/\r\n/g, "\n").split("\n");
+  while (all.length > 0 && all[all.length - 1].trim() === "") all.pop();
+  if (all.length === 0) return null;
+  const lines = all.slice(0, CODE_TEASER_LINES);
+  return { lines, hiddenCount: Math.max(0, all.length - lines.length) };
+}
+
 function PostVideoCTA({
   claimLink,
   signInLink,
+  domain,
+  testCode,
 }: {
   claimLink: string;
   signInLink: string;
+  domain: string;
+  testCode: string | null;
 }) {
+  const teaser = buildCodeTeaser(testCode);
   return (
-    <section className="rounded-xl border bg-white dark:bg-card p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
-      <div className="flex-1 min-w-0 space-y-1">
-        <h2 className="text-base sm:text-lg font-semibold tracking-tight">
-          Take this test with you
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          Download the test code, or claim it to re-run on demand — both are
-          free.
-        </p>
+    <section className="rounded-xl border bg-white dark:bg-card p-5 sm:p-6 space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
+        <div className="flex-1 min-w-0 space-y-1">
+          <h2 className="text-base sm:text-lg font-semibold tracking-tight">
+            Take this test with you
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            This is a real Playwright test, recorded against {domain}. Claim it
+            into your own workspace and re-run it on every deploy — free.
+          </p>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+          <a
+            href={claimLink}
+            className="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:opacity-90"
+          >
+            Claim this test — free
+          </a>
+          <a
+            href={signInLink}
+            className="inline-flex items-center justify-center rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
+          >
+            Sign in to run it
+          </a>
+        </div>
       </div>
-      <div className="flex flex-col sm:flex-row gap-2 shrink-0">
-        <a
-          href={claimLink}
-          className="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:opacity-90"
-        >
-          Download test code
-        </a>
-        <a
-          href={signInLink}
-          className="inline-flex items-center justify-center rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
-        >
-          Run on demand
-        </a>
-      </div>
+      {teaser && (
+        <figure className="m-0">
+          <div className="relative rounded-md border bg-muted/40 overflow-hidden">
+            <pre className="overflow-x-auto p-4 text-xs leading-relaxed font-mono text-muted-foreground">
+              {teaser.lines.join("\n")}
+            </pre>
+            {teaser.hiddenCount > 0 && (
+              <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-white dark:from-card to-transparent pointer-events-none" />
+            )}
+          </div>
+          {teaser.hiddenCount > 0 && (
+            <figcaption className="mt-1.5 text-xs text-muted-foreground">
+              +{teaser.hiddenCount} more line
+              {teaser.hiddenCount === 1 ? "" : "s"} —{" "}
+              <a
+                href={claimLink}
+                className="font-medium text-foreground underline-offset-4 hover:underline"
+              >
+                claim the test to get the full code
+              </a>
+              .
+            </figcaption>
+          )}
+        </figure>
+      )}
     </section>
+  );
+}
+
+// Threshold below which the strip stays hidden — small numbers read as "nobody
+// uses this" and hurt more than no proof at all.
+const SOCIAL_PROOF_MIN_RUNS = 100;
+const SOCIAL_PROOF_MIN_PRODUCTS = 5;
+
+function SocialProofStrip({
+  stats,
+}: {
+  stats: { productsTested: number; testRunsCompleted: number };
+}) {
+  const showRuns = stats.testRunsCompleted >= SOCIAL_PROOF_MIN_RUNS;
+  const showProducts = stats.productsTested >= SOCIAL_PROOF_MIN_PRODUCTS;
+  if (!showRuns && !showProducts) return null;
+  const bits: string[] = [];
+  if (showRuns)
+    bits.push(`${stats.testRunsCompleted.toLocaleString()} test runs recorded`);
+  if (showProducts)
+    bits.push(`${stats.productsTested.toLocaleString()} products tested`);
+  return (
+    <div className="text-center text-sm text-muted-foreground">
+      {bits.join(" · ")} with Lastest
+    </div>
   );
 }
 
 function ClaimCTA({
   claimLink,
   signInLink,
+  domain,
+  variant,
 }: {
   claimLink: string;
   signInLink: string;
+  domain: string;
+  variant: "build" | "test";
 }) {
   return (
     <section className="rounded-xl border bg-white dark:bg-card p-6 sm:p-8 space-y-4">
       <h2 className="text-xl sm:text-2xl font-semibold">
-        Claim this test — free
+        {variant === "test"
+          ? `This test was built for ${domain} — claim it free`
+          : `These tests were built for ${domain} — claim them free`}
       </h2>
       <p className="text-sm text-muted-foreground">
-        We&apos;ll copy the test into your own Lastest workspace. You supply the
-        ideas, we supply the regression coverage.
+        One click copies the test{variant === "test" ? "" : "s"} and baseline
+        screenshots into your own Lastest workspace. Re-run on every deploy and
+        catch regressions before your users do — free, no card required.
       </p>
       <div className="flex flex-col sm:flex-row gap-2">
         <a
           href={claimLink}
           className="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:opacity-90"
         >
-          Sign up free
+          {variant === "test" ? "Claim this test" : "Claim these tests"}
         </a>
         <a
           href={signInLink}
