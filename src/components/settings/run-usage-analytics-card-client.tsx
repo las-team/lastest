@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   FileCode,
   Minus,
   TrendingUp,
@@ -73,6 +74,9 @@ function monthDay(isoDay: string): string {
 }
 
 const CHART_HEIGHT = 150;
+
+// Tests shown per project before the "Show all" toggle reveals the rest.
+const TESTS_PREVIEW_COUNT = 5;
 
 export function RunUsageAnalyticsCard({
   analytics,
@@ -446,6 +450,18 @@ function Breakdown({
   expanded: string | null;
   setExpanded: (id: string | null) => void;
 }) {
+  // Per-project ids whose full test list is revealed (default: preview only).
+  const [showAllTests, setShowAllTests] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const toggleShowAll = (id: string) =>
+    setShowAllTests((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
   return (
     <div className="px-5 pb-2 pt-4">
       <div className="mb-2.5 font-mono text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -458,6 +474,12 @@ function Breakdown({
           const isOpen = expandable && expanded === repo.id;
           const share = totalMinutes > 0 ? repo.minutes / totalMinutes : 0;
           const color = colorFor(repo.id, i);
+          const allShown = showAllTests.has(repo.id);
+          const hasMoreTests = repo.tests.length > TESTS_PREVIEW_COUNT;
+          const visibleTests =
+            hasMoreTests && !allShown
+              ? repo.tests.slice(0, TESTS_PREVIEW_COUNT)
+              : repo.tests;
           return (
             <div key={repo.id} className={i === 0 ? "" : "border-t"}>
               <div
@@ -513,7 +535,7 @@ function Breakdown({
 
               {isOpen && (
                 <div className="border-t bg-muted/30">
-                  {repo.tests.map((t, ti) => (
+                  {visibleTests.map((t, ti) => (
                     <Link
                       key={t.id}
                       href={`/tests/${t.id}`}
@@ -546,6 +568,25 @@ function Breakdown({
                       </div>
                     </Link>
                   ))}
+                  {hasMoreTests && (
+                    <button
+                      type="button"
+                      onClick={() => toggleShowAll(repo.id)}
+                      className="flex w-full items-center justify-center gap-1.5 border-t px-4 py-2.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/50"
+                    >
+                      {allShown ? (
+                        <>
+                          <ChevronUp className="h-3.5 w-3.5" />
+                          Show less
+                        </>
+                      ) : (
+                        <>
+                          <ChevronDown className="h-3.5 w-3.5" />
+                          Show all {repo.testCount} tests
+                        </>
+                      )}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -553,7 +594,7 @@ function Breakdown({
         })}
       </div>
       <div className="mx-0.5 mt-2.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground/60">
-        Click a project to see its top tests · test names link to /tests/[id]
+        Click a project to see its tests · test names link to /tests/[id]
       </div>
     </div>
   );

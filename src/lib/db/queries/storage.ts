@@ -164,7 +164,7 @@ export interface RunUsageAnalyticsRepo {
   name: string;
   minutes: number;
   testCount: number;
-  /** Top tests by run-minutes (empty for the aggregated "Other" bucket). */
+  /** All tests sorted desc by run-minutes (empty for the aggregated "Other" bucket). */
   tests: RunUsageAnalyticsTest[];
 }
 
@@ -313,7 +313,7 @@ export async function getTeamRunUsageAnalytics(
         name: repoName.get(id) ?? id,
         minutes,
         testCount: tlist.length,
-        tests: tlist.slice(0, 5),
+        tests: tlist,
       };
     })
     .sort((a, b) => b.minutes - a.minutes);
