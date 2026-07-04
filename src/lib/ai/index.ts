@@ -101,6 +101,11 @@ export interface GenerateWithAIOptions {
   /** Request structured JSON output. Forwarded to providers that support
    *  `response_format: { type: 'json_object' }` (OpenRouter, OpenAI). Ignored elsewhere. */
   responseFormat?: "json_object";
+  /** Image inputs for vision-capable providers (e.g. screenshots for the
+   *  share-page caption generator). Forwarded to `provider.generate({ images })`.
+   *  Only used on the direct generate path — the MCP tool-calling bridge path
+   *  doesn't accept images. */
+  images?: { base64: string; mediaType: string }[];
 }
 
 export async function generateWithAI(
@@ -213,6 +218,7 @@ export async function generateWithAI(
         systemPrompt: finalSystemPrompt || undefined,
         signal: options?.signal,
         responseFormat: options?.responseFormat,
+        images: options?.images,
       });
     }
 
