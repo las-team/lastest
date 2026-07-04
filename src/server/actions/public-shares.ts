@@ -103,6 +103,13 @@ export async function publishBuildShare(
   // Only ping on a genuinely new share — re-runs that refresh an existing link
   // shouldn't spam the channel.
   if (!existing && INTERNAL_SHARE_DISCORD_WEBHOOK_URL) {
+    // Demo notes ride along so the operator sees the outreach hook + the
+    // (share-hidden) testing struggles right next to the URL. Notes may live on
+    // an earlier build of the same repo (QuickStart writes them pre-rerun), so
+    // fall back repo-wide like the share renderer does.
+    const demoNotes =
+      (await queries.getBuildDemoNotes(buildId).catch(() => null)) ??
+      (await queries.getLatestDemoNotesForRepo(repoId).catch(() => null));
     void sendDiscordShareNotification(INTERNAL_SHARE_DISCORD_WEBHOOK_URL, {
       shareUrl,
       slug: share.slug,
@@ -111,6 +118,8 @@ export async function publishBuildShare(
       publishedByEmail: session.user.email,
       teamName: session.team.name,
       scopedTestName: scopedTest?.name ?? null,
+      outreachHook: demoNotes?.outreachHook ?? null,
+      testingStruggles: demoNotes?.testingStruggles ?? [],
     }).catch((e) => {
       console.error("[publicShare] discord ping failed", e);
     });

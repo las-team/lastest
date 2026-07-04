@@ -406,6 +406,7 @@ export default async function PublicSharePage({ params }: PageProps) {
     chapters: chapters.map((c) => ({ title: c.label, atSec: c.atSec })),
     uxSummary: demoNotes?.uxSummary ?? null,
     highlights: demoNotes?.highlights ?? [],
+    outreachHook: demoNotes?.outreachHook ?? null,
   });
 
   return (

@@ -21,6 +21,7 @@ import type {
   QuickstartPublicScout,
   QuickstartAuthedScout,
   QuickstartBusinessInteraction,
+  QuickstartProductArchetype,
 } from "@/lib/db/schema";
 
 /**
@@ -86,6 +87,14 @@ Use Playwright MCP browser tools (browser_navigate, browser_snapshot, browser_cl
    - primaryInputLabel: the visible label / placeholder of the input the founder's hero CTA points at (e.g. "Paste a startup idea", "Search anything", "Enter a URL"). If no input is visible publicly, return null.
    - primaryCtaLabel: the literal text of the hero CTA button (e.g. "Validate idea", "Generate brief", "Run search").
    - demoInputValue: a SAFE additive demo string to type into primaryInputLabel that exercises the product's core function. Examples: "AI-powered birthday-card generator for parents of 3-7 year olds" for an idea-validator, "https://example.com/article" for a URL summariser, "best coffee shops in Berlin" for a search tool. NEVER pick a value that triggers destructive actions, real payments, outbound messaging on the founder's behalf, or scans of real third-party accounts.
+   Also classify productArchetype — the interaction shape of the product's PRIMARY surface (pick ONE):
+   - "canvas": drawing/whiteboard/diagram/map tool with a large interactive <canvas>
+   - "search": the core job is typing a query and reading results (search bars, lookup tools, directories)
+   - "form": the core job is filling a form/textarea and submitting for a generated output (validators, generators, summarizers)
+   - "upload": the core job starts by uploading a file (CSV analyzers, image tools, document processors)
+   - "ecommerce": a storefront with product cards and an add-to-cart flow
+   - "dashboard": the product is primarily viewed data/panels behind auth; no obvious public input
+   - "other": none of the above fits
 5. Find the registration page by examining the landing page DOM ONLY. Look for any visible \`<a>\` or \`<button>\` whose visible text matches /sign ?up|register|create.+account|get started|join (free|now|us)/i. Accept both same-origin links (href starts with /) AND cross-subdomain links (e.g. https://auth.example.com/register, https://app.example.com/signup). Click the first match and snapshot the destination. NEVER guess paths like /signup, /register, /join — if no CTA exists in the DOM, return registerPath: null and classification: "no_public_register". Record registerPath as either a relative path starting with / (same-origin) or the FULL absolute URL (cross-subdomain, e.g. "https://auth.example.com/register"). NEVER mix the two formats (do not prefix a path with a partial URL).
 6. Snapshot the register page and classify the sign-up flow.
 7. Find the LOGIN page the same DOM-only way (link/button whose visible text matches /sign ?in|log ?in/i). Record loginPath as either a relative path starting with / OR the FULL absolute URL — same format rules as registerPath; null if none found. Note whether the login form exposes email + password fields.
@@ -127,6 +136,7 @@ Return STRICT JSON (no markdown, no prose), shape:
     "primaryCtaLabel": "Validate idea | null",
     "demoInputValue": "AI birthday-card generator for parents of 3-7yos | null"
   },
+  "productArchetype": "canvas | search | form | upload | ecommerce | dashboard | other",
   "friction": [{ "kind": "cookie_overlap | slow_route | console_error | ...", "note": "string" }]
 }`;
 
@@ -260,6 +270,21 @@ function asBusinessInteraction(
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+function asArchetype(value: unknown): QuickstartProductArchetype | undefined {
+  const allowed = [
+    "canvas",
+    "search",
+    "form",
+    "upload",
+    "dashboard",
+    "ecommerce",
+    "other",
+  ] as const;
+  return (allowed as readonly string[]).includes(value as string)
+    ? (value as QuickstartProductArchetype)
+    : undefined;
+}
+
 function classify(value: unknown): QuickstartPublicScout["classification"] {
   const allowed = [
     "email_password",
@@ -303,11 +328,15 @@ function asPathOrUrl(value: unknown): string | null {
 export interface QuickstartScoutPublicResult {
   data: QuickstartPublicScout;
   promptLogId?: string;
+  /** How many bounded retries the JSON-parse path needed (0 = clean first try).
+   *  Recorded in the step detail so flaky models are visible post-hoc. */
+  retryCount: number;
 }
 
 export interface QuickstartScoutAuthedResult {
   data: QuickstartAuthedScout;
   promptLogId?: string;
+  retryCount: number;
 }
 
 export async function runQuickstartScoutPublic(
@@ -352,10 +381,14 @@ export async function runQuickstartScoutPublic(
     );
   }
 
-  // One retry with an explicit "JSON only" reminder when the first response wasn't JSON.
-  // Catches the "Playwright MCP browser locked → LLM returned prose" failure mode.
+  // One retry with the parse error appended when the first response wasn't
+  // JSON. Catches the "Playwright MCP browser locked → LLM returned prose"
+  // failure mode; feeding back the actual error steers the model harder than a
+  // generic reminder.
+  let retryCount = 0;
   if (!parsed) {
-    const retryPrompt = `${prompt}\n\nIMPORTANT: Your previous response was not valid JSON. Browse the site with MCP tools and return ONLY the strict JSON object specified in the system prompt, no prose, no markdown fences.`;
+    retryCount = 1;
+    const retryPrompt = `${prompt}\n\nIMPORTANT: Your previous response was not valid JSON (parse error: ${parseError ?? "unknown"}). Browse the site with MCP tools and return ONLY the strict JSON object specified in the system prompt, no prose, no markdown fences.`;
     const retryResponse = await generateWithAI(
       config,
       retryPrompt,
@@ -427,10 +460,11 @@ export async function runQuickstartScoutPublic(
         ? parsed.cookieBannerSelectorHint
         : undefined,
     businessInteraction: asBusinessInteraction(parsed.businessInteraction),
+    productArchetype: asArchetype(parsed.productArchetype),
     friction: safeArray(parsed.friction, asFriction),
   };
 
-  return { data, promptLogId };
+  return { data, promptLogId, retryCount };
 }
 
 export async function runQuickstartScoutAuthed(
@@ -465,29 +499,53 @@ ${authSetupCode}
 After the seed completes successfully, navigate to ${baseUrl} and proceed with the workflow in the system prompt. Return strict JSON.`;
 
   let promptLogId: string | undefined;
+  const generateOpts = {
+    ...mcpOpts,
+    repositoryId,
+    actionType: "agent_discover" as const,
+    onLogCreated: (id: string) => {
+      promptLogId = id;
+      options?.onLogCreated?.(id);
+    },
+    responseFormat: "json_object" as const,
+  };
   const response = await generateWithAI(
     config,
     prompt,
     AUTHED_SCOUT_SYSTEM_PROMPT,
-    {
-      ...mcpOpts,
-      repositoryId,
-      actionType: "agent_discover",
-      onLogCreated: (id) => {
-        promptLogId = id;
-        options?.onLogCreated?.(id);
-      },
-      responseFormat: "json_object",
-    },
+    generateOpts,
   );
 
   let parsed: Record<string, unknown> = {};
+  let parseError: string | undefined;
   try {
     const json = extractJson(response);
     if (json && typeof json === "object")
       parsed = json as Record<string, unknown>;
-  } catch {
-    // fall through
+  } catch (err) {
+    parseError = err instanceof Error ? err.message : String(err);
+  }
+
+  // One bounded retry with the parse error appended. Without it an unusable
+  // response silently degraded to an empty authed scout — nav links and safe
+  // CTAs vanished from the walkthrough with no visible cause.
+  let retryCount = 0;
+  if (parseError) {
+    retryCount = 1;
+    const retryPrompt = `${prompt}\n\nIMPORTANT: Your previous response was not valid JSON (parse error: ${parseError}). Return ONLY the strict JSON object specified in the system prompt, no prose, no markdown fences.`;
+    const retryResponse = await generateWithAI(
+      config,
+      retryPrompt,
+      AUTHED_SCOUT_SYSTEM_PROMPT,
+      generateOpts,
+    );
+    try {
+      const json = extractJson(retryResponse);
+      if (json && typeof json === "object")
+        parsed = json as Record<string, unknown>;
+    } catch {
+      // Still unusable — degrade to an empty authed scout as before.
+    }
   }
 
   const data: QuickstartAuthedScout = {
@@ -499,5 +557,5 @@ After the seed completes successfully, navigate to ${baseUrl} and proceed with t
     friction: safeArray(parsed.friction, asFriction),
   };
 
-  return { data, promptLogId };
+  return { data, promptLogId, retryCount };
 }

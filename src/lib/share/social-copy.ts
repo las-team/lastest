@@ -29,6 +29,10 @@ export interface SocialCopyInput {
   /** Optional AI demo-run summary + highlights, woven into long-form copy. */
   uxSummary: string | null;
   highlights: { label: string; note: string }[];
+  /** Tweet-length opener from the demo notes (concrete observation, ≤200
+   *  chars). When present it leads the X post instead of the generic stat
+   *  line — the "Post to X" prefill the outreach loop wants. */
+  outreachHook?: string | null;
 }
 
 export interface SocialCopy {
@@ -119,7 +123,11 @@ export function xWeightedLength(text: string): number {
 
 export function buildXPost(input: SocialCopyInput): string {
   const stat = buildStatLine(input);
-  const lead = `${verdictEmoji(input)} ${input.title} on ${input.domain}: ${stat}.`;
+  // The demo-notes outreach hook (a concrete, specific observation) beats the
+  // generic stat line as the opener when the run produced one.
+  const lead = input.outreachHook
+    ? `${verdictEmoji(input)} ${input.outreachHook}`
+    : `${verdictEmoji(input)} ${input.title} on ${input.domain}: ${stat}.`;
   const tail = `\n\nWatch the full run 👇\n${input.shareUrl}\n\n#VisualTesting #QA #WebDev`;
   const budget = X_LIMIT - xWeightedLength(tail);
   return `${clampAtWordBoundary(lead, budget)}${tail}`;
