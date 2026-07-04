@@ -28,10 +28,16 @@ export interface QuickstartRunFacts {
 export interface GenerateDemoNotesInput {
   repositoryId: string;
   productName: string;
-  publicScout: QuickstartPublicScout;
+  /** Absent in reduced-facts mode (standalone notes for a non-QuickStart build,
+   *  where no scout ever ran). The prompt then leans on run results, visited
+   *  routes, and console errors only. */
+  publicScout?: QuickstartPublicScout;
   authedScout?: QuickstartAuthedScout;
   authSetup?: QuickstartAuthSetupMeta;
   runFacts: QuickstartRunFacts;
+  /** Reduced-facts mode only: routes/steps actually visited, recovered from the
+   *  run's step labels — the scout-less stand-in for publicNavRoutes. */
+  routesVisited?: string[];
   /** True when the captured login session was successfully captured but did NOT
    *  replay as authenticated on the test runner, so the walkthrough was
    *  downgraded to public-only. Distinct from authSetup.captured=false (capture
@@ -47,13 +53,19 @@ QUALITY BAR (this is what separates good notes from generic ones):
 - Where a friction point has an obvious one-line fix, say it (e.g. "/signup 404s but /sign-up works — add a redirect").
 - Conversational and concrete. No marketing fluff, no hedging, no filler.
 
+VOICE — write TO the founder, not about the site:
+- Second person for their product: "your pricing page", "your onboarding", "your empty state". Never "the site's pricing page".
+- "We" for Lastest's actions: "we recorded", "we noticed", "we couldn't get past". Never passive "it was observed".
+
 RULES:
 - Pass facts ONLY. Do NOT invent features, routes, timings, or issues the input did not contain. If a section has little real signal, return fewer items (or an empty array) — do not pad.
+- When scoutRan is false (reduced-facts mode), base everything on runResults, routesVisited, and consoleErrors — do not speculate about what the product does beyond its name.
 - uxSummary: 2-3 sentences. Lead with what the product actually does (from concept / businessInteraction — the primary input + CTA tell you the core job). Then point to the single strongest UX signal in the facts.
 - highlights: 1-4 things the founder should be proud of, each tied to a concrete observation and safe to quote in outreach.
-- frictionPoints: 0-3 real UX issues observed (cookie-banner overlap, slow route, console-noisy analytics, confusing empty state, guessable-URL 404). Product-facing — never shown in outreach.
+- frictionPoints: max 2 real UX issues. These ARE public on the share and read by the founder — findings build credibility. Each MUST come with a one-line fix, written in a "fixable, not embarrassing" tone (e.g. "/signup 404s but /sign-up works — add a redirect"). Nothing security-sensitive, nothing that reads as public shaming.
 - testingStruggles: 0-3 things that made automated testing hard (captcha, verify-email gate, OAuth-only, OTP, hung networkidle, an auth session that wouldn't replay). Empty array if the run was clean.
 - skippedRoutes: 0-N routes the agent meant to visit but couldn't, each with the reason.
+- outreachHook: ONE sentence, max 200 characters, leading with the single most striking SPECIFIC observation — it becomes the first line of the X reply/DM to the founder. It MUST reference a concrete route, label, or number from the facts. NO marketing adjectives (no "amazing", "sleek", "beautiful").
 
 OUTPUT STRICT JSON, no markdown, exactly this shape:
 {
@@ -61,25 +73,27 @@ OUTPUT STRICT JSON, no markdown, exactly this shape:
   "highlights": [{ "label": "string", "note": "string" }],
   "frictionPoints": [{ "label": "string", "note": "string" }],
   "testingStruggles": [{ "label": "string", "note": "string" }],
-  "skippedRoutes": [{ "path": "string", "reason": "string" }]
+  "skippedRoutes": [{ "path": "string", "reason": "string" }],
+  "outreachHook": "string"
 }
 
 EXAMPLE — match this specificity and voice, do NOT copy its content:
 {
-  "uxSummary": "Postbox is a transactional-email API for indie developers; the hero leads with a strong 'send your first email in 4 lines' tagline. The pricing table is unusually clean for an indie product, and the register page is a single minimal column.",
+  "uxSummary": "Postbox is a transactional-email API for indie developers; your hero leads with a strong 'send your first email in 4 lines' tagline. Your pricing table is unusually clean for an indie product, and the register page is a single minimal column.",
   "highlights": [
     { "label": "Pricing clarity", "note": "Three tiers, each with one differentiator headline and no 'contact sales' tier — a strong signal for an indie audience." },
-    { "label": "Empty-state copy", "note": "The /dashboard zero-state ships with working sample data, so a new user skips the 'now what?' moment." }
+    { "label": "Empty-state copy", "note": "Your /dashboard zero-state ships with working sample data, so a new user skips the 'now what?' moment." }
   ],
   "frictionPoints": [
-    { "label": "Cookie banner overlap", "note": "The consent banner covers the hero CTA on first paint; dismissed before the screenshot." }
+    { "label": "Cookie banner overlap", "note": "The consent banner covers your hero CTA on first paint — anchoring it bottom-left (or delaying it a beat) frees the CTA." }
   ],
   "testingStruggles": [
     { "label": "Captcha on register", "note": "An hCaptcha iframe rendered after submit, so the auth phase fell back to public-only." }
   ],
   "skippedRoutes": [
     { "path": "/dashboard", "reason": "Couldn't authenticate past the captcha." }
-  ]
+  ],
+  "outreachHook": "We ran your signup + all 5 nav routes on postbox.dev — the /dashboard zero-state with live sample data was the standout; one fixable snag on the hero CTA."
 }`;
 
 function dedupeItems(items: DemoNoteItem[]): DemoNoteItem[] {
@@ -120,18 +134,25 @@ function asSkippedRoutes(value: unknown): DemoNoteSkippedRoute[] {
 }
 
 function buildFactsBlock(input: GenerateDemoNotesInput): string {
+  const scout = input.publicScout;
   const facts: Record<string, unknown> = {
     productName: input.productName,
-    concept: input.publicScout.concept ?? null,
-    tagline: input.publicScout.tagline ?? null,
+    // Reduced-facts mode (no scout): the model must lean on run results,
+    // visited routes, and console errors only — flag it so it doesn't try to
+    // infer a concept that was never observed.
+    scoutRan: !!scout,
+    concept: scout?.concept ?? null,
+    tagline: scout?.tagline ?? null,
     // The primary input + CTA the product is built around — the single best
     // "what does this actually do" signal for the uxSummary lead sentence.
-    businessInteraction: input.publicScout.businessInteraction ?? null,
-    authClassification: input.publicScout.classification,
-    authAutomatable: input.publicScout.authAutomatable,
-    publicNavRoutes: input.publicScout.navLinks.map((n) => n.path),
-    cookieBannerSeen: !!input.publicScout.cookieBannerSelectorHint,
-    publicFriction: input.publicScout.friction ?? [],
+    businessInteraction: scout?.businessInteraction ?? null,
+    productArchetype: scout?.productArchetype ?? null,
+    authClassification: scout?.classification ?? null,
+    authAutomatable: scout?.authAutomatable ?? false,
+    publicNavRoutes: scout?.navLinks.map((n) => n.path) ?? [],
+    routesVisited: input.routesVisited ?? [],
+    cookieBannerSeen: !!scout?.cookieBannerSelectorHint,
+    publicFriction: scout?.friction ?? [],
     authedNavRoutes: input.authedScout?.inAppNavLinks.map((n) => n.path) ?? [],
     authedObservedRoutes: input.authedScout?.observedRoutes ?? [],
     safeCtas: input.authedScout?.safeCtaCandidates.map((c) => c.label) ?? [],
@@ -207,6 +228,7 @@ Produce the demo notes JSON.`;
     });
   }
   if (
+    input.publicScout &&
     !input.publicScout.authAutomatable &&
     input.publicScout.classification !== "no_public_register"
   ) {
@@ -216,22 +238,36 @@ Produce the demo notes JSON.`;
     });
   }
 
-  const summary =
+  const aiSummary =
     typeof parsed.uxSummary === "string" && parsed.uxSummary.length > 0
       ? parsed.uxSummary
-      : input.publicScout.concept
-        ? `${input.productName}: ${input.publicScout.concept}`
-        : `${input.productName}: ${input.runFacts.passedCount} test${input.runFacts.passedCount === 1 ? "" : "s"} passed, ${input.runFacts.changesDetected} screenshots captured.`;
+      : null;
+  const summary =
+    aiSummary ??
+    (input.publicScout?.concept
+      ? `${input.productName}: ${input.publicScout.concept}`
+      : `${input.productName}: ${input.runFacts.passedCount} test${input.runFacts.passedCount === 1 ? "" : "s"} passed, ${input.runFacts.changesDetected} screenshots captured.`);
+
+  const outreachHook =
+    typeof parsed.outreachHook === "string" && parsed.outreachHook.length > 0
+      ? parsed.outreachHook.slice(0, 200)
+      : undefined;
 
   return {
     uxSummary: summary,
     highlights: dedupeItems(asNoteItems(parsed.highlights)).slice(0, 4),
-    frictionPoints: dedupeItems(asNoteItems(parsed.frictionPoints)).slice(0, 4),
+    // Friction is public + founder-read: cap at 2 (matches the prompt) so the
+    // panel reads as "two fixable observations", never a defect list.
+    frictionPoints: dedupeItems(asNoteItems(parsed.frictionPoints)).slice(0, 2),
     testingStruggles: dedupeItems([
       ...asNoteItems(parsed.testingStruggles),
       ...fallbackTesting,
     ]).slice(0, 4),
     skippedRoutes: asSkippedRoutes(parsed.skippedRoutes).slice(0, 6),
+    outreachHook,
+    // Marks the deterministic fallback summary so the share-readiness gate can
+    // tell a real AI write-up from boilerplate.
+    fallbackSummary: !aiSummary || undefined,
     generatedAt: new Date().toISOString(),
     modelId,
   };
