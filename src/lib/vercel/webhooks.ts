@@ -11,15 +11,14 @@ import crypto from "crypto";
  * ⚠ The SHA1 choice matches Vercel's documented behavior as of 2026-07. It is
  * isolated here so it's a one-line change if a live delivery proves otherwise.
  */
-const WEBHOOK_SECRET = process.env.VERCEL_INTEGRATION_CLIENT_SECRET || "";
-
 export function verifyVercelSignature(
   rawBody: string,
   signature: string | null,
 ): boolean {
-  if (!signature || !WEBHOOK_SECRET) return false;
+  const secret = process.env.VERCEL_INTEGRATION_CLIENT_SECRET || "";
+  if (!signature || !secret) return false;
   const digest = crypto
-    .createHmac("sha1", WEBHOOK_SECRET)
+    .createHmac("sha1", secret)
     .update(rawBody, "utf8")
     .digest("hex");
   try {
