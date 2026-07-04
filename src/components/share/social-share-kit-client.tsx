@@ -8,8 +8,10 @@
 // hands video + text straight into the app's composer, YouTube's Title
 // prefills from the download's filename, copy-and-open buttons put the
 // caption/description on the clipboard as the uploader opens, and the media
-// is prepared client-side (MP4 re-encode, screenshot zip for TikTok
-// slideshows).
+// is prepared client-side (streamed .webm download, screenshot zip for TikTok
+// slideshows). Playwright records .webm; platforms that need MP4 (X, LinkedIn,
+// TikTok) get a copy-paste ffmpeg command rather than a slow in-browser
+// re-encode.
 
 import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
@@ -38,10 +40,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { buildZip, type ZipEntry } from "@/lib/share/client-zip";
-import {
-  convertWebmToMp4,
-  mp4ConversionSupported,
-} from "@/lib/share/mp4-convert";
 import type { SocialCopy } from "@/lib/share/social-copy";
 
 export interface ShareSlide {
@@ -56,7 +54,6 @@ export interface SocialShareKitProps {
   copy: SocialCopy;
   /** Same-origin /share/<slug>/... URL of the run recording, when one exists. */
   videoUrl: string | null;
-  videoDurationMs: number | null;
   /** Step screenshots for the TikTok slideshow flow, in capture order. */
   slides: ShareSlide[];
 }
@@ -66,7 +63,6 @@ export function SocialShareKit({
   title,
   copy,
   videoUrl,
-  videoDurationMs,
   slides,
 }: SocialShareKitProps) {
   const fileStem = useMemo(() => slugify(title), [title]);
@@ -77,28 +73,17 @@ export function SocialShareKit({
         Share this run
       </h2>
       <div className="flex flex-wrap items-center gap-2">
-        <XShareDialog
-          copy={copy}
-          videoUrl={videoUrl}
-          videoDurationMs={videoDurationMs}
-          fileStem={fileStem}
-        />
-        <YouTubeShareDialog
-          copy={copy}
-          videoUrl={videoUrl}
-          videoDurationMs={videoDurationMs}
-        />
+        <XShareDialog copy={copy} videoUrl={videoUrl} fileStem={fileStem} />
+        <YouTubeShareDialog copy={copy} videoUrl={videoUrl} />
         <TikTokShareDialog
           copy={copy}
           videoUrl={videoUrl}
-          videoDurationMs={videoDurationMs}
           slides={slides}
           fileStem={fileStem}
         />
         <LinkedInShareDialog
           copy={copy}
           videoUrl={videoUrl}
-          videoDurationMs={videoDurationMs}
           fileStem={fileStem}
         />
         <CopyLinkChip shareUrl={shareUrl} />
@@ -112,12 +97,10 @@ export function SocialShareKit({
 function XShareDialog({
   copy,
   videoUrl,
-  videoDurationMs,
   fileStem,
 }: {
   copy: SocialCopy;
   videoUrl: string | null;
-  videoDurationMs: number | null;
   fileStem: string;
 }) {
   const intent = `https://x.com/intent/post?text=${encodeURIComponent(copy.x)}`;
@@ -153,15 +136,13 @@ function XShareDialog({
         <div className="space-y-4">
           <OneTapShare
             videoUrl={videoUrl}
-            videoDurationMs={videoDurationMs}
             downloadName={fileStem}
             text={copy.x}
             appName="X"
           />
-          <StepBlock n={1} label="Download the recording (X needs MP4)">
+          <StepBlock n={1} label="Download the recording, then convert for X">
             <VideoDownloadButton
               videoUrl={videoUrl}
-              videoDurationMs={videoDurationMs}
               fileStem={fileStem}
               preferMp4
             />
@@ -189,12 +170,10 @@ function XShareDialog({
 function LinkedInShareDialog({
   copy,
   videoUrl,
-  videoDurationMs,
   fileStem,
 }: {
   copy: SocialCopy;
   videoUrl: string | null;
-  videoDurationMs: number | null;
   fileStem: string;
 }) {
   // LinkedIn's feed composer still honours text prefill — unlike the legacy
@@ -235,15 +214,16 @@ function LinkedInShareDialog({
         <div className="space-y-4">
           <OneTapShare
             videoUrl={videoUrl}
-            videoDurationMs={videoDurationMs}
             downloadName={fileStem}
             text={copy.linkedin}
             appName="LinkedIn"
           />
-          <StepBlock n={1} label="Download the recording (LinkedIn needs MP4)">
+          <StepBlock
+            n={1}
+            label="Download the recording, then convert for LinkedIn"
+          >
             <VideoDownloadButton
               videoUrl={videoUrl}
-              videoDurationMs={videoDurationMs}
               fileStem={fileStem}
               preferMp4
             />
@@ -278,11 +258,9 @@ function LinkedInShareDialog({
 function YouTubeShareDialog({
   copy,
   videoUrl,
-  videoDurationMs,
 }: {
   copy: SocialCopy;
   videoUrl: string | null;
-  videoDurationMs: number | null;
 }) {
   if (!videoUrl) return null;
   // YouTube prefills the upload form's Title field from the uploaded file's
@@ -309,7 +287,6 @@ function YouTubeShareDialog({
         <div className="space-y-4">
           <OneTapShare
             videoUrl={videoUrl}
-            videoDurationMs={videoDurationMs}
             downloadName={titleFilename}
             text={copy.youtube.description}
             appName="YouTube"
@@ -320,7 +297,6 @@ function YouTubeShareDialog({
           >
             <VideoDownloadButton
               videoUrl={videoUrl}
-              videoDurationMs={videoDurationMs}
               fileStem={titleFilename}
               webmNote="YouTube accepts .webm directly and prefills the upload's Title field from this filename."
             />
@@ -358,13 +334,11 @@ function YouTubeShareDialog({
 function TikTokShareDialog({
   copy,
   videoUrl,
-  videoDurationMs,
   slides,
   fileStem,
 }: {
   copy: SocialCopy;
   videoUrl: string | null;
-  videoDurationMs: number | null;
   slides: ShareSlide[];
   fileStem: string;
 }) {
@@ -425,15 +399,16 @@ function TikTokShareDialog({
                 <>
                   <OneTapShare
                     videoUrl={videoUrl}
-                    videoDurationMs={videoDurationMs}
                     downloadName={fileStem}
                     text={copy.tiktok}
                     appName="TikTok"
                   />
-                  <StepBlock n={1} label="Download the recording">
+                  <StepBlock
+                    n={1}
+                    label="Download the recording, then convert for TikTok"
+                  >
                     <VideoDownloadButton
                       videoUrl={videoUrl}
-                      videoDurationMs={videoDurationMs}
                       fileStem={fileStem}
                       preferMp4
                     />
@@ -544,107 +519,100 @@ function SlideshowDownload({
   );
 }
 
-// --- video download (with best-effort MP4 conversion) ---------------------------
+// --- video download (streamed .webm + optional ffmpeg-to-MP4 recipe) ------------
+
+// The ffmpeg one-liner handed to users whose target platform needs MP4. H.264 +
+// yuv420p is the broadest-compatibility encode; +faststart moves the moov atom
+// up front so the upload previews without a full download.
+function ffmpegToMp4Command(stem: string): string {
+  return `ffmpeg -i "${stem}.webm" -c:v libx264 -pix_fmt yuv420p -movflags +faststart "${stem}.mp4"`;
+}
 
 function VideoDownloadButton({
   videoUrl,
-  videoDurationMs,
   fileStem,
   preferMp4 = false,
   webmNote,
 }: {
   videoUrl: string;
-  videoDurationMs: number | null;
   fileStem: string;
-  /** True when the target platform (X, TikTok app) rejects .webm. */
+  /** True when the target platform (X, LinkedIn, TikTok app) rejects .webm. */
   preferMp4?: boolean;
   webmNote?: string;
 }) {
-  const [state, setState] = useState<
-    "idle" | "converting" | "done" | "fallback"
-  >("idle");
+  const [state, setState] = useState<"idle" | "preparing" | "done" | "error">(
+    "idle",
+  );
   const [progress, setProgress] = useState(0);
-  const canConvert = typeof window !== "undefined" && mp4ConversionSupported();
 
+  // Stream the recording in the background (chunked reads keep the tab
+  // responsive instead of freezing on a big blob) and hand it to the browser's
+  // save dialog once it's ready.
   const downloadWebm = async () => {
+    setState("preparing");
+    setProgress(0);
     try {
-      const res = await fetch(videoUrl);
-      if (!res.ok) throw new Error(String(res.status));
-      triggerDownload(await res.blob(), `${fileStem}.webm`);
+      const blob = await fetchBlobWithProgress(videoUrl, setProgress);
+      triggerDownload(blob, `${fileStem}.webm`);
+      setState("done");
     } catch {
       // Last resort: hand the URL to the browser directly.
+      setState("error");
       window.open(videoUrl, "_blank", "noopener");
     }
   };
 
-  const downloadMp4 = async () => {
-    setState("converting");
-    setProgress(0);
-    try {
-      const blob = await convertWebmToMp4(videoUrl, {
-        durationMs: videoDurationMs,
-        onProgress: setProgress,
-      });
-      triggerDownload(blob, `${fileStem}.mp4`);
-      setState("done");
-    } catch {
-      await downloadWebm();
-      setState("fallback");
-    }
-  };
-
-  const wantMp4 = preferMp4 && canConvert;
+  const preparing = state === "preparing";
 
   return (
-    <div className="space-y-1.5">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={wantMp4 ? downloadMp4 : downloadWebm}
-          disabled={state === "converting"}
-        >
-          {state === "converting" ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : state === "done" ? (
-            <Check className="size-3.5" />
-          ) : (
-            <Download className="size-3.5" />
-          )}
-          {state === "converting"
-            ? `Converting… ${Math.round(progress * 100)}%`
-            : wantMp4
-              ? "Download video (MP4)"
-              : "Download video (.webm)"}
-        </Button>
-        {wantMp4 && (
-          <button
-            type="button"
-            onClick={downloadWebm}
-            className="text-xs text-muted-foreground underline-offset-4 hover:underline"
-          >
-            original .webm
-          </button>
+    <div className="space-y-2">
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={downloadWebm}
+        disabled={preparing}
+      >
+        {preparing ? (
+          <Loader2 className="size-3.5 animate-spin" />
+        ) : state === "done" ? (
+          <Check className="size-3.5" />
+        ) : (
+          <Download className="size-3.5" />
         )}
-      </div>
-      {state === "converting" && (
+        {preparing
+          ? progress > 0
+            ? `Preparing… ${Math.round(progress * 100)}%`
+            : "Preparing…"
+          : state === "done"
+            ? "Downloaded (.webm)"
+            : "Download recording (.webm)"}
+      </Button>
+      {preparing && (
         <p className="text-xs text-muted-foreground">
-          Re-encoding in your browser — takes about the clip&apos;s length.
+          Downloading in the background — your browser will save it when
+          it&apos;s ready.
         </p>
       )}
-      {preferMp4 && !canConvert && (
-        <p className="text-xs text-muted-foreground">
-          This browser can&apos;t convert to MP4 — the platform may reject
-          .webm, so convert it first (e.g. with an online converter).
-        </p>
-      )}
-      {state === "fallback" && (
-        <p className="text-xs text-muted-foreground">
-          MP4 conversion failed — downloaded the original .webm instead.
-        </p>
+      {preferMp4 && (
+        <div className="space-y-1.5">
+          <p className="text-xs text-muted-foreground">
+            This platform needs MP4. Download the .webm above, then convert it
+            locally with ffmpeg:
+          </p>
+          <LabeledCopyField
+            label="Convert to MP4"
+            value={ffmpegToMp4Command(fileStem)}
+          />
+        </div>
       )}
       {!preferMp4 && webmNote && (
         <p className="text-xs text-muted-foreground">{webmNote}</p>
+      )}
+      {state === "error" && (
+        <p className="text-xs text-muted-foreground">
+          Couldn&apos;t prepare the download — opened the recording in a new tab
+          instead; use your browser&apos;s Save Video As.
+        </p>
       )}
     </div>
   );
@@ -661,8 +629,8 @@ let canShareProbe: boolean | null = null;
 function probeCanShareVideoFiles(): boolean {
   if (canShareProbe == null) {
     try {
-      const probe = new File([new Uint8Array(1)], "probe.mp4", {
-        type: "video/mp4",
+      const probe = new File([new Uint8Array(1)], "probe.webm", {
+        type: "video/webm",
       });
       canShareProbe = !!navigator.canShare?.({ files: [probe] });
     } catch {
@@ -682,18 +650,16 @@ function useCanShareVideoFiles(): boolean {
 // The closest thing to a prefilled upload screen the platforms allow: the Web
 // Share API hands the video file + post text to the chosen app, which opens
 // its composer with the video already attached (X and TikTok prefill the text
-// too on most devices). Two clicks by design — preparing the file (fetch +
-// MP4 re-encode) outlives the user-gesture window navigator.share() requires,
-// so click 1 prepares and click 2 shares.
+// too on most devices). Two clicks by design — streaming the file down outlives
+// the user-gesture window navigator.share() requires, so click 1 prepares and
+// click 2 shares.
 function OneTapShare({
   videoUrl,
-  videoDurationMs,
   downloadName,
   text,
   appName,
 }: {
   videoUrl: string;
-  videoDurationMs: number | null;
   downloadName: string;
   text: string;
   appName: string;
@@ -711,21 +677,10 @@ function OneTapShare({
     setState("preparing");
     setProgress(0);
     try {
-      let blob: Blob;
-      let name: string;
-      if (mp4ConversionSupported()) {
-        blob = await convertWebmToMp4(videoUrl, {
-          durationMs: videoDurationMs,
-          onProgress: setProgress,
-        });
-        name = `${downloadName}.mp4`;
-      } else {
-        const res = await fetch(videoUrl);
-        if (!res.ok) throw new Error(String(res.status));
-        blob = await res.blob();
-        name = `${downloadName}.webm`;
-      }
-      const file = new File([blob], name, { type: blob.type || "video/mp4" });
+      const blob = await fetchBlobWithProgress(videoUrl, setProgress);
+      const file = new File([blob], `${downloadName}.webm`, {
+        type: blob.type || "video/webm",
+      });
       if (!navigator.canShare?.({ files: [file] })) {
         throw new Error("file not shareable");
       }
@@ -975,6 +930,38 @@ function CopyField({
       </Button>
     </div>
   );
+}
+
+// Stream a same-origin asset into a Blob, reporting 0..1 progress as bytes
+// arrive. Chunked reads yield to the event loop between reads, so a large
+// recording downloads without freezing the tab (unlike a single blocking
+// `await res.blob()`). Falls back to a plain blob() when the body isn't a
+// readable stream, and reports indeterminate progress (0) when the server
+// sends no Content-Length.
+async function fetchBlobWithProgress(
+  url: string,
+  onProgress?: (fraction: number) => void,
+): Promise<Blob> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(String(res.status));
+  const type = res.headers.get("content-type") || "video/webm";
+  const reader = res.body?.getReader();
+  if (!reader) return res.blob();
+
+  const total = Number(res.headers.get("content-length")) || 0;
+  const chunks: BlobPart[] = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      chunks.push(value);
+      received += value.length;
+      if (total) onProgress?.(Math.min(1, received / total));
+    }
+  }
+  onProgress?.(1);
+  return new Blob(chunks, { type });
 }
 
 function triggerDownload(blob: Blob, filename: string) {

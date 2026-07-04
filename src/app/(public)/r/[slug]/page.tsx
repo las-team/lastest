@@ -469,9 +469,6 @@ export default async function PublicSharePage({ params }: PageProps) {
           title={isTestShare ? (test?.name ?? displayDomain) : displayDomain}
           copy={socialCopy}
           videoUrl={clips[0]?.src ?? null}
-          videoDurationMs={
-            clips[0]?.durationMs ?? primaryResult?.durationMs ?? null
-          }
           slides={shareSlides}
         />
 
