@@ -447,7 +447,6 @@ export default async function PublicSharePage({ params }: PageProps) {
           pixelsChanged={totalPixelsChanged}
           branch={testRun?.gitBranch ?? null}
           commit={testRun?.gitCommit ?? null}
-          claimLink={claimLink}
         />
 
         {isTestShare ? (
@@ -823,7 +822,6 @@ function OutcomeHeader({
   pixelsChanged,
   branch,
   commit,
-  claimLink,
 }: {
   variant: "build" | "test";
   domain: string;
@@ -835,7 +833,6 @@ function OutcomeHeader({
   pixelsChanged: number;
   branch: string | null;
   commit: string | null;
-  claimLink: string;
 }) {
   const verdict =
     variant === "test"
@@ -892,25 +889,16 @@ function OutcomeHeader({
               {metaBits.join(" · ")}
             </p>
           )}
-          {/* "Built for you" framing + the conversion ask, above the fold. The
-              claim CTA leads; the outbound product link is intentionally a
-              quiet text link so the first prominent action on the page doesn't
-              send the visitor away to their own site. */}
+          {/* "Built for you" framing, above the fold. The dedicated claim CTA
+              sections below carry the conversion ask; the outbound product link
+              stays a quiet text link. */}
           <p className="text-sm text-muted-foreground">
             {variant === "test"
               ? `We built this regression test for ${domain} — it's yours to keep, free.`
               : `We ran this regression suite against ${domain} — the tests are yours to keep, free.`}
           </p>
-          <div className="flex flex-wrap items-center gap-3 pt-1">
-            <a
-              href={claimLink}
-              className="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:opacity-90"
-            >
-              {variant === "test"
-                ? "Claim this test — free"
-                : "Claim these tests — free"}
-            </a>
-            {productUrl && (
+          {productUrl && (
+            <div className="flex flex-wrap items-center gap-3 pt-1">
               <a
                 href={productUrl}
                 target="_blank"
@@ -920,8 +908,8 @@ function OutcomeHeader({
                 Visit site
                 <ExternalLinkIcon />
               </a>
-            )}
-          </div>
+            </div>
+          )}
         </div>
         {shortCommit && (
           <div className="hidden sm:flex flex-col items-end shrink-0 text-right">
