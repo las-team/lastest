@@ -246,6 +246,34 @@ export async function markPublicShareClaimed(
     );
 }
 
+// Aggregate numbers for the share page's social-proof strip. Distinct target
+// domains stand in for "products tested"; total persisted test results stand
+// in for "test runs". Both are platform-wide on purpose — the strip's job is
+// to show a cold visitor that Lastest is alive, not to describe this share.
+export async function getPublicShareStats(): Promise<{
+  productsTested: number;
+  testRunsCompleted: number;
+}> {
+  const [products, runs] = await Promise.all([
+    db
+      .select({
+        n: sql<number>`COUNT(DISTINCT ${publicShares.targetDomain})::int`,
+      })
+      .from(publicShares)
+      .where(
+        and(
+          eq(publicShares.status, "public"),
+          isNotNull(publicShares.targetDomain),
+        ),
+      ),
+    db.select({ n: sql<number>`COUNT(*)::int` }).from(testResults),
+  ]);
+  return {
+    productsTested: products[0]?.n ?? 0,
+    testRunsCompleted: runs[0]?.n ?? 0,
+  };
+}
+
 export async function incrementPublicShareView(slug: string): Promise<void> {
   await db
     .update(publicShares)
