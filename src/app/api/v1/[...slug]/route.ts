@@ -81,12 +81,68 @@ import {
   extractSourceIp,
 } from "@/lib/url-diff/ssrf";
 import { checkRateLimit } from "@/lib/url-diff/rate-limit";
+import {
+  generateAndStoreCaptionsForBuild,
+  storeCaptionsForBuild,
+} from "@/lib/share/generate-captions";
+import type { VideoCaption } from "@/lib/db/schema";
 
 // Helper to verify API auth. `getCurrentSession` already handles both cookie
 // sessions and `Authorization: Bearer <token>` headers, so v1 and any
 // downstream server actions share the same resolution path.
 async function verifyAuth(_request: NextRequest) {
   return getCurrentSession();
+}
+
+// Coerce an untrusted request body into a clean VideoCaption[] (used by the
+// manual, no-AI authoring path). Drops anything malformed rather than failing
+// the whole write so a partially-bad payload still stores its good cues.
+function sanitizeCaptions(raw: unknown): VideoCaption[] {
+  const arr = Array.isArray(raw)
+    ? raw
+    : Array.isArray((raw as { captions?: unknown })?.captions)
+      ? (raw as { captions: unknown[] }).captions
+      : [];
+  const num = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
+  const out: VideoCaption[] = [];
+  for (const c of arr) {
+    if (!c || typeof c !== "object") continue;
+    const o = c as Record<string, unknown>;
+    const stepIndex = num(o.stepIndex);
+    const startMs = num(o.startMs);
+    const endMs = num(o.endMs);
+    if (
+      stepIndex == null ||
+      startMs == null ||
+      endMs == null ||
+      typeof o.text !== "string" ||
+      o.text.trim().length === 0
+    )
+      continue;
+    const ann = o.annotation;
+    const annotation =
+      ann === "arrow" || ann === "underline" || ann === "box" ? ann : undefined;
+    let focus: VideoCaption["focus"];
+    const f = o.focus as Record<string, unknown> | undefined;
+    if (f && typeof f === "object") {
+      const x = num(f.x);
+      const y = num(f.y);
+      const w = num(f.w);
+      const h = num(f.h);
+      if (x != null && y != null && w != null && h != null)
+        focus = { x, y, w, h };
+    }
+    out.push({
+      stepIndex,
+      startMs,
+      endMs,
+      text: o.text.trim(),
+      focus,
+      annotation,
+    });
+  }
+  return out;
 }
 
 // Map thrown auth errors from server actions to proper HTTP status codes
@@ -2093,6 +2149,51 @@ export async function POST(
       }
       await queries.upsertBuildDemoNotes(id, payload);
       return NextResponse.json({ ok: true }, { status: 201 });
+    }
+
+    // Write/generate share recording captions: POST /api/v1/builds/:id/captions
+    //   ?generate=true  → run the AI vision pass over the build's primary
+    //                     recording and store the cues (needs a vision-capable
+    //                     provider in the repo's AI settings).
+    //   otherwise       → store a caller-supplied VideoCaption[] verbatim
+    //                     (body = array or { captions: [...] }). Lets an agent
+    //                     author captions the same way it authors demo-notes.
+    // Cues are merged into the build's demo-notes payload, so the /r/<slug>
+    // share page picks them up via the captions.vtt route with no extra wiring.
+    if (resource === "builds" && id && subResource === "captions") {
+      if (!(await verifyBuildOwnership(id, session))) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      const generate = request.nextUrl.searchParams.get("generate") === "true";
+      if (generate) {
+        const result = await generateAndStoreCaptionsForBuild(id);
+        if (result.count === 0) {
+          return NextResponse.json(
+            { error: "No captions generated", reason: result.reason },
+            { status: 422 },
+          );
+        }
+        return NextResponse.json(
+          { ok: true, count: result.count },
+          { status: 201 },
+        );
+      }
+      const body = await request.json().catch(() => null);
+      const captions = sanitizeCaptions(body);
+      if (captions.length === 0) {
+        return NextResponse.json(
+          {
+            error:
+              "Body must contain a non-empty VideoCaption[] (or { captions: [...] })",
+          },
+          { status: 400 },
+        );
+      }
+      await storeCaptionsForBuild(id, captions);
+      return NextResponse.json(
+        { ok: true, count: captions.length },
+        { status: 201 },
+      );
     }
 
     // Verify phase: POST /api/v1/verify/layer-feedback
