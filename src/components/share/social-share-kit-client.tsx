@@ -1,22 +1,27 @@
 "use client";
 
 // Social share kit for the public /r/<slug> page. Replaces the old plain-text
-// SocialShareRow with icon buttons and platform-specific "share assistants":
-// X, YouTube, and TikTok have no web intent that can carry media or upload
-// metadata, so each dialog prepopulates every field the platform's composer
-// asks for (copy-to-clipboard), prepares the media (MP4 conversion for X /
-// TikTok video, a zip of step screenshots for TikTok slideshows), and
-// deep-links into the platform's uploader.
+// SocialShareRow with icon buttons and platform-specific "share assistants".
+// Only X and LinkedIn have web intents that prefill their composers (text
+// only) — no platform accepts media or upload metadata through a URL. So each
+// dialog gets as close to a prefilled screen as its platform allows: Web Share
+// hands video + text straight into the app's composer, YouTube's Title
+// prefills from the download's filename, copy-and-open buttons put the
+// caption/description on the clipboard as the uploader opens, and the media
+// is prepared client-side (MP4 re-encode, screenshot zip for TikTok
+// slideshows).
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   Check,
+  ClipboardPaste,
   Copy,
   Download,
   ExternalLink,
   Images,
   Link2,
   Loader2,
+  Share2,
   Video,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -65,7 +70,6 @@ export function SocialShareKit({
   slides,
 }: SocialShareKitProps) {
   const fileStem = useMemo(() => slugify(title), [title]);
-  const linkedin = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl)}`;
 
   return (
     <section className="space-y-2 pt-2 border-t">
@@ -83,7 +87,6 @@ export function SocialShareKit({
           copy={copy}
           videoUrl={videoUrl}
           videoDurationMs={videoDurationMs}
-          fileStem={fileStem}
         />
         <TikTokShareDialog
           copy={copy}
@@ -92,12 +95,12 @@ export function SocialShareKit({
           slides={slides}
           fileStem={fileStem}
         />
-        <ShareChip asChild>
-          <a href={linkedin} target="_blank" rel="noopener noreferrer">
-            <LinkedInLogo className="size-3.5" />
-            LinkedIn
-          </a>
-        </ShareChip>
+        <LinkedInShareDialog
+          copy={copy}
+          videoUrl={videoUrl}
+          videoDurationMs={videoDurationMs}
+          fileStem={fileStem}
+        />
         <CopyLinkChip shareUrl={shareUrl} />
       </div>
     </section>
@@ -148,6 +151,13 @@ function XShareDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
+          <OneTapShare
+            videoUrl={videoUrl}
+            videoDurationMs={videoDurationMs}
+            downloadName={fileStem}
+            text={copy.x}
+            appName="X"
+          />
           <StepBlock n={1} label="Download the recording (X needs MP4)">
             <VideoDownloadButton
               videoUrl={videoUrl}
@@ -174,9 +184,9 @@ function XShareDialog({
   );
 }
 
-// --- YouTube --------------------------------------------------------------------
+// --- LinkedIn -------------------------------------------------------------------
 
-function YouTubeShareDialog({
+function LinkedInShareDialog({
   copy,
   videoUrl,
   videoDurationMs,
@@ -187,7 +197,98 @@ function YouTubeShareDialog({
   videoDurationMs: number | null;
   fileStem: string;
 }) {
+  // LinkedIn's feed composer still honours text prefill — unlike the legacy
+  // share-offsite URL (which only carries the link), this opens the "start a
+  // post" screen with the full post written; the trailing share URL unfurls
+  // into the OG card.
+  const composer = `https://www.linkedin.com/feed/?shareActive=true&text=${encodeURIComponent(copy.linkedin)}`;
+
+  // Without a recording the prefilled composer is the whole flow.
+  if (!videoUrl) {
+    return (
+      <ShareChip asChild>
+        <a href={composer} target="_blank" rel="noopener noreferrer">
+          <LinkedInLogo className="size-3.5" />
+          LinkedIn
+        </a>
+      </ShareChip>
+    );
+  }
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <ShareChip>
+          <LinkedInLogo className="size-3.5" />
+          LinkedIn
+        </ShareChip>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Post to LinkedIn with the recording</DialogTitle>
+          <DialogDescription>
+            The composer opens with the post already written. Attach the
+            recording for a video post, or post as-is and LinkedIn unfurls the
+            report link into a preview card.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <OneTapShare
+            videoUrl={videoUrl}
+            videoDurationMs={videoDurationMs}
+            downloadName={fileStem}
+            text={copy.linkedin}
+            appName="LinkedIn"
+          />
+          <StepBlock n={1} label="Download the recording (LinkedIn needs MP4)">
+            <VideoDownloadButton
+              videoUrl={videoUrl}
+              videoDurationMs={videoDurationMs}
+              fileStem={fileStem}
+              preferMp4
+            />
+          </StepBlock>
+          <StepBlock n={2} label="Post text (prefilled in the composer too)">
+            <CopyField
+              value={copy.linkedin}
+              rows={6}
+              ariaLabel="LinkedIn post text"
+            />
+          </StepBlock>
+          <StepBlock
+            n={3}
+            label="Open the prefilled composer and attach the video"
+          >
+            <Button asChild size="sm">
+              <a href={composer} target="_blank" rel="noopener noreferrer">
+                <LinkedInLogo className="size-3.5" />
+                Open LinkedIn composer
+                <ExternalLink className="size-3.5" />
+              </a>
+            </Button>
+          </StepBlock>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// --- YouTube --------------------------------------------------------------------
+
+function YouTubeShareDialog({
+  copy,
+  videoUrl,
+  videoDurationMs,
+}: {
+  copy: SocialCopy;
+  videoUrl: string | null;
+  videoDurationMs: number | null;
+}) {
   if (!videoUrl) return null;
+  // YouTube prefills the upload form's Title field from the uploaded file's
+  // name — so the downloaded file IS the title prefill. Keep it human-readable
+  // (spaces, case) rather than a slug.
+  const titleFilename = sanitizeFilename(copy.youtube.title);
   return (
     <Dialog>
       <DialogTrigger asChild>
@@ -200,20 +301,31 @@ function YouTubeShareDialog({
         <DialogHeader>
           <DialogTitle>Upload to YouTube</DialogTitle>
           <DialogDescription>
-            Everything below is prefilled from this run — download the
-            recording, then paste the metadata into YouTube&apos;s upload form.
+            YouTube has no prefillable upload link, so this gets as close as
+            possible: the file is named so YouTube prefills the Title from it,
+            and the description lands on your clipboard as the form opens.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          <StepBlock n={1} label="Download the recording">
+          <OneTapShare
+            videoUrl={videoUrl}
+            videoDurationMs={videoDurationMs}
+            downloadName={titleFilename}
+            text={copy.youtube.description}
+            appName="YouTube"
+          />
+          <StepBlock
+            n={1}
+            label="Download the recording (filename = video title)"
+          >
             <VideoDownloadButton
               videoUrl={videoUrl}
               videoDurationMs={videoDurationMs}
-              fileStem={fileStem}
-              webmNote="YouTube accepts .webm uploads directly."
+              fileStem={titleFilename}
+              webmNote="YouTube accepts .webm directly and prefills the upload's Title field from this filename."
             />
           </StepBlock>
-          <StepBlock n={2} label="Copy the metadata">
+          <StepBlock n={2} label="Metadata (prefilled — tweak if you like)">
             <div className="space-y-3">
               <LabeledCopyField label="Title" value={copy.youtube.title} />
               <LabeledCopyField
@@ -224,18 +336,16 @@ function YouTubeShareDialog({
               <LabeledCopyField label="Tags" value={copy.youtube.tags} />
             </div>
           </StepBlock>
-          <StepBlock n={3} label="Upload">
-            <Button asChild size="sm">
-              <a
-                href="https://www.youtube.com/upload"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <YouTubeLogo className="size-3.5" />
-                Open YouTube upload
-                <ExternalLink className="size-3.5" />
-              </a>
-            </Button>
+          <StepBlock n={3} label="Upload — title prefills from the filename">
+            <CopyAndOpenButton
+              copyValue={copy.youtube.description}
+              copyWhat="description"
+              href="https://www.youtube.com/upload"
+            >
+              <YouTubeLogo className="size-3.5" />
+              Copy description &amp; open YouTube
+              <ExternalLink className="size-3.5" />
+            </CopyAndOpenButton>
           </StepBlock>
         </div>
       </DialogContent>
@@ -262,18 +372,19 @@ function TikTokShareDialog({
   const hasSlides = slides.length >= 2;
   if (!hasVideo && !hasSlides) return null;
 
+  // TikTok has no prefillable upload URL either — copy the caption in the
+  // same click that opens the uploader, so the compose screen is one paste
+  // away from fully filled.
   const uploadButton = (
-    <Button asChild size="sm">
-      <a
-        href="https://www.tiktok.com/tiktokstudio/upload"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        <TikTokLogo className="size-3.5" />
-        Open TikTok upload
-        <ExternalLink className="size-3.5" />
-      </a>
-    </Button>
+    <CopyAndOpenButton
+      copyValue={copy.tiktok}
+      copyWhat="caption"
+      href="https://www.tiktok.com/tiktokstudio/upload"
+    >
+      <TikTokLogo className="size-3.5" />
+      Copy caption &amp; open TikTok
+      <ExternalLink className="size-3.5" />
+    </CopyAndOpenButton>
   );
 
   return (
@@ -312,6 +423,13 @@ function TikTokShareDialog({
             <TabsContent value="video" className="space-y-4 pt-3">
               {videoUrl && (
                 <>
+                  <OneTapShare
+                    videoUrl={videoUrl}
+                    videoDurationMs={videoDurationMs}
+                    downloadName={fileStem}
+                    text={copy.tiktok}
+                    appName="TikTok"
+                  />
                   <StepBlock n={1} label="Download the recording">
                     <VideoDownloadButton
                       videoUrl={videoUrl}
@@ -320,10 +438,7 @@ function TikTokShareDialog({
                       preferMp4
                     />
                   </StepBlock>
-                  <StepBlock
-                    n={2}
-                    label="Upload the video and paste the caption"
-                  >
+                  <StepBlock n={2} label="Upload the video and paste">
                     {uploadButton}
                   </StepBlock>
                 </>
@@ -535,7 +650,199 @@ function VideoDownloadButton({
   );
 }
 
+// --- one-tap Web Share (video + text handed straight to the app) ---------------
+
+// True where navigator.share can carry video files (mobile Chrome/Safari,
+// some desktops). The capability never changes during a page's life, so it's
+// probed once and served through useSyncExternalStore — the server snapshot
+// is false, keeping SSR + hydration consistent, and React re-reads the real
+// value after hydrating.
+let canShareProbe: boolean | null = null;
+function probeCanShareVideoFiles(): boolean {
+  if (canShareProbe == null) {
+    try {
+      const probe = new File([new Uint8Array(1)], "probe.mp4", {
+        type: "video/mp4",
+      });
+      canShareProbe = !!navigator.canShare?.({ files: [probe] });
+    } catch {
+      canShareProbe = false;
+    }
+  }
+  return canShareProbe;
+}
+function useCanShareVideoFiles(): boolean {
+  return useSyncExternalStore(
+    () => () => {},
+    probeCanShareVideoFiles,
+    () => false,
+  );
+}
+
+// The closest thing to a prefilled upload screen the platforms allow: the Web
+// Share API hands the video file + post text to the chosen app, which opens
+// its composer with the video already attached (X and TikTok prefill the text
+// too on most devices). Two clicks by design — preparing the file (fetch +
+// MP4 re-encode) outlives the user-gesture window navigator.share() requires,
+// so click 1 prepares and click 2 shares.
+function OneTapShare({
+  videoUrl,
+  videoDurationMs,
+  downloadName,
+  text,
+  appName,
+}: {
+  videoUrl: string;
+  videoDurationMs: number | null;
+  downloadName: string;
+  text: string;
+  appName: string;
+}) {
+  const supported = useCanShareVideoFiles();
+  const [state, setState] = useState<"idle" | "preparing" | "ready" | "error">(
+    "idle",
+  );
+  const [progress, setProgress] = useState(0);
+  const fileRef = useRef<File | null>(null);
+
+  if (!supported) return null;
+
+  const prepare = async () => {
+    setState("preparing");
+    setProgress(0);
+    try {
+      let blob: Blob;
+      let name: string;
+      if (mp4ConversionSupported()) {
+        blob = await convertWebmToMp4(videoUrl, {
+          durationMs: videoDurationMs,
+          onProgress: setProgress,
+        });
+        name = `${downloadName}.mp4`;
+      } else {
+        const res = await fetch(videoUrl);
+        if (!res.ok) throw new Error(String(res.status));
+        blob = await res.blob();
+        name = `${downloadName}.webm`;
+      }
+      const file = new File([blob], name, { type: blob.type || "video/mp4" });
+      if (!navigator.canShare?.({ files: [file] })) {
+        throw new Error("file not shareable");
+      }
+      fileRef.current = file;
+      setState("ready");
+    } catch {
+      setState("error");
+    }
+  };
+
+  const share = async () => {
+    const file = fileRef.current;
+    if (!file) return;
+    // Belt-and-braces: some apps drop the text when a file is attached, so
+    // put it on the clipboard too — worst case it's one paste away.
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Clipboard unavailable — the dialog's copy fields still work.
+    }
+    try {
+      await navigator.share({ files: [file], text });
+    } catch {
+      // User dismissed the sheet — keep the prepared file for another go.
+    }
+  };
+
+  return (
+    <div className="rounded-md border bg-muted/40 p-3 space-y-2">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <Share2 className="size-4 shrink-0" />
+        Fastest: send it straight to {appName}
+      </div>
+      {state === "ready" ? (
+        <Button size="sm" onClick={share}>
+          <Share2 className="size-3.5" />
+          Open share sheet
+        </Button>
+      ) : (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={prepare}
+          disabled={state === "preparing"}
+        >
+          {state === "preparing" ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <Video className="size-3.5" />
+          )}
+          {state === "preparing"
+            ? `Preparing video… ${Math.round(progress * 100)}%`
+            : "Prepare video"}
+        </Button>
+      )}
+      <p className="text-xs text-muted-foreground">
+        {state === "ready"
+          ? `Pick ${appName} in the sheet — its composer opens with the video attached; the text is prefilled or on your clipboard.`
+          : "Hands the video and prefilled text to the app's own composer — no downloads to juggle."}
+      </p>
+      {state === "error" && (
+        <p className="text-xs text-destructive">
+          Couldn&apos;t prepare the video for sharing — use the manual steps
+          below.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // --- shared bits ----------------------------------------------------------------
+
+// One click, two effects: the caption/description lands on the clipboard and
+// the platform's uploader opens — its form is one paste from prefilled.
+function CopyAndOpenButton({
+  copyValue,
+  copyWhat,
+  href,
+  children,
+}: {
+  copyValue: string;
+  copyWhat: string;
+  href: string;
+  children: React.ReactNode;
+}) {
+  const [copied, setCopied] = useState(false);
+  const go = async () => {
+    try {
+      await navigator.clipboard.writeText(copyValue);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 4000);
+    } catch {
+      // Clipboard unavailable — the copy fields above still work.
+    }
+    window.open(href, "_blank", "noopener,noreferrer");
+  };
+  return (
+    <div className="space-y-1.5">
+      <Button size="sm" onClick={go}>
+        {children}
+      </Button>
+      <p className="text-xs text-muted-foreground inline-flex items-center gap-1">
+        {copied ? (
+          <>
+            <Check className="size-3" />
+            {`Copied — paste the ${copyWhat} into the form.`}
+          </>
+        ) : (
+          <>
+            <ClipboardPaste className="size-3" />
+            {`Copies the ${copyWhat} as it opens — just paste.`}
+          </>
+        )}
+      </p>
+    </div>
+  );
+}
 
 function ShareChip({
   asChild,
@@ -680,6 +987,19 @@ function triggerDownload(blob: Blob, filename: string) {
   a.remove();
   // Give the browser a beat to start the download before revoking.
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+// Human-readable filename (spaces and case preserved) — used where the
+// filename itself is the prefill, e.g. YouTube derives the upload's Title
+// from it. Only strips characters that are illegal in filenames.
+function sanitizeFilename(s: string): string {
+  return (
+    s
+      .replace(/[/\\:*?"<>|\u0000-\u001f]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 120) || "lastest-run"
+  );
 }
 
 function slugify(s: string): string {

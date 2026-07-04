@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildLinkedInPost,
   buildSocialCopy,
   buildStatLine,
   buildTikTokCaption,
@@ -138,11 +139,27 @@ describe("buildTikTokCaption", () => {
   });
 });
 
+describe("buildLinkedInPost", () => {
+  it("includes the report link, summary, and hashtags within the limit", () => {
+    const post = buildLinkedInPost(base);
+    expect(post.length).toBeLessThanOrEqual(3000);
+    expect(post).toContain(base.shareUrl);
+    expect(post).toContain(base.uxSummary);
+    expect(post).toContain("#VisualTesting");
+    expect(post).toContain("re-run and pixel-diffed against baseline");
+  });
+  it("uses build phrasing on build shares", () => {
+    const post = buildLinkedInPost({ ...base, variant: "build" });
+    expect(post).toContain("this is one build's report");
+  });
+});
+
 describe("buildSocialCopy", () => {
-  it("returns all three platform payloads", () => {
+  it("returns all four platform payloads", () => {
     const copy = buildSocialCopy(base);
     expect(copy.x).toBeTruthy();
     expect(copy.youtube.title).toBeTruthy();
     expect(copy.tiktok).toBeTruthy();
+    expect(copy.linkedin).toBeTruthy();
   });
 });

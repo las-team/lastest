@@ -35,6 +35,7 @@ export interface SocialCopy {
   x: string;
   youtube: { title: string; description: string; tags: string };
   tiktok: string;
+  linkedin: string;
 }
 
 const X_LIMIT = 280;
@@ -43,6 +44,7 @@ const YT_TITLE_LIMIT = 100;
 const YT_DESCRIPTION_LIMIT = 5000;
 const YT_TAGS_LIMIT = 500;
 const TIKTOK_LIMIT = 2200;
+const LINKEDIN_LIMIT = 3000;
 
 /** "1:23" / "12:05" / "1:02:03" — YouTube chapter timestamp format. */
 export function formatTimestamp(sec: number): string {
@@ -226,10 +228,32 @@ export function buildTikTokCaption(input: SocialCopyInput): string {
   return clampAtWordBoundary(caption, TIKTOK_LIMIT);
 }
 
+// --- LinkedIn -----------------------------------------------------------------
+
+// Longer-form professional post. Fed to LinkedIn's still-working prefill URL
+// (/feed/?shareActive=true&text=...), which opens the composer with this text
+// filled in; LinkedIn unfurls the trailing share URL into the OG card.
+export function buildLinkedInPost(input: SocialCopyInput): string {
+  const stat = buildStatLine(input);
+  const parts: string[] = [
+    `${verdictEmoji(input)} ${input.title} on ${input.domain} — ${stat}.`,
+    input.variant === "build"
+      ? `Every release gets recorded, screenshotted, and diffed against baseline automatically — this is one build's report.`
+      : `This flow is recorded once, then re-run and pixel-diffed against baseline on every build.`,
+  ];
+  if (input.uxSummary) parts.push(input.uxSummary);
+  parts.push(
+    `Full interactive report (recording, diff sliders, a11y + perf checks): ${input.shareUrl}`,
+  );
+  parts.push(`#VisualTesting #QA #WebDev #Automation`);
+  return clampAtWordBoundary(parts.join("\n\n"), LINKEDIN_LIMIT);
+}
+
 export function buildSocialCopy(input: SocialCopyInput): SocialCopy {
   return {
     x: buildXPost(input),
     youtube: buildYouTubeMeta(input),
     tiktok: buildTikTokCaption(input),
+    linkedin: buildLinkedInPost(input),
   };
 }
