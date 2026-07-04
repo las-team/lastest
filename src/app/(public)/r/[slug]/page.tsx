@@ -25,11 +25,15 @@ import type {
 import { isValidShareSlug, buildShareUrl } from "@/lib/share/slug";
 import { resolveTestVideoUrl } from "@/lib/share/video-fallback";
 import { ShareVideoPlayer } from "./share-video-player";
-import { CopyLinkButton } from "./copy-link-button";
 import { AwardBadgeRow } from "@/components/awards/award-badge-row";
 import { MobileDiffGallery } from "@/components/diff/mobile-diff-gallery-client";
 import { ChapterRail, type Chapter } from "@/components/share/chapter-rail";
 import { DomOverlay } from "@/components/share/dom-overlay-client";
+import {
+  SocialShareKit,
+  type ShareSlide,
+} from "@/components/share/social-share-kit-client";
+import { buildSocialCopy } from "@/lib/share/social-copy";
 
 // Dynamic — share content is live and render is cheap (pure server HTML).
 export const revalidate = 0;
@@ -377,6 +381,40 @@ export default async function PublicSharePage({ params }: PageProps) {
       )
     : [];
 
+  // Prepopulated copy + assets for the social share kit (X / YouTube / TikTok
+  // dialogs). Copy is built server-side (pure string work) so the client
+  // island only ships UI. Slides feed TikTok's photo-slideshow flow: step
+  // captures on test shares, changed-page screenshots on build shares.
+  const shareVerdictLabel = isTestShare
+    ? testVerdict(primaryResult?.status ?? null).label
+    : buildVerdict(build.overallStatus).label;
+  const shareSlides: ShareSlide[] = isTestShare
+    ? chapters.map((c) => ({ url: c.src, label: c.label }))
+    : [
+        ...buildSliderDiffs(diffs, toUrl).map((d) => ({
+          url: d.current,
+          label: d.stepLabel ?? "Visual change",
+        })),
+        ...buildGallery(diffs, scopedResults, toUrl, new Set<string>()).map(
+          (g) => ({ url: g.src, label: g.label }),
+        ),
+      ];
+  const socialCopy = buildSocialCopy({
+    shareUrl,
+    title: isTestShare ? (test?.name ?? displayDomain) : displayDomain,
+    domain: displayDomain,
+    variant: isTestShare ? "test" : "build",
+    verdictLabel: shareVerdictLabel,
+    pixelsChanged: totalPixelsChanged,
+    changesDetected: build.changesDetected ?? 0,
+    totalTests: build.totalTests ?? 0,
+    durationMs: primaryResult?.durationMs ?? null,
+    chapters: chapters.map((c) => ({ title: c.label, atSec: c.atSec })),
+    uxSummary: demoNotes?.uxSummary ?? null,
+    highlights: demoNotes?.highlights ?? [],
+    outreachHook: demoNotes?.outreachHook ?? null,
+  });
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <ShareHeader signInLink={signInLink} claimLink={claimLink} />
@@ -420,8 +458,6 @@ export default async function PublicSharePage({ params }: PageProps) {
             build={build}
             perfScore={perfScore}
             testResult={primaryResult}
-            shareUrl={shareUrl}
-            testName={test?.name ?? displayDomain}
             domain={displayDomain}
             testCode={test?.code ?? null}
             pixelsChanged={totalPixelsChanged}
@@ -454,6 +490,14 @@ export default async function PublicSharePage({ params }: PageProps) {
             />
           </>
         )}
+
+        <SocialShareKit
+          shareUrl={shareUrl}
+          title={isTestShare ? (test?.name ?? displayDomain) : displayDomain}
+          copy={socialCopy}
+          videoUrl={clips[0]?.src ?? null}
+          slides={shareSlides}
+        />
 
         {showAwardBadges && award && <AwardBadgeRow award={award} />}
 
@@ -1713,7 +1757,9 @@ function BuildDiffsGallery({
   );
 }
 
-// --- Test share: video + step strip + stats + pull quote + diffs + socials --
+// --- Test share: video + step strip + stats + pull quote + diffs ------------
+// (Social share buttons render at page level via SocialShareKit — both
+// build and test shares get them.)
 
 function TestShareBody({
   diffs,
@@ -1722,8 +1768,6 @@ function TestShareBody({
   build,
   perfScore,
   testResult,
-  shareUrl,
-  testName,
   domain,
   testCode,
   pixelsChanged,
@@ -1738,8 +1782,6 @@ function TestShareBody({
   build: Build;
   perfScore: number | null;
   testResult: ShareTestResult | null;
-  shareUrl: string;
-  testName: string;
   domain: string;
   testCode: string | null;
   pixelsChanged: number;
@@ -1904,13 +1946,6 @@ function TestShareBody({
       )}
 
       {gallery.length > 0 && <GallerySection items={gallery} />}
-
-      <SocialShareRow
-        shareUrl={shareUrl}
-        testName={testName}
-        domain={domain}
-        changesCount={sliderDiffs.length}
-      />
     </>
   );
 }
@@ -2094,59 +2129,6 @@ function PullQuote({ text }: { text: string }) {
       <p className="text-xs text-muted-foreground mt-2">
         Built with Lastest — open-source visual regression testing.
       </p>
-    </section>
-  );
-}
-
-function SocialShareRow({
-  shareUrl,
-  testName,
-  domain,
-  changesCount,
-}: {
-  shareUrl: string;
-  testName: string;
-  domain: string;
-  changesCount: number;
-}) {
-  // Findings-led prefill: a founder proud of a clean run (or startled by a
-  // dirty one) should be one click from a post that reads like a result, not
-  // like an ad. The test name is the fallback subject when domain is generic.
-  const subject = domain || testName;
-  const text =
-    changesCount > 0
-      ? `Lastest caught ${changesCount} visual change${changesCount === 1 ? "" : "s"} on ${subject} — before/after diff and full recording:`
-      : `${subject} just passed a full visual regression run on Lastest — watch the recording:`;
-  const tweet = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
-    text,
-  )}&url=${encodeURIComponent(shareUrl)}`;
-  const linkedin = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(
-    shareUrl,
-  )}`;
-  const buttonClasses =
-    "inline-flex items-center rounded-md border bg-card px-3 py-1.5 text-xs font-medium hover:bg-muted";
-  return (
-    <section className="flex flex-wrap items-center gap-2 pt-2 border-t">
-      <span className="text-xs uppercase tracking-wide text-muted-foreground mr-1">
-        Share
-      </span>
-      <a
-        href={tweet}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={buttonClasses}
-      >
-        Post to X
-      </a>
-      <a
-        href={linkedin}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={buttonClasses}
-      >
-        Share on LinkedIn
-      </a>
-      <CopyLinkButton url={shareUrl} className={buttonClasses} />
     </section>
   );
 }

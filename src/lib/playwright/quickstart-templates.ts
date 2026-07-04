@@ -111,6 +111,17 @@ export interface RenderWalkthroughOptions {
   primaryInputLabel?: string;
   primaryCtaLabel?: string;
   demoInputValue?: string;
+  /** Product archetype classified by the public scout. Picks the deterministic
+   *  public-phase interaction snippet (canvas draw / search query / sample-file
+   *  upload / add-to-cart). Absent → legacy behavior (canvas auto-detection only). */
+  productArchetype?:
+    | "canvas"
+    | "search"
+    | "form"
+    | "upload"
+    | "dashboard"
+    | "ecommerce"
+    | "other";
 }
 
 function jsString(value: string): string {
@@ -433,12 +444,135 @@ ${renderEbBootstrap()}
 `;
 }
 
+/**
+ * Public-phase interaction snippet per product archetype, emitted right after
+ * the homepage screenshot. Each is best-effort (fully wrapped) so a mismatch
+ * between the scout's classification and the real page never breaks the run.
+ * No archetype (legacy scouts) falls back to canvas auto-detection — the large
+ * drawing <canvas> heuristic is cheap and self-gating.
+ */
+function renderArchetypeSnippet(
+  archetype: RenderWalkthroughOptions["productArchetype"],
+): string {
+  switch (archetype) {
+    case "canvas":
+    case undefined:
+      // Canvas / drawing apps (Excalidraw, tldraw, whiteboards, map tools):
+      // when the homepage exposes a large drawing <canvas>, perform a REAL
+      // coordinate-based action — select the rectangle tool ('r', the de-facto
+      // shortcut across drawing apps) and drag a square — so the walkthrough
+      // demonstrates the product's core function instead of only screenshotting
+      // nav pages. Gated on a visibly large canvas, so non-drawing canvases
+      // (charts, games) never break the run.
+      return `  try {
+    const canvas = page.locator('canvas').first();
+    if (await canvas.isVisible().catch(() => false)) {
+      const box = await canvas.boundingBox().catch(() => null);
+      if (box && box.width > 300 && box.height > 200) {
+        await canvas.click({ position: { x: 30, y: 30 } }).catch(() => {});
+        await page.keyboard.press('r').catch(() => {});
+        await page.waitForTimeout(150);
+        const side = Math.min(box.width, box.height) * 0.25;
+        const x1 = box.x + box.width * 0.4;
+        const y1 = box.y + box.height * 0.35;
+        await page.mouse.move(x1, y1);
+        await page.mouse.down();
+        await page.mouse.move(x1 + side * 0.5, y1 + side * 0.5, { steps: 8 });
+        await page.mouse.move(x1 + side, y1 + side, { steps: 8 });
+        await page.mouse.up();
+        await page.keyboard.press('Escape').catch(() => {});
+        await page.waitForTimeout(300);
+        stepLogger.log(\`Scenario \${publicScenario}: Drew a square on the canvas\`);
+        await page.screenshot({ path: shot(publicScenario, 'draw-square'), fullPage: true });
+        publicScenario++;
+      }
+    }
+  } catch (canvasErr) {
+    stepLogger.warn(\`Canvas draw step skipped: \${canvasErr && canvasErr.message}\`);
+  }`;
+    case "search":
+      // Search-first products: run a real query on the public search surface
+      // so the walkthrough captures actual results, not an empty search bar.
+      return `  try {
+    const searchInput = page.getByRole('searchbox').first()
+      .or(page.locator('input[type="search"]').first())
+      .or(page.getByPlaceholder(/search|find|look ?up/i).first());
+    if (await searchInput.isVisible().catch(() => false)) {
+      await searchInput.click().catch(() => {});
+      await searchInput.pressSequentially(BIZ_DEMO_VALUE || 'demo', { delay: 15 }).catch(() => {});
+      await searchInput.press('Enter').catch(() => {});
+      await Promise.race([
+        page.waitForLoadState('networkidle', { timeout: 8000 }),
+        page.waitForSelector('[role="list"], [role="listbox"], [data-testid*="result"], .results, .result-list', { timeout: 8000 }),
+      ]).catch(() => {});
+      await settle();
+      stepLogger.log(\`Scenario \${publicScenario}: Search results\`);
+      await page.screenshot({ path: shot(publicScenario, 'search-results'), fullPage: true });
+      publicScenario++;
+    }
+  } catch (archErr) {
+    stepLogger.warn(\`Search step skipped: \${archErr && archErr.message}\`);
+  }`;
+    case "upload":
+      // Upload-first products: feed a tiny generated CSV into the first file
+      // input (hidden inputs behind styled buttons still accept setInputFiles)
+      // so the product shows its processing surface.
+      return `  try {
+    const fileInput = page.locator('input[type="file"]').first();
+    if ((await fileInput.count().catch(() => 0)) > 0) {
+      await fileInput.setInputFiles({
+        name: 'lastest-sample.csv',
+        mimeType: 'text/csv',
+        buffer: Buffer.from('name,value\\nalpha,1\\nbeta,2\\ngamma,3\\n'),
+      }).catch(() => {});
+      await Promise.race([
+        page.waitForLoadState('networkidle', { timeout: 8000 }),
+        page.waitForSelector('[role="progressbar"], [data-testid*="result"], table, .preview', { timeout: 8000 }),
+      ]).catch(() => {});
+      await settle();
+      stepLogger.log(\`Scenario \${publicScenario}: Uploaded a sample file\`);
+      await page.screenshot({ path: shot(publicScenario, 'upload-result'), fullPage: true });
+      publicScenario++;
+    }
+  } catch (archErr) {
+    stepLogger.warn(\`Upload step skipped: \${archErr && archErr.message}\`);
+  }`;
+    case "ecommerce":
+      // Storefronts: add the first product to the cart and open it — the
+      // classic add-to-cart-and-abandon walk. Additive only; never checkout.
+      return `  try {
+    const addBtn = page.getByRole('button', { name: /add to (cart|bag|basket)/i }).first();
+    if (await addBtn.isVisible().catch(() => false)) {
+      await addBtn.click({ timeout: 3000 }).catch(() => {});
+      await settle();
+      const cartLink = page.getByRole('link', { name: /cart|bag|basket/i }).first()
+        .or(page.getByRole('button', { name: /^(cart|bag|basket)\\b/i }).first())
+        .or(page.locator('a[href*="cart"]').first());
+      if (await cartLink.isVisible().catch(() => false)) {
+        await cartLink.click({ timeout: 3000 }).catch(() => {});
+        await settle();
+      }
+      stepLogger.log(\`Scenario \${publicScenario}: Added to cart\`);
+      await page.screenshot({ path: shot(publicScenario, 'cart'), fullPage: true });
+      publicScenario++;
+    }
+  } catch (archErr) {
+    stepLogger.warn(\`Add-to-cart step skipped: \${archErr && archErr.message}\`);
+  }`;
+    // form is covered by the business-interaction block; dashboard/other have
+    // no public-phase interaction beyond the nav walk.
+    default:
+      return "";
+  }
+}
+
 export function renderWalkthroughCode(opts: RenderWalkthroughOptions): string {
   const authAutomatable = opts.authAutomatable;
   const inputLabel = opts.primaryInputLabel?.trim() ?? "";
   const ctaLabel = opts.primaryCtaLabel?.trim() ?? "";
   const demoValue = opts.demoInputValue?.trim() ?? "";
   const hasBizInteraction = inputLabel.length > 0 && demoValue.length > 0;
+  const archetypeSnippet = renderArchetypeSnippet(opts.productArchetype);
 
   return `export async function test(page, baseUrl, screenshotPath, stepLogger) {
   const AUTH_AUTOMATABLE = ${authAutomatable};
@@ -467,39 +601,9 @@ ${renderEbBootstrap()}
 
   let publicScenario = 2;
 
-  // Primary interaction for canvas / drawing apps (Excalidraw, tldraw, whiteboards,
-  // map tools): when the homepage exposes a large drawing <canvas>, perform a REAL
-  // coordinate-based action — select the rectangle tool ('r', the de-facto shortcut
-  // across drawing apps) and drag a square — so the walkthrough demonstrates the
-  // product's core function instead of only screenshotting nav pages. Best-effort:
-  // gated on a visibly large canvas and fully wrapped, so non-drawing canvases
-  // (charts, games) never break the run.
-  try {
-    const canvas = page.locator('canvas').first();
-    if (await canvas.isVisible().catch(() => false)) {
-      const box = await canvas.boundingBox().catch(() => null);
-      if (box && box.width > 300 && box.height > 200) {
-        await canvas.click({ position: { x: 30, y: 30 } }).catch(() => {});
-        await page.keyboard.press('r').catch(() => {});
-        await page.waitForTimeout(150);
-        const side = Math.min(box.width, box.height) * 0.25;
-        const x1 = box.x + box.width * 0.4;
-        const y1 = box.y + box.height * 0.35;
-        await page.mouse.move(x1, y1);
-        await page.mouse.down();
-        await page.mouse.move(x1 + side * 0.5, y1 + side * 0.5, { steps: 8 });
-        await page.mouse.move(x1 + side, y1 + side, { steps: 8 });
-        await page.mouse.up();
-        await page.keyboard.press('Escape').catch(() => {});
-        await page.waitForTimeout(300);
-        stepLogger.log(\`Scenario \${publicScenario}: Drew a square on the canvas\`);
-        await page.screenshot({ path: shot(publicScenario, 'draw-square'), fullPage: true });
-        publicScenario++;
-      }
-    }
-  } catch (canvasErr) {
-    stepLogger.warn(\`Canvas draw step skipped: \${canvasErr && canvasErr.message}\`);
-  }
+  // Archetype-specific primary interaction (scout-classified): show the product
+  // doing its job on the public surface before the generic nav walk.
+${archetypeSnippet}
 
   const navLinks = await page.$$eval('a[href]', as => as
     .map(a => a.getAttribute('href') || '')
@@ -600,6 +704,15 @@ ${renderEbBootstrap()}
           if (input) {
             await input.click({ timeout: 3000 }).catch(() => {});
             await input.pressSequentially(BIZ_DEMO_VALUE, { delay: 15 }).catch(() => {});
+            stepLogger.log(\`Scenario \${publicScenario}: Business interaction "\${BIZ_DEMO_VALUE.slice(0, 40)}"\`);
+            await page.screenshot({ path: shot(publicScenario, 'biz-interaction'), fullPage: true });
+            publicScenario++;
+            // Snapshot the pre-submit state so we can tell when the product
+            // actually produced output (URL change or main-content mutation),
+            // not just that the network went quiet.
+            const beforeUrl = page.url();
+            const beforeLen = await page.locator('main, [role="main"], body').first()
+              .innerText().then(t => t.length).catch(() => 0);
             // Submit: prefer the scout-named CTA, else any hero-shape verb.
             const heroVerbRe = /^(validate|generate|create|run|search|find|analy[sz]e|check|test|try|start|go|build|score|review|summarize)\\b/i;
             const ctaCandidates = [];
@@ -622,15 +735,25 @@ ${renderEbBootstrap()}
               // forms). Try pressing Enter as a last resort before giving up.
               await input.press('Enter').catch(() => {});
             }
-            // Wait for the page to react: URL change, network settle, or a
-            // new result-shaped surface (list / panel / dialog). 8s cap.
+            // Wait for the product's OUTPUT, not just the submission: a URL
+            // change, a meaningful main-content mutation, or a result-shaped
+            // surface (list / panel / dialog). Generation flows can take a
+            // while, so the cap is generous (12s).
             await Promise.race([
-              page.waitForLoadState('networkidle', { timeout: 8000 }),
-              page.waitForSelector('[role="dialog"], [role="list"], [role="article"], [data-testid*="result"], .results, .result-list', { timeout: 8000 }),
+              page.waitForFunction(function (args) {
+                if (location.href !== args.beforeUrl) return true;
+                var el = document.querySelector('main, [role="main"]') || document.body;
+                var len = ((el && el.innerText) || '').length;
+                return Math.abs(len - args.beforeLen) > 80;
+              }, { beforeUrl: beforeUrl, beforeLen: beforeLen }, { timeout: 12000 }),
+              page.waitForSelector('[role="dialog"], [role="list"], [role="article"], [data-testid*="result"], .results, .result-list', { timeout: 12000 }),
             ]).catch(() => {});
             await settle();
-            stepLogger.log(\`Scenario \${publicScenario}: Business interaction "\${BIZ_DEMO_VALUE.slice(0, 40)}"\`);
-            await page.screenshot({ path: shot(publicScenario, 'biz-interaction'), fullPage: true });
+            // The money frame — the product's own output, labeled with the
+            // product's own verb so the chapter rail reads "Validate idea",
+            // not "Step 6".
+            stepLogger.log(\`Scenario \${publicScenario}: \${BIZ_CTA_LABEL || 'Product output'}\`);
+            await page.screenshot({ path: shot(publicScenario, 'result'), fullPage: true });
             publicScenario++;
             bizFired = true;
           } else {

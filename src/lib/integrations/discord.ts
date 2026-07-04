@@ -226,6 +226,13 @@ export interface DiscordShareNotification {
   publishedByEmail: string;
   teamName: string;
   scopedTestName?: string | null;
+  /** Tweet-length opener from the demo notes — the DM's intended first line,
+   *  surfaced next to the share URL so the operator never writes it from scratch. */
+  outreachHook?: string | null;
+  /** Automation gotchas from the demo notes. Hidden from the public share on
+   *  purpose, but excellent DM material — routed here so the person doing
+   *  outreach actually sees them. */
+  testingStruggles?: Array<{ label: string; note: string }>;
 }
 
 export async function sendDiscordShareNotification(
@@ -249,6 +256,21 @@ export async function sendDiscordShareNotification(
     value: `\`${notification.slug}\``,
     inline: true,
   });
+  if (notification.outreachHook) {
+    fields.push({
+      name: "Outreach hook",
+      value: notification.outreachHook.slice(0, 1024),
+    });
+  }
+  if (notification.testingStruggles?.length) {
+    fields.push({
+      name: "Testing struggles (operator-only)",
+      value: notification.testingStruggles
+        .map((s) => `• ${s.label} — ${s.note}`)
+        .join("\n")
+        .slice(0, 1024),
+    });
+  }
 
   const embed = {
     title: "🚀 Fresh share dropped in the wild",
