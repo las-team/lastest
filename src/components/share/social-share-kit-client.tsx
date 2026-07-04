@@ -26,6 +26,7 @@ import {
   Share2,
   Video,
 } from "lucide-react";
+import JSZip from "jszip";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -39,7 +40,6 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { buildZip, type ZipEntry } from "@/lib/share/client-zip";
 import type { SocialCopy } from "@/lib/share/social-copy";
 
 export interface ShareSlide {
@@ -454,18 +454,25 @@ function SlideshowDownload({
   const download = async () => {
     setState("working");
     try {
-      const entries: ZipEntry[] = [];
+      const zip = new JSZip();
+      let added = 0;
       for (let i = 0; i < slides.length; i++) {
         const s = slides[i];
         const res = await fetch(s.url);
         if (!res.ok) continue;
-        const buf = new Uint8Array(await res.arrayBuffer());
+        const buf = await res.arrayBuffer();
         const ext = extensionOf(s.url) ?? "png";
         const idx = `${i + 1}`.padStart(2, "0");
-        entries.push({ name: `${idx}-${slugify(s.label)}.${ext}`, data: buf });
+        zip.file(`${idx}-${slugify(s.label)}.${ext}`, buf);
+        added++;
       }
-      if (entries.length === 0) throw new Error("no slides fetched");
-      triggerDownload(buildZip(entries), `${fileStem}-slides.zip`);
+      if (added === 0) throw new Error("no slides fetched");
+      // Store, don't DEFLATE: the slides are already-compressed PNGs.
+      const blob = await zip.generateAsync({
+        type: "blob",
+        compression: "STORE",
+      });
+      triggerDownload(blob, `${fileStem}-slides.zip`);
       setState("done");
     } catch {
       setState("error");
