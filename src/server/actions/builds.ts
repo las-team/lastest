@@ -3063,6 +3063,16 @@ async function sendBuildNotifications(data: {
       console.error("Failed to post GitLab MR comment:", error);
     }
   }
+
+  // Report to the Vercel check (native Marketplace integration). No-ops unless
+  // this build was triggered by a Vercel deployment (a vercel_checks row exists
+  // for it). Dynamic import keeps the reporter off the hot module graph.
+  try {
+    const { reportVercelCheckForBuild } = await import("@/lib/vercel/reporter");
+    await reportVercelCheckForBuild(data.buildId, data.status);
+  } catch (error) {
+    console.error("Failed to report Vercel check:", error);
+  }
 }
 
 /**

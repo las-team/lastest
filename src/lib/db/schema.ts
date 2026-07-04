@@ -1721,7 +1721,8 @@ export type TriggerType =
   | "manual"
   | "push"
   | "scheduled"
-  | "validate_diff";
+  | "validate_diff"
+  | "vercel";
 
 // AI Provider settings for test generation
 export type AIProvider =
@@ -3108,6 +3109,115 @@ export const githubActionConfigs = pgTable("github_action_configs", {
 
 export type GithubActionConfig = typeof githubActionConfigs.$inferSelect;
 export type NewGithubActionConfig = typeof githubActionConfigs.$inferInsert;
+
+// ============================================
+// Vercel Marketplace Integration
+// ============================================
+// Native Vercel Checks path: install Lastest from the Vercel Marketplace and
+// every deployment gets a Lastest visual-regression check — no GitHub Actions
+// workflow required. Mirrors the GitHub integration tables end to end.
+
+// Team-scoped install — one row per Vercel integration *configuration*
+// (mirrors githubAccounts). `accessToken` is an OAuth2 integration token
+// (the Checks API 403s on personal access tokens); encrypted at rest with
+// ENCRYPTION_KEY via encryptField/decryptField at the query layer.
+export const vercelAccounts = pgTable("vercel_accounts", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  teamId: text("team_id")
+    .notNull()
+    .references(() => teams.id),
+  vercelConfigurationId: text("vercel_configuration_id").notNull().unique(),
+  vercelTeamId: text("vercel_team_id"),
+  vercelUserId: text("vercel_user_id"),
+  accessToken: text("access_token").notNull(), // encrypted (enc:v1:…)
+  installedByUserId: text("installed_by_user_id"),
+  createdAt: timestamp("created_at").$defaultFn(() => new Date()),
+  updatedAt: timestamp("updated_at").$defaultFn(() => new Date()),
+});
+
+export type VercelAccount = typeof vercelAccounts.$inferSelect;
+export type NewVercelAccount = typeof vercelAccounts.$inferInsert;
+
+export type VercelRunOn = "preview" | "production" | "both";
+
+// Per-repo mapping + behavior (mirrors githubActionConfigs). One row maps a
+// Vercel project to a Lastest repository and controls when/how the check runs.
+export const vercelProjectConfigs = pgTable(
+  "vercel_project_configs",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id),
+    repositoryId: text("repository_id")
+      .notNull()
+      .references(() => repositories.id, { onDelete: "cascade" }),
+    vercelAccountId: text("vercel_account_id")
+      .notNull()
+      .references(() => vercelAccounts.id, { onDelete: "cascade" }),
+    vercelProjectId: text("vercel_project_id").notNull(),
+    vercelProjectName: text("vercel_project_name"),
+    runOn: text("run_on").notNull().default("preview"), // 'preview' | 'production' | 'both'
+    blocking: boolean("blocking").notNull().default(true),
+    rerequestable: boolean("rerequestable").notNull().default(true),
+    timeoutMinutes: integer("timeout_minutes").notNull().default(15),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at").$defaultFn(() => new Date()),
+    updatedAt: timestamp("updated_at").$defaultFn(() => new Date()),
+  },
+  (table) => [
+    // One config per (install, project). deployment.created looks the config
+    // up by vercelProjectId; a project can only map to one repo at a time.
+    uniqueIndex("uniq_vercel_project_configs_account_project").on(
+      table.vercelAccountId,
+      table.vercelProjectId,
+    ),
+  ],
+);
+
+export type VercelProjectConfig = typeof vercelProjectConfigs.$inferSelect;
+export type NewVercelProjectConfig = typeof vercelProjectConfigs.$inferInsert;
+
+export type VercelCheckStatus = "registered" | "running" | "completed";
+export type VercelCheckConclusion =
+  | "succeeded"
+  | "failed"
+  | "neutral"
+  | "canceled"
+  | "skipped";
+
+// Deployment↔check↔build correlation. The reporter needs this at completion
+// time to find which Vercel check to conclude for a finished build.
+export const vercelChecks = pgTable(
+  "vercel_checks",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    vercelProjectConfigId: text("vercel_project_config_id")
+      .notNull()
+      .references(() => vercelProjectConfigs.id, { onDelete: "cascade" }),
+    vercelDeploymentId: text("vercel_deployment_id").notNull(),
+    vercelCheckId: text("vercel_check_id"), // set once the check is registered
+    deploymentUrl: text("deployment_url"),
+    buildId: text("build_id"), // nullable until deployment.ready queues the build
+    status: text("status").notNull().default("registered"), // registered|running|completed
+    conclusion: text("conclusion"),
+    createdAt: timestamp("created_at").$defaultFn(() => new Date()),
+    updatedAt: timestamp("updated_at").$defaultFn(() => new Date()),
+  },
+  (table) => [
+    index("idx_vercel_checks_deployment").on(table.vercelDeploymentId),
+    index("idx_vercel_checks_build").on(table.buildId),
+  ],
+);
+
+export type VercelCheck = typeof vercelChecks.$inferSelect;
+export type NewVercelCheck = typeof vercelChecks.$inferInsert;
 
 // ============================================
 // GitLab Pipeline Configs

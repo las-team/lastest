@@ -57,6 +57,7 @@ import {
   ReconnectGithubLink,
 } from "@/components/settings/connect-github-button";
 import { GithubActionsCard } from "@/components/settings/github-actions-card-client";
+import { VercelCard } from "@/components/settings/vercel/vercel-card-client";
 import { ConnectGitlabButton } from "@/components/settings/connect-gitlab-button";
 import { GitlabPipelinesCard } from "@/components/settings/gitlab-pipelines-card-client";
 import { ScheduleManagerCard } from "@/components/settings/schedule-manager-client";
@@ -103,6 +104,10 @@ export default async function SettingsPage({
     teamId ? queries.getRepositoriesByTeam(teamId) : [],
     getRunners(),
     getSystemRunners(),
+  ]);
+  const [vercelAccount, vercelConfigs] = await Promise.all([
+    teamId ? queries.getVercelAccountByTeam(teamId) : null,
+    teamId ? queries.getVercelProjectConfigs(teamId) : [],
   ]);
   const [apiTokens, systemEBSessions] = await Promise.all([
     listApiTokens(),
@@ -493,6 +498,22 @@ export default async function SettingsPage({
           runners={runners}
           repos={teamRepos}
           hasGitlabAccount={!!gitlabAccount}
+        />
+      </div>
+
+      {/* Vercel Marketplace (native Checks) */}
+      <div id="vercel">
+        <VercelCard
+          account={
+            vercelAccount
+              ? {
+                  vercelTeamId: vercelAccount.vercelTeamId,
+                  vercelUserId: vercelAccount.vercelUserId,
+                }
+              : null
+          }
+          configs={vercelConfigs}
+          repos={teamRepos}
         />
       </div>
     </>
@@ -944,10 +965,16 @@ export default async function SettingsPage({
               Google Sheets connected successfully!
             </div>
           )}
+          {params.success === "vercel_connected" && (
+            <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2 text-green-700 dark:bg-green-950/30 dark:border-green-800 dark:text-green-400">
+              <Check className="w-5 h-5" />
+              Vercel connected successfully! Map a project below.
+            </div>
+          )}
           {params.error && (
             <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg flex items-center gap-2 text-destructive">
               <X className="w-5 h-5" />
-              Failed to connect GitHub: {params.error.replace(/_/g, " ")}
+              Connection failed: {params.error.replace(/_/g, " ")}
             </div>
           )}
 
