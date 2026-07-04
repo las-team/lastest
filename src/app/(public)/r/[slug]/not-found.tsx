@@ -11,16 +11,24 @@ export default function ShareNotFound() {
           This share isn&apos;t available
         </h1>
         <p className="text-sm text-muted-foreground">
-          The page may have been revoked or removed. If you believe this is a
-          mistake, contact the person who shared the link with you.
+          The report may have been revoked or removed — but the tests behind it
+          are easy to recreate. Record a flow once and Lastest re-runs it on
+          every deploy, free.
         </p>
-        <div className="pt-2">
-          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+        <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
           <a
-            href="/"
+            href="/register"
             className="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-medium px-4 py-2 hover:bg-primary/90"
           >
-            Visit Lastest
+            Test your own product — free
+          </a>
+          <a
+            href="https://lastest.cloud/demos"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center rounded-md border font-medium px-4 py-2 hover:bg-muted"
+          >
+            Browse live demos
           </a>
         </div>
       </div>
