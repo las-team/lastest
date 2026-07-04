@@ -33,6 +33,8 @@ const eslintConfig = defineConfig([
     "migration-work/**",
     "tests/**",
     ".recovery/**",
+    // Claude agent worktrees are full repo copies; root-relative ignores don't match inside them
+    ".claude/**",
   ]),
 ]);
 
