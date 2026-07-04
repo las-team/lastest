@@ -39,7 +39,7 @@ export default async function LeaderboardPage() {
 
   if (!gamificationEnabled || !season) {
     return (
-      <div className="max-w-4xl mx-auto p-6 space-y-8">
+      <div className="max-w-4xl mx-auto p-4 md:p-6 space-y-8">
         <TrophyRoomHeader />
         <TrophyRoom entries={trophyEntries} origin={origin} />
         {!gamificationEnabled && <GamificationDisabledHint />}
@@ -86,13 +86,13 @@ export default async function LeaderboardPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto p-6 space-y-8">
+    <div className="max-w-4xl mx-auto p-4 md:p-6 space-y-8">
       <header className="text-center space-y-2">
         <div className="inline-flex items-center gap-2 text-xs font-mono uppercase tracking-[0.2em] text-muted-foreground">
           <Trophy className="h-3 w-3" />
           {season.name}
         </div>
-        <h1 className="text-4xl font-black tracking-tight font-[family-name:var(--font-press-start,monospace)]">
+        <h1 className="text-2xl md:text-4xl font-black tracking-tight font-[family-name:var(--font-press-start,monospace)]">
           HIGH SCORES
         </h1>
         <p className="text-sm text-muted-foreground">
@@ -197,16 +197,19 @@ function LeaderboardRow({
   return (
     <li
       className={cn(
-        "flex items-center gap-4 px-4 py-3",
+        "flex items-center gap-2 md:gap-4 px-3 md:px-4 py-3",
         isViewer && "bg-primary/5 ring-1 ring-inset ring-primary/30",
       )}
     >
       <div
-        className={cn("w-8 text-right font-mono font-bold text-lg", rankColor)}
+        className={cn(
+          "w-7 md:w-8 text-right font-mono font-bold text-base md:text-lg shrink-0",
+          rankColor,
+        )}
       >
         #{row.rank}
       </div>
-      <Avatar className="h-9 w-9">
+      <Avatar className="h-8 w-8 md:h-9 md:w-9 shrink-0">
         {row.actorKind === "user" && row.avatarUrl && (
           <AvatarImage src={row.avatarUrl} alt={row.displayName} />
         )}
@@ -249,7 +252,7 @@ function LeaderboardRow({
       </div>
       <div
         className={cn(
-          "font-mono font-bold text-xl tabular-nums",
+          "font-mono font-bold text-lg md:text-xl tabular-nums shrink-0",
           topThree && "text-primary",
         )}
       >

@@ -920,6 +920,7 @@ export async function getTestResultsWithTestInfo(testRunId: string) {
       screenshotPath: testResults.screenshotPath,
       errorMessage: testResults.errorMessage,
       durationMs: testResults.durationMs,
+      consoleErrors: testResults.consoleErrors,
       testName: tests.name,
     })
     .from(testResults)

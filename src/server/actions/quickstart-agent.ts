@@ -10,9 +10,11 @@ import type {
   AgentStepRichResult,
   AgentStepState,
   ActivityEventType,
+  DemoNotes,
   PwAgentType,
   TestSetupOverrides,
 } from "@/lib/db/schema";
+import { resolveTestVideoUrl } from "@/lib/share/video-fallback";
 import { isQuickstartEnabled, gateReasonHint } from "@/lib/quickstart/gating";
 import {
   renderAuthSetupCode,
@@ -451,12 +453,17 @@ async function runQsPreflight(
   // sites almost always emit benign console/network noise (analytics 401s,
   // third-party scripts); with the default "fail" mode every clean screenshot
   // reds the walk. The walkthrough template also route-blocks known noise, but
-  // this is the belt to that suspenders. Best-effort — never fail preflight on it.
+  // this is the belt to that suspenders. Also switch the a11y + perf layers ON
+  // in log mode: the share's "Checks run" grid advertises them, and a real
+  // WCAG/vitals grade is an outreach hook where a "—" tile is dead weight.
+  // Best-effort — never fail preflight on it.
   let errorModesSet = false;
   try {
     await queries.upsertPlaywrightSettings(repositoryId, {
       consoleErrorMode: "warn",
       networkErrorMode: "warn",
+      a11yMode: "log",
+      perfMode: "log",
     });
     errorModesSet = true;
   } catch (err) {
@@ -528,7 +535,7 @@ async function runQsScoutPublic(
     queuedForBrowser: false,
   });
   try {
-    const { data, promptLogId } = await runQuickstartScoutPublic(
+    const { data, promptLogId, retryCount } = await runQuickstartScoutPublic(
       repositoryId,
       gate.baseUrl,
       {
@@ -553,6 +560,8 @@ async function runQsScoutPublic(
       classification: data.classification,
       authAutomatable: data.authAutomatable,
       navLinkCount: data.navLinks.length,
+      productArchetype: data.productArchetype,
+      scoutRetryCount: retryCount,
       promptLogId,
       ebClaimed: !!eb,
     });
@@ -915,7 +924,7 @@ async function runQsScoutAuthed(
       }
     }
 
-    const { data, promptLogId } = await runQuickstartScoutAuthed(
+    const { data, promptLogId, retryCount } = await runQuickstartScoutAuthed(
       repositoryId,
       gate.baseUrl,
       authTest.code,
@@ -925,6 +934,7 @@ async function runQsScoutAuthed(
     await setCompleted(sessionId, "qs_scout_authed", {
       navLinkCount: data.inAppNavLinks.length,
       ctaCount: data.safeCtaCandidates.length,
+      scoutRetryCount: retryCount,
       promptLogId,
       ebClaimed: !!eb,
     });
@@ -988,6 +998,7 @@ async function runQsGenerate(
     primaryInputLabel: biz?.primaryInputLabel,
     primaryCtaLabel: biz?.primaryCtaLabel,
     demoInputValue: biz?.demoInputValue,
+    productArchetype: publicScout.productArchetype,
   });
 
   const setupOverrides: TestSetupOverrides | undefined =
@@ -1178,6 +1189,7 @@ async function runQsRunAndNotes(
         primaryInputLabel: biz?.primaryInputLabel,
         primaryCtaLabel: biz?.primaryCtaLabel,
         demoInputValue: biz?.demoInputValue,
+        productArchetype: meta.publicScout?.productArchetype,
       });
       await queries.updateTest(walkthroughTestId, {
         code: publicOnlyCode,
@@ -1211,12 +1223,19 @@ async function runQsRunAndNotes(
     }
   }
 
+  // Console errors captured by the executor during the run — one of the
+  // cheapest sources of specific, credible findings for the notes. Deduped
+  // across tests; the notes prompt slices further.
+  const runConsoleErrors = Array.from(
+    new Set(testResults.flatMap((r) => r.consoleErrors ?? [])),
+  ).slice(0, 10);
+
   const runFacts: QuickstartRunFacts = {
     passedCount: summary.passedCount,
     failedCount: summary.failedCount,
     changesDetected: summary.changesDetected,
     testNames: testResults.map((r) => r.testName ?? "test"),
-    consoleErrors: [],
+    consoleErrors: runConsoleErrors,
     failedSteps: testResults
       .filter((r) => r.status === "failed" || r.status === "setup_failed")
       .slice(0, 5)
@@ -1461,6 +1480,45 @@ async function runQsPublishShare(
     return false;
   }
 
+  // ── Share-readiness gate ──
+  // A video-less, notes-less share is boilerplate — the #1 content gap the
+  // outreach playbook flags. Check the ingredients and publish with an explicit
+  // quality flag (and the reasons) instead of silently shipping a weak share.
+  const degradedReasons: string[] = [];
+  let notes: DemoNotes | null = null;
+  try {
+    const build = await queries.getBuild(buildToShare);
+    const results = build?.testRunId
+      ? await queries.getTestResultsByRun(build.testRunId).catch(() => [])
+      : [];
+    const wt =
+      results.find((r) => r.testId === walkthroughTestId) ?? results[0];
+    // videoPath is known to go missing even when the webm exists (executor
+    // gap) — fall back to the same disk scan the share page uses.
+    const hasVideo =
+      !!wt?.videoPath ||
+      !!(await resolveTestVideoUrl(repositoryId, walkthroughTestId).catch(
+        () => null,
+      ));
+    if (!hasVideo) degradedReasons.push("no run recording for the walkthrough");
+    const screenshotCount = wt?.screenshots?.length ?? 0;
+    if (screenshotCount < 4)
+      degradedReasons.push(`only ${screenshotCount} screenshots captured (<4)`);
+    // Notes live on the FIRST build (qs_run_and_notes wrote them there); the
+    // share renderer resolves them repo-wide, so check the same way.
+    notes =
+      (await queries.getBuildDemoNotes(buildToShare).catch(() => null)) ??
+      (await queries.getLatestDemoNotesForRepo(repositoryId).catch(() => null));
+    if (!notes) degradedReasons.push("demo notes missing");
+    else if (notes.fallbackSummary)
+      degradedReasons.push(
+        "demo notes are the deterministic fallback (AI summary failed)",
+      );
+  } catch (err) {
+    console.warn("[QuickStart] share-readiness check failed:", err);
+  }
+  const shareQuality = degradedReasons.length === 0 ? "ok" : "degraded";
+
   try {
     const result = await publishBuildShare(buildToShare, {
       scopedTestId: walkthroughTestId,
@@ -1475,19 +1533,34 @@ async function runQsPublishShare(
       slug: result.slug,
       url: result.url,
       buildId: buildToShare,
+      shareQuality,
+      degradedReasons: degradedReasons.length ? degradedReasons : undefined,
+      // Operator-facing: testing struggles are hidden from the share but are
+      // prime DM material ("your signup has an hCaptcha — we worked around
+      // it"); the outreach hook is the DM's intended first line.
+      testingStruggles: notes?.testingStruggles?.length
+        ? notes.testingStruggles
+        : undefined,
+      outreachHook: notes?.outreachHook,
     });
     emitActivity(
       teamId,
       repositoryId,
       sessionId,
       "session:complete",
-      `Share published: ${result.url}`,
+      shareQuality === "ok"
+        ? `Share published: ${result.url}`
+        : `Share published (degraded — ${degradedReasons.join("; ")}): ${result.url}`,
       {
         stepId: "qs_publish_share",
-        detail: { shareId: result.shareId, url: result.url } as Record<
-          string,
-          unknown
-        >,
+        detail: {
+          shareId: result.shareId,
+          url: result.url,
+          shareQuality,
+          degradedReasons,
+          testingStruggles: notes?.testingStruggles ?? [],
+          outreachHook: notes?.outreachHook ?? null,
+        } as Record<string, unknown>,
       },
     );
     return true;

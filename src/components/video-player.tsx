@@ -13,6 +13,8 @@ import {
 } from "react";
 import * as SliderPrimitive from "@radix-ui/react-slider";
 import {
+  Captions,
+  CaptionsOff,
   Check,
   Maximize2,
   Minimize2,
@@ -34,6 +36,13 @@ import { cn } from "@/lib/utils";
 const RATE_OPTIONS = [0.5, 1, 1.5, 2, 3, 4] as const;
 const VOLUME_KEY = "lastest:videoplayer:volume";
 const MUTED_KEY = "lastest:videoplayer:muted";
+const CAPTIONS_KEY = "lastest:videoplayer:captions";
+
+export interface VideoTextTrack {
+  src: string;
+  srclang: string;
+  label: string;
+}
 
 export interface VideoPlayerHandle {
   play: () => Promise<void>;
@@ -69,6 +78,14 @@ export interface VideoPlayerProps {
    * finite value (via `durationchange`), the real value takes over.
    */
   durationMsFallback?: number | null;
+  /**
+   * Subtitle/caption tracks attached to the `<video>` as `<track>` children
+   * (WebVTT). When present, a CC toggle appears in the controls. Same-origin
+   * sources only — no `crossorigin` is set.
+   */
+  tracks?: VideoTextTrack[];
+  /** Whether captions start visible. Overridden by the user's saved choice. */
+  captionsDefaultOn?: boolean;
 }
 
 function formatTime(s: number): string {
@@ -128,6 +145,8 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       onReady,
       ariaLabel,
       durationMsFallback,
+      tracks,
+      captionsDefaultOn = false,
     },
     ref,
   ) {
@@ -159,6 +178,11 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     const initialMuted = mutedProp ?? true;
     const [muted, setMuted] = useState(initialMuted);
     const [playbackRate, setPlaybackRate] = useState(defaultPlaybackRate);
+    const [captionsOn, setCaptionsOn] = useState(captionsDefaultOn);
+    // Active cue text for our custom caption bar. We render captions ourselves
+    // (track mode stays "hidden") so they can sit ABOVE the controls instead of
+    // the browser's default bottom position, which overlaps the control bar.
+    const [activeCueText, setActiveCueText] = useState<string | null>(null);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [isScrubbing, setIsScrubbing] = useState(false);
     const [controlsVisible, setControlsVisible] = useState(true);
@@ -185,10 +209,73 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
           const m = window.localStorage.getItem(MUTED_KEY);
           if (m !== null) setMuted(m === "1");
         }
+        const cc = window.localStorage.getItem(CAPTIONS_KEY);
+        if (cc !== null) setCaptionsOn(cc === "1");
       } catch {
         // localStorage unavailable; fall back to defaults.
       }
     }, [mutedProp]);
+
+    // Drive captions. We never use "showing" mode — that would let the browser
+    // paint cues at the bottom of the video, on top of the controls. Instead we
+    // keep enabled tracks in "hidden" mode (cues still parse and `cuechange`
+    // still fires) and render the active cue ourselves in a bar positioned
+    // above the controls (see the caption overlay in the JSX). When off, tracks
+    // go "disabled" so the browser does no cue work. Persists the preference and
+    // re-runs when the track set changes so a late-arriving track is handled.
+    useEffect(() => {
+      const v = videoRef.current;
+      if (!v) return;
+
+      const syncMode = () => {
+        for (let i = 0; i < v.textTracks.length; i++) {
+          v.textTracks[i]!.mode = captionsOn ? "hidden" : "disabled";
+        }
+      };
+      const readActiveCue = () => {
+        if (!captionsOn) {
+          setActiveCueText(null);
+          return;
+        }
+        for (let i = 0; i < v.textTracks.length; i++) {
+          const tt = v.textTracks[i]!;
+          if (tt.mode === "disabled") continue;
+          const cues = tt.activeCues;
+          if (cues && cues.length > 0) {
+            setActiveCueText(
+              Array.from(cues)
+                .map((c) => (c as VTTCue).text)
+                .join("\n"),
+            );
+            return;
+          }
+        }
+        setActiveCueText(null);
+      };
+
+      const onAddTrack = () => {
+        syncMode();
+        readActiveCue();
+      };
+
+      syncMode();
+      readActiveCue();
+
+      const tts = Array.from(v.textTracks);
+      tts.forEach((tt) => tt.addEventListener("cuechange", readActiveCue));
+      v.textTracks.addEventListener?.("addtrack", onAddTrack);
+
+      try {
+        window.localStorage.setItem(CAPTIONS_KEY, captionsOn ? "1" : "0");
+      } catch {
+        // noop
+      }
+
+      return () => {
+        tts.forEach((tt) => tt.removeEventListener("cuechange", readActiveCue));
+        v.textTracks.removeEventListener?.("addtrack", onAddTrack);
+      };
+    }, [captionsOn, tracks]);
 
     useEffect(() => {
       const v = videoRef.current;
@@ -536,6 +623,13 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
             e.preventDefault();
             toggleMute();
             break;
+          case "c":
+          case "C":
+            if (tracks && tracks.length > 0) {
+              e.preventDefault();
+              setCaptionsOn((on) => !on);
+            }
+            break;
           case "f":
           case "F":
             e.preventDefault();
@@ -550,7 +644,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
         }
         wakeControls();
       },
-      [skip, toggleFullscreen, toggleMute, togglePlay, wakeControls],
+      [skip, toggleFullscreen, toggleMute, togglePlay, wakeControls, tracks],
     );
 
     const VolumeIcon =
@@ -597,7 +691,17 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
           muted={muted}
           onClick={togglePlay}
           className={cn("block h-full w-full object-contain", videoClassName)}
-        />
+        >
+          {tracks?.map((t) => (
+            <track
+              key={t.src}
+              kind="subtitles"
+              src={t.src}
+              srcLang={t.srclang}
+              label={t.label}
+            />
+          ))}
+        </video>
 
         {!isPlaying && duration > 0 && (
           <button
@@ -608,6 +712,24 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
           >
             <Play className="h-7 w-7 translate-x-0.5 fill-current" />
           </button>
+        )}
+
+        {/* Custom caption bar. Sits above the control bar — and lifts further
+            when the controls are visible — so cues never overlap the controls.
+            Driven by the hidden text track's active cue (see the captions
+            effect). */}
+        {captionsOn && activeCueText && (
+          <div
+            aria-live="polite"
+            className={cn(
+              "pointer-events-none absolute inset-x-0 z-10 flex justify-center px-4 transition-[bottom] duration-150",
+              showControls ? "bottom-24" : "bottom-6",
+            )}
+          >
+            <span className="max-w-[90%] whitespace-pre-line rounded bg-black/75 px-2.5 py-1 text-center text-sm font-medium leading-snug text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.6)] backdrop-blur-sm">
+              {activeCueText}
+            </span>
+          </div>
         )}
 
         <div
@@ -722,6 +844,26 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
             </span>
 
             <div className="flex-1" />
+
+            {tracks && tracks.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setCaptionsOn((c) => !c)}
+                aria-label={captionsOn ? "Hide captions" : "Show captions"}
+                aria-pressed={captionsOn}
+                title={captionsOn ? "Hide captions" : "Show captions"}
+                className={cn(
+                  "flex h-7 w-7 items-center justify-center rounded-md text-white transition-colors hover:bg-white/15",
+                  captionsOn && "bg-white/20",
+                )}
+              >
+                {captionsOn ? (
+                  <Captions className="h-4 w-4" />
+                ) : (
+                  <CaptionsOff className="h-4 w-4" />
+                )}
+              </button>
+            )}
 
             <Popover>
               <PopoverTrigger asChild>

@@ -2736,6 +2736,19 @@ export interface QuickstartBusinessInteraction {
   demoInputValue?: string;
 }
 
+/** Product archetype classified by the public scout from the landing surface.
+ *  Drives which deterministic interaction snippet renderWalkthroughCode emits
+ *  (canvas draw, search query, sample-file upload, add-to-cart) so the
+ *  walkthrough shows the product doing its job, not just nav clicks. */
+export type QuickstartProductArchetype =
+  | "canvas"
+  | "search"
+  | "form"
+  | "upload"
+  | "dashboard"
+  | "ecommerce"
+  | "other";
+
 export interface QuickstartPublicScout extends QuickstartAuthClassification {
   tagline?: string;
   concept?: string;
@@ -2765,6 +2778,10 @@ export interface QuickstartPublicScout extends QuickstartAuthClassification {
   cookieBannerSelectorHint?: string;
   friction?: Array<{ kind: string; note: string }>;
   businessInteraction?: QuickstartBusinessInteraction;
+  /** What kind of product surface the scout saw — picks the walkthrough's
+   *  archetype-specific interaction snippet. Absent on pre-archetype scouts
+   *  (the template then falls back to its legacy canvas auto-detection). */
+  productArchetype?: QuickstartProductArchetype;
 }
 
 export interface QuickstartAuthedScout {
@@ -4138,11 +4155,15 @@ export type NewBuildChangeMapRow = typeof buildChangeMaps.$inferInsert;
 //
 // Bucketed deliberately:
 //   highlights        → safe to quote in outreach DMs
-//   frictionPoints    → stays in the share, never quoted to the founder
-//   testingStruggles  → automation gotchas (captcha, hangs); feeds the next
-//                       demo run's qualification step
+//   frictionPoints    → PUBLIC on the share and read by the founder: max 2,
+//                       each with a one-line fix, "fixable, not embarrassing"
+//                       tone — findings build credibility
+//   testingStruggles  → automation gotchas (captcha, hangs); hidden from the
+//                       share, routed to the operator (publish step + Discord)
 //   skippedRoutes     → explicit "couldn't get here" provenance — beats a
 //                       silent omission in the screenshot list
+//   outreachHook      → tweet-length opener for the X reply/DM + the share
+//                       page's Post-to-X prefill
 // ---------------------------------------------------------------------------
 
 export interface DemoNoteItem {
@@ -4155,17 +4176,53 @@ export interface DemoNoteSkippedRoute {
   reason: string;
 }
 
+// One narration cue for the share-page recording. The AI vision pass writes
+// one of these per captured step (aligned to test_results.screenshots[] order)
+// describing what the agent does and what's visible on screen. Cue timing is
+// an EVEN SPLIT of the recording's duration_ms — we don't persist a real
+// per-step video timestamp (see captions.ts / src/lib/share/vtt.ts). `focus`
+// and `annotation` are captured now but only rendered by the (planned)
+// arrow/underline overlay; the v1 subtitle track ignores them.
+export interface VideoCaption {
+  /** 0-based, aligns to test_results.screenshots[] order. */
+  stepIndex: number;
+  /** Cue start in ms (even-split approximation of duration_ms). */
+  startMs: number;
+  /** Cue end in ms. */
+  endMs: number;
+  /** One short present-tense narration line. */
+  text: string;
+  /** Normalized 0..1 region of the primary element the agent acted on.
+   *  Stored for the future annotation overlay; not rendered by the v1 track. */
+  focus?: { x: number; y: number; w: number; h: number };
+  /** How the focus region should be marked once the overlay ships. */
+  annotation?: "arrow" | "underline" | "box";
+}
+
 export interface DemoNotes {
   /** 2–3 sentence overall UI/UX impression. */
   uxSummary: string;
   /** Things that worked well; safe for outreach. */
   highlights: DemoNoteItem[];
-  /** UX issues observed; founder-facing on the share, never in outreach. */
+  /** Real UX issues (max 2), each with a one-line fix. PUBLIC on the share and
+   *  read by the founder — fixable-not-embarrassing tone, never security-sensitive. */
   frictionPoints: DemoNoteItem[];
-  /** Automation pain points (captcha, hangs, OAuth-only flows). */
+  /** Automation pain points (captcha, hangs, OAuth-only flows). Hidden from the
+   *  share; routed to the operator via the publish step result + Discord ping. */
   testingStruggles: DemoNoteItem[];
   /** Routes the agent tried but couldn't capture. */
   skippedRoutes?: DemoNoteSkippedRoute[];
+  /** One tweet-length sentence (≤200 chars) leading with the most striking
+   *  concrete observation — intended first line of the outreach reply/DM and
+   *  the prefill for the share page's Post-to-X button. */
+  outreachHook?: string;
+  /** True when uxSummary is the deterministic fallback (AI call failed or
+   *  returned nothing) — the share-readiness gate treats such notes as absent. */
+  fallbackSummary?: boolean;
+  /** Time-coded narration for the recording, rendered as the <video> subtitle
+   *  track on /r/<slug>. Optional — absent on notes written before captions
+   *  shipped, in which case the share renders no track. */
+  captions?: VideoCaption[];
   generatedAt: string;
   /** Provider/model id used for the AI summary, when applicable. */
   modelId?: string;

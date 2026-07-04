@@ -368,7 +368,7 @@ export function RunDashboardClient({
   };
 
   return (
-    <div className="flex-1 p-6 overflow-auto">
+    <div className="flex-1 p-4 md:p-6 overflow-auto">
       {verifyPhaseEnabled && (
         <div className="max-w-6xl mx-auto mb-4 rounded-md border bg-primary/5 p-3 text-sm flex items-center justify-between gap-3">
           <span>
@@ -388,7 +388,7 @@ export function RunDashboardClient({
         <div className="space-y-6 lg:order-2">
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <CardTitle>Run Tests</CardTitle>
                   <CardDescription>
@@ -501,7 +501,7 @@ export function RunDashboardClient({
                               );
                             }}
                           >
-                            <SelectTrigger className="w-[180px] h-8 text-xs">
+                            <SelectTrigger className="w-full max-w-[180px] h-8 text-xs">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>

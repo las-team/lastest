@@ -115,7 +115,9 @@ function VerifyEmptyShell({
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "14px 20px",
+          flexWrap: "wrap",
+          gap: 8,
+          padding: "12px 16px",
           borderBottom: "1px solid var(--border)",
           background: "var(--c-white)",
           position: "relative",
@@ -178,7 +180,7 @@ function VerifyEmptyShell({
             border: "1px solid var(--border)",
             borderRadius: 8,
             padding: 32,
-            maxWidth: 460,
+            maxWidth: "min(460px, 100%)",
             textAlign: "center",
             boxShadow: "0 1px 2px rgba(31,42,51,0.05)",
           }}
@@ -257,12 +259,12 @@ function BranchPicker({
         style={{ position: "fixed", inset: 0, zIndex: 50 }}
       />
       <div
-        className="v-card"
+        className="v-card v-popover"
         style={{
           position: "absolute",
           top: "calc(100% + 6px)",
           right: 0,
-          width: 280,
+          width: "min(280px, calc(100vw - 24px))",
           padding: 8,
           zIndex: 51,
           display: "flex",
@@ -368,6 +370,7 @@ function EmptyState({
         alignItems: "center",
         justifyContent: "center",
         background: "var(--secondary)",
+        padding: 16,
       }}
     >
       <div
@@ -376,7 +379,7 @@ function EmptyState({
           border: "1px solid var(--border)",
           borderRadius: 8,
           padding: 32,
-          maxWidth: 460,
+          maxWidth: "min(460px, 100%)",
           textAlign: "center",
           boxShadow: "0 1px 2px rgba(31,42,51,0.05)",
         }}

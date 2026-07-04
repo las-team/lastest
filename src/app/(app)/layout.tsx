@@ -103,7 +103,10 @@ export default async function AppLayout({
                 <main className="flex-1 overflow-auto relative pb-14 md:pb-0">
                   {children}
                 </main>
-                <MobileBottomNav sidebar={sidebarEl} />
+                <MobileBottomNav
+                  sidebar={sidebarEl}
+                  verifyEnabled={session?.team?.verifyPhaseEnabled ?? false}
+                />
               </div>
             </div>
             <BugReportWidget />
