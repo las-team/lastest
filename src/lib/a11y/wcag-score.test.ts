@@ -60,6 +60,10 @@ describe("WCAG Score Utilities", () => {
     });
   });
 
+  // Calibrated model (spec §3.5): a weighted PASS-RATIO with a bounded
+  // per-rule penalty, replacing the old unbounded 100−Σdeduction that snapped
+  // realistic pages to 0. Assertions are properties + ranges (the exact old
+  // per-rule deduction values encoded the bug and are gone).
   describe("calculateWcagScore", () => {
     it("returns score 100 for no violations", () => {
       const result = calculateWcagScore([]);
@@ -84,98 +88,147 @@ describe("WCAG Score Utilities", () => {
       expect(result.passedRules).toBe(0);
     });
 
-    it("deducts correctly for a single critical violation (AA)", () => {
-      // critical weight=10, nodes=1, AA multiplier=1.0 → deduction=10
-      const v = makeViolation({
-        impact: "critical",
-        nodes: 1,
-        wcagLevel: "AA",
-      });
-      const result = calculateWcagScore([v]);
-      expect(result.score).toBe(90);
-      expect(result.bySeverity.critical).toBe(1);
-    });
-
-    it("deducts correctly for a serious violation", () => {
-      // serious weight=5, nodes=1, AA=1.0 → deduction=5
-      const v = makeViolation({ impact: "serious", nodes: 1, wcagLevel: "AA" });
-      const result = calculateWcagScore([v]);
-      expect(result.score).toBe(95);
-    });
-
-    it("deducts correctly for moderate violation", () => {
-      // moderate weight=2, nodes=1, AA=1.0 → deduction=2
-      const v = makeViolation({
-        impact: "moderate",
-        nodes: 1,
-        wcagLevel: "AA",
-      });
-      const result = calculateWcagScore([v]);
-      expect(result.score).toBe(98);
-    });
-
-    it("deducts correctly for minor violation", () => {
-      // minor weight=1, nodes=1, AA=1.0 → deduction=1
-      const v = makeViolation({ impact: "minor", nodes: 1, wcagLevel: "AA" });
-      const result = calculateWcagScore([v]);
-      expect(result.score).toBe(99);
-    });
-
-    it("applies level A multiplier (1.5)", () => {
-      // moderate weight=2, nodes=1, A=1.5 → deduction=3
-      const v = makeViolation({ impact: "moderate", nodes: 1, wcagLevel: "A" });
-      const result = calculateWcagScore([v]);
-      expect(result.score).toBe(97);
-    });
-
-    it("applies level AAA multiplier (0.5)", () => {
-      // moderate weight=2, nodes=1, AAA=0.5 → deduction=1
-      const v = makeViolation({
-        impact: "moderate",
-        nodes: 1,
-        wcagLevel: "AAA",
-      });
-      const result = calculateWcagScore([v]);
-      expect(result.score).toBe(99);
-    });
-
-    it("caps node multiplier at 3", () => {
-      // critical weight=10, nodes=100 → capped at 3, AA=1.0 → deduction=30
-      const v = makeViolation({
-        impact: "critical",
-        nodes: 100,
-        wcagLevel: "AA",
-      });
-      const result = calculateWcagScore([v]);
-      expect(result.score).toBe(70);
-    });
-
-    it("uses nodes=1 when nodes is undefined", () => {
-      const v = makeViolation({ impact: "critical", wcagLevel: "AA" });
-      delete (v as unknown as Record<string, unknown>).nodes;
-      const result = calculateWcagScore([v]);
-      expect(result.score).toBe(90);
-    });
-
-    it("falls back to tags-based level detection when wcagLevel not set", () => {
-      const v = makeViolation({
-        impact: "moderate",
-        nodes: 1,
-        tags: ["wcag2a"],
-      });
-      delete (v as unknown as Record<string, unknown>).wcagLevel;
-      const result = calculateWcagScore([v]);
-      // moderate=2, A=1.5 → deduction=3
-      expect(result.score).toBe(97);
-    });
-
-    it("clamps score to 0 minimum", () => {
-      // 20 critical violations × 3 nodes each = deduction 600
-      const violations = Array.from({ length: 20 }, () =>
-        makeViolation({ impact: "critical", nodes: 3, wcagLevel: "AA" }),
+    it("keeps every score in [0, 100]", () => {
+      const many = Array.from({ length: 40 }, () =>
+        makeViolation({ impact: "critical", nodes: 5, wcagLevel: "A" }),
       );
-      const result = calculateWcagScore(violations);
-      expect(result.score).toBe(0);
+      expect(calculateWcagScore(many).score).toBeGreaterThanOrEqual(0);
+      expect(calculateWcagScore(many).score).toBeLessThanOrEqual(100);
+      expect(calculateWcagScore([], 50).score).toBeLessThanOrEqual(100);
+    });
+
+    it("ranks severity: critical hurts more than serious > moderate > minor", () => {
+      // Fewer passes so the penalty differences separate after rounding (at very
+      // high pass counts every single-violation score rounds toward 100).
+      const s = (impact: A11yViolation["impact"]) =>
+        calculateWcagScore(
+          [makeViolation({ impact, nodes: 2, wcagLevel: "AA" })],
+          10,
+        ).score;
+      expect(s("critical")).toBeLessThan(s("serious"));
+      expect(s("serious")).toBeLessThan(s("moderate"));
+      expect(s("moderate")).toBeLessThan(s("minor"));
+    });
+
+    it("caps node impact at 3 (nodes=3 and nodes=100 score the same)", () => {
+      const at3 = calculateWcagScore(
+        [makeViolation({ impact: "critical", nodes: 3, wcagLevel: "AA" })],
+        40,
+      ).score;
+      const at100 = calculateWcagScore(
+        [makeViolation({ impact: "critical", nodes: 100, wcagLevel: "AA" })],
+        40,
+      ).score;
+      expect(at3).toBe(at100);
+    });
+
+    it("softens level A relative to AA (small gap, not 1.5×)", () => {
+      const a = calculateWcagScore(
+        [makeViolation({ impact: "serious", nodes: 3, wcagLevel: "A" })],
+        40,
+      ).score;
+      const aa = calculateWcagScore(
+        [makeViolation({ impact: "serious", nodes: 3, wcagLevel: "AA" })],
+        40,
+      ).score;
+      expect(a).toBeLessThanOrEqual(aa);
+      expect(aa - a).toBeLessThan(8);
+    });
+
+    it("rewards passing more checks (pass-ratio buoyancy)", () => {
+      const violations = [
+        makeViolation({ impact: "serious", nodes: 3, wcagLevel: "AA" }),
+        makeViolation({
+          id: "2",
+          impact: "moderate",
+          nodes: 2,
+          wcagLevel: "AA",
+        }),
+      ];
+      const few = calculateWcagScore(violations, 10).score;
+      const many = calculateWcagScore(violations, 80).score;
+      expect(many).toBeGreaterThan(few);
+    });
+
+    it("scores a polished site (many passes, few minor/moderate) in the A/B band", () => {
+      const score = calculateWcagScore(
+        [
+          makeViolation({ impact: "moderate", nodes: 2, wcagLevel: "AA" }),
+          makeViolation({
+            id: "2",
+            impact: "moderate",
+            nodes: 1,
+            wcagLevel: "AA",
+          }),
+          makeViolation({
+            id: "3",
+            impact: "minor",
+            nodes: 4,
+            wcagLevel: "AA",
+          }),
+        ],
+        50,
+      ).score;
+      expect(score).toBeGreaterThanOrEqual(80);
+    });
+
+    it("does NOT collapse to 0 on a realistic page tripping several rules", () => {
+      const violations = [
+        makeViolation({
+          id: "1",
+          impact: "critical",
+          nodes: 8,
+          wcagLevel: "A",
+        }),
+        makeViolation({
+          id: "2",
+          impact: "serious",
+          nodes: 5,
+          wcagLevel: "AA",
+        }),
+        makeViolation({
+          id: "3",
+          impact: "serious",
+          nodes: 3,
+          wcagLevel: "AA",
+        }),
+        makeViolation({
+          id: "4",
+          impact: "moderate",
+          nodes: 4,
+          wcagLevel: "AA",
+        }),
+        makeViolation({ id: "5", impact: "minor", nodes: 6, wcagLevel: "AA" }),
+      ];
+      const score = calculateWcagScore(violations, 45).score;
+      expect(score).toBeGreaterThan(30);
+      expect(score).toBeLessThan(95);
+    });
+
+    it("degrades gracefully with no passes captured (no snap to 0 on one violation)", () => {
+      const score = calculateWcagScore([
+        makeViolation({ impact: "serious", nodes: 3, wcagLevel: "AA" }),
+      ]).score;
+      expect(score).toBeGreaterThan(50);
+      expect(score).toBeLessThan(100);
+    });
+
+    it("is monotonic: adding a violation never raises the score", () => {
+      const base = [
+        makeViolation({ impact: "moderate", nodes: 2, wcagLevel: "AA" }),
+      ];
+      const worse = [
+        ...base,
+        makeViolation({
+          id: "x",
+          impact: "critical",
+          nodes: 3,
+          wcagLevel: "A",
+        }),
+      ];
+      expect(calculateWcagScore(worse, 40).score).toBeLessThanOrEqual(
+        calculateWcagScore(base, 40).score,
+      );
     });
 
     it("counts bySeverity correctly for mixed violations", () => {

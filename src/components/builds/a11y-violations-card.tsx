@@ -5,9 +5,8 @@
  * A11yComplianceCard on the build detail page and inside the Verify
  * focus A11y pane. One collapsible row per rule (sorted by severity →
  * occurrence count), each carrying impact / WCAG-level badges, the
- * occurrence count, a "Learn more" link to deque university, and the
- * first sample test that hit the rule (with selector + failureSummary
- * when the harvester captured them).
+ * occurrence count, and the first sample test that hit the rule (with
+ * selector + failureSummary when the harvester captured them).
  *
  * The grouped data is fetched server-side via the
  * `getBuildA11yViolations` server action; this component is purely a
@@ -20,7 +19,6 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
-  ExternalLink,
   Accessibility,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -50,15 +48,6 @@ const IMPACT_STYLE: Record<Severity, string> = {
   moderate: "bg-warning/15 text-warning-foreground border-warning/30",
   minor: "bg-muted text-muted-foreground border-border",
 };
-
-function dequeUniversityUrl(rule: string, fallback: string): string {
-  // axe-core always ships a helpUrl that points at deque university for
-  // the rule (e.g. dequeuniversity.com/rules/axe/4.9/<rule>); use it
-  // verbatim when present, otherwise synthesise a search URL so the
-  // "Learn more" link always points somewhere useful.
-  if (fallback) return fallback;
-  return `https://dequeuniversity.com/rules/axe/latest/${encodeURIComponent(rule)}`;
-}
 
 function downloadBlob(filename: string, data: string, mime: string) {
   const blob = new Blob([data], { type: mime });
@@ -221,15 +210,6 @@ export function A11yViolationsCard({
                     {r.description}
                   </p>
                 )}
-                <a
-                  href={dequeUniversityUrl(r.id, r.helpUrl)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                >
-                  Learn more on Deque University
-                  <ExternalLink className="h-3 w-3" />
-                </a>
                 {r.samples.length > 0 && (
                   <div className="space-y-1.5">
                     <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
