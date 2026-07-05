@@ -9,7 +9,7 @@ import { requireAuth, requireRepoAccess, requireTeamAccess } from "@/lib/auth";
 import { generateShareSlug, buildShareUrl } from "@/lib/share/slug";
 import { STORAGE_DIRS, toRelativePath } from "@/lib/storage/paths";
 import { sendDiscordShareNotification } from "@/lib/integrations/discord";
-import type { PublicShare } from "@/lib/db/schema";
+import type { PublicShare, PublicShareKind } from "@/lib/db/schema";
 
 // Internal "new share published" ping. Opt-in via env only — never hardcode a
 // webhook URL here (it is a bearer credential and would be committed to source).
@@ -35,7 +35,7 @@ function deriveTargetDomain(
 
 export async function publishBuildShare(
   buildId: string,
-  options: { scopedTestId?: string | null } = {},
+  options: { scopedTestId?: string | null; kind?: PublicShareKind } = {},
 ): Promise<PublishShareResult> {
   const build = await queries.getBuild(buildId);
   if (!build) throw new Error("Build not found");
@@ -63,6 +63,7 @@ export async function publishBuildShare(
   }
 
   const targetDomain = deriveTargetDomain(domainTest?.targetUrl);
+  const kind: PublicShareKind = options.kind ?? "regression";
 
   // Reuse an existing live share instead of minting a new URL on every publish:
   //  - Test-scoped shares are keyed by testId across builds, so re-running a
@@ -82,6 +83,9 @@ export async function publishBuildShare(
       buildId,
       targetDomain,
       publishedByUserId: session.user.id,
+      // Only override an explicit kind (QuickStart re-run → "demo"); a bare
+      // re-publish leaves the stored kind untouched so it can't be downgraded.
+      kind: options.kind,
     });
   } else if (existing) {
     share = existing;
@@ -95,6 +99,7 @@ export async function publishBuildShare(
       ownerTeamId: session.team.id,
       publishedByUserId: session.user.id,
       status: "public",
+      kind,
       targetDomain,
     });
   }
@@ -131,6 +136,7 @@ export async function publishBuildShare(
 
 export async function publishLatestTestShare(
   testId: string,
+  options: { kind?: PublicShareKind } = {},
 ): Promise<PublishShareResult> {
   const test = await queries.getTest(testId);
   if (!test) throw new Error("Test not found");
@@ -170,7 +176,10 @@ export async function publishLatestTestShare(
     });
   }
 
-  return publishBuildShare(build.id, { scopedTestId: testId });
+  return publishBuildShare(build.id, {
+    scopedTestId: testId,
+    kind: options.kind,
+  });
 }
 
 export async function listTestShares(testId: string): Promise<PublicShare[]> {

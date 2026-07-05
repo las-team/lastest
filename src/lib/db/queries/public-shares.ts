@@ -12,6 +12,7 @@ import {
 import type {
   NewPublicShare,
   PublicShare,
+  PublicShareKind,
   Baseline,
   CapturedScreenshot,
   DomDiffResult,
@@ -122,6 +123,10 @@ export async function repointPublicShare(
     buildId: string;
     targetDomain: string | null;
     publishedByUserId?: string | null;
+    // Preserve/refresh the share kind on repoint. QuickStart re-runs repoint an
+    // existing test-scoped share at the fresh build, so a demo share must stay a
+    // demo share across re-publishes; omit to leave the stored value untouched.
+    kind?: PublicShareKind;
   },
 ): Promise<PublicShare> {
   await db
@@ -132,6 +137,7 @@ export async function repointPublicShare(
       ...(data.publishedByUserId
         ? { publishedByUserId: data.publishedByUserId }
         : {}),
+      ...(data.kind ? { kind: data.kind } : {}),
     })
     .where(eq(publicShares.id, id));
   const [row] = await db

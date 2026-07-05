@@ -3621,6 +3621,15 @@ export type NewAchievement = typeof achievements.$inferInsert;
 
 export type PublicShareStatus = "public" | "revoked";
 
+// Distinguishes an outreach demo share (a QuickStart walkthrough published to
+// pitch a founder — run-to-run diffs are inter-run noise, not findings) from a
+// genuine regression share (real before/after findings). The presentation layer
+// keys almost everything off this: demo shares suppress inter-run diff chips and
+// change counts, regression shares render them as today. Defaults to
+// "regression" so pre-existing shares and the operator build-detail flow are
+// unaffected; QuickStart publishes with "demo".
+export type PublicShareKind = "regression" | "demo";
+
 export const publicShares = pgTable(
   "public_shares",
   {
@@ -3636,6 +3645,7 @@ export const publicShares = pgTable(
       .$type<PublicShareStatus>()
       .notNull()
       .default("public"),
+    kind: text("kind").$type<PublicShareKind>().notNull().default("regression"),
     targetDomain: text("target_domain"),
     claimedByTeamId: text("claimed_by_team_id"),
     claimedByUserId: text("claimed_by_user_id"),

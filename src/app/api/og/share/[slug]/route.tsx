@@ -7,6 +7,7 @@ import {
 } from "@/lib/db/queries/public-shares";
 import { resolveStoragePath } from "@/lib/storage/paths";
 import { isValidShareSlug } from "@/lib/share/slug";
+import { deriveShareFacts } from "@/lib/share/demo-facts";
 
 // Node runtime — we read screenshots off disk to embed them inline.
 export const runtime = "nodejs";
@@ -29,40 +30,74 @@ const COLOR_TEAL = "#36A88E";
 const COLOR_LINE = "rgba(31, 42, 51, 0.10)";
 const COLOR_MUTED = "rgba(31, 42, 51, 0.55)";
 
-function pickHeroPath(
-  diffs: Awaited<ReturnType<typeof getShareDataBySlug>> extends infer T
+type ShareDiffs =
+  Awaited<ReturnType<typeof getShareDataBySlug>> extends infer T
     ? T extends { diffs: infer D }
       ? D
       : never
-    : never,
-  results: Awaited<ReturnType<typeof getShareDataBySlug>> extends infer T
+    : never;
+type ShareResults =
+  Awaited<ReturnType<typeof getShareDataBySlug>> extends infer T
     ? T extends { results: infer R }
       ? R
       : never
-    : never,
-): { kind: "diff" | "current" | "baseline" | "shot"; path: string } | null {
-  if (diffs) {
-    const changed = diffs.find((d) => d.diffImagePath);
-    if (changed?.diffImagePath)
-      return { kind: "diff", path: changed.diffImagePath };
-    const withCurrent = diffs.find((d) => d.currentImagePath);
-    if (withCurrent?.currentImagePath)
-      return { kind: "current", path: withCurrent.currentImagePath };
-    const withBaseline = diffs.find((d) => d.baselineImagePath);
-    if (withBaseline?.baselineImagePath)
-      return { kind: "baseline", path: withBaseline.baselineImagePath };
-  }
-  if (results) {
-    for (const r of results) {
-      if (r.screenshotPath) return { kind: "shot", path: r.screenshotPath };
+    : never;
+
+type HeroPick = {
+  kind: "diff" | "current" | "baseline" | "shot";
+  path: string;
+} | null;
+
+// Hero-image selection. `mode` flips the priority:
+//  - "diff": the red overlay IS the story (regression card with changes) →
+//    diff > current > baseline > shot.
+//  - "product": product-first (demo + clean cards) → current > baseline > shot
+//    > diff. A washed-out diff ghost or red-smeared page must NEVER front a demo
+//    card, so the diff image is the last resort here.
+function pickHeroPath(
+  diffs: ShareDiffs,
+  results: ShareResults,
+  mode: "diff" | "product",
+): HeroPick {
+  const firstDiff = (
+    field: keyof NonNullable<ShareDiffs>[number],
+  ): string | null => {
+    const d = diffs?.find((x) => x[field]);
+    const v = d?.[field];
+    return typeof v === "string" && v ? v : null;
+  };
+  const firstShot = (): string | null => {
+    for (const r of results ?? []) {
+      if (r.screenshotPath) return r.screenshotPath;
       const captured = (r.screenshots ?? []) as Array<{
         path?: string | null;
       }> | null;
-      const firstShot = captured?.find((s) => s.path)?.path;
-      if (firstShot) return { kind: "shot", path: firstShot };
+      const shot = captured?.find((s) => s.path)?.path;
+      if (shot) return shot;
     }
-  }
-  return null;
+    return null;
+  };
+
+  const diff = firstDiff("diffImagePath");
+  const current = firstDiff("currentImagePath");
+  const baseline = firstDiff("baselineImagePath");
+  const shot = firstShot();
+
+  const order: HeroPick[] =
+    mode === "diff"
+      ? [
+          diff ? { kind: "diff", path: diff } : null,
+          current ? { kind: "current", path: current } : null,
+          baseline ? { kind: "baseline", path: baseline } : null,
+          shot ? { kind: "shot", path: shot } : null,
+        ]
+      : [
+          current ? { kind: "current", path: current } : null,
+          baseline ? { kind: "baseline", path: baseline } : null,
+          shot ? { kind: "shot", path: shot } : null,
+          diff ? { kind: "diff", path: diff } : null,
+        ];
+  return order.find((x) => x !== null) ?? null;
 }
 
 async function readImageAsDataUrl(storagePath: string): Promise<string | null> {
@@ -175,48 +210,86 @@ async function renderShareOg({
 
   const domain =
     ctx.share.targetDomain || ctx.test?.name || "Visual regression check";
-  const changes = ctx.build.changesDetected ?? 0;
   const total = ctx.build.totalTests ?? 0;
   const status = ctx.build.overallStatus;
-  const hasChanges = changes > 0;
-
-  // Cosmetic status badge.
-  const badge =
-    status === "blocked"
-      ? { label: "Blocked", color: COLOR_RED }
-      : hasChanges
-        ? {
-            label: `${changes} visual ${changes === 1 ? "change" : "changes"}`,
-            color: COLOR_RED,
-          }
-        : status === "safe_to_merge"
-          ? { label: "Safe to merge", color: COLOR_TEAL }
-          : { label: "Review", color: COLOR_INK };
-
-  const headline = hasChanges
-    ? `${changes} visual ${changes === 1 ? "change" : "changes"} detected`
-    : "No visual changes detected";
-
-  const subhead =
-    total > 0
-      ? `across ${total} test${total === 1 ? "" : "s"}`
-      : "Visual regression report";
-
-  const hero = pickHeroPath(diffs, results);
-  const heroDataUrl = hero ? await readImageAsDataUrl(hero.path) : null;
-  const heroLabel =
-    hero?.kind === "diff"
-      ? "DIFF"
-      : hero?.kind === "baseline"
-        ? "BASELINE"
-        : hero?.kind === "current"
-          ? "CURRENT"
-          : "CAPTURE";
+  const failed = ctx.build.failedCount ?? 0;
+  const kind = ctx.share.kind ?? "regression";
 
   // Resolve a clean domain string for the headline (strip protocol + trailing slash)
   const cleanDomain = String(domain)
     .replace(/^https?:\/\//, "")
     .replace(/\/+$/, "");
+
+  // Derived from the SAME inputs the page uses — the change count here must
+  // equal the page's "N visual changes" section (spec §1 consistency invariant),
+  // so we count renderable diffs, NOT build.changesDetected (which drops to 0
+  // after baseline approval and produced the contradictory "No changes" card).
+  const facts = deriveShareFacts({
+    results,
+    diffs,
+    test: ctx.test,
+    build: ctx.build,
+  });
+
+  // Card model, chosen by share.kind. A demo card NEVER shows change counts,
+  // "REVIEW", or red accents — the product must look tested-and-live, not broken.
+  let accent: string;
+  let badge: { label: string; color: string };
+  let headline: string;
+  let subhead: string;
+  let heroMode: "diff" | "product";
+
+  if (kind === "demo") {
+    accent = COLOR_TEAL;
+    badge = {
+      label: failed > 0 ? "TESTED LIVE" : "PASSED",
+      color: COLOR_TEAL,
+    };
+    headline = `We tested ${cleanDomain} live`;
+    const parts = [facts.authed ? "authenticated walkthrough" : "walkthrough"];
+    if (facts.steps > 0)
+      parts.push(`${facts.steps} step${facts.steps === 1 ? "" : "s"}`);
+    if (facts.duration) parts.push(facts.duration);
+    subhead = parts.join(" · ");
+    heroMode = "product";
+  } else if (facts.changeCount > 0) {
+    const n = facts.changeCount;
+    accent = COLOR_RED;
+    badge = {
+      label: `${n} visual ${n === 1 ? "change" : "changes"}`,
+      color: COLOR_RED,
+    };
+    headline = `${n} visual ${n === 1 ? "change" : "changes"} detected`;
+    subhead =
+      total > 0
+        ? `across ${total} test${total === 1 ? "" : "s"}`
+        : "Visual regression report";
+    heroMode = "diff";
+  } else if (status === "blocked") {
+    accent = COLOR_RED;
+    badge = { label: "Blocked", color: COLOR_RED };
+    headline = `Review required on ${cleanDomain}`;
+    subhead =
+      total > 0
+        ? `across ${total} test${total === 1 ? "" : "s"}`
+        : "Visual regression report";
+    heroMode = "product";
+  } else {
+    accent = COLOR_TEAL;
+    badge = { label: "No regressions", color: COLOR_TEAL };
+    headline = `No regressions on ${cleanDomain}`;
+    subhead = `${total} test${total === 1 ? "" : "s"} · all passing`;
+    heroMode = "product";
+  }
+
+  const hero = pickHeroPath(diffs, results, heroMode);
+  const heroDataUrl = hero ? await readImageAsDataUrl(hero.path) : null;
+  const heroLabel =
+    hero?.kind === "diff"
+      ? "DIFF"
+      : hero?.kind === "current"
+        ? "CURRENT"
+        : "CAPTURE";
 
   return new ImageResponse(
     <div
@@ -235,7 +308,7 @@ async function renderShareOg({
       <div
         style={{
           height: 8,
-          backgroundColor: hasChanges ? COLOR_RED : COLOR_TEAL,
+          backgroundColor: accent,
           display: "flex",
         }}
       />
@@ -440,7 +513,7 @@ async function renderShareOg({
                 top: 18,
                 right: -18,
                 bottom: -18,
-                backgroundColor: hasChanges ? COLOR_RED : COLOR_TEAL,
+                backgroundColor: accent,
                 display: "flex",
               }}
             />
