@@ -1459,22 +1459,13 @@ function LayerOutcomesGrid({
 
   return (
     <section className="space-y-2">
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Checks run
-        </h2>
-        {signInLink && (
-          <a
-            href={signInLink}
-            className="text-[11px] text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
-          >
-            Log in for details
-          </a>
-        )}
-      </div>
-      {/* Chips are informational, not links. Routing a cold visitor who clicks
-          "A11y: C" into a login form converts worse than telling them what the
-          number means — the single header link above is the auth entry point. */}
+      <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        Checks run
+      </h2>
+      {/* Metric chips are informational, not links. Routing a cold visitor who
+          clicks "A11y: C" into a login form converts worse than telling them
+          what the number means — the dedicated log-in card at the end of the
+          grid is the auth entry point. */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
         {chips.map((o) => {
           const t = layerToneClasses(o.tone);
@@ -1529,6 +1520,20 @@ function LayerOutcomesGrid({
               </div>
             </div>
           ))}
+        {/* Auth entry point as a grid card (was a small header text link). */}
+        {signInLink && (
+          <a
+            href={signInLink}
+            className="block rounded-md px-3 py-2 text-center border border-dashed bg-white dark:bg-card hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <div className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground">
+              Full report
+            </div>
+            <div className="text-sm font-semibold truncate text-foreground">
+              Log in →
+            </div>
+          </a>
+        )}
       </div>
     </section>
   );
@@ -2036,8 +2041,8 @@ function TestShareBody({
             <h2 className="text-sm font-medium text-muted-foreground">
               What we see when we test {domain}
             </h2>
-            {(xray || showWcag) && (
-              <div className="grid gap-4 md:grid-cols-2">
+            {(xray || largestDiff) && (
+              <div className="grid gap-4 md:grid-cols-2 md:items-start">
                 {xray && (
                   <div className="space-y-2">
                     <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -2051,36 +2056,37 @@ function TestShareBody({
                     />
                   </div>
                 )}
-                {showWcag && (
-                  <ShareWcagPanel
-                    summary={a11ySummary}
-                    score={build.a11yScore ?? null}
-                    totalRulesChecked={build.a11yTotalRulesChecked ?? null}
-                    violationCount={build.a11yViolationCount ?? null}
-                    claimLink={claimLink}
-                    gradeMode={a11yGradeMode}
-                  />
+                {largestDiff && (
+                  <div className="space-y-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      How Lastest compares runs
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Between two identical runs we flag every moved pixel. On
+                      your deploys, this is how real regressions get caught.
+                    </p>
+                    <DiffSlider
+                      baseline={largestDiff.baseline}
+                      current={largestDiff.current}
+                      diff={largestDiff.diff}
+                      stepLabel={largestDiff.stepLabel}
+                      pixelDifference={largestDiff.pixelDifference}
+                      stepNumber={largestDiff.stepNumber}
+                    />
+                  </div>
                 )}
               </div>
             )}
-            {largestDiff && (
-              <div className="space-y-2">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  How Lastest compares runs
-                </h3>
-                <p className="text-xs text-muted-foreground">
-                  Between two identical runs we flag every moved pixel. On your
-                  deploys, this is how real regressions get caught.
-                </p>
-                <DiffSlider
-                  baseline={largestDiff.baseline}
-                  current={largestDiff.current}
-                  diff={largestDiff.diff}
-                  stepLabel={largestDiff.stepLabel}
-                  pixelDifference={largestDiff.pixelDifference}
-                  stepNumber={largestDiff.stepNumber}
-                />
-              </div>
+            {/* Full-width so the rule-card carousel gets the whole page column. */}
+            {showWcag && (
+              <ShareWcagPanel
+                summary={a11ySummary}
+                score={build.a11yScore ?? null}
+                totalRulesChecked={build.a11yTotalRulesChecked ?? null}
+                violationCount={build.a11yViolationCount ?? null}
+                claimLink={claimLink}
+                gradeMode={a11yGradeMode}
+              />
             )}
           </section>
         )}

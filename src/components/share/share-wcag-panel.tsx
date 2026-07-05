@@ -164,11 +164,19 @@ export function ShareWcagPanel({
         </div>
       </div>
 
-      <ul className="space-y-3" aria-label="Top accessibility issues">
+      {/* Horizontal snap carousel — one card per rule. Keeps the panel's
+          vertical footprint to a single card height; overflow scrolls inside
+          this <ul> (never the page body). Native scroll = keyboard (arrow keys
+          on a focused card scroll it into view via scroll-snap) + touch-friendly
+          with no client JS. */}
+      <ul
+        className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-2 -mb-2"
+        aria-label="Top accessibility issues"
+      >
         {topRules.map((r) => (
           <li
             key={r.id}
-            className="rounded-md border bg-background/50 p-3 space-y-1.5"
+            className="snap-start shrink-0 w-[16rem] sm:w-[18rem] rounded-md border bg-background/50 p-3 space-y-1.5"
           >
             <div className="flex flex-wrap items-center gap-2">
               <span
@@ -201,15 +209,6 @@ export function ShareWcagPanel({
                 {r.sampleSummary}
               </p>
             )}
-            <a
-              href={r.helpUrl}
-              target="_blank"
-              rel="noopener noreferrer nofollow"
-              className="inline-flex items-center gap-1 text-xs font-medium text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 rounded"
-            >
-              Learn more on Deque University
-              <span aria-hidden="true">↗</span>
-            </a>
           </li>
         ))}
       </ul>
