@@ -52,7 +52,7 @@ Shared prerequisite for all three: a way to distinguish **demo shares** (QuickSt
    - `A11y` / `Perf` — per §3 evidence gates.
    - `Visual`, `Network`, `URL`, `DOM`, `Text`, `Variables` — omit entirely on demo shares (inter-run noise by construction). The grid title becomes "Checks run" with fewer, all-defensible chips; add one muted trailing chip "+ 5 more layers on every deploy" linking the value story instead of dashes.
 3. **Stat tiles:** drop the "Diff px" tile on demo shares; keep Duration, Accessible/Design/Fast per §3.
-4. **"N visual changes" section:** on demo shares, do NOT render inter-run diffs as findings. Replace with ONE showcase block: the single largest-diff step rendered as the existing before/after slider, titled "**How Lastest compares runs**" with caption "Between two identical runs we flag every moved pixel — on your deploys this is how regressions get caught." (the slider itself is the product demo; the framing stops it reading as "your site is broken"). All captured screenshots continue rendering in the gallery.
+4. **"N visual changes" section:** on demo shares, do NOT render inter-run diffs as findings. Replace with the **showcase strip** (see §4/§5): the single largest-diff step rendered as the existing before/after slider, titled "**How Lastest compares runs**" with caption "Between two identical runs we flag every moved pixel — on your deploys this is how regressions get caught." (the slider itself is the product demo; the framing stops it reading as "your site is broken"), alongside the DOM X-ray and WCAG panel. All captured screenshots continue rendering in the gallery.
 5. **Root-cause option (phase 2, run layer):** after `qs_approve_baselines`, compute cluster bounding boxes from each diff image where `pixelDifference > DEMO_NOISE_PX` (suggest 500) and persist them as baseline ignore regions (`src/lib/db/queries/visual-diffs.ts` ignore-region helpers exist), then the pairing rerun diffs clean. This makes chips/hero honest without presentation-layer special cases and benefits the claimed test too — the founder inherits a stable baseline. Presentation fixes above still ship first; this replaces rule 4's need over time.
 
 ### Acceptance
@@ -84,13 +84,64 @@ Shared prerequisite for all three: a way to distinguish **demo shares** (QuickSt
 
 ---
 
+## 4. Eye-candy: DOM X-ray showcase — visible on first scroll-through
+
+### Problems observed
+- The annotated DOM overlay (`src/components/share/dom-overlay-client.tsx`, ported from Verify > DOM) is the most visually distinctive artifact Lastest produces — toned bounding boxes drawn over the founder's real screenshot — and it appeared on **zero** of the five demo shares. It only renders when a step has DOM *diff* changes (`buildDomOverlays` in `page.tsx` requires `layers.dom` / `metadata.domDiff` with added/removed/changed > 0); demo runs diff clean, so the section never mounts. When it does render (regression shares), it sits below the diff sliders, far down the page.
+- The current overlay is **mouse-only**: element popovers open on `onMouseEnter` — invisible on touch, unreachable by keyboard, and nothing is annotated until the visitor hovers. A founder scrolling on a phone sees a plain screenshot.
+
+### Required behavior
+1. **New "DOM X-ray" mode for `DomOverlay`.** Keep the existing diff mode untouched for regression shares. Add an `xray` variant that annotates a step's *captured element inventory* rather than a diff: the page `<h1>`, nav/landmark regions, the primary CTA, and form fields — the elements Lastest tracks per step.
+2. **Data:** demo runs must persist a per-step element inventory. The executor's DOM layer already builds `DomSnapshotElement`s (tag, selectors, textContent, boundingBox) for comparison; add a capped `showcaseElements: DomSnapshotElement[]` (max ~8: first h1, landmarks, up to 3 interactive elements, the business-interaction input/CTA when present) to the step comparison's stored layers (or a sibling JSONB) during quickstart runs. Fallback when absent: reuse any inter-run DOM diff elements re-framed as "live regions we track" — never render an empty x-ray.
+3. **Visible without interaction (the "first scroll-through" requirement):** in the default state, render 2–3 boxes *pre-labeled* — persistent chip labels (e.g. `〈h1〉 "See what changed"`, `button "Get started"`) pinned to their boxes with a hairline connector, not hidden behind hover. Remaining boxes render as outlines. Optional slow highlight cycle through the boxes, disabled under `prefers-reduced-motion`.
+4. **Accessible interaction model** (replaces hover-only, applies to BOTH modes):
+   - Each box becomes a `<button>` — focusable in DOM order, visible focus ring (`ring-2` + offset), `aria-expanded` state.
+   - Popover opens on focus AND on click/tap (toggle); Escape and outside-tap close it; popover gets `role="tooltip"` and is referenced via `aria-describedby`.
+   - Box `aria-label`: `"{tone} <{tag}> {selector}"` so screen readers announce what sighted users see in the popover.
+   - Color is never the only signal: the +/−/~ sign (already in `TONE_STYLE`) renders inside the chip label.
+5. **Placement:** demo shares render the showcase strip **directly after `PostVideoCTA`** — i.e. within the first two viewport-heights: video → hero (claim CTA) → take-this-test card → **showcase strip**. Desktop: 2-column grid (DOM X-ray left, WCAG panel §5 right, comparison slider full-width beneath). Mobile: stacked in that order. Section heading: "**What we see when we test {domain}**" — one strip that shows off pixels, DOM, and accessibility together.
+
+### Acceptance
+- A demo share on a phone shows, without any interaction, the founder's screenshot with 2–3 labeled element callouts inside the first two screens of scrolling.
+- Keyboard-only: Tab reaches every box, Enter opens the detail popover, Escape closes; VoiceOver announces tag + selector.
+- Regression shares keep today's diff overlays (now with the accessible interaction model) — no data changes required for them.
+
+---
+
+## 5. Eye-candy: WCAG analysis panel — port the internal a11y UI to the share
+
+### Problems observed
+- The internal build page renders a genuinely attractive a11y surface — `A11yComplianceCard` (colored score ring, "N/M rules passed", severity breakdown, trend sparkline) and `A11yViolationsCard` (per-rule rows with impact/WCAG badges, occurrence counts, sample selector + failureSummary, deque-university "Learn more" links) — while the share reduces all of it to a bare "F · 23" tile. The share shows the *accusation* and hides the *analysis*.
+
+### Required behavior
+1. **New `ShareWcagPanel`** (server-rendered, share-safe — no app-internal CSS vars, mirrors the `DomOverlay` porting approach):
+   - **Header row:** the score ring from `A11yComplianceCard` (same 90/70 color bands) + "WCAG 2.2 AA · {passed}/{checked} rules passed" + severity chips (`critical / serious / moderate / minor` counts). Under the §3.3 grade floor, a would-be D/F ring renders amber with the label "Needs review" — but the panel still shows, because here the number arrives WITH its evidence.
+   - **Top rules list:** up to 3 rules, sorted severity → occurrence (same ordering as `A11yViolationsCard`), each row: impact badge, human rule description, occurrence count, ONE sample (selector, truncated failureSummary), and the deque `helpUrl` "Learn more" link (`rel="noopener noreferrer nofollow"`).
+   - **Footer line:** "{n} more rules checked — claim the test for the full report" → claim link. The panel is the payoff-preview pattern from PR #71's code teaser, applied to a11y.
+   - **Trend sparkline:** only when ≥2 builds have scores (demo repos usually have 1–2 runs; render nothing rather than a 1-bar chart).
+2. **Data:** reuse `getBuildA11yViolations` (`src/lib/db/queries/builds.ts`, `BuildA11yViolationRow`) server-side in the share page. Add a slim share projection (rule id, description, impact, count, helpUrl, one sample selector/failureSummary) — do NOT ship the full `a11yViolations` JSONB (`schema.ts:896`) to the client; it's excluded from `ShareVisualDiff` for payload reasons and must stay that way.
+3. **Composition with §3:** this panel IS the §3.2 evidence gate — the Accessible tile/chip renders iff the panel has rows to show, and the tile anchors-links down to the panel. The §3.5 calibration task still gates *demo-share* grades; until it passes, the panel may render with the neutral header "Accessibility checks — {n} rules evaluated" and rules list, score ring hidden.
+4. **Self-demonstrating accessibility (non-negotiable):** the panel itself must pass what it measures — semantic `<ul>`/`<li>` structure, severity conveyed by badge text not color alone, AA-contrast checked in both themes, focus-visible styles on links. A WCAG panel that fails axe on our own share is a credibility own-goal.
+5. **Placement:** demo shares — right column of the §4.5 showcase strip. Regression shares — below the visual-changes section, above the gallery.
+6. **Notes tie-in:** when the panel renders, the demo-notes facts block (`quickstart-notes.ts` `buildFactsBlock`) receives the top 3 rules so the AI notes can reference them ("the F traces to 8 color-contrast pairs in the sidebar") — findings in prose and in UI must tell the same story.
+
+### Acceptance
+- Databuddy's share (85/B) shows a green-band ring, "B · {passed}/{checked} rules passed", severity chips, and up to 3 concrete rules with deque links — in the first two viewport-heights, next to the DOM X-ray.
+- Trigger.dev's share (score 10, pre-calibration) shows the neutral rules-list variant — real violations named, no unexplained F anywhere on the page.
+- Running axe against a rendered share page reports zero critical/serious violations for the panel and the DOM X-ray themselves.
+
+---
+
 ## Rollout order
 
 1. §0 `kind` column + publish plumbing (everything keys off it).
 2. §1 OG card (biggest outreach impact, zero risk to regression shares).
 3. §2 presentation rules (page-only, gated on `kind`).
-4. §3.1–3.4 + 3.6 gates (page + facts plumbing).
-5. §3.5 a11y calibration, then re-enable demo a11y grades.
-6. §2.5 ignore-region auto-masking (phase 2, replaces the §2.4 special case over time).
+4. §4.4 accessible interaction model for `DomOverlay` (standalone, benefits regression shares immediately).
+5. §5 WCAG panel (data already exists via `getBuildA11yViolations`; doubles as the §3.2 evidence gate).
+6. §3.1–3.4 + 3.6 gates (page + facts plumbing).
+7. §4.1–4.3 + 4.5 DOM X-ray showcase strip (needs the quickstart element-inventory capture).
+8. §3.5 a11y calibration, then re-enable demo a11y score rings.
+9. §2.5 ignore-region auto-masking (phase 2, replaces the §2.4 special case over time).
 
 Non-goals: no change to the executor's diffing for regression runs; no change to claim flow; the PR #71 restructure (hero CTA, code teaser, chips-not-links) composes with all of the above — §2.2 supersedes its "—"-chip tooltip copy on demo shares.
