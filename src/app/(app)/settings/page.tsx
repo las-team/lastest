@@ -66,6 +66,8 @@ import { TestMigrationCard } from "@/components/settings/test-migration-card";
 import { EmailPreferencesCard } from "@/components/settings/email-preferences-client";
 import { StorageUsageCard } from "@/components/settings/storage-usage-card-client";
 import { RunUsageCard } from "@/components/settings/run-usage-card-client";
+import { RunUsageAnalyticsCard } from "@/components/settings/run-usage-analytics-card-client";
+import { computeRunUsageProjection } from "@/lib/billing/run-usage";
 import { BillingCard } from "@/components/settings/billing-card-client";
 import { isStripeConfigured, getStripeClient } from "@/lib/billing/stripe";
 import { getCatalog, toUiCatalog } from "@/lib/billing/catalog";
@@ -161,6 +163,9 @@ export default async function SettingsPage({
     ? await queries.getTeamStorageUsage(teamId)
     : null;
   const runUsage = teamId ? await queries.getTeamRunUsage(teamId) : null;
+  const runAnalytics = teamId
+    ? await queries.getTeamRunUsageAnalytics(teamId)
+    : null;
   const teamBilling = teamId ? await queries.getTeamBilling(teamId) : null;
   const stripeConfigured = isStripeConfigured();
   const billingCatalog = teamBilling ? toUiCatalog(await getCatalog()) : [];
@@ -687,6 +692,19 @@ export default async function SettingsPage({
               runUsage.runUsageLastCalculatedAt?.toISOString() ?? null
             }
             enforcementEnabled={runEnforcementEnabled}
+          />
+        </div>
+      )}
+
+      {/* Run usage analytics — per-project / per-test run-minute breakdown */}
+      {runUsage && runAnalytics && (
+        <div id="run-usage-analytics">
+          <RunUsageAnalyticsCard
+            analytics={runAnalytics}
+            projection={computeRunUsageProjection(
+              runUsage.runMinutesThisMonth,
+              runUsage.monthlyRunQuota,
+            )}
           />
         </div>
       )}

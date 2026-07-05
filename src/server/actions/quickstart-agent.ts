@@ -47,6 +47,9 @@ import { eq } from "drizzle-orm";
 import { toProxyStreamUrl } from "@/lib/eb/stream-url";
 import { appendStreamToken } from "@/lib/eb/stream-token";
 import { chromium, type Browser } from "playwright";
+import { readFile } from "fs/promises";
+import { resolveStoragePath } from "@/lib/storage/paths";
+import { computeDiffClusters } from "@/lib/diff/diff-clusters";
 
 /**
  * Normalise a raw EB `ws://host:port` stream URL into a browser-routable form for
@@ -1230,6 +1233,17 @@ async function runQsRunAndNotes(
     new Set(testResults.flatMap((r) => r.consoleErrors ?? [])),
   ).slice(0, 10);
 
+  // Top a11y rule violations for the notes facts (spec §3.6) — the SAME evidence
+  // the share's WCAG panel shows, so prose and UI cite one story. Best-effort:
+  // never let an a11y-fetch hiccup block notes generation.
+  let a11yTopRules: string[] = [];
+  try {
+    const a11yRows = await queries.getBuildA11yViolations(buildId);
+    a11yTopRules = a11yRows.slice(0, 3).map((r) => `${r.id} (${r.totalNodes})`);
+  } catch (err) {
+    console.warn("[QuickStart] a11y top-rules fetch failed:", err);
+  }
+
   const runFacts: QuickstartRunFacts = {
     passedCount: summary.passedCount,
     failedCount: summary.failedCount,
@@ -1244,6 +1258,7 @@ async function runQsRunAndNotes(
         step: "unknown",
         error: r.errorMessage ?? "unknown",
       })),
+    a11yTopRules,
   };
 
   // Generate demo notes
@@ -1291,6 +1306,63 @@ async function runQsRunAndNotes(
   return true;
 }
 
+// Pixel-difference floor above which a demo diff is worth clustering into ignore
+// regions — below this it's sub-visual jitter not worth masking (spec §2.5).
+const DEMO_NOISE_PX = 500;
+
+// After a demo's baselines are approved, mask the regions of run-to-run churn
+// (animated heroes, rotating testimonials, live charts, timestamps) as baseline
+// ignore regions so the pairing rerun diffs clean — the demo share's chips/hero
+// become honest and the founder inherits a stable baseline. Idempotent (skips a
+// step that already has regions) and best-effort (never throws into approval).
+async function maskDemoNoiseRegions(buildId: string): Promise<number> {
+  const diffs = await queries.getVisualDiffsByBuild(buildId);
+  let created = 0;
+  for (const d of diffs) {
+    if (!d.testId || (d.pixelDifference ?? 0) <= DEMO_NOISE_PX) continue;
+    if (!d.baselineImagePath || !d.currentImagePath) continue;
+    const existing = await queries.getIgnoreRegions(
+      d.testId,
+      d.stepLabel ?? null,
+    );
+    if (existing.length > 0) continue;
+    const baseAbs = resolveStoragePath(
+      d.baselineImagePath.startsWith("/")
+        ? d.baselineImagePath
+        : `/${d.baselineImagePath}`,
+    );
+    const curAbs = resolveStoragePath(
+      d.currentImagePath.startsWith("/")
+        ? d.currentImagePath
+        : `/${d.currentImagePath}`,
+    );
+    if (!baseAbs || !curAbs) continue;
+    let baseBuf: Buffer;
+    let curBuf: Buffer;
+    try {
+      [baseBuf, curBuf] = await Promise.all([
+        readFile(baseAbs),
+        readFile(curAbs),
+      ]);
+    } catch {
+      continue;
+    }
+    for (const r of computeDiffClusters(baseBuf, curBuf)) {
+      await queries.createIgnoreRegion({
+        testId: d.testId,
+        stepLabel: d.stepLabel ?? null,
+        x: r.x,
+        y: r.y,
+        width: r.width,
+        height: r.height,
+        reason: "auto: demo run-to-run noise",
+      });
+      created += 1;
+    }
+  }
+  return created;
+}
+
 async function runQsApproveBaselines(
   sessionId: string,
   repositoryId: string,
@@ -1314,6 +1386,13 @@ async function runQsApproveBaselines(
       buildId,
       "quickstart-agent",
     );
+    // Mask run-to-run noise regions so the pairing rerun diffs clean (§2.5).
+    let maskedRegions = 0;
+    try {
+      maskedRegions = await maskDemoNoiseRegions(buildId);
+    } catch (err) {
+      console.warn("[QuickStart] demo-noise masking failed:", err);
+    }
     await setCompleted(sessionId, "qs_approve_baselines", {
       buildId,
       approvedCount,
@@ -1323,7 +1402,9 @@ async function runQsApproveBaselines(
       repositoryId,
       sessionId,
       "step:complete",
-      `Approved ${approvedCount} baselines`,
+      `Approved ${approvedCount} baselines${
+        maskedRegions > 0 ? ` · masked ${maskedRegions} noise regions` : ""
+      }`,
       { stepId: "qs_approve_baselines", agentType: "quickstart" },
     );
     return true;
@@ -1522,6 +1603,10 @@ async function runQsPublishShare(
   try {
     const result = await publishBuildShare(buildToShare, {
       scopedTestId: walkthroughTestId,
+      // QuickStart shares are outreach demos: the pairing rerun diffs run-to-run
+      // noise (animated heroes, timestamps, live charts), so the presentation
+      // layer must suppress inter-run diff findings and change counts. See §0.
+      kind: "demo",
     });
     await mergeMetadata(sessionId, {
       shareId: result.shareId,

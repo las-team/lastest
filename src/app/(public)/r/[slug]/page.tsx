@@ -16,19 +16,42 @@ import {
   getLatestDemoNotesForRepo,
 } from "@/lib/db/queries/demo-notes";
 import { getRepoAward } from "@/lib/db/queries/awards";
+import { getBuildA11yViolations } from "@/lib/db/queries/builds";
 import type {
   DemoNotes,
   DomDiffResult,
+  DomSnapshotElement,
   RepoAward,
   WebVitalsSample,
 } from "@/lib/db/schema";
 import { isValidShareSlug, buildShareUrl } from "@/lib/share/slug";
+import { redactCodeSecrets } from "@/lib/security/redact-code";
 import { resolveTestVideoUrl } from "@/lib/share/video-fallback";
+import {
+  deriveShareFacts,
+  hasRenderableVisualChange,
+  type ShareFacts,
+} from "@/lib/share/demo-facts";
+import { publicShareGrade } from "@/lib/share/grade";
+import {
+  projectShareA11y,
+  type ShareA11ySummary,
+} from "@/lib/share/a11y-projection";
+import { buildXrayElements, buildXrayFromDomDiff } from "@/lib/share/xray";
+import type { XrayElement } from "@/lib/share/xray";
 import { ShareVideoPlayer } from "./share-video-player";
+import { ShareWcagPanel } from "@/components/share/share-wcag-panel";
 import { AwardBadgeRow } from "@/components/awards/award-badge-row";
 import { MobileDiffGallery } from "@/components/diff/mobile-diff-gallery-client";
 import { ChapterRail, type Chapter } from "@/components/share/chapter-rail";
 import { DomOverlay } from "@/components/share/dom-overlay-client";
+
+// Feature gate for showing an a11y numeric GRADE on demo (outreach) shares.
+// Off until wcag-score.ts is validated against known-good sites (spec §3.5) —
+// a missing grade costs nothing, a wrong "F" costs the deal. Flip to `true`
+// only after that calibration passes. Regression shares are unaffected (they
+// show the floored grade regardless). See docs / the calibration task.
+const DEMO_A11Y_GRADE_ENABLED = false;
 import {
   SocialShareKit,
   type ShareSlide,
@@ -254,6 +277,33 @@ export default async function PublicSharePage({ params }: PageProps) {
   // were captured (renders "—"); see computePerfScore.
   const perfScore = computePerfScore(scopedResults);
 
+  // Demo (outreach) share? The pairing rerun on a demo diffs run-to-run noise
+  // (animated heroes, timestamps, live charts), so its presentation suppresses
+  // inter-run diff findings and change counts (spec §2). Demos are always
+  // test-scoped, but gate on isTestShare too for safety.
+  const isDemo = share.kind === "demo" && isTestShare;
+
+  // Steps / duration / authed / renderable-change-count, derived from the SAME
+  // inputs the OG card uses so the page and its unfurl never disagree (§1/§2).
+  const shareFacts: ShareFacts = deriveShareFacts({
+    results: scopedResults,
+    diffs,
+    test,
+    build,
+  });
+
+  // Slim, share-safe a11y projection for the WCAG panel + evidence gate (§5).
+  // Build-scoped, cheap; the heavy a11yViolations JSONB never reaches the client.
+  const a11ySummary: ShareA11ySummary = projectShareA11y(
+    await getBuildA11yViolations(build.id),
+  );
+  // Grade display mode for a11y on THIS share:
+  //  - regression: floored grade (D/F → "Needs review") — the operator's own QA.
+  //  - demo: no numeric grade until wcag-score.ts is calibrated (§3.5); the panel
+  //    still names real violations.
+  const a11yGradeMode: "hidden" | "floored" =
+    !isDemo || DEMO_A11Y_GRADE_ENABLED ? "floored" : "hidden";
+
   // Recording clips, hoisted to page level so the player renders as the FIRST
   // element in <main> — above the fold, at actual size, highest in the HTML.
   // Google only indexes videos on "watch pages" where the video is the main
@@ -419,7 +469,7 @@ export default async function PublicSharePage({ params }: PageProps) {
     <div className="min-h-screen bg-background text-foreground">
       <ShareHeader signInLink={signInLink} claimLink={claimLink} />
 
-      <main className="mx-auto max-w-3xl px-4 sm:px-6 py-10 space-y-8">
+      <main className="mx-auto max-w-5xl px-4 sm:px-6 py-10 space-y-8">
         {clips.length > 0 && (
           <section className="space-y-3">
             {/* <figure>/<figcaption> binds descriptive text to the recording so
@@ -447,6 +497,7 @@ export default async function PublicSharePage({ params }: PageProps) {
           pixelsChanged={totalPixelsChanged}
           branch={testRun?.gitBranch ?? null}
           commit={testRun?.gitCommit ?? null}
+          demoFacts={isDemo ? shareFacts : null}
         />
 
         {isTestShare ? (
@@ -464,6 +515,9 @@ export default async function PublicSharePage({ params }: PageProps) {
             demoNotes={demoNotes}
             claimLink={claimLink}
             signInLink={signInLink}
+            isDemo={isDemo}
+            a11ySummary={a11ySummary}
+            a11yGradeMode={a11yGradeMode}
           />
         ) : (
           <>
@@ -474,6 +528,7 @@ export default async function PublicSharePage({ params }: PageProps) {
               diffs={diffs}
               stepComparisons={scopedStepComparisons}
               signInLink={signInLink}
+              a11yScore={build.a11yScore}
             />
             {hasDemoContent(demoNotes) && <DemoNotesPanel notes={demoNotes} />}
             <BuildSummary
@@ -638,7 +693,7 @@ function ShareHeader({
 }) {
   return (
     <header className="border-b">
-      <div className="mx-auto max-w-3xl px-4 sm:px-6 h-14 flex items-center justify-between">
+      <div className="mx-auto max-w-5xl px-4 sm:px-6 h-14 flex items-center justify-between">
         {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
         <a href="/" className="flex items-center gap-2 font-semibold">
           <LastestLogo />
@@ -822,6 +877,7 @@ function OutcomeHeader({
   pixelsChanged,
   branch,
   commit,
+  demoFacts,
 }: {
   variant: "build" | "test";
   domain: string;
@@ -833,6 +889,9 @@ function OutcomeHeader({
   pixelsChanged: number;
   branch: string | null;
   commit: string | null;
+  // Present on demo shares: the meta line reads "N steps · duration ·
+  // authenticated" instead of the inter-run "{px} pixels changed" (spec §2).
+  demoFacts?: ShareFacts | null;
 }) {
   const verdict =
     variant === "test"
@@ -850,6 +909,15 @@ function OutcomeHeader({
     if (commit && commit !== "unknown") metaBits.push(commit.slice(0, 7));
     const dur = formatDuration(build.elapsedMs);
     if (dur) metaBits.push(dur);
+  } else if (demoFacts) {
+    // Demo share: steps · duration · authenticated — the inter-run pixel delta
+    // is run-to-run noise on a demo, not a finding (spec §2).
+    if (demoFacts.steps > 0)
+      metaBits.push(
+        `${demoFacts.steps} step${demoFacts.steps === 1 ? "" : "s"}`,
+      );
+    if (demoFacts.duration) metaBits.push(demoFacts.duration);
+    if (demoFacts.authed) metaBits.push("authenticated");
   } else {
     const dur = testResult?.durationMs;
     if (dur != null) metaBits.push(`${dur.toLocaleString()} ms`);
@@ -953,12 +1021,17 @@ function computeLayerOutcomes({
   results,
   diffs,
   stepComparisons,
+  a11yScore,
 }: {
   variant: "build" | "test";
   testResult: ShareTestResult | null;
   results: ShareTestResult[];
   diffs: ShareVisualDiff[];
   stepComparisons: ShareStepComparison[];
+  // Absolute build a11y score. When present, the A11y chip shows the SAME
+  // (floored) grade as the Accessible tile — never "—" beside a graded tile
+  // (spec §3.1 single-source).
+  a11yScore?: number | null;
 }): LayerOutcome[] {
   // Run — test pass/fail or build verdict roll-up.
   const run: LayerOutcome = (() => {
@@ -1097,29 +1170,38 @@ function computeLayerOutcomes({
     };
   })();
 
-  // Console — new error fingerprints across steps.
+  // Console — new error fingerprints across steps. The tooltip names the top 3
+  // fingerprints (§2/§3.6) so an "N new" chip is never an unexplained count.
   const consoleLayer: LayerOutcome = (() => {
     let newCount = 0;
     let touched = false;
+    const samples: string[] = [];
     for (const s of stepComparisons) {
       const c = s.layers?.consoleDiff;
       if (!c) continue;
       touched = true;
-      newCount += c.newFingerprints?.length ?? 0;
+      for (const f of c.newFingerprints ?? []) {
+        newCount += 1;
+        if (samples.length < 3 && f.sample) samples.push(f.sample.slice(0, 80));
+      }
     }
-    if (!touched)
-      return { key: "console", label: "Console", value: "✓", tone: "ok" };
-    if (newCount === 0)
+    if (!touched || newCount === 0)
       return { key: "console", label: "Console", value: "✓", tone: "ok" };
     return {
       key: "console",
       label: "Console",
       value: `${newCount} new`,
       tone: "danger",
+      title: samples.length
+        ? `New console errors: ${samples.join(" · ")}`
+        : undefined,
     };
   })();
 
-  // A11y — new violations by severity.
+  // A11y — single-source with the Accessible tile (§3.1). When the build has an
+  // absolute a11y score, the chip shows the SAME floored grade the tile does;
+  // step-level new-violation severities (when present) go into the tooltip. Only
+  // when no absolute score exists do we fall back to the step-level delta.
   const a11y: LayerOutcome = (() => {
     let critical = 0;
     let serious = 0;
@@ -1135,6 +1217,21 @@ function computeLayerOutcomes({
       moderate += a.newBySeverity?.moderate ?? 0;
       minor += a.newBySeverity?.minor ?? 0;
     }
+    const sevTitle = touched
+      ? `crit ${critical} · serious ${serious} · mod ${moderate} · minor ${minor}`
+      : undefined;
+
+    if (typeof a11yScore === "number") {
+      const g = publicShareGrade(a11yScore);
+      return {
+        key: "a11y",
+        label: "A11y",
+        value: g.showScore ? g.display : "Review",
+        tone: g.tone,
+        title: sevTitle ?? `WCAG 2.2 score ${a11yScore}`,
+      };
+    }
+
     if (!touched)
       return { key: "a11y", label: "A11y", value: "—", tone: "muted" };
     const total = critical + serious + moderate + minor;
@@ -1145,7 +1242,7 @@ function computeLayerOutcomes({
       label: "A11y",
       value: `${total} new`,
       tone: critical + serious > 0 ? "danger" : "warn",
-      title: `crit ${critical} · serious ${serious} · mod ${moderate} · minor ${minor}`,
+      title: sevTitle,
     };
   })();
 
@@ -1285,6 +1382,12 @@ function LayerOutcomesGrid({
   diffs,
   stepComparisons,
   signInLink,
+  demo = false,
+  a11yScore = null,
+  a11yHasEvidence = false,
+  a11yCalibrated = false,
+  perfScore = null,
+  valueStoryLink,
 }: {
   variant: "build" | "test";
   testResult: ShareTestResult | null;
@@ -1292,6 +1395,15 @@ function LayerOutcomesGrid({
   diffs: ShareVisualDiff[];
   stepComparisons: ShareStepComparison[];
   signInLink?: string;
+  // Demo shares render a curated, all-defensible chip set: inter-run layers
+  // (Visual/Network/URL/DOM/Text/Variables) are run-to-run noise by construction
+  // and are omitted (spec §2), replaced by a muted "+ more layers" chip.
+  demo?: boolean;
+  a11yScore?: number | null;
+  a11yHasEvidence?: boolean;
+  a11yCalibrated?: boolean;
+  perfScore?: number | null;
+  valueStoryLink?: string;
 }) {
   const outcomes = computeLayerOutcomes({
     variant,
@@ -1299,27 +1411,64 @@ function LayerOutcomesGrid({
     results,
     diffs,
     stepComparisons,
+    a11yScore,
   });
+
+  // On demo shares, only surface chips a founder could independently verify:
+  // Run (pass/fail), Console (named fingerprints), and absolute grades (Fast,
+  // and Accessible once calibrated). Everything else is inter-run diff noise.
+  let chips: LayerOutcome[] = outcomes;
+  let moreChip: LayerOutcome | null = null;
+  if (demo) {
+    const byKey = new Map(outcomes.map((o) => [o.key, o]));
+    chips = [];
+    const run = byKey.get("run");
+    if (run) chips.push(run);
+    const con = byKey.get("console");
+    if (con) chips.push(con);
+    if (perfScore != null) {
+      const g = publicShareGrade(perfScore);
+      chips.push({
+        key: "perf",
+        label: "Fast",
+        value: g.showScore ? g.display : "Review",
+        tone: g.tone,
+        title: `Web Vitals score ${perfScore}`,
+      });
+    }
+    // Accessible: evidence-gated (§3.2) AND grade only once calibrated (§3.5);
+    // pre-calibration the WCAG panel below carries the a11y story instead.
+    if (a11yScore != null && a11yHasEvidence && a11yCalibrated) {
+      const g = publicShareGrade(a11yScore);
+      chips.push({
+        key: "a11y",
+        label: "Accessible",
+        value: g.showScore ? g.display : "Review",
+        tone: g.tone,
+        title: `WCAG 2.2 score ${a11yScore}`,
+      });
+    }
+    moreChip = {
+      key: "more",
+      label: "+ more",
+      value: "5 layers",
+      tone: "muted",
+      title:
+        "Visual, DOM, Text, Network, URL and Variables run on every deploy when you claim this test",
+    };
+  }
+
   return (
     <section className="space-y-2">
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Checks run
-        </h2>
-        {signInLink && (
-          <a
-            href={signInLink}
-            className="text-[11px] text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
-          >
-            Log in for details
-          </a>
-        )}
-      </div>
-      {/* Chips are informational, not links. Routing a cold visitor who clicks
-          "A11y: C" into a login form converts worse than telling them what the
-          number means — the single header link above is the auth entry point. */}
+      <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        Checks run
+      </h2>
+      {/* Metric chips are informational, not links. Routing a cold visitor who
+          clicks "A11y: C" into a login form converts worse than telling them
+          what the number means — the dedicated log-in card at the end of the
+          grid is the auth entry point. */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-        {outcomes.map((o) => {
+        {chips.map((o) => {
           const t = layerToneClasses(o.tone);
           const tip =
             o.title ??
@@ -1343,6 +1492,49 @@ function LayerOutcomesGrid({
             </div>
           );
         })}
+        {/* Muted trailing chip: the layers we suppress on a demo still run on
+            every deploy once claimed — link the value story rather than show dashes. */}
+        {moreChip &&
+          (valueStoryLink ? (
+            <a
+              href={valueStoryLink}
+              title={moreChip.title}
+              className="block rounded-md px-3 py-2 text-center border bg-white dark:bg-card hover:bg-muted"
+            >
+              <div className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground">
+                {moreChip.label}
+              </div>
+              <div className="text-sm font-semibold tabular-nums truncate text-muted-foreground">
+                {moreChip.value}
+              </div>
+            </a>
+          ) : (
+            <div
+              title={moreChip.title}
+              className="block rounded-md px-3 py-2 text-center border bg-white dark:bg-card"
+            >
+              <div className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground">
+                {moreChip.label}
+              </div>
+              <div className="text-sm font-semibold tabular-nums truncate text-muted-foreground">
+                {moreChip.value}
+              </div>
+            </div>
+          ))}
+        {/* Auth entry point as a grid card (was a small header text link). */}
+        {signInLink && (
+          <a
+            href={signInLink}
+            className="block rounded-md px-3 py-2 text-center border border-dashed bg-white dark:bg-card hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <div className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground">
+              Full report
+            </div>
+            <div className="text-sm font-semibold truncate text-foreground">
+              Log in →
+            </div>
+          </a>
+        )}
       </div>
     </section>
   );
@@ -1619,22 +1811,12 @@ function StatCard({
   );
 }
 
-// Map a 0–100 quality score to a presentable letter grade + tone. Bands mirror
-// the internal compliance cards (90+ green, 70+ amber, else red).
-function scoreGrade(score: number): {
-  grade: string;
-  tone: "ok" | "warn" | "danger";
-} {
-  if (score >= 90) return { grade: "A", tone: "ok" };
-  if (score >= 80) return { grade: "B", tone: "ok" };
-  if (score >= 70) return { grade: "C", tone: "warn" };
-  if (score >= 60) return { grade: "D", tone: "warn" };
-  return { grade: "F", tone: "danger" };
-}
-
 // Presentable quality tile: a letter grade headline (color-toned by band) with
 // the raw score + standard label as sublabel. Renders a neutral "—" when the
 // layer didn't report a score. Reuses StatCard so it inherits share styling.
+// The public grade floor (spec §3.3) applies here: a would-be D/F collapses to
+// an amber "Review" tile with the number hidden — a founder's own product never
+// carries a bare failing grade on their public timeline.
 function GradeCard({
   score,
   label,
@@ -1645,13 +1827,13 @@ function GradeCard({
   sub: string;
 }) {
   if (score == null) return <StatCard value="—" label={label} tone="neutral" />;
-  const { grade, tone } = scoreGrade(score);
+  const g = publicShareGrade(score);
   return (
     <StatCard
-      value={grade}
+      value={g.showScore ? g.display : "Review"}
       label={label}
-      sublabel={`${sub} · ${score}`}
-      tone={tone}
+      sublabel={g.showScore ? `${sub} · ${score}` : sub}
+      tone={g.tone}
     />
   );
 }
@@ -1763,6 +1945,9 @@ function TestShareBody({
   demoNotes,
   claimLink,
   signInLink,
+  isDemo,
+  a11ySummary,
+  a11yGradeMode,
 }: {
   diffs: ShareVisualDiff[];
   results: ShareTestResult[];
@@ -1777,11 +1962,17 @@ function TestShareBody({
   demoNotes: DemoNotes | null;
   claimLink: string;
   signInLink: string;
+  isDemo: boolean;
+  a11ySummary: ShareA11ySummary;
+  a11yGradeMode: "hidden" | "floored";
 }) {
   const steps = collectSteps(testResult, results, toUrl);
   const stepPaths = new Set<string>(collectStepPaths(testResult, results));
 
   const durationMs = testResult?.durationMs ?? null;
+
+  const a11yHasEvidence = a11ySummary.ruleCount > 0;
+  const a11yCalibrated = a11yGradeMode === "floored";
 
   const sliderDiffs = buildSliderDiffs(diffs, toUrl);
   // DOM-change overlays (Verify > DOM tab, ported): annotated screenshots for
@@ -1812,10 +2003,138 @@ function TestShareBody({
 
   const pullQuote =
     pixelsChanged > 0
-      ? `${pixelsChanged.toLocaleString()} pixels changed — review before ship.`
+      ? `${pixelsChanged.toLocaleString()} pixels changed. Review before ship.`
       : durationMs
         ? `Recorded once. Ran in ${durationMs.toLocaleString()} ms. Zero regressions.`
         : "Recorded once. Runs on every build. Zero regressions.";
+
+  // -- Demo share: showcase-first, noise-suppressed (spec §2 / §4.5 / §5) -------
+  // The pairing rerun on a demo diffs run-to-run noise, so we DON'T render its
+  // diffs as findings. Instead: a showcase strip (DOM X-ray + WCAG panel + the
+  // single largest diff as a "how we compare runs" demo), a curated checks grid,
+  // and honest tiles (no "Diff px"). All captured screenshots still render below.
+  if (isDemo) {
+    const xray = buildXrayShowcase(testResult, results, toUrl, domOverlays);
+    const largestDiff = sliderDiffs.length
+      ? [...sliderDiffs].sort(
+          (a, b) => b.pixelDifference - a.pixelDifference,
+        )[0]
+      : null;
+    const gallery = buildGallery(diffs, results, toUrl, new Set<string>());
+    const showWcag = a11ySummary.ruleCount > 0;
+    const showStrip = !!xray || showWcag || !!largestDiff;
+    const demoTileCount =
+      1 +
+      (build.designSystemScore != null ? 1 : 0) +
+      (perfScore != null ? 1 : 0);
+
+    return (
+      <>
+        <PostVideoCTA
+          claimLink={claimLink}
+          signInLink={signInLink}
+          domain={domain}
+          testCode={testCode}
+        />
+
+        {showStrip && (
+          <section className="space-y-4">
+            <h2 className="text-sm font-medium text-muted-foreground">
+              What we see when we test {domain}
+            </h2>
+            {(xray || largestDiff) && (
+              <div className="grid gap-4 md:grid-cols-2 md:items-start">
+                {xray && (
+                  <div className="space-y-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      DOM X-ray
+                    </h3>
+                    <DomOverlay
+                      variant="xray"
+                      screenshotSrc={xray.src}
+                      elements={xray.elements}
+                      stepLabel={null}
+                    />
+                  </div>
+                )}
+                {largestDiff && (
+                  <div className="space-y-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      How Lastest compares runs
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Between two identical runs we flag every moved pixel. On
+                      your deploys, this is how real regressions get caught.
+                    </p>
+                    <DiffSlider
+                      baseline={largestDiff.baseline}
+                      current={largestDiff.current}
+                      diff={largestDiff.diff}
+                      stepLabel={largestDiff.stepLabel}
+                      pixelDifference={largestDiff.pixelDifference}
+                      stepNumber={largestDiff.stepNumber}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+            {/* Full-width so the rule-card carousel gets the whole page column. */}
+            {showWcag && (
+              <ShareWcagPanel
+                summary={a11ySummary}
+                score={build.a11yScore ?? null}
+                totalRulesChecked={build.a11yTotalRulesChecked ?? null}
+                violationCount={build.a11yViolationCount ?? null}
+                claimLink={claimLink}
+                gradeMode={a11yGradeMode}
+              />
+            )}
+          </section>
+        )}
+
+        <LayerOutcomesGrid
+          variant="test"
+          testResult={testResult}
+          results={results}
+          diffs={diffs}
+          stepComparisons={stepComparisons}
+          signInLink={signInLink}
+          demo
+          a11yScore={build.a11yScore}
+          a11yHasEvidence={a11yHasEvidence}
+          a11yCalibrated={a11yCalibrated}
+          perfScore={perfScore}
+          valueStoryLink={claimLink}
+        />
+
+        <div className={`grid gap-3 ${gridColsClass(demoTileCount)}`}>
+          <StatCard
+            value={
+              durationMs != null
+                ? (formatDuration(durationMs) ?? `${durationMs}`)
+                : "—"
+            }
+            label="Duration"
+            tone="neutral"
+          />
+          {build.designSystemScore != null && (
+            <GradeCard
+              score={build.designSystemScore}
+              label="Design"
+              sub="Design system"
+            />
+          )}
+          {perfScore != null && (
+            <GradeCard score={perfScore} label="Fast" sub="Web Vitals" />
+          )}
+        </div>
+
+        {hasDemoContent(demoNotes) && <DemoNotesPanel notes={demoNotes} />}
+
+        {gallery.length > 0 && <GallerySection items={gallery} />}
+      </>
+    );
+  }
 
   return (
     <>
@@ -1835,6 +2154,7 @@ function TestShareBody({
         diffs={diffs}
         stepComparisons={stepComparisons}
         signInLink={signInLink}
+        a11yScore={build.a11yScore}
       />
 
       {/* The captured-steps strip now lives at page level as the "In this video"
@@ -2108,6 +2428,40 @@ function buildDomOverlays(
   return out;
 }
 
+// Curate the DOM X-ray showcase for a demo share: pick the captured step whose
+// stored DOM snapshot yields the richest element inventory, and annotate that
+// step's screenshot. Falls back to re-framing an inter-run DOM diff's elements
+// so the x-ray is never empty (spec §4.1). Returns null only when there's no
+// resolvable screenshot with any usable elements at all.
+function buildXrayShowcase(
+  primary: ShareTestResult | null,
+  all: ShareTestResult[],
+  toUrl: (p: string | null | undefined) => string | null,
+  domOverlays: DomOverlayItem[],
+): { src: string; elements: XrayElement[] } | null {
+  const source = primary ?? all[0] ?? null;
+  let best: { src: string; elements: XrayElement[] } | null = null;
+  for (const s of source?.screenshots ?? []) {
+    if (!s.path) continue;
+    const elements = buildXrayElements(
+      (s.domSnapshot?.elements ?? null) as DomSnapshotElement[] | null,
+    );
+    if (elements.length === 0) continue;
+    const url = toUrl(s.path);
+    if (!url) continue;
+    if (!best || elements.length > best.elements.length)
+      best = { src: url, elements };
+  }
+  if (best) return best;
+  // Fallback: reuse an inter-run DOM diff overlay's elements re-framed.
+  const overlay = domOverlays[0];
+  if (overlay) {
+    const elements = buildXrayFromDomDiff(overlay.dom);
+    if (elements.length > 0) return { src: overlay.src, elements };
+  }
+  return null;
+}
+
 function PullQuote({ text }: { text: string }) {
   return (
     <section className="rounded-xl border bg-muted/40 px-6 py-5 text-center">
@@ -2168,8 +2522,9 @@ function buildSliderDiffs(
     .map((d): SliderDiff | null => {
       // A row with zero pixel difference isn't a visual change — auto-approved
       // / unchanged steps still produce visual_diffs rows, but the "Visual
-      // changes" section should only surface actual pixel diffs.
-      if ((d.pixelDifference ?? 0) <= 0) return null;
+      // changes" section should only surface actual pixel diffs. Shares the
+      // predicate with the OG card's change count so the two never disagree (§1).
+      if (!hasRenderableVisualChange(d)) return null;
       const baseline = toUrl(d.baselineImagePath);
       const current = toUrl(d.currentImagePath);
       if (!baseline || !current) return null;
@@ -2406,17 +2761,15 @@ const CODE_TEASER_LINES = 12;
 
 type CodeTeaser = { lines: string[]; hiddenCount: number };
 
-// First lines of the real Playwright test, safe to render publicly. Typed-in
-// payloads (.fill/.type second string argument) are redacted so credentials or
-// emails recorded during authoring never appear on a public page. The tail of
-// the file stays behind the signup gate — the teaser's job is to prove the
-// test is real code the visitor can walk away with.
+// First lines of the real Playwright test, safe to render publicly. Embedded
+// secrets — baked session/storage-state blobs, JWTs, OAuth tokens, and typed-in
+// .fill/.type payloads — are masked by redactCodeSecrets so credentials or PII
+// recorded during authoring never appear on a public page. The tail of the file
+// stays behind the signup gate — the teaser's job is to prove the test is real
+// code the visitor can walk away with.
 function buildCodeTeaser(code: string | null | undefined): CodeTeaser | null {
   if (!code) return null;
-  const redacted = code.replace(
-    /(\.(?:fill|type)\(\s*(['"`])(?:\\.|(?!\2).)*\2\s*,\s*)(['"`])(?:\\.|(?!\3).)*\3/g,
-    "$1$3•••$3",
-  );
+  const redacted = redactCodeSecrets(code);
   const all = redacted.replace(/\r\n/g, "\n").split("\n");
   while (all.length > 0 && all[all.length - 1].trim() === "") all.pop();
   if (all.length === 0) return null;

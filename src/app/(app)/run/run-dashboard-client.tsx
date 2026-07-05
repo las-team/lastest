@@ -29,6 +29,7 @@ import {
   ChevronRight,
   List,
   AlertTriangle,
+  Lock,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
@@ -100,6 +101,8 @@ interface RunDashboardClientProps {
   branches?: string[];
   branchBaseUrls?: Record<string, string> | null;
   verifyPhaseEnabled?: boolean;
+  /** Team is over its run-minute quota with enforcement on — runs are blocked. */
+  runsPaused?: boolean;
 }
 
 const HISTORY_KEY = "baseurl-history";
@@ -152,6 +155,7 @@ export function RunDashboardClient({
   branches = [],
   branchBaseUrls,
   verifyPhaseEnabled = false,
+  runsPaused = false,
 }: RunDashboardClientProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
@@ -394,21 +398,30 @@ export function RunDashboardClient({
                 <div className="flex items-center gap-2">
                   <Button
                     onClick={handleRunAll}
-                    disabled={isRunning || tests.length === 0}
+                    disabled={isRunning || tests.length === 0 || runsPaused}
                     size="lg"
+                    title={
+                      runsPaused
+                        ? "Run-minute quota reached — new runs are paused until the next billing cycle or an upgrade"
+                        : undefined
+                    }
                   >
-                    {isRunning ? (
+                    {runsPaused ? (
+                      <Lock className="h-4 w-4 mr-2" />
+                    ) : isRunning ? (
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                     ) : comparisonEnabled ? (
                       <GitCompare className="h-4 w-4 mr-2" />
                     ) : (
                       <Play className="h-4 w-4 mr-2" />
                     )}
-                    {comparisonEnabled
-                      ? "Run Comparison"
-                      : hasComposeConfig
-                        ? `Run ${composedTestCount} Tests`
-                        : "Run All Tests"}
+                    {runsPaused
+                      ? "Runs paused"
+                      : comparisonEnabled
+                        ? "Run Comparison"
+                        : hasComposeConfig
+                          ? `Run ${composedTestCount} Tests`
+                          : "Run All Tests"}
                   </Button>
                 </div>
               </div>

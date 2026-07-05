@@ -7,12 +7,17 @@ import {
   getReviewTodosByBranch,
   getLastBuildByBranch,
   getVisualDiffsWithTestStatus,
+  getTeamRunUsage,
 } from "@/lib/db/queries";
 import { getBuildsByRepo } from "@/server/actions/builds";
 import { getEnvironmentConfig } from "@/server/actions/environment";
 import { fetchRepoBranches } from "@/server/actions/repos";
 import { getCurrentSession } from "@/lib/auth";
 import { isVerifyPhaseEnabled } from "@/lib/verify/feature-flag";
+import {
+  computeRunUsageProjection,
+  deriveRunUsageBannerState,
+} from "@/lib/billing/run-usage";
 
 export default async function RunPage() {
   const session = await getCurrentSession();
@@ -55,6 +60,23 @@ export default async function RunPage() {
   const initialDiffs = latestBuildId
     ? await getVisualDiffsWithTestStatus(latestBuildId)
     : [];
+
+  // Run-minute enforcement: when the team is over quota and enforcement is on,
+  // new runs are blocked server-side (runs.ts) — reflect that in the toolbar so
+  // "Run all" is visibly locked rather than throwing on click.
+  const runUsage = teamId ? await getTeamRunUsage(teamId) : null;
+  const runsPaused =
+    !!runUsage &&
+    process.env.ENFORCE_RUN_LIMITS === "true" &&
+    deriveRunUsageBannerState({
+      used: runUsage.runMinutesThisMonth,
+      quota: runUsage.monthlyRunQuota,
+      projected: computeRunUsageProjection(
+        runUsage.runMinutesThisMonth,
+        runUsage.monthlyRunQuota,
+      ).projected,
+      enforcementEnabled: true,
+    }) === "paused";
 
   // Map branch name → latest commit SHA for graph "ahead" indicators
   const branchHeads: Record<string, string> = {};
@@ -105,6 +127,7 @@ export default async function RunPage() {
         branches={repoBranches.map((b) => b.name)}
         branchBaseUrls={selectedRepo?.branchBaseUrls ?? null}
         verifyPhaseEnabled={verifyPhaseEnabled}
+        runsPaused={runsPaused}
       />
     </div>
   );

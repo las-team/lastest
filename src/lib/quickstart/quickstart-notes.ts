@@ -23,6 +23,10 @@ export interface QuickstartRunFacts {
   testNames: string[];
   consoleErrors: string[];
   failedSteps: Array<{ test: string; step: string; error: string }>;
+  /** Top axe rule violations, pre-formatted "rule-id (offending nodes)" e.g.
+   *  "color-contrast (8)". Lets the notes cite the SAME evidence the share's
+   *  WCAG panel shows, so findings in prose and UI tell one story (spec §3.6). */
+  a11yTopRules?: string[];
 }
 
 export interface GenerateDemoNotesInput {
@@ -169,6 +173,10 @@ function buildFactsBlock(input: GenerateDemoNotesInput): string {
     },
     consoleErrors: input.runFacts.consoleErrors.slice(0, 5),
     failedSteps: input.runFacts.failedSteps.slice(0, 5),
+    // Top accessibility rule violations (rule-id + occurrence count). Only cite
+    // these if a frictionPoint genuinely traces to them — never manufacture an
+    // a11y complaint the founder didn't ask about.
+    accessibilityTopRules: input.runFacts.a11yTopRules?.slice(0, 3) ?? [],
   };
   return JSON.stringify(facts, null, 2);
 }
