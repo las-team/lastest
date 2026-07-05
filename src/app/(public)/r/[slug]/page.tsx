@@ -25,6 +25,7 @@ import type {
   WebVitalsSample,
 } from "@/lib/db/schema";
 import { isValidShareSlug, buildShareUrl } from "@/lib/share/slug";
+import { redactCodeSecrets } from "@/lib/security/redact-code";
 import { resolveTestVideoUrl } from "@/lib/share/video-fallback";
 import {
   deriveShareFacts,
@@ -2760,17 +2761,15 @@ const CODE_TEASER_LINES = 12;
 
 type CodeTeaser = { lines: string[]; hiddenCount: number };
 
-// First lines of the real Playwright test, safe to render publicly. Typed-in
-// payloads (.fill/.type second string argument) are redacted so credentials or
-// emails recorded during authoring never appear on a public page. The tail of
-// the file stays behind the signup gate — the teaser's job is to prove the
-// test is real code the visitor can walk away with.
+// First lines of the real Playwright test, safe to render publicly. Embedded
+// secrets — baked session/storage-state blobs, JWTs, OAuth tokens, and typed-in
+// .fill/.type payloads — are masked by redactCodeSecrets so credentials or PII
+// recorded during authoring never appear on a public page. The tail of the file
+// stays behind the signup gate — the teaser's job is to prove the test is real
+// code the visitor can walk away with.
 function buildCodeTeaser(code: string | null | undefined): CodeTeaser | null {
   if (!code) return null;
-  const redacted = code.replace(
-    /(\.(?:fill|type)\(\s*(['"`])(?:\\.|(?!\2).)*\2\s*,\s*)(['"`])(?:\\.|(?!\3).)*\3/g,
-    "$1$3•••$3",
-  );
+  const redacted = redactCodeSecrets(code);
   const all = redacted.replace(/\r\n/g, "\n").split("\n");
   while (all.length > 0 && all[all.length - 1].trim() === "") all.pop();
   if (all.length === 0) return null;
