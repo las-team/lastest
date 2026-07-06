@@ -214,6 +214,7 @@ export async function saveNotificationSettings(data: {
   customWebhookMethod?: string;
   customWebhookHeaders?: string | null;
   issueTrackerProvider?: "github" | "gitlab";
+  issueAssignee?: string | null;
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();
