@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   GitCommit,
   Wrench,
+  Bot,
 } from "lucide-react";
 import Image from "next/image";
 import {
@@ -75,6 +76,7 @@ const definitionNav = [
 
 const executionNav = [
   { name: "Runs", href: "/run", icon: Play },
+  { name: "QA Agent", href: "/qa-agent", icon: Bot },
   { name: "Compare", href: "/compare", icon: GitCompare },
   { name: "URL Diff", href: "/url-diff", icon: SplitSquareHorizontal },
   { name: "Impact", href: "/analytics/impact", icon: TrendingDown },

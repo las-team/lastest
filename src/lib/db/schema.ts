@@ -1803,6 +1803,7 @@ export type AIActionType =
   | "agent_generate"
   | "agent_heal"
   | "agent_play"
+  | "qa_plan"
   | "triage"
   | "generate_var_value"
   | "suggest_app_fix";
@@ -2576,7 +2577,7 @@ export type AgentSessionStatus =
   | "failed"
   | "cancelled";
 
-export type AgentSessionKind = "play" | "quickstart" | "ranger";
+export type AgentSessionKind = "play" | "quickstart" | "ranger" | "qa";
 
 export type AgentStepId =
   | "settings_check"
@@ -2603,7 +2604,16 @@ export type AgentStepId =
   | "qs_publish_share"
   // Ranger (EB-backed live page scout, MCP-driven)
   | "ranger_provision"
-  | "ranger_browse";
+  | "ranger_browse"
+  // QA Agent (dedicated comprehensive-suite builder, /qa-agent page)
+  | "qa_setup"
+  | "qa_discover"
+  | "qa_plan"
+  | "qa_plan_review"
+  | "qa_generate"
+  | "qa_execute"
+  | "qa_heal"
+  | "qa_summary";
 
 export type AgentStepStatus =
   | "pending"
@@ -2801,6 +2811,145 @@ export interface QuickstartAuthSetupMeta {
   mode?: "login" | "signup";
 }
 
+// ── QA Agent (comprehensive suite builder) ──────────────────────────────────
+
+/** Coverage groups the QA agent plans and generates tests for. Mirrors the
+ *  industry-standard suite tiers (smoke/regression) and coverage angles
+ *  (a11y/perf/resilience/negative); `journey` is the business-outcome E2E
+ *  tier (e.g. "an order is actually placed") and is always planned. */
+export type QaTestGroup =
+  | "smoke"
+  | "api"
+  | "ui"
+  | "hybrid"
+  | "a11y"
+  | "perf"
+  | "resilience"
+  | "negative"
+  | "journey";
+
+export type QaPriority = "P1" | "P2" | "P3";
+
+/** A critical user journey with a verifiable business outcome. */
+export interface QaPlanJourney {
+  id: string;
+  title: string;
+  priority: QaPriority;
+  /** Ordered user-visible steps of the journey. */
+  steps: string[];
+  /** The business outcome this journey must produce (e.g. "order placed"). */
+  businessOutcome: string;
+  /** How the outcome is proven beyond UI toasts (end-state via API/data/UI). */
+  endStateVerification: string;
+}
+
+/** One planned test case. `scenario` is generator-ready prose (steps +
+ *  expected results); `api` is set for api-group items and drives a headless
+ *  ApiTestDefinition instead of a browser test. */
+export interface QaPlanItem {
+  id: string;
+  group: QaTestGroup;
+  title: string;
+  priority: QaPriority;
+  /** Traceability link to the journey this test covers, when applicable. */
+  journeyId?: string;
+  /** Route/page under test, relative to the target base URL. */
+  pagePath?: string;
+  rationale?: string;
+  scenario: string;
+  /** Verified selectors from discovery the generator should prefer. */
+  selectorHints?: string[];
+  api?: {
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+    path: string;
+    expectedStatus?: number;
+    body?: unknown;
+    description?: string;
+  };
+  /** User can exclude items during plan review. Absent = enabled. */
+  enabled?: boolean;
+}
+
+export interface QaTestPlan {
+  appProfile: {
+    summary: string;
+    businessDomain?: string;
+    /** The single most valuable business outcome of the app. */
+    primaryOutcome?: string;
+  };
+  journeys: QaPlanJourney[];
+  items: QaPlanItem[];
+  entryCriteria?: string[];
+  exitCriteria?: string[];
+  risks?: string[];
+}
+
+/** One live-crawled page: rendered-DOM facts + same-origin API endpoints
+ *  observed while the page loaded. Fed (condensed) to the planner. */
+export interface QaPageSnapshot {
+  url: string;
+  finalUrl: string;
+  title: string | null;
+  headings: Array<{ level: number; text: string }>;
+  forms: Array<{
+    name: string | null;
+    action: string | null;
+    method: string;
+    inputs: Array<{
+      tag: string;
+      type: string | null;
+      name: string | null;
+      id: string | null;
+      label: string | null;
+    }>;
+  }>;
+  buttons: string[];
+  links: Array<{ text: string; href: string }>;
+  testIds: string[];
+  candidateSelectors: string[];
+  apiEndpoints: Array<{ method: string; path: string; status: number }>;
+}
+
+export interface QaDiscovery {
+  targetUrl: string;
+  crawledPages: QaPageSnapshot[];
+  /** Routes from the static GitHub-tree scan (repo-aware mode only). */
+  staticRoutes?: Array<{ path: string; type: string }>;
+  framework?: string;
+  githubConnected: boolean;
+}
+
+export type QaGeneratedTestStatus =
+  | "generating"
+  | "generated"
+  | "generation_failed"
+  | "passed"
+  | "failed"
+  | "healed";
+
+export interface QaGeneratedTest {
+  planItemId: string;
+  group: QaTestGroup;
+  /** Absent when generation failed before a test row was created. */
+  testId?: string;
+  name: string;
+  status: QaGeneratedTestStatus;
+  error?: string;
+}
+
+export interface QaSummaryData {
+  planned: number;
+  generated: number;
+  passed: number;
+  failed: number;
+  healed: number;
+  byGroup: Partial<
+    Record<QaTestGroup, { planned: number; generated: number; passed: number }>
+  >;
+  /** journeyId → testIds covering it (traceability matrix). */
+  journeyCoverage: Record<string, string[]>;
+}
+
 export interface AgentSessionMetadata {
   buildIds?: string[];
   fixAttempts?: Record<string, number>;
@@ -2856,6 +3005,27 @@ export interface AgentSessionMetadata {
   rangerUrl?: string;
   /** Deterministic rendered page map produced by the ranger EB browse. */
   rangerPageMap?: Record<string, unknown>;
+  // QA Agent fields (kind = "qa"). Credentials for the target app reuse
+  // quickstartEmail/quickstartPassword above so they get the same AES-256-GCM
+  // encryption-at-rest treatment from the agent-session query layer.
+  /** Target app base URL under test. */
+  qaTargetUrl?: string;
+  /** Coverage groups selected for this run ("journey" is always included). */
+  qaGroups?: QaTestGroup[];
+  /** Skip the human plan-review gate and generate immediately. */
+  qaAutoApprove?: boolean;
+  /** Live + static discovery output feeding the planner. */
+  qaDiscovery?: QaDiscovery;
+  /** The structured test plan produced by the planner subagent. */
+  qaPlan?: QaTestPlan;
+  /** User feedback captured on "request changes" — fed to the planner rerun. */
+  qaPlannerFeedback?: string;
+  /** Per-plan-item generation/execution status ledger. */
+  qaGeneratedTests?: QaGeneratedTest[];
+  /** Test-run ids started by the execute/heal phases. */
+  qaRunIds?: string[];
+  /** Final coverage/traceability summary. */
+  qaSummary?: QaSummaryData;
   [key: string]: unknown;
 }
 
@@ -3350,7 +3520,8 @@ export type ActivitySourceType =
   | "play_agent"
   | "mcp_server"
   | "generate_agent"
-  | "heal_agent";
+  | "heal_agent"
+  | "qa_agent";
 
 export type ActivityArtifactType =
   | "test"
