@@ -37,8 +37,6 @@ import {
   createIssueForCase,
   fetchLinkedIssueForCase,
 } from "@/server/actions/verify-issues";
-import { GITHUB_NOT_CONNECTED } from "@/lib/verify/github-connection";
-import { ConnectGithubInline } from "@/components/verify/connect-github-inline";
 import {
   addFocusRegion,
   removeFocusRegion,
@@ -6391,7 +6389,6 @@ function ComposeIssueCard({
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [errorCode, setErrorCode] = useState<string | null>(null);
 
   const toggleLayer = (layer: EvidenceLayer) => {
     setIncludeLayers((prev) => {
@@ -6406,7 +6403,6 @@ function ComposeIssueCard({
     if (submitting) return;
     setSubmitting(true);
     setError(null);
-    setErrorCode(null);
     // Compose nothing client-side. The server pulls full step + layers
     // (network/console/dom/a11y/url/perf) plus build context and renders the
     // rich body; we just tell it which evidence sections the reviewer ticked
@@ -6419,7 +6415,6 @@ function ComposeIssueCard({
     setSubmitting(false);
     if (!res.ok) {
       setError(res.error ?? "Failed to create issue");
-      setErrorCode(res.code ?? null);
       return;
     }
     onAfterCreate?.();
@@ -6532,21 +6527,12 @@ function ComposeIssueCard({
       )}
 
       {error && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            alignSelf: "flex-start",
-          }}
+        <span
+          className="v-chip regression"
+          style={{ fontSize: 9, alignSelf: "flex-start" }}
         >
-          <span className="v-chip regression" style={{ fontSize: 9 }}>
-            {error}
-          </span>
-          {errorCode === GITHUB_NOT_CONNECTED && (
-            <ConnectGithubInline className="v-btn" />
-          )}
-        </div>
+          {error}
+        </span>
       )}
 
       <button

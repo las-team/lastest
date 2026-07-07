@@ -36,6 +36,7 @@ export async function GET(
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
+    const streamAuthToken = process.env.STREAM_AUTH_TOKEN || null;
     // Suppress the streamUrl once the session has been released or is shutting
     // down — even if the DB row still has the old URL (e.g. EB crashed before
     // releasePoolEB could clear it), handing it back would lead the client to
@@ -58,11 +59,10 @@ export async function GET(
       runnerId: session.runnerId,
       status: session.status,
       streamUrl:
-        isLive && probedAlive
-          ? toProxyStreamUrl(session.streamUrl, session.id, session.instanceId)
-          : null,
+        isLive && probedAlive ? toProxyStreamUrl(session.streamUrl) : null,
       viewport: session.viewport,
       currentUrl: session.currentUrl,
+      streamAuthToken,
     });
   } catch {
     return NextResponse.json(

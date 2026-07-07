@@ -43,6 +43,8 @@ export async function GET() {
       return true;
     });
 
+    const streamAuthToken = process.env.STREAM_AUTH_TOKEN || null;
+
     // TCP-probe every live streamUrl in parallel. Catches the race where the
     // DB still shows a session as ready/busy but the backing pod was reaped
     // (1-job-1-EB) or crashed before status was flipped to stopping — handing
@@ -70,9 +72,7 @@ export async function GET() {
           runnerId: s.runnerId,
           status: s.status,
           streamUrl:
-            isLive && probedAlive
-              ? toProxyStreamUrl(s.streamUrl, s.id, s.instanceId)
-              : null,
+            isLive && probedAlive ? toProxyStreamUrl(s.streamUrl) : null,
           viewport: s.viewport,
           currentUrl: s.currentUrl,
           userId: s.userId,
@@ -80,6 +80,7 @@ export async function GET() {
           lastActivityAt: s.lastActivityAt,
         };
       }),
+      streamAuthToken,
     });
   } catch {
     return NextResponse.json(

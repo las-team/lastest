@@ -288,13 +288,6 @@ export const SYSTEM_FONTS_CSS = `
 `;
 
 /**
- * True when this process runs inside a Kubernetes pod. The kubelet always
- * injects KUBERNETES_SERVICE_HOST for the default `kubernetes` service,
- * independent of `enableServiceLinks`.
- */
-const IN_KUBERNETES = Boolean(process.env.KUBERNETES_SERVICE_HOST);
-
-/**
  * Chromium launch args for cross-OS rendering consistency.
  */
 export const CROSS_OS_CHROMIUM_ARGS = [
@@ -316,23 +309,11 @@ export const CROSS_OS_CHROMIUM_ARGS = [
   "--disable-background-timer-throttling",
   "--disable-renderer-backgrounding",
   "--disable-backgrounding-occluded-windows",
-  // Not a rendering flag — the Chromium sandbox is a privilege boundary and has
-  // no effect on rasterization or compositing. Required because the EB pod runs
-  // under `seccompProfile: RuntimeDefault` (blocks clone(CLONE_NEWUSER), so the
-  // namespace sandbox can't start) with `allowPrivilegeEscalation: false` and
-  // all capabilities dropped (no_new_privs makes the setuid chrome-sandbox
-  // helper inert). Both sandbox paths are closed, so Chromium aborts at startup
-  // without this. Drop it if the pod ever gets a seccomp profile that permits
-  // the userns sandbox.
+  // Sandbox args — harmless on non-Docker hosts, ensures identical compositing
+  // behavior between containerized (embedded) and bare-metal (runner) environments
   "--no-sandbox",
-  // Forces Chromium to back shared memory with files under /tmp instead of
-  // /dev/shm — slower, but required wherever /dev/shm is Docker's 64Mi default,
-  // which crashes Chromium under load. Under Kubernetes the EB pod always
-  // mounts a 512Mi memory emptyDir at /dev/shm (k8s/embedded-browser-job.yaml,
-  // pool-service/src/provisioner.ts, EB_SHM_SIZE), so there the flag is pure
-  // slowdown. Everywhere else — static compose fleets, host process mode — the
-  // /dev/shm size is not guaranteed, so keep it.
-  ...(IN_KUBERNETES ? [] : ["--disable-dev-shm-usage"]),
+  "--disable-setuid-sandbox",
+  "--disable-dev-shm-usage",
 ];
 
 /**

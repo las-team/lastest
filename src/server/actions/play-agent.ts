@@ -22,7 +22,6 @@ import { getEnvironmentConfig } from "./environment";
 import { addDefaultSetupStep } from "./setup-steps";
 import { createHash } from "crypto";
 import { generateWithAI, extractCodeFromResponse } from "@/lib/ai";
-import { checkAiConfigReadiness } from "@/lib/ai/availability";
 import type { AIProviderConfig } from "@/lib/ai/types";
 import { chromium } from "playwright";
 import { executeSetupViaRunner } from "@/lib/execution/executor";
@@ -323,11 +322,7 @@ async function runSettingsCheck(
   if (!ghAccount && !skipGithub) missing.push("GitHub account");
 
   const aiSettings = await getAISettings(repositoryId);
-  // Provider presence alone is not enough: a fresh team on an API-key-only
-  // deployment has a default provider but no credentials — the readiness gate
-  // catches that so the session pauses for configuration instead of dying
-  // mid-run.
-  const hasAI = checkAiConfigReadiness(aiSettings).runnable;
+  const hasAI = aiSettings.provider && aiSettings.provider !== "none";
   if (!hasAI && !skipAI) missing.push("AI provider");
 
   if (missing.length > 0) {
@@ -2154,15 +2149,11 @@ async function runGenerate(
       .filter((t) => t.areaName === area.name)
       .map((t) => t.testId);
     if (areaTestIds.length > 0 && area.planSnapshot) {
-      try {
-        const snapshot = JSON.parse(area.planSnapshot);
-        snapshot.generatedTestIds = areaTestIds;
-        await queries.updateFunctionalArea(area.id, {
-          planSnapshot: JSON.stringify(snapshot),
-        });
-      } catch {
-        // Corrupt snapshot — skip the bookkeeping, the tests still exist.
-      }
+      const snapshot = JSON.parse(area.planSnapshot);
+      snapshot.generatedTestIds = areaTestIds;
+      await queries.updateFunctionalArea(area.id, {
+        planSnapshot: JSON.stringify(snapshot),
+      });
     }
   }
 

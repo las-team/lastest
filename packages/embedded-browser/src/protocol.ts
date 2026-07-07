@@ -1,6 +1,8 @@
 /**
- * Protocol types for the embedded browser package — re-exported from the
- * canonical wire-protocol package shared with the app.
+ * Protocol types for the embedded browser package.
+ * StabilizationPayload is now a type alias for the shared CoreStabilizationSettings.
  */
 
-export type { StabilizationPayload } from "@lastest/eb-protocol";
+import type { CoreStabilizationSettings } from "@lastest/shared";
+
+export type StabilizationPayload = CoreStabilizationSettings;

@@ -16,7 +16,6 @@ import { createOpenRouterProvider } from "./openrouter";
 import { createAnthropicDirectProvider } from "./anthropic-direct";
 import { ClaudeAgentSDKProvider } from "./claude-agent-sdk";
 import { createOllamaProvider } from "./ollama";
-import { agentSdkReadiness } from "./availability";
 import type { AIProvider } from "./types";
 
 export interface ChangeMapProviderConfig {
@@ -82,10 +81,6 @@ function buildUserPrompt(input: ChangeMapAIInput): string {
 
 function createProvider(config: ChangeMapProviderConfig): AIProvider {
   if (config.provider === "claude-agent-sdk") {
-    const readiness = agentSdkReadiness();
-    if (!readiness.runnable) {
-      throw new Error(readiness.reason);
-    }
     const sdkModel = config.model?.replace(/^anthropic\//, "") || undefined;
     return new ClaudeAgentSDKProvider({
       permissionMode: "plan",

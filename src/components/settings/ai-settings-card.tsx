@@ -26,7 +26,6 @@ import {
   testAIConnection,
 } from "@/server/actions/ai-settings";
 import { DEFAULT_AI_SETTINGS } from "@/lib/db/schema";
-import { defaultAiProvider } from "@/lib/ai/availability";
 import type {
   AISettings,
   AIProvider,
@@ -53,13 +52,6 @@ import { toast } from "sonner";
 interface AISettingsCardProps {
   settings: AISettings;
   repositoryId?: string | null;
-  /** False on images with no `claude` binary on PATH (AI_HOST_CLI_DISABLED):
-   *  the claude-cli provider is not offered. */
-  claudeCliAvailable?: boolean;
-  /** False when the deployment ships no credentials the Agent SDK can use:
-   *  the claude-agent-sdk provider is not offered. Server env is not visible
-   *  here, so both flags are resolved server-side and passed in. */
-  agentSdkAvailable?: boolean;
 }
 
 const OPENROUTER_MODELS = [
@@ -84,8 +76,6 @@ const OPENAI_MODELS = [
 export function AISettingsCard({
   settings,
   repositoryId,
-  claudeCliAvailable,
-  agentSdkAvailable,
 }: AISettingsCardProps) {
   const [isPending, startTransition] = useTransition();
   const [isTesting, setIsTesting] = useState(false);
@@ -94,14 +84,8 @@ export function AISettingsCard({
     message: string;
   } | null>(null);
 
-  // Deployment-aware default: images that can't run the Agent SDK must not
-  // offer it as the initial selection.
-  const deploymentDefaultProvider = defaultAiProvider(
-    agentSdkAvailable,
-  ) as AIProvider;
-
   const [provider, setProvider] = useState<AIProvider>(
-    (settings.provider as AIProvider) || deploymentDefaultProvider,
+    (settings.provider as AIProvider) || DEFAULT_AI_SETTINGS.provider,
   );
   const [openrouterApiKey, setOpenrouterApiKey] = useState(
     settings.openrouterApiKey || "",
@@ -167,7 +151,7 @@ export function AISettingsCard({
 
   // Store original values to compare against (prevents save on mount)
   const originalValues = useRef({
-    provider: (settings.provider as AIProvider) || deploymentDefaultProvider,
+    provider: (settings.provider as AIProvider) || DEFAULT_AI_SETTINGS.provider,
     openrouterApiKey: settings.openrouterApiKey || "",
     openrouterModel:
       settings.openrouterModel || DEFAULT_AI_SETTINGS.openrouterModel,
@@ -328,7 +312,7 @@ export function AISettingsCard({
   const handleReset = () => {
     startTransition(async () => {
       await resetAISettings(repositoryId);
-      setProvider(deploymentDefaultProvider);
+      setProvider(DEFAULT_AI_SETTINGS.provider);
       setOpenrouterApiKey("");
       setOpenrouterModel(DEFAULT_AI_SETTINGS.openrouterModel);
       setCustomInstructions("");
@@ -405,28 +389,24 @@ export function AISettingsCard({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {claudeCliAvailable && (
-                <SelectItem value="claude-cli">
-                  <div className="flex items-center gap-2">
-                    <Zap className="h-4 w-4" />
-                    Claude CLI (requires `claude login`)
-                  </div>
-                </SelectItem>
-              )}
+              <SelectItem value="claude-cli">
+                <div className="flex items-center gap-2">
+                  <Zap className="h-4 w-4" />
+                  Claude CLI (requires `claude login`)
+                </div>
+              </SelectItem>
               <SelectItem value="openrouter">
                 <div className="flex items-center gap-2">
                   <Sparkles className="h-4 w-4" />
                   OpenRouter API
                 </div>
               </SelectItem>
-              {agentSdkAvailable && (
-                <SelectItem value="claude-agent-sdk">
-                  <div className="flex items-center gap-2">
-                    <Bot className="h-4 w-4" />
-                    Claude Agent SDK
-                  </div>
-                </SelectItem>
-              )}
+              <SelectItem value="claude-agent-sdk">
+                <div className="flex items-center gap-2">
+                  <Bot className="h-4 w-4" />
+                  Claude Agent SDK
+                </div>
+              </SelectItem>
               <SelectItem value="anthropic">
                 <div className="flex items-center gap-2">
                   <Brain className="h-4 w-4" />

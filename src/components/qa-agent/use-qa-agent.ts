@@ -1,13 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { AgentSession, QaRunMode, QaTestGroup } from "@/lib/db/schema";
+import type { AgentSession, QaTestGroup } from "@/lib/db/schema";
 import {
   startQaAgent,
   approveQaPlan,
   rerunQaPlanner,
-  rerunQaSession,
-  addQaUserJourneys,
   pauseQaAgent,
   resumeQaAgent,
   cancelQaAgent,
@@ -18,14 +16,10 @@ const POLL_INTERVAL = 2000;
 
 export interface StartQaOptions {
   targetUrl: string;
-  mode?: QaRunMode;
   groups: QaTestGroup[];
   email?: string;
   password?: string;
   autoApprove?: boolean;
-  allowRegistration?: boolean;
-  /** Uploaded product docs, base64-encoded (.md/.txt/.pdf/.docx). */
-  docs?: Array<{ name: string; contentBase64: string }>;
 }
 
 /**
@@ -140,33 +134,6 @@ export function useQaAgent(
     [repositoryId, storageKey, startPolling],
   );
 
-  /** Re-run a prior session with its stored configuration (history rows). */
-  const rerun = useCallback(
-    async (sourceSessionId: string) => {
-      setLoading(true);
-      setError(null);
-      try {
-        const result = await rerunQaSession(sourceSessionId);
-        if (storageKey) localStorage.setItem(storageKey, result.sessionId);
-        startPolling(result.sessionId);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to re-run");
-      } finally {
-        setLoading(false);
-      }
-    },
-    [storageKey, startPolling],
-  );
-
-  /** Attach to a session started elsewhere (e.g. the task dispatcher). */
-  const attach = useCallback(
-    (sid: string) => {
-      if (storageKey) localStorage.setItem(storageKey, sid);
-      startPolling(sid);
-    },
-    [storageKey, startPolling],
-  );
-
   const approve = useCallback(
     (disabledItemIds: string[]) =>
       session
@@ -184,32 +151,6 @@ export function useQaAgent(
         ? runAction(() => rerunQaPlanner(session.id, feedback), session.id)
         : Promise.resolve(),
     [session, runAction],
-  );
-
-  // Refine the reviewer's own journeys and merge them into the plan. Unlike the
-  // other actions this returns a {success,error} result instead of throwing, so
-  // surface the error inline; poll on success to pick up the augmented plan.
-  const addJourneys = useCallback(
-    async (journeysText: string): Promise<boolean> => {
-      if (!session) return false;
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await addQaUserJourneys(session.id, journeysText);
-        if (res.success) {
-          startPolling(session.id);
-          return true;
-        }
-        setError(res.error ?? "Could not add those journeys");
-        return false;
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Action failed");
-        return false;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [session, startPolling],
   );
 
   const pause = useCallback(
@@ -254,7 +195,7 @@ export function useQaAgent(
     session?.steps.filter(
       (s) => s.status === "completed" || s.status === "skipped",
     ).length ?? 0;
-  const totalSteps = session?.steps.length ?? 9;
+  const totalSteps = session?.steps.length ?? 8;
   const progress =
     totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0;
 
@@ -267,11 +208,8 @@ export function useQaAgent(
     isTerminal,
     progress,
     start,
-    rerun,
-    attach,
     approve,
     requestChanges,
-    addJourneys,
     pause,
     resume,
     cancel,

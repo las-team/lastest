@@ -20,7 +20,6 @@
 
 import type { Browser, BrowserContext, CDPSession, Page } from "playwright";
 import type { StabilizationPayload } from "./protocol.js";
-import type { LogEntry } from "@lastest/eb-protocol";
 import {
   setupFreezeScripts,
   applyPreScreenshotStabilization,
@@ -112,7 +111,7 @@ export interface EmbeddedTestResult {
   status: "passed" | "failed" | "error" | "timeout" | "cancelled";
   durationMs: number;
   error?: { message: string; stack?: string; screenshot?: string };
-  logs: LogEntry[];
+  logs: Array<{ timestamp: number; level: string; message: string }>;
   screenshots: Array<{
     filename: string;
     data: string;
@@ -225,7 +224,7 @@ export interface EmbeddedSetupResult {
   variables?: Record<string, unknown>;
   durationMs: number;
   error?: string;
-  logs: LogEntry[];
+  logs: Array<{ timestamp: number; level: string; message: string }>;
 }
 
 export interface RunSetupPayload {
@@ -500,7 +499,8 @@ export class EmbeddedTestExecutor {
     this.abortController = abortCtrl;
 
     const startTime = Date.now();
-    const logs: LogEntry[] = [];
+    const logs: Array<{ timestamp: number; level: string; message: string }> =
+      [];
     const screenshots: Array<{
       filename: string;
       data: string;
@@ -528,7 +528,7 @@ export class EmbeddedTestExecutor {
     let allNetworkRequests: EmbeddedNetworkRequest[] = [];
     const testTimeout = Math.max(command.timeout || 120000, 30000);
 
-    const logFn = (level: LogEntry["level"], message: string) => {
+    const logFn = (level: string, message: string) => {
       logs.push({ timestamp: Date.now(), level, message });
       console.log(
         `  [${level.toUpperCase()}] [embedded:${command.testId}] ${message}`,
@@ -731,12 +731,11 @@ export class EmbeddedTestExecutor {
     }
 
     // Self-test bypass: when the EB pod is running Lastest's own e2e suite
-    // against its own host, inject this pod's credential as a Bearer header
-    // so login POSTs skip the per-IP rate limit. Dynamic pool EBs hold a
-    // per-session EB_BOOTSTRAP_TOKEN (accepted by the host's rate-limit
-    // classifier via HMAC verify); static-fleet EBs fall back to the first
-    // comma-separated SYSTEM_EB_TOKEN entry. Strict origin guard prevents
-    // the token leaking into customer apps the EB renders.
+    // against its own host, inject SYSTEM_EB_TOKEN as a Bearer header so
+    // login POSTs skip the per-IP rate limit. Strict origin guard prevents
+    // the token leaking into customer apps the EB renders. Uses the first
+    // comma-separated token (provisioner-style) per the SYSTEM_EB_TOKEN
+    // split convention.
     //
     // Eligible target origins: LASTEST_URL (internal cluster DNS used for
     // EB→host coordination) plus LASTEST_PUBLIC_URL if set (external URL
@@ -744,9 +743,7 @@ export class EmbeddedTestExecutor {
     // these differ — the internal DNS doesn't match what the test browser
     // navigates to — so both must be allowlisted.
     {
-      const selfTestToken =
-        process.env.EB_BOOTSTRAP_TOKEN?.trim() ||
-        process.env.SYSTEM_EB_TOKEN?.split(",")[0]?.trim();
+      const systemTokenRaw = process.env.SYSTEM_EB_TOKEN?.split(",")[0]?.trim();
       const allowedOrigins = new Set<string>();
       for (const raw of [
         process.env.LASTEST_URL,
@@ -759,16 +756,16 @@ export class EmbeddedTestExecutor {
           /* skip malformed */
         }
       }
-      if (selfTestToken && allowedOrigins.size > 0) {
+      if (systemTokenRaw && allowedOrigins.size > 0) {
         try {
           const testOrigin = new URL(command.targetUrl).origin;
           if (allowedOrigins.has(testOrigin)) {
             await testContext.setExtraHTTPHeaders({
-              Authorization: `Bearer ${selfTestToken}`,
+              Authorization: `Bearer ${systemTokenRaw}`,
             });
             logFn(
               "info",
-              `Self-test bypass: injected pod credential for ${testOrigin}`,
+              `Self-test bypass: injected SYSTEM_EB_TOKEN for ${testOrigin}`,
             );
           }
         } catch {
@@ -3142,10 +3139,11 @@ export class EmbeddedTestExecutor {
     },
   ): Promise<EmbeddedSetupResult> {
     const startTime = Date.now();
-    const logs: LogEntry[] = [];
+    const logs: Array<{ timestamp: number; level: string; message: string }> =
+      [];
     const setupTimeout = Math.max(command.timeout || 120000, 30000);
 
-    const logFn = (level: LogEntry["level"], message: string) => {
+    const logFn = (level: string, message: string) => {
       logs.push({ timestamp: Date.now(), level, message });
       console.log(
         `  [${level.toUpperCase()}] [setup:${command.setupId}] ${message}`,

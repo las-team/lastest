@@ -19,8 +19,8 @@ import type {
   ServerCommand,
   HeartbeatPayload,
   ConnectionEstablishedMessage,
-} from "@lastest/eb-protocol";
-import { createMessage } from "@lastest/eb-protocol";
+} from "./protocol";
+import { createMessage } from "./protocol";
 
 export interface ConnectedRunner {
   runnerId: string;

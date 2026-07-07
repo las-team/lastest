@@ -4,14 +4,13 @@ import {
   runnerCommands,
   runnerCommandResults,
   tests,
-} from "@lastest/db/schema";
-import { eq, and, inArray, lt, or, isNull, notExists, sql } from "drizzle-orm";
-
+} from "../schema";
 import type {
   NewRunnerCommand,
   NewRunnerCommandResult,
   RunnerCommandStatus,
-} from "@lastest/db/schema";
+} from "../schema";
+import { eq, and, inArray, lt, or, isNull, notExists, sql } from "drizzle-orm";
 
 // Time the server waits for an EB `response:command_ack` after dispatching a
 // command before redelivering on the next heartbeat. EB sends the ack as the

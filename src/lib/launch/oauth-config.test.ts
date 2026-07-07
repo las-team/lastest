@@ -3,11 +3,7 @@ import {
   isValidClientId,
   isAllowedRedirectUri,
   scopeIncludes,
-  scopeForClient,
   LAUNCH_CLIENT_ID,
-  LAUNCH_SCOPE,
-  PLAYGROUND_CLIENT_ID,
-  PLAYGROUND_SCOPE,
 } from "./oauth-config";
 
 describe("launch/oauth-config", () => {
@@ -16,18 +12,10 @@ describe("launch/oauth-config", () => {
     vi.unstubAllEnvs();
   });
 
-  it("only accepts registered client ids", () => {
+  it("only accepts the launch-www client id", () => {
     expect(isValidClientId(LAUNCH_CLIENT_ID)).toBe(true);
-    expect(isValidClientId(PLAYGROUND_CLIENT_ID)).toBe(true);
     expect(isValidClientId("something-else")).toBe(false);
     expect(isValidClientId(null)).toBe(false);
-  });
-
-  it("maps each client to its own scope", () => {
-    expect(scopeForClient(LAUNCH_CLIENT_ID)).toBe(LAUNCH_SCOPE);
-    expect(scopeForClient(PLAYGROUND_CLIENT_ID)).toBe(PLAYGROUND_SCOPE);
-    expect(scopeForClient("something-else")).toBe(null);
-    expect(scopeForClient(null)).toBe(null);
   });
 
   it("allows the production launch origin by default and localhost in dev", () => {

@@ -143,6 +143,7 @@ import {
   type ActionProgressInfo,
 } from "@/components/embedded-browser/browser-viewer-client";
 import { getStreamUrlForRunner } from "@/server/actions/embedded-sessions";
+import { appendStreamToken } from "@/lib/eb/stream-token";
 import { TestSpecEditor } from "@/components/tests/test-spec-editor";
 import { PublishShareDialog } from "@/app/(app)/builds/[buildId]/publish-share-dialog";
 import { diffLines as diffTextLines, diffStats } from "@/lib/diff/text-diff";
@@ -797,7 +798,12 @@ export function TestDetailClient({
           try {
             const streamInfo = await getStreamUrlForRunner(actualRunnerId);
             if (streamInfo?.streamUrl) {
-              setStreamUrl(streamInfo.streamUrl);
+              setStreamUrl(
+                appendStreamToken(
+                  streamInfo.streamUrl,
+                  streamInfo.streamAuthToken,
+                ),
+              );
             }
           } catch {
             // Stream not available — not critical

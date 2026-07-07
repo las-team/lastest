@@ -10,7 +10,6 @@
 
 import { generateWithAI } from "@/lib/ai";
 import { aiConfigFromSettings } from "@/lib/ai/provider-config";
-import { checkAiConfigReadiness } from "@/lib/ai/availability";
 import { parseAiJson } from "@/lib/ai/json-parse";
 import * as queries from "@/lib/db/queries";
 import type { TriageResult, TriageClassification } from "@/lib/db/schema";
@@ -70,14 +69,12 @@ export async function triageTestFailure(
       };
     }
 
-    // Skip triage when the configured provider cannot run here (e.g. claude-cli
-    // has no JSON-mode chat, or a host-CLI provider on an API-key-only
-    // deployment).
-    if (!checkAiConfigReadiness(settings).runnable) {
+    // Skip triage if AI is not configured or is CLI-only
+    if (settings.provider === "claude-cli") {
       return {
         classification: "unknown",
         confidence: 0,
-        reasoning: "AI triage skipped (provider not runnable)",
+        reasoning: "AI triage skipped (CLI provider)",
       };
     }
 

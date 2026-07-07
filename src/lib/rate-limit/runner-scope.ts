@@ -19,7 +19,6 @@
 
 import { timingSafeEqual } from "node:crypto";
 import * as queries from "@/lib/db/queries";
-import { verifyBootstrapToken } from "@lastest/pool-service/common";
 
 export interface RunnerCheck {
   isRunner: boolean;
@@ -28,7 +27,6 @@ export interface RunnerCheck {
     | "bearer-token"
     | "api-session"
     | "system-eb-token"
-    | "eb-bootstrap-token"
     | "cookie-browser"
     | "unauth";
 }
@@ -53,12 +51,6 @@ export async function classifyRequest(request: Request): Promise<RunnerCheck> {
     const token = auth.slice("Bearer ".length).trim();
     if (token && matchesSystemToken(token)) {
       return { isRunner: true, reason: "system-eb-token" };
-    }
-    // Per-session bootstrap token (dynamic pool EBs — they no longer hold
-    // SYSTEM_EB_TOKEN). Pure HMAC check, no DB: exactly as cheap as the
-    // shared-secret path it replaces on this hot middleware.
-    if (token && verifyBootstrapToken(token)) {
-      return { isRunner: true, reason: "eb-bootstrap-token" };
     }
     if (token && (await isApiSessionToken(token))) {
       return { isRunner: true, reason: "api-session" };

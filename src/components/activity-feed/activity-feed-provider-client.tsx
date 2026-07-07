@@ -40,6 +40,13 @@ export function useActivityFeedContextSafe() {
 }
 
 const MAX_EVENTS = 500;
+const WS_RETRY_DELAY = 3000;
+const WS_MAX_RETRIES = 10;
+
+function buildWsUrl(path: string): string {
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}${path}`;
+}
 
 export function ActivityFeedProvider({
   children,
@@ -52,6 +59,8 @@ export function ActivityFeedProvider({
   const [activeSessionCount, setActiveSessionCount] = useState(0);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const lastMcpToast = useRef(0);
+  const retryCount = useRef(0);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearedAtRef = useRef<string | null>(
     typeof window !== "undefined"
       ? sessionStorage.getItem("activity-feed-cleared-at")
@@ -104,81 +113,104 @@ export function ActivityFeedProvider({
       });
   }, []);
 
-  // Live feed via SSE. EventSource auto-reconnects (including across the
-  // endpoint's 90s lifetime-cap close), so no hand-rolled retry loop.
+  // WebSocket connection with retry (deferred to next tick to avoid hydration mismatch)
   useEffect(() => {
-    const es = new EventSource("/api/activity-feed");
+    let ws: WebSocket | null = null;
+    let cancelled = false;
 
-    es.onopen = () => setIsConnected(true);
+    function connect() {
+      if (cancelled) return;
 
-    es.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (data.type === "connected") return;
+      ws = new WebSocket(buildWsUrl("/api/activity-feed/ws"));
 
-        const event = data as ActivityEvent;
-        // Skip events from before the last clear
-        if (
-          clearedAtRef.current &&
-          event.createdAt &&
-          new Date(event.createdAt) <= new Date(clearedAtRef.current)
-        )
-          return;
-        setEvents((prev) => {
-          // Dedupe by id
-          if (prev.some((p) => p.id === event.id)) return prev;
-          const next = [...prev, event];
-          return next.length > MAX_EVENTS ? next.slice(-MAX_EVENTS) : next;
-        });
+      ws.onopen = () => {
+        setIsConnected(true);
+        retryCount.current = 0;
+      };
 
-        // Track active sessions
-        if (event.eventType === "session:start") {
-          setActiveSessionCount((c) => c + 1);
-        } else if (
-          event.eventType === "session:complete" ||
-          event.eventType === "session:error"
-        ) {
-          setActiveSessionCount((c) => Math.max(0, c - 1));
-        }
+      ws.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data.type === "connected") return;
 
-        // Toast notifications
-        if (event.eventType === "session:start") {
-          toast("AI session started", {
-            description: event.summary,
-            action: { label: "View", onClick: () => setIsOpen(true) },
+          const event = data as ActivityEvent;
+          // Skip events from before the last clear
+          if (
+            clearedAtRef.current &&
+            event.createdAt &&
+            new Date(event.createdAt) <= new Date(clearedAtRef.current)
+          )
+            return;
+          setEvents((prev) => {
+            // Dedupe by id
+            if (prev.some((p) => p.id === event.id)) return prev;
+            const next = [...prev, event];
+            return next.length > MAX_EVENTS ? next.slice(-MAX_EVENTS) : next;
           });
-        } else if (event.eventType === "session:complete") {
-          toast.success("AI session completed", {
-            description: event.summary,
-            action: { label: "View", onClick: () => setIsOpen(true) },
-          });
-        } else if (event.eventType === "session:error") {
-          toast.error("AI session failed", {
-            description: event.summary,
-            action: { label: "View", onClick: () => setIsOpen(true) },
-          });
-        } else if (event.eventType === "mcp:tool_call") {
-          const now = Date.now();
-          if (now - lastMcpToast.current > 5000) {
-            lastMcpToast.current = now;
-            toast("MCP tool called", {
-              description: event.summary,
-              duration: 3000,
-            });
+
+          // Track active sessions
+          if (event.eventType === "session:start") {
+            setActiveSessionCount((c) => c + 1);
+          } else if (
+            event.eventType === "session:complete" ||
+            event.eventType === "session:error"
+          ) {
+            setActiveSessionCount((c) => Math.max(0, c - 1));
           }
-        }
-      } catch {
-        // Ignore parse errors
-      }
-    };
 
-    es.onerror = () => {
-      // EventSource retries automatically; just reflect the gap in the UI.
-      setIsConnected(false);
-    };
+          // Toast notifications
+          if (event.eventType === "session:start") {
+            toast("AI session started", {
+              description: event.summary,
+              action: { label: "View", onClick: () => setIsOpen(true) },
+            });
+          } else if (event.eventType === "session:complete") {
+            toast.success("AI session completed", {
+              description: event.summary,
+              action: { label: "View", onClick: () => setIsOpen(true) },
+            });
+          } else if (event.eventType === "session:error") {
+            toast.error("AI session failed", {
+              description: event.summary,
+              action: { label: "View", onClick: () => setIsOpen(true) },
+            });
+          } else if (event.eventType === "mcp:tool_call") {
+            const now = Date.now();
+            if (now - lastMcpToast.current > 5000) {
+              lastMcpToast.current = now;
+              toast("MCP tool called", {
+                description: event.summary,
+                duration: 3000,
+              });
+            }
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      };
+
+      ws.onclose = () => {
+        setIsConnected(false);
+
+        // Retry with backoff
+        if (!cancelled && retryCount.current < WS_MAX_RETRIES) {
+          retryCount.current++;
+          const delay = WS_RETRY_DELAY * Math.min(retryCount.current, 5);
+          retryTimer.current = setTimeout(connect, delay);
+        }
+      };
+
+      ws.onerror = () => {
+        // onclose will fire after this
+      };
+    }
+
+    connect();
 
     return () => {
-      es.close();
+      cancelled = true;
+      ws?.close();
+      if (retryTimer.current) clearTimeout(retryTimer.current);
       setIsConnected(false);
     };
   }, []);

@@ -76,8 +76,6 @@ export async function claimEmbeddedBrowserForAgent(
       cdpUrl: string;
       streamUrl: string;
       runnerId: string;
-      /** Provisioner instanceId; null for static-fleet EBs. */
-      instanceId: string | null;
     }
   | undefined
 > {
@@ -99,7 +97,6 @@ export async function claimEmbeddedBrowserForAgent(
         .select({
           cdpUrl: embeddedSessions.cdpUrl,
           streamUrl: embeddedSessions.streamUrl,
-          instanceId: embeddedSessions.instanceId,
         })
         .from(embeddedSessions)
         .where(eq(embeddedSessions.runnerId, poolEB.runnerId));
@@ -110,7 +107,6 @@ export async function claimEmbeddedBrowserForAgent(
             cdpUrl: session.cdpUrl,
             streamUrl: session.streamUrl,
             runnerId: poolEB.runnerId,
-            instanceId: session.instanceId,
           };
         }
         // Registered but its CDP endpoint is unreachable — a stale port-forward

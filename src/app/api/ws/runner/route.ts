@@ -26,7 +26,7 @@ import type {
   ErrorResponse,
   StepEventResponse,
   CommandAckResponse,
-} from "@lastest/eb-protocol";
+} from "@/lib/ws/protocol";
 import { recordStepEvent } from "@/lib/ws/step-state";
 import {
   waitForCommandQueued,
@@ -57,13 +57,6 @@ import { activeRunnerSessions, startCleanupLoop } from "@/lib/eb/cleanup-loop";
 // ============================================
 
 const MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024; // 10MB limit
-
-// Heartbeat long-poll window. Must stay comfortably under the runner's HTTP
-// timeout and under any ingress/proxy read timeout in front of the app.
-const COMMAND_LONG_POLL_MS = 25_000;
-
-// How often the parked long-poll re-checks the command queue.
-const COMMAND_POLL_INTERVAL_MS = 1_000;
 
 /**
  * Sanitize filename to prevent path traversal attacks.
@@ -256,24 +249,10 @@ export async function POST(request: NextRequest) {
           runner.maxParallelTests ?? undefined,
         );
 
-        // Long-poll: if no commands, hold the request open and re-check the
-        // queue until something lands or the window closes. This polls rather
-        // than waiting on a NOTIFY because LISTEN cannot survive a
-        // transaction-mode connection pooler and, with the app scaled out, the
-        // pod that queues a command is rarely the pod parked here.
-        // `waitForCommandQueued` is just the sleep — it returns early when the
-        // enqueue happened to land on this same pod, which turns the common
-        // single-pod case back into near-zero latency. The re-query is what
-        // guarantees delivery, so the loop re-checks on timeout too.
+        // Long-poll: if no commands, wait up to 25s for a command to be queued
         if (dispatched.length === 0) {
-          const deadline = Date.now() + COMMAND_LONG_POLL_MS;
-          while (dispatched.length === 0) {
-            const remaining = deadline - Date.now();
-            if (remaining <= 0) break;
-            await waitForCommandQueued(
-              runner.id,
-              Math.min(COMMAND_POLL_INTERVAL_MS, remaining),
-            );
+          const notified = await waitForCommandQueued(runner.id, 25_000);
+          if (notified) {
             dispatched = await dispatchPendingCommands(
               runner.id,
               runner.maxParallelTests ?? undefined,
@@ -416,11 +395,7 @@ export async function POST(request: NextRequest) {
       case "response:screenshot": {
         // Handle screenshot upload - save directly to disk
         const screenshotMsg = message as ScreenshotUploadResponse;
-        // Run screenshots only — ad-hoc captures (AdHocScreenshotPayload, no
-        // filename/testRunId) take the recording path and never reach the
-        // disk-save below; sanitizeFilename throws them into the catch.
-        const payload =
-          screenshotMsg.payload as import("@lastest/eb-protocol").ScreenshotUploadPayload;
+        const payload = screenshotMsg.payload;
 
         try {
           // Validate inputs to prevent path traversal and DoS attacks
@@ -528,7 +503,7 @@ export async function POST(request: NextRequest) {
           testRunId,
           repositoryId,
           networkRequests,
-        } = message.payload as import("@lastest/eb-protocol").NetworkBodiesPayload;
+        } = message.payload as import("@/lib/ws/protocol").NetworkBodiesPayload;
 
         if (!commandId || !networkRequests) {
           return NextResponse.json(
@@ -1238,7 +1213,7 @@ export async function clearRemoteRecordingSession(
 // (`lastest-internal-dev`) receives the EB's `response:debug_state` POSTs.
 // Pre-DB this was a globalThis Map, which silently broke on that split.
 
-import type { DebugStateResponsePayload } from "@lastest/eb-protocol";
+import type { DebugStateResponsePayload } from "@/lib/ws/protocol";
 import { db } from "@/lib/db";
 import { remoteDebugSessions } from "@/lib/db/schema";
 import {

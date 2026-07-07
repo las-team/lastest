@@ -17,7 +17,7 @@ import {
   claimOrProvisionPoolEB,
   releasePoolEB,
 } from "@/server/actions/embedded-sessions";
-import { isKubernetesMode } from "@lastest/pool-service/common";
+import { isKubernetesMode } from "@/lib/eb/provisioner";
 
 export interface CaptureStorageStateInput {
   repositoryId: string;
@@ -198,11 +198,8 @@ export async function captureStorageState(
   let attempt = await tryCaptureViaRunner(input);
 
   if (!attempt) {
-    // No pooled browser available. On a k8s-provisioned (multi-tenant)
-    // deployment we must NOT fall back to in-process eval of arbitrary auth
-    // code. Process mode is deliberately exempt: it only exists on
-    // single-tenant local/self-hosted setups, where the fallback below is the
-    // same trust domain as the pool EBs.
+    // No pooled browser available. On a provisioned deployment we must NOT fall
+    // back to in-process eval of arbitrary auth code.
     if (isKubernetesMode()) {
       return {
         captured: false,

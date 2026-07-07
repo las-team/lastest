@@ -1,6 +1,5 @@
 import { chromium, type Page } from "playwright";
 import type { QaPageSnapshot } from "@/lib/db/schema";
-import { isAuthLink } from "@/lib/qa-agent/auth-links";
 
 /**
  * QA Agent live discovery crawl. Connects to a provisioned Embedded Browser
@@ -22,13 +21,6 @@ export interface QaCrawlOptions {
   onPage?: (snapshot: QaPageSnapshot, index: number) => void;
   /** Login before crawling: fills the first form containing a password field. */
   credentials?: { email: string; password: string };
-  /** DOM-discovered login page (from qa_login). When set with credentials,
-   *  the crawl logs in THERE before mapping, instead of relying on the first
-   *  crawled page happening to show a password form. */
-  loginUrl?: string;
-  /** Rank login/signup/register links first when picking pages to follow, so
-   *  public-only discovery reliably maps the auth surface within maxPages. */
-  prioritizeAuthLinks?: boolean;
   signal?: AbortSignal;
 }
 
@@ -146,7 +138,6 @@ function pickNextLinks(
   base: URL,
   visited: Set<string>,
   count: number,
-  prioritizeAuth = false,
 ): string[] {
   const seen = new Set<string>();
   const candidates: Array<{ url: string; score: number }> = [];
@@ -159,18 +150,14 @@ function pickNextLinks(
     // Prefer labeled nav links with shallow paths; skip asset-ish URLs.
     if (/\.(png|jpe?g|svg|css|js|pdf|zip)(\?|$)/i.test(url.pathname)) continue;
     const depth = url.pathname.split("/").filter(Boolean).length;
-    const authBonus =
-      prioritizeAuth && isAuthLink(link.text, url.pathname) ? 10 : 0;
-    const score = (link.text ? 0 : 5) + depth - authBonus;
+    const score = (link.text ? 0 : 5) + depth;
     candidates.push({ url: key, score });
   }
   candidates.sort((a, b) => a.score - b.score);
   return candidates.slice(0, count).map((c) => c.url);
 }
 
-/** Fill and submit the first form containing a password field. Shared with the
- *  qa_login step, which drives the same deterministic login on its own EB. */
-export async function attemptLogin(
+async function attemptLogin(
   page: Page,
   credentials: { email: string; password: string },
 ): Promise<boolean> {
@@ -217,28 +204,6 @@ export async function crawlTargetApp(
     const page = context.pages()[0] ?? (await context.newPage());
     const base = new URL(targetUrl);
 
-    // Console errors observed while the current page loads, keyed per page.
-    // Deduped and capped so a chatty page can't bloat the digest.
-    let currentConsoleErrors: string[] = [];
-    page.on("console", (msg) => {
-      if (msg.type() !== "error") return;
-      if (currentConsoleErrors.length >= 15) return;
-      const text = msg.text().replace(/\s+/g, " ").trim().slice(0, 200);
-      if (text && !currentConsoleErrors.includes(text)) {
-        currentConsoleErrors.push(text);
-      }
-    });
-    page.on("pageerror", (err) => {
-      if (currentConsoleErrors.length >= 15) return;
-      const text = `${err.name}: ${err.message}`
-        .replace(/\s+/g, " ")
-        .trim()
-        .slice(0, 200);
-      if (text && !currentConsoleErrors.includes(text)) {
-        currentConsoleErrors.push(text);
-      }
-    });
-
     // Same-origin fetch/XHR observation, keyed per visited page.
     let currentEndpoints: QaPageSnapshot["apiEndpoints"] = [];
     page.on("response", (response) => {
@@ -259,23 +224,6 @@ export async function crawlTargetApp(
       }
     });
 
-    // With a known login page, authenticate BEFORE the crawl starts so every
-    // mapped page reflects the post-login state.
-    if (options.credentials && options.loginUrl) {
-      try {
-        await page.goto(options.loginUrl, {
-          waitUntil: "domcontentloaded",
-          timeout: PAGE_NAV_TIMEOUT_MS,
-        });
-        await page
-          .waitForLoadState("networkidle", { timeout: PAGE_SETTLE_TIMEOUT_MS })
-          .catch(() => {});
-        loginAttempted = await attemptLogin(page, options.credentials);
-      } catch {
-        // Best-effort — the first-page fallback below still applies.
-      }
-    }
-
     const visited = new Set<string>();
     const queue: string[] = [new URL(targetUrl).href];
 
@@ -285,7 +233,6 @@ export async function crawlTargetApp(
       if (visited.has(url)) continue;
       visited.add(url);
       currentEndpoints = [];
-      currentConsoleErrors = [];
       try {
         await page.goto(url, {
           waitUntil: "domcontentloaded",
@@ -299,7 +246,7 @@ export async function crawlTargetApp(
 
         // On the first page, log in when credentials are provided and a
         // password field is present, then re-extract the authed DOM.
-        if (pages.length === 0 && options.credentials && !loginAttempted) {
+        if (pages.length === 0 && options.credentials) {
           loginAttempted = await attemptLogin(page, options.credentials);
         }
 
@@ -308,7 +255,6 @@ export async function crawlTargetApp(
           url,
           ...dom,
           apiEndpoints: [...currentEndpoints],
-          consoleErrors: [...currentConsoleErrors],
         };
         pages.push(snapshot);
         options.onPage?.(snapshot, pages.length - 1);
@@ -319,7 +265,6 @@ export async function crawlTargetApp(
           base,
           visited,
           maxPages - pages.length,
-          options.prioritizeAuthLinks,
         )) {
           queue.push(next);
         }

@@ -35,9 +35,6 @@ const config = {
   serverUrl: process.env.LASTEST_URL ?? "http://localhost:3000",
   token: process.env.LASTEST_TOKEN ?? "",
   systemToken: process.env.SYSTEM_EB_TOKEN ?? "",
-  // Per-session credential minted by the pool service (dynamic k8s pool).
-  // Static-fleet deployments keep using the shared SYSTEM_EB_TOKEN instead.
-  bootstrapToken: process.env.EB_BOOTSTRAP_TOKEN ?? "",
   streamPort,
   streamHost: process.env.STREAM_HOST ?? "", // Empty = auto-detect container IP
   pollInterval: parseInt(process.env.POLL_INTERVAL ?? "1000", 10),
@@ -51,10 +48,8 @@ const config = {
   cdpPort: parseInt(process.env.CDP_PORT ?? String(streamPort + 2), 10),
 };
 
-if (!config.token && !config.systemToken && !config.bootstrapToken) {
-  console.error(
-    "One of LASTEST_TOKEN, SYSTEM_EB_TOKEN or EB_BOOTSTRAP_TOKEN is required",
-  );
+if (!config.token && !config.systemToken) {
+  console.error("Either LASTEST_TOKEN or SYSTEM_EB_TOKEN is required");
   process.exit(1);
 }
 
@@ -420,7 +415,6 @@ async function startup(): Promise<void> {
     // raw Chromium CDP socket is 127.0.0.1-only (see TCP proxy above).
     cdpPort: config.cdpPort + 10,
     systemToken: config.systemToken || undefined,
-    bootstrapToken: config.bootstrapToken || undefined,
     instanceId: config.instanceId,
   });
 
@@ -462,7 +456,24 @@ async function startup(): Promise<void> {
     switch (command.type) {
       case "command:run_test": {
         if (!browser || !testExecutor || !runnerClient) break;
-        const payload = command.payload;
+        const payload = command.payload as {
+          testId: string;
+          testRunId: string;
+          code: string;
+          codeHash: string;
+          targetUrl: string;
+          timeout?: number;
+          repositoryId?: string;
+          viewport?: { width: number; height: number };
+          storageState?: string;
+          setupVariables?: Record<string, unknown>;
+          cursorPlaybackSpeed?: number;
+          stabilization?: import("./protocol.js").StabilizationPayload;
+          headed?: boolean;
+          forceVideoRecording?: boolean;
+          selectorStats?: import("./test-executor.js").RunTestPayload["selectorStats"];
+          textCaptureEnabled?: boolean;
+        };
 
         // Dedup: skip if already running (mirrors standard runner activeTestIds)
         if (activeTestIds.has(payload.testId)) {
@@ -777,7 +788,7 @@ async function startup(): Promise<void> {
               try {
                 await capturedClient.sendMessage({
                   id: crypto.randomUUID(),
-                  type: "response:network_bodies",
+                  type: "response:network_bodies" as "response:test_result",
                   timestamp: Date.now(),
                   payload: {
                     correlationId: capturedCommand.id,
@@ -847,7 +858,7 @@ async function startup(): Promise<void> {
 
       case "command:start_recording": {
         if (!browser || !runnerClient || !recorder) break;
-        const startRecPayload = command.payload;
+        const startRecPayload = command.payload as { sessionId: string };
         // Redispatch guard: the same session arriving again (lost ack /
         // reaped command row) must not tear down and restart a live recording.
         if (
@@ -863,7 +874,19 @@ async function startup(): Promise<void> {
         if (streamServer) {
           streamServer.inspectMode = false;
         }
-        const payload = command.payload;
+        const payload = command.payload as {
+          sessionId: string;
+          targetUrl: string;
+          viewport?: { width: number; height: number };
+          selectorPriority?: Array<{
+            type: string;
+            enabled: boolean;
+            priority: number;
+          }>;
+          pointerGestures?: boolean;
+          cursorFPS?: number;
+          setupSteps?: Array<{ code: string; codeHash: string }>;
+        };
 
         runnerClient.setStatus("busy", payload.sessionId);
 
@@ -1072,7 +1095,7 @@ async function startup(): Promise<void> {
 
       case "command:stop_recording": {
         if (!runnerClient || !page) break;
-        const payload = command.payload;
+        const payload = command.payload as { sessionId: string };
 
         // Reset inspect mode when stopping recording
         if (streamServer) streamServer.inspectMode = false;
@@ -1196,7 +1219,10 @@ async function startup(): Promise<void> {
 
       case "command:create_assertion": {
         if (!recorder?.isActive() || !runnerClient) break;
-        const assertPayload = command.payload;
+        const assertPayload = command.payload as {
+          sessionId: string;
+          assertionType: string;
+        };
         recorder.createAssertion(assertPayload.assertionType);
         console.log(
           `[Command] Created assertion: ${assertPayload.assertionType}`,
@@ -1206,7 +1232,15 @@ async function startup(): Promise<void> {
 
       case "command:create_wait": {
         if (!recorder?.isActive() || !runnerClient) break;
-        const waitPayload = command.payload;
+        const waitPayload = command.payload as {
+          sessionId: string;
+          waitType: "duration" | "selector";
+          durationMs?: number;
+          selector?: string;
+          selectors?: Array<{ type: string; value: string }>;
+          condition?: "visible" | "hidden";
+          timeoutMs?: number;
+        };
         recorder.createWait({
           waitType: waitPayload.waitType,
           durationMs: waitPayload.durationMs,
@@ -1241,7 +1275,11 @@ async function startup(): Promise<void> {
 
       case "command:promote_selector": {
         if (!recorder?.isActive()) break;
-        const promotePayload = command.payload;
+        const promotePayload = command.payload as {
+          sessionId: string;
+          actionId: string;
+          selectorValue: string;
+        };
         recorder.promoteSelector(
           promotePayload.actionId,
           promotePayload.selectorValue,
@@ -1254,7 +1292,7 @@ async function startup(): Promise<void> {
 
       case "command:start_debug": {
         if (!browser || !runnerClient) break;
-        const startDbgPayload = command.payload;
+        const startDbgPayload = command.payload as { sessionId: string };
         // Redispatch guard: don't rebuild a live debug session from scratch
         // when the server redelivers the same start command.
         if (
@@ -1292,7 +1330,25 @@ async function startup(): Promise<void> {
         if (streamServer) {
           streamServer.inspectMode = false;
         }
-        const payload = command.payload;
+        const payload = command.payload as {
+          sessionId: string;
+          testId: string;
+          code: string;
+          cleanBody: string;
+          steps: import("./debug-executor.js").DebugStep[];
+          targetUrl: string;
+          viewport?: { width: number; height: number };
+          storageState?: string;
+          setupVariables?: Record<string, unknown>;
+          stabilization?: import("./protocol.js").StabilizationPayload;
+          selectorPriority?: Array<{
+            type: string;
+            enabled: boolean;
+            priority: number;
+          }>;
+          pointerGestures?: boolean;
+          cursorFPS?: number;
+        };
 
         runnerClient.setStatus("busy", payload.sessionId);
 
@@ -1398,7 +1454,22 @@ async function startup(): Promise<void> {
 
       case "command:debug_action": {
         if (!debugExecutor || !runnerClient) break;
-        const payload = command.payload;
+        const payload = command.payload as {
+          sessionId: string;
+          action:
+            | "step_forward"
+            | "step_back"
+            | "run_to_end"
+            | "run_to_step"
+            | "update_code"
+            | "start_recording"
+            | "stop_recording";
+          stepIndex?: number;
+          code?: string;
+          cleanBody?: string;
+          steps?: import("./debug-executor.js").DebugStep[];
+          spliceMode?: "replace" | "insert";
+        };
 
         // Replays replace the BrowserContext + page (step_back, run_to_step
         // going backward, or any action re-running stale code after an edit).
@@ -1505,7 +1576,17 @@ async function startup(): Promise<void> {
 
       case "command:run_setup": {
         if (!browser || !testExecutor || !runnerClient) break;
-        const payload = command.payload;
+        const payload = command.payload as {
+          setupId: string;
+          code: string;
+          codeHash: string;
+          targetUrl: string;
+          timeout?: number;
+          viewport?: { width: number; height: number };
+          stabilization?: import("./protocol.js").StabilizationPayload;
+          browser?: string;
+          headed?: boolean;
+        };
 
         // Fire-and-forget async (same activeTasks bookkeeping as run_test)
         const capturedClient = runnerClient;
@@ -1659,18 +1740,16 @@ async function startup(): Promise<void> {
         // maybeTerminateReleasedEB before the k8s Job is DELETEd).
         // Detach the command loop and enter shutdown(); shutdown() will
         // drain any in-flight sendMessage promises before process.exit.
-        const reason = command.payload?.reason ?? "server-requested";
+        const reason =
+          (command.payload as { reason?: string } | undefined)?.reason ??
+          "server-requested";
         console.log(`[Command] Shutdown requested: ${reason}`);
         void shutdown();
         break;
       }
 
       default:
-        // Exhaustive over ServerCommand — only reachable when the app sends a
-        // type this EB build doesn't know (version skew), so log the raw value.
-        console.warn(
-          `[Command] Unknown command type: ${(command as { type: string }).type}`,
-        );
+        console.warn(`[Command] Unknown command type: ${command.type}`);
     }
   };
 

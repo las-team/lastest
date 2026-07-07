@@ -37,7 +37,6 @@ const ACTION_TYPE_LABELS: Record<string, string> = {
   enhance_test: "Enhance Test",
   scan_routes: "Scan Routes",
   test_connection: "Test Connection",
-  qa_task_triage: "QA Task Triage",
 };
 
 function formatTimeAgo(date: Date | null): string {

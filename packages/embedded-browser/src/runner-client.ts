@@ -7,16 +7,6 @@
  */
 
 import os from "os";
-import type {
-  AgentResponse,
-  EmbeddedAutoRegisterResponse,
-  EmbeddedRegisterResponse,
-  HeartbeatMessage,
-  HeartbeatPayload,
-  RunnerConnectResponse,
-  RunnerHeartbeatResponse,
-  ServerCommand,
-} from "@lastest/eb-protocol";
 
 function getContainerIP(): string | null {
   const interfaces = os.networkInterfaces();
@@ -30,6 +20,42 @@ function getContainerIP(): string | null {
   return null;
 }
 
+// Re-define minimal protocol types to avoid cross-package imports
+interface BaseMessage {
+  id: string;
+  type: string;
+  timestamp: number;
+  payload: unknown;
+}
+
+interface HeartbeatPayload {
+  status: "idle" | "busy" | "recording";
+  currentTask?: string;
+  systemInfo: {
+    platform: string;
+    memory: { used: number; total: number };
+    uptime: number;
+  };
+  disconnect?: boolean;
+}
+
+interface ConnectResponse {
+  runnerId: string;
+  teamId: string;
+  capabilities?: string[];
+  commands?: BaseMessage[];
+  sessionId: string;
+}
+
+interface HeartbeatResponse {
+  commands?: BaseMessage[];
+}
+
+interface RegisterResponse {
+  sessionId: string;
+  runnerId: string;
+}
+
 export interface EmbeddedRunnerOptions {
   serverUrl: string;
   token: string;
@@ -38,11 +64,8 @@ export interface EmbeddedRunnerOptions {
   pollInterval?: number;
   /** CDP port for Playwright MCP integration */
   cdpPort?: number;
-  /** Static-fleet shared token — if set, uses /api/embedded/auto-register */
+  /** System EB shared token — if set, uses /api/embedded/auto-register instead */
   systemToken?: string;
-  /** Per-session bootstrap token minted by the pool service — preferred over
-   *  systemToken when both are set; also uses /api/embedded/auto-register */
-  bootstrapToken?: string;
   /** Container instance ID (os.hostname()) for system registration */
   instanceId?: string;
 }
@@ -62,7 +85,6 @@ export class EmbeddedRunnerClient {
   private wakeHeartbeat: (() => void) | null = null;
   private cdpPort?: number;
   private systemToken?: string;
-  private bootstrapToken?: string;
   private instanceId?: string;
   // Track in-flight sendMessage promises so shutdown() can drain them before
   // the pod exits. Without this the k8s DELETE can race a result/network_bodies
@@ -76,11 +98,11 @@ export class EmbeddedRunnerClient {
   private commandChain: Promise<void> = Promise.resolve();
 
   /** Called when the main app sends a command (test/recording) */
-  onCommand?: (command: ServerCommand) => Promise<void>;
+  onCommand?: (command: BaseMessage) => Promise<void>;
 
   /** Public so locally-synthesized commands (e.g. the recording inactivity
    *  watchdog's stop_recording) go through the same ordering chain. */
-  enqueueCommand(cmd: ServerCommand): void {
+  enqueueCommand(cmd: BaseMessage): void {
     this.commandChain = this.commandChain
       .then(() => this.onCommand?.(cmd))
       .catch((err) => {
@@ -96,7 +118,6 @@ export class EmbeddedRunnerClient {
     this.pollInterval = options.pollInterval ?? 1000;
     this.cdpPort = options.cdpPort;
     this.systemToken = options.systemToken;
-    this.bootstrapToken = options.bootstrapToken;
     this.instanceId = options.instanceId;
   }
 
@@ -135,7 +156,7 @@ export class EmbeddedRunnerClient {
         return false;
       }
 
-      const data = (await response.json()) as EmbeddedRegisterResponse;
+      const data = (await response.json()) as RegisterResponse;
       this.embeddedSessionId = data.sessionId;
       this.runnerId = data.runnerId;
 
@@ -169,7 +190,7 @@ export class EmbeddedRunnerClient {
         return false;
       }
 
-      const data = (await response.json()) as RunnerConnectResponse;
+      const data = (await response.json()) as ConnectResponse;
       this.sessionId = data.sessionId;
       this.runnerId = data.runnerId;
 
@@ -192,8 +213,7 @@ export class EmbeddedRunnerClient {
   }
 
   /**
-   * Register as a system EB. Auth is the per-session EB_BOOTSTRAP_TOKEN when
-   * present (dynamic pool), else the shared SYSTEM_EB_TOKEN (static fleet).
+   * Register as a system EB via shared SYSTEM_EB_TOKEN.
    * The server creates/updates a system runner and returns a per-runner token.
    */
   async registerAsSystem(): Promise<boolean> {
@@ -211,7 +231,7 @@ export class EmbeddedRunnerClient {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${this.bootstrapToken || this.systemToken}`,
+            Authorization: `Bearer ${this.systemToken}`,
           },
           body: JSON.stringify({
             streamUrl,
@@ -231,7 +251,11 @@ export class EmbeddedRunnerClient {
         return false;
       }
 
-      const data = (await response.json()) as EmbeddedAutoRegisterResponse;
+      const data = (await response.json()) as {
+        runnerId: string;
+        token: string;
+        sessionId: string;
+      };
       this.runnerId = data.runnerId;
       this.embeddedSessionId = data.sessionId;
       // Replace token with the per-runner token for heartbeats
@@ -255,7 +279,7 @@ export class EmbeddedRunnerClient {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       let registered = false;
 
-      if (this.bootstrapToken || this.systemToken) {
+      if (this.systemToken) {
         registered = await this.registerAsSystem();
       } else {
         registered = await this.register();
@@ -329,7 +353,7 @@ export class EmbeddedRunnerClient {
   }
 
   private async sendHeartbeat(disconnect: boolean): Promise<void> {
-    const heartbeat: HeartbeatMessage = {
+    const heartbeat: BaseMessage = {
       id: crypto.randomUUID(),
       type: "status:heartbeat",
       timestamp: Date.now(),
@@ -361,7 +385,7 @@ export class EmbeddedRunnerClient {
       });
 
       if (response.ok) {
-        const data = (await response.json()) as RunnerHeartbeatResponse;
+        const data = (await response.json()) as HeartbeatResponse;
         if (data.commands && data.commands.length > 0) {
           for (const cmd of data.commands) {
             this.enqueueCommand(cmd);
@@ -374,7 +398,7 @@ export class EmbeddedRunnerClient {
   }
 
   async sendMessage(
-    message: AgentResponse,
+    message: BaseMessage,
     opts: { timeoutMs?: number } = {},
   ): Promise<boolean> {
     const promise = this.doSend(message, opts.timeoutMs ?? 30_000);
@@ -386,7 +410,7 @@ export class EmbeddedRunnerClient {
   }
 
   private async doSend(
-    message: AgentResponse,
+    message: BaseMessage,
     timeoutMs: number,
   ): Promise<boolean> {
     const controller = new AbortController();

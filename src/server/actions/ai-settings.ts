@@ -7,7 +7,6 @@ import {
   SsrfBlockedError,
 } from "@/lib/security/outbound-url";
 import type { AIProvider, AgentSdkPermissionMode } from "@/lib/db/schema";
-import { checkAiConfigReadiness } from "@/lib/ai/availability";
 import { revalidatePath } from "next/cache";
 import { exec } from "child_process";
 import { promisify } from "util";
@@ -173,15 +172,6 @@ export async function testAIConnection(
       anthropicApiKey = stored.anthropicApiKey ?? undefined;
     if (!openaiApiKey || isMaskedValue(openaiApiKey))
       openaiApiKey = stored.openaiApiKey ?? undefined;
-  }
-
-  // Deployments without the claude binary (or without Agent SDK credentials)
-  // fail the test with a clear message instead of ENOENT / a raw SDK auth error.
-  if (provider === "claude-cli" || provider === "claude-agent-sdk") {
-    const readiness = checkAiConfigReadiness({ provider });
-    if (!readiness.runnable) {
-      return { success: false, message: readiness.reason };
-    }
   }
 
   try {

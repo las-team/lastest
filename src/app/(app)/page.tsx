@@ -375,12 +375,7 @@ export default async function DashboardPage({
             </CardHeader>
             {latestBuild && (
               <CardContent className="pt-0">
-                <p
-                  className="text-xs text-muted-foreground"
-                  suppressHydrationWarning
-                >
-                  {lastBuildTime}
-                </p>
+                <p className="text-xs text-muted-foreground">{lastBuildTime}</p>
               </CardContent>
             )}
           </Card>

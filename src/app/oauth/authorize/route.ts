@@ -21,7 +21,7 @@ import * as queries from "@/lib/db/queries";
 import {
   isValidClientId,
   isAllowedRedirectUri,
-  scopeForClient,
+  LAUNCH_SCOPE,
 } from "@/lib/launch/oauth-config";
 import { DEFAULT_LAUNCH } from "@/lib/db/schema";
 
@@ -32,14 +32,13 @@ export async function GET(request: NextRequest) {
   const clientId = sp.get("client_id");
   const redirectUri = sp.get("redirect_uri");
   const responseType = sp.get("response_type") ?? "token";
+  const requestedScope = sp.get("scope") ?? LAUNCH_SCOPE;
   const state = sp.get("state") ?? "";
 
   // Hard failures (never redirect to an un-allowed URI — that's the token-leak guard).
   if (!isValidClientId(clientId)) {
     return NextResponse.json({ error: "invalid_client" }, { status: 400 });
   }
-  const clientScope = scopeForClient(clientId)!;
-  const requestedScope = sp.get("scope") ?? clientScope;
   if (!isAllowedRedirectUri(redirectUri)) {
     return NextResponse.json(
       { error: "invalid_redirect_uri" },
@@ -56,24 +55,20 @@ export async function GET(request: NextRequest) {
 
   const session = await getCurrentSession();
   if (!session) {
-    // Bounce through login, then return to this exact authorize URL. Use a
-    // relative Location: behind the reverse proxy nextUrl.origin resolves to
-    // the pod bind address (0.0.0.0:3000), not the public host.
+    // Bounce through login, then return to this exact authorize URL.
     const returnTo = request.nextUrl.pathname + request.nextUrl.search;
-    const location = `/login?returnTo=${encodeURIComponent(returnTo)}`;
-    return new NextResponse(null, {
-      status: 307,
-      headers: { Location: location },
-    });
+    const loginUrl = new URL("/login", request.nextUrl.origin);
+    loginUrl.searchParams.set("returnTo", returnTo);
+    return NextResponse.redirect(loginUrl);
   }
 
-  // Grant only scopes the client is registered for (intersect requested).
-  const supported = clientScope.split(" ");
+  // Grant only scopes we support (intersect requested with LAUNCH_SCOPE).
+  const supported = LAUNCH_SCOPE.split(" ");
   const granted =
     requestedScope
       .split(/\s+/)
       .filter((s) => supported.includes(s))
-      .join(" ") || clientScope;
+      .join(" ") || LAUNCH_SCOPE;
 
   const token = randomBytes(32).toString("base64url");
   const ttl = DEFAULT_LAUNCH.tokenTtlSeconds;

@@ -1,32 +1,9 @@
-import type {
-  query as sdkQuery,
-  PermissionMode,
-  McpStdioServerConfig,
+import {
+  query,
+  type PermissionMode,
+  type McpStdioServerConfig,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { AIProvider, GenerateOptions, StreamCallbacks } from "./types";
-
-/**
- * The SDK is loaded lazily so importing this module never requires the package
- * to be installed — a top-level import would crash every consumer of @/lib/ai
- * at load time, even when a different provider is selected.
- *
- * Every shipped image does include it (both the JS and its platform-native CLI
- * binary — see Dockerfile / Dockerfile.app, which verify this at build time),
- * so reaching the catch below means a genuinely broken install, not a
- * deployment that opted out. Whether the SDK can *authenticate* is a separate
- * question, gated earlier by agentSdkReadiness() in ./availability.
- */
-async function loadQuery(): Promise<typeof sdkQuery> {
-  try {
-    const mod = await import("@anthropic-ai/claude-agent-sdk");
-    return mod.query;
-  } catch (err) {
-    throw new Error(
-      "Claude Agent SDK failed to load — the @anthropic-ai/claude-agent-sdk package is missing or broken in this image. " +
-        `Configure an API-key provider (Anthropic, OpenAI, OpenRouter) instead. (${err instanceof Error ? err.message : String(err)})`,
-    );
-  }
-}
 
 export interface ClaudeAgentSDKOptions {
   permissionMode?: PermissionMode;
@@ -94,17 +71,8 @@ export class ClaudeAgentSDKProvider implements AIProvider {
       ? abortControllerFromSignal(signal)
       : undefined;
 
-    // The SDK emits the model's final turn twice: once as an `assistant`
-    // message text block, and again as the terminal `result` (subtype
-    // "success") whose `.result` is that same text verbatim. Appending both
-    // yields a doubled reply (e.g. `{json}\n{json}`) that then fails
-    // JSON.parse. Keep the two sources separate and prefer the authoritative
-    // `result`; fall back to the assistant text only if no result arrives.
-    const assistantChunks: string[] = [];
-    let resultText: string | null = null;
+    const messages: string[] = [];
     const stderrChunks: string[] = [];
-
-    const query = await loadQuery();
 
     try {
       for await (const message of query({
@@ -132,14 +100,14 @@ export class ClaudeAgentSDKProvider implements AIProvider {
         if (message.type === "assistant" && message.message?.content) {
           for (const block of message.message.content) {
             if (block.type === "text") {
-              assistantChunks.push(block.text);
+              messages.push(block.text);
             }
           }
         }
-        // The terminal success result — the authoritative final answer.
+        // Also collect result messages (success only)
         if (message.type === "result" && message.subtype === "success") {
           if (message.result) {
-            resultText = message.result;
+            messages.push(message.result);
           }
         }
         // Capture error results with more detail
@@ -155,15 +123,17 @@ export class ClaudeAgentSDKProvider implements AIProvider {
         }
       }
 
-      return (resultText ?? assistantChunks.join("\n")).trim();
+      return messages.join("\n").trim();
     } catch (error) {
       const stderr = stderrChunks.join("").trim();
       if (error instanceof Error) {
         if (error.message === "Aborted") throw error;
         const parts = [`Claude Agent SDK error: ${error.message}`];
         if (stderr) parts.push(`stderr: ${stderr.slice(0, 1000)}`);
-        const lastOutput = resultText ?? assistantChunks.slice(-2).join("\n");
-        if (lastOutput) parts.push(`last output: ${lastOutput.slice(0, 500)}`);
+        if (messages.length > 0)
+          parts.push(
+            `last output: ${messages.slice(-2).join("\n").slice(0, 500)}`,
+          );
         throw new Error(parts.join(" | "));
       }
       throw error;
@@ -189,17 +159,9 @@ export class ClaudeAgentSDKProvider implements AIProvider {
       : undefined;
 
     let fullText = "";
-    // Tracks whether any assistant text was already streamed this turn. The
-    // SDK's terminal success `result` repeats that same final text, so we only
-    // emit it as a fallback when no assistant text arrived — otherwise the
-    // stream (and fullText) would be doubled. See generate() for the details.
-    let streamedAssistant = false;
     const stderrChunks: string[] = [];
 
     try {
-      // Inside the try so a missing SDK reaches callbacks.onError like any
-      // other provider failure.
-      const query = await loadQuery();
       for await (const message of query({
         prompt: fullPrompt,
         options: {
@@ -225,18 +187,15 @@ export class ClaudeAgentSDKProvider implements AIProvider {
           for (const block of message.message.content) {
             if (block.type === "text") {
               fullText += block.text;
-              streamedAssistant = true;
               callbacks.onToken?.(block.text);
             }
           }
         }
-        // Terminal success result — only use it if no assistant text streamed,
-        // since it otherwise duplicates the already-streamed final turn.
+        // Also handle result messages (success only)
         if (
           message.type === "result" &&
           message.subtype === "success" &&
-          message.result &&
-          !streamedAssistant
+          message.result
         ) {
           fullText += message.result;
           callbacks.onToken?.(message.result);

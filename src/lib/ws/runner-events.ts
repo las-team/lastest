@@ -71,6 +71,7 @@ type CommandWaiter = () => void;
 
 const globalCommandWaiters = globalThis as typeof globalThis & {
   __runnerCommandWaiters?: Map<string, CommandWaiter>;
+  __runnerCommandListenInit?: Promise<void> | null;
 };
 if (!globalCommandWaiters.__runnerCommandWaiters) {
   globalCommandWaiters.__runnerCommandWaiters = new Map<
@@ -80,31 +81,52 @@ if (!globalCommandWaiters.__runnerCommandWaiters) {
 }
 const commandWaiters = globalCommandWaiters.__runnerCommandWaiters;
 
+const COMMAND_CHANNEL = "runner_cmd_queued";
+
 function wakeLocalWaiter(runnerId: string): void {
   const waiter = commandWaiters.get(runnerId);
   if (waiter) waiter();
 }
 
 /**
- * Sleep until a command is queued for this runner *on this pod*, or until
- * `timeoutMs` elapses. Returns `true` if woken locally, `false` on timeout.
- *
- * This is one tick of a poll loop, not a delivery guarantee. Cross-pod wakeup
- * used to ride on Postgres LISTEN/NOTIFY, which cannot survive a
- * transaction-mode connection pooler: LISTEN is session state, and the pooler
- * returns the server connection to its pool the moment the statement finishes,
- * so notifications stop arriving *silently*. With the app Deployment scaled out
- * behind an HPA the pod that queues a command is usually not the pod holding
- * that runner's long-poll anyway.
- *
- * So the contract is inverted: the local wake is a latency optimization for the
- * same-pod case, and the caller's re-query after each tick is what actually
- * delivers commands. See the heartbeat handler in `/api/ws/runner`.
+ * Subscribe this pod to cross-pod NOTIFY events. Idempotent — only runs once.
+ * Wakes local waiters when any pod (including this one) signals a command.
+ */
+function ensureListening(): Promise<void> {
+  if (globalCommandWaiters.__runnerCommandListenInit) {
+    return globalCommandWaiters.__runnerCommandListenInit;
+  }
+  globalCommandWaiters.__runnerCommandListenInit = (async () => {
+    try {
+      const { sql } = await import("@/lib/db");
+      await sql.listen(COMMAND_CHANNEL, (payload: string) => {
+        if (payload) wakeLocalWaiter(payload);
+      });
+      console.log("[RunnerEvents] Listening for command-queued notifications");
+    } catch (error) {
+      console.error(
+        "[RunnerEvents] Failed to subscribe to command NOTIFY channel:",
+        error,
+      );
+      // Reset so a later call can retry
+      globalCommandWaiters.__runnerCommandListenInit = null;
+      throw error;
+    }
+  })();
+  return globalCommandWaiters.__runnerCommandListenInit;
+}
+
+/**
+ * Wait until a command is queued for this runner, or until timeout.
+ * Returns `true` if notified, `false` on timeout.
  */
 export function waitForCommandQueued(
   runnerId: string,
   timeoutMs: number,
 ): Promise<boolean> {
+  // Best-effort listener init — if it fails, the local Map still works for same-pod
+  ensureListening().catch(() => {});
+
   // Abort any existing waiter for this runner before registering a new one
   const existingWaiter = commandWaiters.get(runnerId);
   if (existingWaiter) {
@@ -128,11 +150,21 @@ export function waitForCommandQueued(
 }
 
 /**
- * Wake a pending long-poll waiter for this runner if one happens to live on
- * this pod. Best-effort fast path only, and deliberately synchronous — there is
- * no cross-pod broadcast. A waiter on another pod picks the command up on its
- * next poll tick (bounded by `COMMAND_POLL_INTERVAL_MS` in `/api/ws/runner`).
+ * Wake any pending long-poll waiter for this runner across all pods.
+ * Locally wakes the waiter immediately (no DB roundtrip) and broadcasts via
+ * Postgres NOTIFY so waiters on other pods also wake.
  */
 export function notifyCommandQueued(runnerId: string): void {
   wakeLocalWaiter(runnerId);
+  void (async () => {
+    try {
+      const { sql } = await import("@/lib/db");
+      await sql.notify(COMMAND_CHANNEL, runnerId);
+    } catch (error) {
+      console.error(
+        "[RunnerEvents] Failed to broadcast command NOTIFY:",
+        error,
+      );
+    }
+  })();
 }

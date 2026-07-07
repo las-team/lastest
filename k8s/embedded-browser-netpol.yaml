@@ -1,73 +1,23 @@
-# NetworkPolicy: isolate Embedded Browser pods.
+# NetworkPolicy: restrict Embedded Browser pod egress.
 #
-# EB pods run arbitrary, user/AI-authored Playwright code (that is the product),
-# so the EB is the untrusted workload in this namespace. Both directions are
-# locked down:
+# EB pods run arbitrary, user/AI-authored Playwright code (that is the product).
+# They legitimately need to reach the host app callback (LASTEST_URL) and the
+# public internet (the sites under test), but they must NEVER reach the cloud
+# metadata service (169.254.169.254 — IAM credentials on AWS/GCP/Azure). This
+# also defends the URL-diff / capture DNS-rebinding TOCTOU: even if a target
+# hostname re-resolves to a metadata/link-local address inside the pod after the
+# app's pre-flight SSRF check, egress to that range is dropped here.
 #
-#   Ingress — only the app may reach an EB, and only on the three ports it
-#             actually dials. This is what stops EB→EB traffic: one tenant's
-#             browser cannot drive another's CDP endpoint, because the DESTINATION
-#             EB refuses the connection. Enforcing it here rather than via egress
-#             makes it independent of the cluster's pod CIDR.
-#   Egress  — the sites under test and the app callback, but never the cloud
-#             metadata service and never other in-cluster services.
-#
-# IMPORTANT — read before relying on this:
-#   - Enforced ONLY by a CNI that implements NetworkPolicy (Calico, Cilium,
-#     etc.). The default k3d/k3s flannel CNI does NOT enforce it — it is a safe
-#     no-op there, so `pnpm stack` local dev is unaffected either way (scripts/
-#     k3d-up.sh does not apply this file at all). Run an enforcing CNI in any
-#     multi-tenant deployment.
-#   - Kubelet liveness/readiness probes hit 9224 from the NODE, not from a pod.
-#     Most CNIs (Calico failsafe ports, Cilium's host entity) permit
-#     host-originated traffic to local pods by default. If your CNI does not,
-#     probes will fail and Jobs will restart-loop — add an ipBlock allow for
-#     your node CIDR to the ingress rule below.
-#   - `kubectl port-forward` (used by dev-port-forward.ts in k3d mode) also
-#     originates off-pod and is subject to the same caveat.
-#   - The cluster CIDRs in the egress `except` list are k3s/k3d defaults.
-#     Change them to match your cluster, or in-cluster services stay reachable
-#     from an EB.
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: lastest-eb-ingress
-  namespace: lastest
-  labels:
-    app: lastest-eb
-spec:
-  podSelector:
-    matchLabels:
-      app: lastest-eb
-  # Naming Ingress with no matching rule for a peer = default-deny inbound.
-  policyTypes:
-    - Ingress
-  ingress:
-    # The app pod is the ONLY legitimate client. A bare podSelector is
-    # namespace-local, so this does not admit an `app=lastest` pod from some
-    # other namespace.
-    - from:
-        - podSelector:
-            matchLabels:
-              app: lastest
-      ports:
-        # Screencast/input WebSocket, terminated by scripts/front-proxy.js.
-        # Also the TCP target of probeStreamUrlAlive() and the base of
-        # containerUrl.
-        - protocol: TCP
-          port: 9223
-        # /health — polled by the executor (it rewrites containerUrl's port).
-        - protocol: TCP
-          port: 9224
-        # TCP proxy exposing Chromium's CDP across the cluster, for the
-        # agent/MCP paths.
-        - protocol: TCP
-          port: 9232
-  # Deliberately NOT listed: 9222. That is Chromium's own CDP endpoint, bound
-  # to localhost inside the pod; nothing should reach it over the network, and
-  # full CDP access is the strongest capability an EB exposes.
----
+# IMPORTANT:
+#   - This is enforced ONLY by a CNI that implements NetworkPolicy (Calico,
+#     Cilium, etc.). The default k3d/flannel CNI does NOT enforce it — it is a
+#     safe no-op there. Run an enforcing CNI in any multi-tenant deployment.
+#   - The host callback (host.k3d.internal / a LAN homeserver) sits on a private
+#     RFC1918 address, so we deliberately do NOT blanket-deny private ranges —
+#     that would cut the EB off from the app. We deny only the link-local /
+#     metadata range, which no legitimate EB traffic targets. If you want to
+#     also block other internal services, add their CIDRs to `except` below and
+#     keep an explicit allow rule for your host CIDR.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -82,42 +32,16 @@ spec:
   policyTypes:
     - Egress
   egress:
-    # DNS resolution (kube-dns / CoreDNS).
+    # Allow DNS resolution (kube-dns / CoreDNS).
     - ports:
         - protocol: UDP
           port: 53
         - protocol: TCP
           port: 53
-    # The app callback (auto-register, heartbeats, artifact upload) when the
-    # app runs IN-CLUSTER. Matching the backend pod rather than the Service
-    # ClusterIP is deliberate: egress policy is evaluated after kube-proxy
-    # DNAT, so this covers http://lastest:3000 too. If EB auto-registration
-    # starts failing right after applying this file, this rule is the first
-    # thing to check.
-    - to:
-        - podSelector:
-            matchLabels:
-              app: lastest
-      ports:
-        - protocol: TCP
-          port: 3000
-    # The public internet — the sites under test. Everything private stays
-    # blocked, so an EB cannot reach postgres, the pool service, the OCR
-    # service, the kube-apiserver, or another EB by address.
-    #
-    # This also defends the URL-diff / capture DNS-rebinding TOCTOU: even if a
-    # target hostname re-resolves to a metadata or in-cluster address after the
-    # app's pre-flight SSRF check, egress there is dropped.
+    # Allow all other egress EXCEPT the link-local / cloud-metadata range.
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
             except:
               - 169.254.0.0/16 # link-local incl. 169.254.169.254 metadata
               - 127.0.0.0/8 # loopback (node-local services)
-              - 10.42.0.0/16 # k3s/k3d pod CIDR — CHANGE FOR YOUR CLUSTER
-              - 10.43.0.0/16 # k3s/k3d service CIDR — CHANGE FOR YOUR CLUSTER
-    # NOTE for the k3d dev topology, where the app runs on the HOST and EB pods
-    # reach it at host.k3d.internal (an RFC1918 docker-host address): that is
-    # covered by the internet rule above, since only the two cluster CIDRs are
-    # excepted and not all of RFC1918. If you narrow these further, add an
-    # explicit ipBlock allow for your host address or EBs will fail to register.
