@@ -86,12 +86,30 @@ export async function approveDiffCore(diffId: string, approvedBy?: string) {
   if (diff.buildId) {
     const newStatus = await queries.computeBuildStatus(diff.buildId);
     await queries.updateBuild(diff.buildId, { overallStatus: newStatus });
+    reportVercelCheck(diff.buildId, newStatus);
   }
 
   revalidatePath("/builds");
   revalidatePath(`/builds/${diff.buildId}`);
 
   return { success: true };
+}
+
+/**
+ * Re-report a build's Vercel check after a post-completion status change
+ * (approval flips it green, rejection/todo flips it away). Fire-and-forget so
+ * the reviewer's action isn't blocked on a Vercel round-trip; no-ops unless the
+ * build originated from a Vercel deployment.
+ */
+function reportVercelCheck(
+  buildId: string,
+  status: import("@/lib/db/schema").BuildStatus,
+): void {
+  import("@/lib/vercel/reporter")
+    .then(({ reportVercelCheckForBuild }) =>
+      reportVercelCheckForBuild(buildId, status),
+    )
+    .catch(() => {});
 }
 
 /**
@@ -108,6 +126,7 @@ export async function rejectDiffCore(diffId: string) {
   // Update build status to blocked
   if (diff.buildId) {
     await queries.updateBuild(diff.buildId, { overallStatus: "blocked" });
+    reportVercelCheck(diff.buildId, "blocked");
   }
 
   revalidatePath("/builds");
