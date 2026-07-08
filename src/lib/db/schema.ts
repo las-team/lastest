@@ -3111,6 +3111,10 @@ export interface AgentSessionMetadata {
   qaPlan?: QaTestPlan;
   /** User feedback captured on "request changes" — fed to the planner rerun. */
   qaPlannerFeedback?: string;
+  /** Plain-language journeys the user added at the review gate. Refined by AI
+   *  into structured journeys + covering items and merged into qaPlan; kept for
+   *  provenance and so refresh/rerun paths preserve human-supplied intent. */
+  qaUserJourneys?: string[];
   /** Per-plan-item generation/execution status ledger. */
   qaGeneratedTests?: QaGeneratedTest[];
   /** Test-run ids started by the execute/heal phases. */

@@ -607,6 +607,7 @@ export function QaAgentClient({
     start,
     approve,
     requestChanges,
+    addJourneys,
     pause,
     resume,
     cancel,
@@ -771,6 +772,7 @@ export function QaAgentClient({
           loading={loading}
           onApprove={approve}
           onRequestChanges={requestChanges}
+          onAddJourneys={addJourneys}
         />
       )}
 

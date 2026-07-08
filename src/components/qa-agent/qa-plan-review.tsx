@@ -25,6 +25,7 @@ import {
   Loader2,
   MessageSquareWarning,
   Route,
+  Sparkles,
   Target,
 } from "lucide-react";
 
@@ -133,6 +134,7 @@ export function QaPlanReview({
   loading,
   onApprove,
   onRequestChanges,
+  onAddJourneys,
 }: {
   plan: QaTestPlan;
   /** True when the plan is shown outside the review gate (no actions). */
@@ -140,6 +142,9 @@ export function QaPlanReview({
   loading?: boolean;
   onApprove?: (disabledItemIds: string[]) => void;
   onRequestChanges?: (feedback: string) => void;
+  /** Refine the reviewer's own plain-language journeys and merge them in.
+   *  Resolves true when the merge succeeded (drives the panel reset). */
+  onAddJourneys?: (journeysText: string) => Promise<boolean>;
 }) {
   const [disabled, setDisabled] = useState<Set<string>>(
     () =>
@@ -147,6 +152,18 @@ export function QaPlanReview({
   );
   const [feedback, setFeedback] = useState("");
   const [showFeedback, setShowFeedback] = useState(false);
+  const [journeysText, setJourneysText] = useState("");
+  const [showJourneys, setShowJourneys] = useState(false);
+
+  // Refine + merge the reviewer's journeys, then collapse/clear the panel only
+  // when the merge succeeded (on failure the text is kept so they can retry).
+  const submitJourneys = async () => {
+    const ok = await onAddJourneys?.(journeysText.trim());
+    if (ok) {
+      setShowJourneys(false);
+      setJourneysText("");
+    }
+  };
 
   const items = plan.items;
   // Matrix axes: only groups that at least one item is tagged with become
@@ -400,8 +417,46 @@ export function QaPlanReview({
                   </Button>
                 </div>
               </div>
+            ) : showJourneys ? (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Describe the user journeys you care about, one per line. The
+                  AI refines each into a grounded test and adds it to the plan
+                  above — your existing tests and choices are kept.
+                </p>
+                <Textarea
+                  placeholder={
+                    "One journey per line, e.g.\nA user records a flow and sees the diff approved\nAn admin invites a teammate who then signs in\nA user creates a test suite and runs it"
+                  }
+                  value={journeysText}
+                  onChange={(e) => setJourneysText(e.target.value)}
+                  rows={4}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={loading || !journeysText.trim()}
+                    onClick={submitJourneys}
+                  >
+                    {loading ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3.5 w-3.5" />
+                    )}
+                    Refine &amp; add
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setShowJourneys(false)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
             ) : (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button
                   size="sm"
                   disabled={loading || enabledCount === 0}
@@ -414,6 +469,17 @@ export function QaPlanReview({
                   )}
                   Approve {enabledCount} test{enabledCount === 1 ? "" : "s"}
                 </Button>
+                {onAddJourneys && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={loading}
+                    onClick={() => setShowJourneys(true)}
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    Add journeys
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="outline"

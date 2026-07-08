@@ -6,6 +6,7 @@ import {
   startQaAgent,
   approveQaPlan,
   rerunQaPlanner,
+  addQaUserJourneys,
   pauseQaAgent,
   resumeQaAgent,
   cancelQaAgent,
@@ -155,6 +156,32 @@ export function useQaAgent(
     [session, runAction],
   );
 
+  // Refine the reviewer's own journeys and merge them into the plan. Unlike the
+  // other actions this returns a {success,error} result instead of throwing, so
+  // surface the error inline; poll on success to pick up the augmented plan.
+  const addJourneys = useCallback(
+    async (journeysText: string): Promise<boolean> => {
+      if (!session) return false;
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await addQaUserJourneys(session.id, journeysText);
+        if (res.success) {
+          startPolling(session.id);
+          return true;
+        }
+        setError(res.error ?? "Could not add those journeys");
+        return false;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Action failed");
+        return false;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [session, startPolling],
+  );
+
   const pause = useCallback(
     () =>
       session
@@ -212,6 +239,7 @@ export function useQaAgent(
     start,
     approve,
     requestChanges,
+    addJourneys,
     pause,
     resume,
     cancel,

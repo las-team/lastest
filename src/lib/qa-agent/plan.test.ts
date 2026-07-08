@@ -3,17 +3,24 @@ import {
   buildApiDefinition,
   buildDiscoveryDigest,
   buildExistingCoverageDigest,
+  buildExistingPlanDigest,
   buildGeneratorPrompt,
+  buildJourneyRefinerUserPrompt,
   buildPlannerUserPrompt,
   computeQaSummary,
   enabledPlanItems,
+  explainInvalidRefinedJourneys,
   groupPlaywrightOverrides,
   isQaTestPlan,
+  isRefinedJourneys,
   itemGroups,
   itemPlaywrightOverrides,
   matchPlanToExistingTests,
+  mergeRefinedJourneys,
   normalizeQaGroups,
   sanitizeQaPlan,
+  MAX_PLAN_ITEMS,
+  type RefinedJourneys,
 } from "./plan";
 import type {
   QaDiscovery,
@@ -313,6 +320,41 @@ describe("buildGeneratorPrompt", () => {
     expect(notPreAuthed).not.toContain("already authenticated");
     expect(notPreAuthed).toContain("qa@example.com");
   });
+
+  it("threads the login context into every auth mode", () => {
+    const plan = validPlan();
+    const loginContext = {
+      loginUrl: "https://app.example.com/login",
+      signupUrl: "https://app.example.com/register",
+    };
+    // Pre-authenticated: still names the login page (for lapse reporting).
+    const preAuth = buildGeneratorPrompt({
+      item: plan.items[1],
+      plan,
+      targetUrl: "https://app.example.com",
+      auth: { preAuthenticated: true },
+      loginContext,
+    });
+    expect(preAuth).toContain("/login");
+    // Credentials: log in AT the real login URL.
+    const creds = buildGeneratorPrompt({
+      item: plan.items[1],
+      plan,
+      targetUrl: "https://app.example.com",
+      credentials: { email: "qa@example.com", password: "s3cret" },
+      loginContext,
+    });
+    expect(creds).toContain("at https://app.example.com/login");
+    // Public-only run: no session, no creds — still names where auth lives.
+    const publicOnly = buildGeneratorPrompt({
+      item: plan.items[1],
+      plan,
+      targetUrl: "https://app.example.com",
+      loginContext,
+    });
+    expect(publicOnly).toContain("No authenticated session");
+    expect(publicOnly).toContain("/register");
+  });
 });
 
 describe("buildApiDefinition", () => {
@@ -439,6 +481,168 @@ describe("existing coverage in planner prompt", () => {
     });
     expect(prompt).toContain("ALREADY CONTAINS");
     expect(prompt).toContain('- "Login smoke"');
+  });
+});
+
+describe("journey refiner — validation + prompts", () => {
+  const validRefined = (): RefinedJourneys => ({
+    journeys: [
+      {
+        id: "U1",
+        title: "Invite a teammate",
+        priority: "P1",
+        businessArea: "Team",
+        steps: ["Open settings", "Invite", "Verify pending"],
+        businessOutcome: "an invite is created",
+        endStateVerification: "invitee appears in the pending list",
+      },
+    ],
+    items: [
+      {
+        id: "UT1",
+        group: "journey",
+        groups: ["journey", "ui"],
+        title: "Invite teammate flow",
+        priority: "P1",
+        journeyId: "U1",
+        businessArea: "Team",
+        scenario: "1. Open settings 2. Invite 3. Assert pending row",
+      },
+    ],
+  });
+
+  it("accepts a well-formed refiner payload and rejects junk", () => {
+    expect(isRefinedJourneys(validRefined())).toBe(true);
+    expect(isRefinedJourneys({ journeys: [], items: [] })).toBe(false);
+    expect(explainInvalidRefinedJourneys({ journeys: [], items: [] })).toMatch(
+      /no journeys and no items/,
+    );
+    const bad = validRefined();
+    (bad.items[0] as unknown as Record<string, unknown>).scenario = 42;
+    expect(isRefinedJourneys(bad)).toBe(false);
+  });
+
+  it("embeds user journeys + existing plan digest in the prompt", () => {
+    const prompt = buildJourneyRefinerUserPrompt({
+      digest: "DIGEST",
+      groups: ["journey", "ui"],
+      userJourneys: ["Invite a teammate", "Delete a project"],
+      existingPlanDigest: buildExistingPlanDigest(validPlan()),
+      authenticated: true,
+    });
+    expect(prompt).toContain("1. Invite a teammate");
+    expect(prompt).toContain("2. Delete a project");
+    expect(prompt).toContain('test: "Complete a transfer"');
+    expect(prompt).toContain("Authenticated session available: YES");
+  });
+});
+
+describe("mergeRefinedJourneys", () => {
+  const refined = (): RefinedJourneys => ({
+    journeys: [
+      {
+        id: "A",
+        title: "Invite a teammate",
+        priority: "P1",
+        businessArea: "Team",
+        steps: ["Invite"],
+        businessOutcome: "invite created",
+        endStateVerification: "pending row",
+      },
+    ],
+    items: [
+      {
+        id: "X",
+        group: "ui",
+        groups: ["ui"],
+        title: "Invite teammate flow",
+        priority: "P1",
+        journeyId: "A",
+        businessArea: "Team",
+        scenario: "invite steps",
+      },
+    ],
+  });
+
+  it("appends new journeys/items with fresh ids, preserving the existing plan", () => {
+    const plan = validPlan();
+    const {
+      plan: merged,
+      addedJourneys,
+      addedItems,
+    } = mergeRefinedJourneys(plan, refined(), [
+      "journey",
+      "smoke",
+      "api",
+      "ui",
+    ]);
+    expect(addedJourneys).toBe(1);
+    expect(addedItems).toBe(1);
+    // Existing items are untouched.
+    expect(merged.items.slice(0, 3).map((i) => i.id)).toEqual([
+      "T1",
+      "T2",
+      "T3",
+    ]);
+    const newItem = merged.items[merged.items.length - 1];
+    // Fresh, collision-free id; journeyId remapped to the new journey.
+    expect(newItem.id).not.toBe("X");
+    const newJourney = merged.journeys[merged.journeys.length - 1];
+    expect(newItem.journeyId).toBe(newJourney.id);
+    // journey-linked item is forced to carry the "journey" group.
+    expect(itemGroups(newItem)).toContain("journey");
+  });
+
+  it("strips groups the user did not select", () => {
+    const r = refined();
+    r.items[0].groups = ["ui", "perf"];
+    const { plan: merged } = mergeRefinedJourneys(validPlan(), r, [
+      "journey",
+      "ui",
+    ]);
+    const newItem = merged.items[merged.items.length - 1];
+    expect(itemGroups(newItem)).not.toContain("perf");
+    expect(itemGroups(newItem)).toContain("ui");
+  });
+
+  it("dedupes against existing item titles", () => {
+    const r = refined();
+    r.items[0].title = "Landing renders"; // already in validPlan()
+    const { addedItems } = mergeRefinedJourneys(validPlan(), r, [
+      "journey",
+      "smoke",
+      "ui",
+    ]);
+    expect(addedItems).toBe(0);
+  });
+
+  it("bounds newly added items when the plan is already full", () => {
+    const plan = validPlan();
+    // Pad the plan to the cap so the budget floor (4) governs.
+    plan.items = Array.from({ length: MAX_PLAN_ITEMS }, (_, i) => ({
+      id: `P${i}`,
+      group: "ui" as const,
+      title: `Existing ${i}`,
+      priority: "P2" as const,
+      scenario: "x",
+    }));
+    const many: RefinedJourneys = {
+      journeys: [],
+      items: Array.from({ length: 20 }, (_, i) => ({
+        id: `N${i}`,
+        group: "ui" as const,
+        groups: ["ui" as const],
+        title: `New journey item ${i}`,
+        priority: (i < 6 ? "P1" : "P3") as "P1" | "P3",
+        scenario: "y",
+      })),
+    };
+    const { addedItems, trimmed } = mergeRefinedJourneys(plan, many, [
+      "journey",
+      "ui",
+    ]);
+    expect(addedItems).toBe(4); // max(4, MAX - full) === 4
+    expect(trimmed).toBe(16);
   });
 });
 

@@ -39,20 +39,27 @@ import {
   buildApiDefinition,
   buildDiscoveryDigest,
   buildExistingCoverageDigest,
+  buildExistingPlanDigest,
   buildGeneratorPrompt,
+  buildJourneyRefinerSystemPrompt,
+  buildJourneyRefinerUserPrompt,
   buildPlannerSystemPrompt,
   buildPlannerUserPrompt,
   computeQaSummary,
   enabledPlanItems,
   explainInvalidQaPlan,
+  explainInvalidRefinedJourneys,
   isQaTestPlan,
+  isRefinedJourneys,
   itemGroups,
   itemPlaywrightOverrides,
   matchPlanToExistingTests,
+  mergeRefinedJourneys,
   normalizeQaGroups,
   sanitizeQaPlan,
   QA_GROUPS,
   type ExistingTestSummary,
+  type RefinedJourneys,
 } from "@/lib/qa-agent/plan";
 import type {
   ActivityEventType,
@@ -334,6 +341,21 @@ function credentialsFrom(
     };
   }
   return undefined;
+}
+
+/** Whether this run's plan/tests target the AUTHENTICATED in-app surface.
+ *  This is auth AVAILABILITY, not "plaintext credentials were typed": qa_login
+ *  resolves auth via typed creds, a captured/existing storage state, or repo
+ *  default setup steps — any of which means the crawl ran signed-in and
+ *  generated tests start authenticated. Wiring the planner to credsProvided
+ *  alone made it plan "public surface only" on storage-state runs. Mirrors the
+ *  `preAuthenticated` calc in the generate step. */
+function isRunAuthenticated(metadata: AgentSessionMetadata): boolean {
+  return Boolean(
+    metadata.credsProvided ||
+    metadata.qaAuth?.storageStateId ||
+    metadata.qaAuth?.defaultSetupInUse,
+  );
 }
 
 /** Live (non-deleted) repo tests with their area names — the matcher's and
@@ -1180,20 +1202,11 @@ async function runQaPlan(
     return false;
   }
   const groups = normalizeQaGroups(session.metadata.qaGroups ?? []);
-  // Whether the plan should target the authenticated in-app surface. This is
-  // auth AVAILABILITY, not "plaintext credentials were typed": qa_login may
-  // resolve auth via a captured/existing storage state or repo default setup
-  // (existing_setup / registered / creds verified), in which case the crawl
-  // ran signed-in and generated tests start authenticated too. Mirrors the
-  // `preAuthenticated` calc in runQaPlanReview. Using credsProvided alone here
-  // wrongly told the planner "public surface only" on storage-state runs, so it
-  // discarded the whole authed digest and planned only login pages.
-  const qaAuth = session.metadata.qaAuth;
-  const authenticated = Boolean(
-    session.metadata.credsProvided ||
-    qaAuth?.storageStateId ||
-    qaAuth?.defaultSetupInUse,
-  );
+  // Target the authenticated in-app surface whenever qa_login resolved auth —
+  // NOT only when raw credentials were typed (see isRunAuthenticated). Passing
+  // credsProvided alone told the planner "public surface only" on storage-state
+  // runs, so it discarded the whole authed digest and planned only login pages.
+  const authenticated = isRunAuthenticated(session.metadata);
   const feedback = session.metadata.qaPlannerFeedback;
 
   const substeps: NonNullable<AgentStepState["substeps"]> = [
@@ -1619,12 +1632,17 @@ async function runQaGenerate(
               testName: item.title,
               baseUrl: targetUrl,
               routePath: item.pagePath,
+              preAuthenticated,
               userPrompt: buildGeneratorPrompt({
                 item,
                 plan,
                 targetUrl,
                 credentials: preAuthenticated ? undefined : credentials,
                 auth: { preAuthenticated },
+                loginContext: {
+                  loginUrl: qaAuth?.loginUrl,
+                  signupUrl: qaAuth?.signupUrl,
+                },
               }),
             },
             {
@@ -2424,6 +2442,128 @@ export async function rerunQaPlanner(
   );
   revalidatePath("/qa-agent");
   return { success: true };
+}
+
+/** Split a free-text blob of user journeys into individual journeys. Accepts
+ *  newline- or bullet-separated input; trims markers and empties. */
+function parseUserJourneys(raw: string): string[] {
+  return raw
+    .split(/\r?\n/)
+    .map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
+    .filter((l) => l.length > 0)
+    .slice(0, 15);
+}
+
+const REFINER_TIMEOUT_MS = 3 * 60 * 1000;
+
+/**
+ * Refine plain-language journeys the reviewer supplied at the plan gate into
+ * structured, digest-grounded journeys + covering items, and MERGE them into
+ * the current plan (existing items and the reviewer's enable/disable choices
+ * are preserved — see mergeRefinedJourneys). The session STAYS paused at the
+ * review gate showing the augmented plan; nothing advances until the reviewer
+ * approves. Counters the "reduced context" quality gap by letting the human
+ * inject the journeys the condensed digest lost.
+ */
+export async function addQaUserJourneys(
+  sessionId: string,
+  journeysText: string,
+): Promise<{
+  success: boolean;
+  addedJourneys?: number;
+  addedItems?: number;
+  error?: string;
+}> {
+  const { session, teamId } = await requireQaSession(sessionId);
+  const plan = session.metadata.qaPlan;
+  const discovery = session.metadata.qaDiscovery;
+  if (!plan || !discovery) {
+    return { success: false, error: "No plan to add journeys to" };
+  }
+  const journeys = parseUserJourneys(journeysText);
+  if (journeys.length === 0) {
+    return { success: false, error: "No journeys were provided" };
+  }
+
+  const repositoryId = session.repositoryId;
+  const groups = normalizeQaGroups(session.metadata.qaGroups ?? []);
+  const authenticated = isRunAuthenticated(session.metadata);
+  const digest = buildDiscoveryDigest(discovery);
+  const systemPrompt = buildJourneyRefinerSystemPrompt();
+  const userPrompt = buildJourneyRefinerUserPrompt({
+    digest,
+    groups,
+    userJourneys: journeys,
+    existingPlanDigest: buildExistingPlanDigest(plan),
+    authenticated,
+  });
+
+  const callRefiner = async (extra?: string): Promise<string> => {
+    const settings = await queries.getAISettings(repositoryId);
+    const config = getAIConfig(settings);
+    return generateWithAI(
+      config,
+      extra ? `${userPrompt}\n\n${extra}` : userPrompt,
+      systemPrompt,
+      {
+        repositoryId,
+        actionType: "qa_plan",
+        responseFormat: "json_object",
+        signal: AbortSignal.timeout(REFINER_TIMEOUT_MS),
+      },
+    );
+  };
+
+  let refined: RefinedJourneys | null = null;
+  try {
+    const raw = await callRefiner();
+    refined = parseAiJson(raw, isRefinedJourneys, { source: "qa-refine" });
+    if (!refined) {
+      const shape = parseAiJson(raw, (x): x is unknown => true, {
+        source: "qa-refine-explain",
+      });
+      const reason =
+        explainInvalidRefinedJourneys(shape) ?? "the JSON was invalid";
+      const retry = await callRefiner(
+        `Your previous response was not valid: ${reason}. Respond with ONLY the JSON object described in the system prompt.`,
+      );
+      refined = parseAiJson(retry, isRefinedJourneys, {
+        source: "qa-refine-retry",
+      });
+    }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "Journey refiner failed",
+    };
+  }
+  if (!refined) {
+    return {
+      success: false,
+      error:
+        "The AI could not turn those journeys into a valid plan. Reword them and try again.",
+    };
+  }
+
+  const merged = mergeRefinedJourneys(plan, refined, groups);
+  await mergeMetadata(sessionId, {
+    qaPlan: merged.plan,
+    qaUserJourneys: [...(session.metadata.qaUserJourneys ?? []), ...journeys],
+  });
+  emitActivity(
+    teamId,
+    repositoryId,
+    sessionId,
+    "substep:update",
+    `Added ${merged.addedJourneys} journey${merged.addedJourneys === 1 ? "" : "s"} and ${merged.addedItems} test${merged.addedItems === 1 ? "" : "s"} from your input`,
+    { stepId: "qa_plan_review", agentType: "planner" },
+  );
+  revalidatePath("/qa-agent");
+  return {
+    success: true,
+    addedJourneys: merged.addedJourneys,
+    addedItems: merged.addedItems,
+  };
 }
 
 export async function pauseQaAgent(
