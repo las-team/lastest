@@ -220,11 +220,13 @@ async function setStepFailed(
   sessionId: string,
   stepId: AgentStepId,
   error: string,
+  result?: Record<string, unknown>,
 ) {
   await updateStep(sessionId, stepId, {
     status: "failed",
     completedAt: new Date().toISOString(),
     error,
+    ...(result ? { result } : {}),
   });
   await queries.updateAgentSession(sessionId, {
     status: "failed",
@@ -659,13 +661,16 @@ async function runQaPlan(
   };
 
   let plan: QaTestPlan | null = null;
+  let lastRaw = "";
   try {
     const raw = await callPlanner();
+    lastRaw = raw;
     plan = parseAiJson(raw, isQaTestPlan, { source: "qa-plan" });
     if (!plan) {
       const retry = await callPlanner(
         "Your previous response was not a valid plan JSON object. Respond with ONLY the JSON object described in the system prompt.",
       );
+      lastRaw = retry;
       plan = parseAiJson(retry, isQaTestPlan, { source: "qa-plan-retry" });
     }
   } catch (err) {
@@ -677,12 +682,32 @@ async function runQaPlan(
   }
 
   if (!plan) {
-    substeps[0] = { ...substeps[0], status: "error" };
+    // The planner replied (twice) but neither reply parsed into a valid plan.
+    // Don't just fail with a bare message — surface the raw model output so the
+    // user can read/copy it and proceed manually (retry, or build tests by
+    // hand from what the planner produced). Cap the payload so a runaway reply
+    // can't bloat the session row.
+    const MAX_RAW_CHARS = 8_000;
+    const rawOutput =
+      lastRaw.length > MAX_RAW_CHARS
+        ? `${lastRaw.slice(0, MAX_RAW_CHARS)}\n…(truncated — ${lastRaw.length} chars total)`
+        : lastRaw;
+    substeps[0] = {
+      ...substeps[0],
+      status: "error",
+      rawError: "Planner output could not be parsed into a valid plan",
+    };
     await updateSubsteps(sessionId, "qa_plan", substeps);
     await setStepFailed(
       sessionId,
       "qa_plan",
-      "Planner did not produce a valid test plan (JSON parse/shape failure after retry)",
+      "The planner replied but its output couldn't be parsed into a valid test plan after an automatic retry.",
+      {
+        manual: true,
+        rawOutput,
+        manualHint:
+          "Start a new run to retry, or use the raw output below to build the suite manually (record a test, or create tests by hand). If this keeps happening, check the AI provider in Settings — its replies aren't valid JSON.",
+      },
     );
     return false;
   }

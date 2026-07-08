@@ -205,6 +205,26 @@ function PhaseTimeline({ session }: { session: AgentSession }) {
                 {activeStep.error}
               </div>
             )}
+            {activeStep.result?.manual === true && (
+              <div className="mt-2 space-y-2 rounded-md border border-warning/40 bg-warning/5 p-2">
+                <div className="text-xs font-medium">Proceed manually</div>
+                {typeof activeStep.result.manualHint === "string" && (
+                  <p className="text-xs text-muted-foreground">
+                    {activeStep.result.manualHint}
+                  </p>
+                )}
+                {typeof activeStep.result.rawOutput === "string" && (
+                  <div className="space-y-1">
+                    <div className="text-[11px] font-medium text-muted-foreground">
+                      Raw planner output
+                    </div>
+                    <pre className="max-h-64 overflow-auto rounded bg-muted/50 p-2 text-[11px] leading-snug whitespace-pre-wrap break-words">
+                      {activeStep.result.rawOutput}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            )}
             {(activeStep.substeps?.length ?? 0) > 0 && (
               <div className="max-h-56 overflow-y-auto">
                 {activeStep.substeps!.map((substep, i) => (
