@@ -437,3 +437,57 @@ describe("computeQaSummary with covered entries", () => {
     expect(summary.journeyCoverage.J1).toEqual(["ex-1"]);
   });
 });
+
+describe("coverage matrix", () => {
+  it("builds business-area × group cells from plan + ledger", () => {
+    const plan = validPlan();
+    plan.items[0].businessArea = "Payments";
+    plan.items[1].businessArea = "Marketing";
+    // T3 (api) left without a businessArea → rolls up under "General"
+    const summary = computeQaSummary(plan, [
+      {
+        planItemId: "T1",
+        group: "journey",
+        testId: "t-1",
+        name: "Complete a transfer",
+        status: "passed",
+      },
+      {
+        planItemId: "T3",
+        group: "api",
+        testId: "ex-1",
+        name: "Accounts endpoint",
+        status: "covered",
+      },
+    ]);
+    expect(summary.matrix?.Payments?.journey).toEqual({
+      planned: 1,
+      covered: 0,
+      generated: 1,
+      passed: 1,
+    });
+    expect(summary.matrix?.General?.api).toEqual({
+      planned: 1,
+      covered: 1,
+      generated: 0,
+      passed: 0,
+    });
+    // Marketing smoke item has no ledger entry — a pure gap.
+    expect(summary.matrix?.Marketing?.smoke).toEqual({
+      planned: 1,
+      covered: 0,
+      generated: 0,
+      passed: 0,
+    });
+  });
+
+  it("accepts plans with and without businessArea (validator tolerance)", () => {
+    const plan = validPlan();
+    expect(isQaTestPlan(plan)).toBe(true);
+    plan.items[0].businessArea = "Payments";
+    plan.journeys[0].businessArea = "Payments";
+    expect(isQaTestPlan(plan)).toBe(true);
+    (plan.items[0] as unknown as Record<string, unknown>).businessArea = 42;
+    expect(isQaTestPlan(plan)).toBe(false);
+  });
+});

@@ -2837,6 +2837,8 @@ export interface QaPlanJourney {
   priority: QaPriority;
   /** Ordered user-visible steps of the journey. */
   steps: string[];
+  /** Business/functional domain of the journey (matrix axis). */
+  businessArea?: string;
   /** The business outcome this journey must produce (e.g. "order placed"). */
   businessOutcome: string;
   /** How the outcome is proven beyond UI toasts (end-state via API/data/UI). */
@@ -2853,6 +2855,10 @@ export interface QaPlanItem {
   priority: QaPriority;
   /** Traceability link to the journey this test covers, when applicable. */
   journeyId?: string;
+  /** Business/functional domain this item exercises (e.g. "Authentication",
+   *  "Checkout") — one axis of the coverage matrix. Missing values roll up
+   *  under "General". */
+  businessArea?: string;
   /** Route/page under test, relative to the target base URL. */
   pagePath?: string;
   rationale?: string;
@@ -2946,6 +2952,17 @@ export interface QaGeneratedTest {
   error?: string;
 }
 
+/** One cell of the business-area × test-group coverage matrix. */
+export interface QaMatrixCell {
+  planned: number;
+  /** Plan items satisfied by pre-existing tests. */
+  covered: number;
+  generated: number;
+  /** Passing among covered+generated is not knowable for covered (they run
+   *  in normal builds) — `passed` counts this run's passing tests only. */
+  passed: number;
+}
+
 export interface QaSummaryData {
   planned: number;
   generated: number;
@@ -2960,6 +2977,9 @@ export interface QaSummaryData {
       { planned: number; generated: number; covered: number; passed: number }
     >
   >;
+  /** Coverage matrix: business area → test group → cell. Areas come from
+   *  QaPlanItem.businessArea ("General" when unset). */
+  matrix?: Record<string, Partial<Record<QaTestGroup, QaMatrixCell>>>;
   /** journeyId → testIds covering it (traceability matrix). */
   journeyCoverage: Record<string, string[]>;
 }
