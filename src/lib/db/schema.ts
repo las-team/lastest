@@ -2919,10 +2919,19 @@ export interface QaDiscovery {
   githubConnected: boolean;
 }
 
+/** How a QA session runs. `full` is the complete pipeline; `refresh_spec`
+ *  re-discovers the app and re-plans against existing coverage (no
+ *  generation); `fill_gaps` takes the latest plan and generates only the
+ *  items not already covered by a live test. */
+export type QaRunMode = "full" | "refresh_spec" | "fill_gaps";
+
 export type QaGeneratedTestStatus =
   | "generating"
   | "generated"
   | "generation_failed"
+  /** Matched to a pre-existing test (from a prior run or manual authoring) —
+   *  generation skipped, `testId` points at that test. */
+  | "covered"
   | "passed"
   | "failed"
   | "healed";
@@ -2940,11 +2949,16 @@ export interface QaGeneratedTest {
 export interface QaSummaryData {
   planned: number;
   generated: number;
+  /** Plan items satisfied by pre-existing tests (no generation needed). */
+  covered: number;
   passed: number;
   failed: number;
   healed: number;
   byGroup: Partial<
-    Record<QaTestGroup, { planned: number; generated: number; passed: number }>
+    Record<
+      QaTestGroup,
+      { planned: number; generated: number; covered: number; passed: number }
+    >
   >;
   /** journeyId → testIds covering it (traceability matrix). */
   journeyCoverage: Record<string, string[]>;
@@ -3010,6 +3024,11 @@ export interface AgentSessionMetadata {
   // encryption-at-rest treatment from the agent-session query layer.
   /** Target app base URL under test. */
   qaTargetUrl?: string;
+  /** How this session runs (full | refresh_spec | fill_gaps). Absent on
+   *  sessions created before modes existed — treated as "full". */
+  qaMode?: QaRunMode;
+  /** For fill_gaps runs: the prior session whose plan/discovery was reused. */
+  qaPlanSourceSessionId?: string;
   /** Coverage groups selected for this run ("journey" is always included). */
   qaGroups?: QaTestGroup[];
   /** Skip the human plan-review gate and generate immediately. */

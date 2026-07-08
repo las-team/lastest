@@ -20,6 +20,7 @@ import { crawlTargetApp } from "@/lib/qa-agent/crawl";
 import {
   buildApiDefinition,
   buildDiscoveryDigest,
+  buildExistingCoverageDigest,
   buildGeneratorPrompt,
   buildPlannerSystemPrompt,
   buildPlannerUserPrompt,
@@ -27,9 +28,11 @@ import {
   enabledPlanItems,
   groupPlaywrightOverrides,
   isQaTestPlan,
+  matchPlanToExistingTests,
   normalizeQaGroups,
   sanitizeQaPlan,
   QA_GROUPS,
+  type ExistingTestSummary,
 } from "@/lib/qa-agent/plan";
 import type {
   ActivityEventType,
@@ -40,6 +43,7 @@ import type {
   PwAgentType,
   QaDiscovery,
   QaGeneratedTest,
+  QaRunMode,
   QaTestGroup,
   QaTestPlan,
 } from "@/lib/db/schema";
@@ -296,6 +300,47 @@ function credentialsFrom(
     };
   }
   return undefined;
+}
+
+/** Live (non-deleted) repo tests with their area names — the matcher's and
+ *  planner's view of what coverage already exists. */
+async function loadExistingTests(
+  repositoryId: string,
+): Promise<ExistingTestSummary[]> {
+  const [tests, areas] = await Promise.all([
+    queries.getTestsByRepo(repositoryId),
+    queries.getFunctionalAreasByRepo(repositoryId).catch(() => []),
+  ]);
+  const areaName = new Map(areas.map((a) => [a.id, a.name]));
+  return tests.map((t) => ({
+    id: t.id,
+    name: t.name,
+    testType: t.testType,
+    functionalAreaName: t.functionalAreaId
+      ? (areaName.get(t.functionalAreaId) ?? null)
+      : null,
+  }));
+}
+
+/** Prior run's ledger for coverage matching: the fill_gaps source session's,
+ *  else the newest earlier session that has one. */
+async function loadPriorLedger(
+  session: AgentSession,
+): Promise<QaGeneratedTest[] | undefined> {
+  if (session.metadata.qaPlanSourceSessionId) {
+    const source = await queries
+      .getAgentSession(session.metadata.qaPlanSourceSessionId)
+      .catch(() => null);
+    if (source?.metadata.qaGeneratedTests) {
+      return source.metadata.qaGeneratedTests;
+    }
+  }
+  const recent = await queries
+    .getRecentAgentSessions(session.repositoryId, "qa", 10)
+    .catch(() => []);
+  return recent.find(
+    (s) => s.id !== session.id && s.metadata.qaGeneratedTests?.length,
+  )?.metadata.qaGeneratedTests;
 }
 
 // ── Step: qa_setup ───────────────────────────────────────────────────────────
@@ -576,6 +621,15 @@ async function runQaPlan(
   const systemPrompt = buildPlannerSystemPrompt();
   const started = Date.now();
 
+  // Coverage-aware planning: the planner always sees what already exists so
+  // repeat runs (after code or manual test changes) refresh the spec instead
+  // of redesigning it from scratch.
+  const existingTests = await loadExistingTests(repositoryId).catch(() => []);
+  const existingCoverage =
+    existingTests.length > 0
+      ? buildExistingCoverageDigest(existingTests)
+      : undefined;
+
   const callPlanner = async (extraFeedback?: string): Promise<string> => {
     const settings = await queries.getAISettings(repositoryId);
     const config = getAIConfig(settings);
@@ -586,6 +640,7 @@ async function runQaPlan(
         digest,
         groups,
         credsProvided,
+        existingCoverage,
         feedback:
           [feedback, extraFeedback].filter(Boolean).join("\n") || undefined,
       }),
@@ -723,6 +778,32 @@ async function runQaGenerate(
   const doneItemIds = new Set(
     ledger.filter((g) => g.testId).map((g) => g.planItemId),
   );
+
+  // Gap awareness: items already satisfied by a live test (from a prior run's
+  // ledger or a name-matching manual test) are marked covered and skipped —
+  // this is what makes repeat runs fill gaps instead of duplicating the suite.
+  const [existingTests, priorLedger] = await Promise.all([
+    loadExistingTests(repositoryId).catch(() => []),
+    loadPriorLedger(session).catch(() => undefined),
+  ]);
+  const coveredBy = matchPlanToExistingTests(items, existingTests, priorLedger);
+  for (const item of items) {
+    if (doneItemIds.has(item.id)) continue;
+    const testId = coveredBy.get(item.id);
+    if (!testId) continue;
+    ledger.push({
+      planItemId: item.id,
+      group: item.group,
+      testId,
+      name: item.title,
+      status: "covered",
+    });
+    doneItemIds.add(item.id);
+  }
+  if (coveredBy.size > 0) {
+    await mergeMetadata(sessionId, { qaGeneratedTests: [...ledger] });
+  }
+
   const pending = items.filter((i) => !doneItemIds.has(i.id));
 
   emitActivity(
@@ -730,7 +811,7 @@ async function runQaGenerate(
     repositoryId,
     sessionId,
     "step:start",
-    `Generating ${pending.length} tests (${items.length - pending.length} already done)`,
+    `Generating ${pending.length} tests (${items.length - pending.length} already covered or done)`,
     { stepId: "qa_generate", agentType: "generator" },
   );
 
@@ -964,8 +1045,11 @@ async function runQaGenerate(
     if (runnerId) await releasePoolEB(runnerId).catch(() => {});
   }
 
-  const generatedCount = ledger.filter((g) => g.testId).length;
-  if (generatedCount === 0) {
+  const generatedCount = ledger.filter(
+    (g) => g.testId && g.status !== "covered",
+  ).length;
+  const coveredCount = ledger.filter((g) => g.status === "covered").length;
+  if (generatedCount === 0 && coveredCount === 0) {
     await setStepFailed(
       sessionId,
       "qa_generate",
@@ -975,6 +1059,7 @@ async function runQaGenerate(
   }
   await setStepCompleted(sessionId, "qa_generate", {
     generated: generatedCount,
+    covered: coveredCount,
     failed: ledger.filter((g) => g.status === "generation_failed").length,
   });
   emitActivity(
@@ -982,7 +1067,7 @@ async function runQaGenerate(
     repositoryId,
     sessionId,
     "step:complete",
-    `Generated ${generatedCount}/${items.length} tests`,
+    `Generated ${generatedCount}/${items.length} tests (${coveredCount} already covered)`,
     { stepId: "qa_generate", agentType: "generator" },
   );
   return true;
@@ -1048,8 +1133,21 @@ async function runQaExecute(
   await setStepActive(sessionId, "qa_execute");
   const session = await queries.getAgentSession(sessionId);
   const ledger = [...(session?.metadata.qaGeneratedTests ?? [])];
-  const runnable = ledger.filter((g) => g.testId);
+  // Only newly generated tests run here (plus prior failures on a resume) —
+  // "covered" entries belong to the standing suite and run via normal builds.
+  const runnable = ledger.filter(
+    (g) => g.testId && (g.status === "generated" || g.status === "failed"),
+  );
   if (runnable.length === 0) {
+    const anyCovered = ledger.some((g) => g.status === "covered");
+    if (anyCovered) {
+      await setStepSkipped(
+        sessionId,
+        "qa_execute",
+        "Nothing new to run — every plan item is covered by an existing test",
+      );
+      return true;
+    }
     await setStepFailed(sessionId, "qa_execute", "No generated tests to run");
     return false;
   }
@@ -1086,8 +1184,9 @@ async function runQaExecute(
   if (!statuses) return false; // stopped
 
   let passed = 0;
+  const ranIds = new Set(runnable.map((g) => g.testId));
   for (const entry of ledger) {
-    if (!entry.testId) continue;
+    if (!entry.testId || !ranIds.has(entry.testId)) continue;
     const status = statuses.get(entry.testId);
     entry.status = status === "passed" ? "passed" : "failed";
     if (status === "passed") passed += 1;
@@ -1260,33 +1359,89 @@ async function runQaSummary(
     await setStepFailed(sessionId, "qa_summary", "Missing plan");
     return false;
   }
-  const summary = computeQaSummary(
-    plan,
-    session.metadata.qaGeneratedTests ?? [],
-  );
+
+  // Spec-refresh runs skip generation, so their ledger is empty — build it
+  // here from existing-coverage matches so the summary shows exactly which
+  // plan items the current suite covers and which are gaps (fill_gaps input).
+  let ledger = session.metadata.qaGeneratedTests ?? [];
+  if (ledger.length === 0) {
+    const [existingTests, priorLedger] = await Promise.all([
+      loadExistingTests(repositoryId).catch(() => []),
+      loadPriorLedger(session).catch(() => undefined),
+    ]);
+    const items = enabledPlanItems(plan);
+    const coveredBy = matchPlanToExistingTests(
+      items,
+      existingTests,
+      priorLedger,
+    );
+    ledger = items
+      .filter((i) => coveredBy.has(i.id))
+      .map((i) => ({
+        planItemId: i.id,
+        group: i.group,
+        testId: coveredBy.get(i.id),
+        name: i.title,
+        status: "covered" as const,
+      }));
+    await mergeMetadata(sessionId, { qaGeneratedTests: ledger });
+  }
+
+  const summary = computeQaSummary(plan, ledger);
   await mergeMetadata(sessionId, { qaSummary: summary });
   await setStepCompleted(sessionId, "qa_summary", {
     planned: summary.planned,
     generated: summary.generated,
+    covered: summary.covered,
     passed: summary.passed,
   });
   await queries.updateAgentSession(sessionId, {
     status: "completed",
     completedAt: new Date(),
   });
+  const gaps = summary.planned - summary.covered - summary.generated;
   emitActivity(
     teamId,
     repositoryId,
     sessionId,
     "session:complete",
-    `QA suite build complete: ${summary.generated} tests generated, ${summary.passed} passing`,
+    session.metadata.qaMode === "refresh_spec"
+      ? `Specification refreshed: ${summary.planned} planned, ${summary.covered} covered by existing tests, ${gaps} gaps`
+      : `QA suite build complete: ${summary.generated} tests generated, ${summary.covered} already covered, ${summary.passed} passing`,
   );
   return true;
 }
 
 // ── Pipeline ─────────────────────────────────────────────────────────────────
 
-const QA_PIPELINE: AgentStepId[] = QA_STEP_DEFINITIONS.map((s) => s.id);
+/** Step lists per run mode — a session's `steps` array IS its pipeline; the
+ *  executor walks it in order, so segmented modes just build shorter lists. */
+const MODE_PIPELINES: Record<QaRunMode, AgentStepId[]> = {
+  full: QA_STEP_DEFINITIONS.map((s) => s.id),
+  // Re-discover + re-plan against existing coverage; no generation. Summary
+  // reports which plan items the current suite already covers vs. the gaps.
+  refresh_spec: [
+    "qa_setup",
+    "qa_discover",
+    "qa_plan",
+    "qa_plan_review",
+    "qa_summary",
+  ],
+  // Reuse the latest plan/discovery; generate only uncovered items.
+  fill_gaps: ["qa_setup", "qa_generate", "qa_execute", "qa_heal", "qa_summary"],
+};
+
+function buildStepsForMode(mode: QaRunMode): AgentStepState[] {
+  return MODE_PIPELINES[mode].map((id, i) => {
+    const def = QA_STEP_DEFINITIONS.find((d) => d.id === id)!;
+    return {
+      id,
+      status: i === 0 ? ("active" as const) : ("pending" as const),
+      label: def.label,
+      description: def.description,
+    };
+  });
+}
 
 async function executeQaPipeline(
   sessionId: string,
@@ -1296,13 +1451,17 @@ async function executeQaPipeline(
 ) {
   const controller = getOrCreateController(sessionId);
   const signal = controller.signal;
-  const startIdx = QA_PIPELINE.indexOf(fromStep);
+  const session = await queries.getAgentSession(sessionId);
+  if (!session) return;
+  // The session's own steps define the pipeline (mode-dependent).
+  const pipeline = session.steps.map((s) => s.id);
+  const startIdx = pipeline.indexOf(fromStep);
   if (startIdx === -1) return;
 
   try {
-    for (let i = startIdx; i < QA_PIPELINE.length; i++) {
+    for (let i = startIdx; i < pipeline.length; i++) {
       if (await isStopped(sessionId, signal)) return;
-      const stepId = QA_PIPELINE[i];
+      const stepId = pipeline[i];
       let ok = false;
       switch (stepId) {
         case "qa_setup":
@@ -1355,6 +1514,8 @@ async function executeQaPipeline(
 export interface StartQaAgentInput {
   repositoryId: string;
   targetUrl: string;
+  /** full (default) | refresh_spec | fill_gaps — see QaRunMode. */
+  mode?: QaRunMode;
   groups: QaTestGroup[];
   email?: string;
   password?: string;
@@ -1392,13 +1553,31 @@ export async function startQaAgent(
     });
   }
 
+  const mode: QaRunMode = input.mode ?? "full";
   const credsProvided = Boolean(input.email?.trim() && input.password);
-  const steps: AgentStepState[] = QA_STEP_DEFINITIONS.map((def, i) => ({
-    id: def.id,
-    status: i === 0 ? "active" : "pending",
-    label: def.label,
-    description: def.description,
-  }));
+  const steps = buildStepsForMode(mode);
+
+  // fill_gaps reuses the newest stored plan (from any prior full/refresh run)
+  // instead of re-discovering and re-planning.
+  let planSeed: Partial<AgentSessionMetadata> = {};
+  if (mode === "fill_gaps") {
+    const recent = await queries.getRecentAgentSessions(
+      input.repositoryId,
+      "qa",
+      10,
+    );
+    const source = recent.find((s) => s.metadata.qaPlan);
+    if (!source) {
+      throw new Error(
+        "No stored test plan to fill gaps from — run the agent (full or refresh specification) first",
+      );
+    }
+    planSeed = {
+      qaPlan: source.metadata.qaPlan,
+      qaDiscovery: source.metadata.qaDiscovery,
+      qaPlanSourceSessionId: source.id,
+    };
+  }
 
   const session = await queries.createAgentSession({
     repositoryId: input.repositoryId,
@@ -1409,10 +1588,12 @@ export async function startQaAgent(
     steps,
     metadata: {
       qaTargetUrl: targetUrl,
+      qaMode: mode,
       qaGroups: normalizeQaGroups(input.groups),
       qaAutoApprove: Boolean(input.autoApprove),
       credsProvided,
       authMode: credsProvided ? "login" : "public_only",
+      ...planSeed,
       ...(credsProvided
         ? {
             quickstartEmail: input.email!.trim(),
@@ -1427,7 +1608,7 @@ export async function startQaAgent(
     input.repositoryId,
     session.id,
     "session:start",
-    `QA agent started on ${targetUrl}`,
+    `QA agent started on ${targetUrl} (${mode.replace("_", " ")})`,
   );
 
   executeQaPipeline(session.id, team.id, input.repositoryId, "qa_setup").catch(
@@ -1491,12 +1672,13 @@ export async function approveQaPlan(
     { stepId: "qa_plan_review", agentType: "orchestrator" },
   );
 
-  executeQaPipeline(
-    sessionId,
-    teamId,
-    session.repositoryId,
-    "qa_generate",
-  ).catch((err) => console.error("[QaAgent] unhandled:", err));
+  // Continue with whatever follows the review gate in THIS session's
+  // pipeline — qa_generate on full runs, qa_summary on refresh_spec runs.
+  const reviewIdx = session.steps.findIndex((s) => s.id === "qa_plan_review");
+  const nextStep = session.steps[reviewIdx + 1]?.id ?? "qa_summary";
+  executeQaPipeline(sessionId, teamId, session.repositoryId, nextStep).catch(
+    (err) => console.error("[QaAgent] unhandled:", err),
+  );
   revalidatePath("/qa-agent");
   return { success: true };
 }

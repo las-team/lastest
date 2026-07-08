@@ -331,6 +331,10 @@ export function buildPlannerUserPrompt(opts: {
   groups: QaTestGroup[];
   credsProvided: boolean;
   feedback?: string;
+  /** Digest of tests that already exist in the repo (see
+   *  buildExistingCoverageDigest). Present on refresh/spec runs so the
+   *  planner designs against the CURRENT suite instead of a blank slate. */
+  existingCoverage?: string;
 }): string {
   const groupList = opts.groups
     .map((g) => {
@@ -343,6 +347,11 @@ export function buildPlannerUserPrompt(opts: {
     `Selected coverage groups:\n${groupList}`,
     `Login credentials available: ${opts.credsProvided ? "YES — journeys may authenticate" : "NO — public surface only"}`,
   ];
+  if (opts.existingCoverage) {
+    parts.push(
+      `The repository ALREADY CONTAINS the automated tests listed below (created by earlier runs or by hand). Design the plan for the application as it is NOW: keep the plan complete (every journey and coverage angle listed, so traceability stays whole), and when a scenario is already well covered by an existing test, reuse that test's exact name as the item title so it can be matched — do not invent a variation of it. Focus new/changed scenarios on what the existing suite does NOT cover.\n\n--- EXISTING TESTS ---\n${opts.existingCoverage}`,
+    );
+  }
   if (opts.feedback) {
     parts.push(
       `The previous plan was rejected by the human reviewer with this feedback — address it:\n${opts.feedback}`,
@@ -350,6 +359,78 @@ export function buildPlannerUserPrompt(opts: {
   }
   parts.push(`--- DISCOVERY DIGEST ---\n${opts.digest}`);
   return parts.join("\n\n");
+}
+
+// ---------------------------------------------------------------------------
+// Existing-coverage matching (segmented re-runs)
+// ---------------------------------------------------------------------------
+
+/** The slice of a repo test the matcher/planner needs. */
+export interface ExistingTestSummary {
+  id: string;
+  name: string;
+  testType?: string | null;
+  functionalAreaName?: string | null;
+}
+
+const MAX_EXISTING_DIGEST_TESTS = 120;
+
+export function buildExistingCoverageDigest(
+  tests: ExistingTestSummary[],
+): string {
+  return tests
+    .slice(0, MAX_EXISTING_DIGEST_TESTS)
+    .map(
+      (t) =>
+        `- "${t.name}"${t.functionalAreaName ? ` (area: ${t.functionalAreaName})` : ""}${t.testType === "api" ? " [api]" : ""}`,
+    )
+    .join("\n");
+}
+
+function normalizeTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * Deterministically match plan items to tests that already exist. Two
+ * signals, strongest first:
+ *  1. A prior run's ledger linked the same plan-item id to a test that still
+ *     exists (fill_gaps reuses the source session's plan, so ids are stable).
+ *  2. Normalized-title equality with an existing test's name (covers manual
+ *     tests and the planner echoing an existing test's exact name).
+ * Returns planItemId → existing testId.
+ */
+export function matchPlanToExistingTests(
+  items: QaPlanItem[],
+  existingTests: ExistingTestSummary[],
+  priorLedger?: QaGeneratedTest[],
+): Map<string, string> {
+  const liveIds = new Set(existingTests.map((t) => t.id));
+  const byTitle = new Map<string, string>();
+  for (const t of existingTests) {
+    const key = normalizeTitle(t.name);
+    if (key && !byTitle.has(key)) byTitle.set(key, t.id);
+  }
+  const priorByItem = new Map<string, string>();
+  for (const entry of priorLedger ?? []) {
+    if (entry.testId && liveIds.has(entry.testId)) {
+      priorByItem.set(entry.planItemId, entry.testId);
+    }
+  }
+  const matches = new Map<string, string>();
+  for (const item of items) {
+    const prior = priorByItem.get(item.id);
+    if (prior) {
+      matches.set(item.id, prior);
+      continue;
+    }
+    const byName = byTitle.get(normalizeTitle(item.title));
+    if (byName) matches.set(item.id, byName);
+  }
+  return matches;
 }
 
 // ---------------------------------------------------------------------------
@@ -452,24 +533,28 @@ export function computeQaSummary(
 ): QaSummaryData {
   const items = enabledPlanItems(plan);
   const byGroup: QaSummaryData["byGroup"] = {};
+  const emptyBucket = () => ({
+    planned: 0,
+    generated: 0,
+    covered: 0,
+    passed: 0,
+  });
   for (const item of items) {
-    const bucket = (byGroup[item.group] ??= {
-      planned: 0,
-      generated: 0,
-      passed: 0,
-    });
+    const bucket = (byGroup[item.group] ??= emptyBucket());
     bucket.planned += 1;
   }
   let generatedCount = 0;
+  let covered = 0;
   let passed = 0;
   let failed = 0;
   let healed = 0;
   for (const g of generated) {
-    const bucket = (byGroup[g.group] ??= {
-      planned: 0,
-      generated: 0,
-      passed: 0,
-    });
+    const bucket = (byGroup[g.group] ??= emptyBucket());
+    if (g.status === "covered") {
+      covered += 1;
+      bucket.covered += 1;
+      continue;
+    }
     if (g.status !== "generation_failed" && g.status !== "generating") {
       generatedCount += 1;
       bucket.generated += 1;
@@ -493,6 +578,7 @@ export function computeQaSummary(
   return {
     planned: items.length,
     generated: generatedCount,
+    covered,
     passed,
     failed,
     healed,
