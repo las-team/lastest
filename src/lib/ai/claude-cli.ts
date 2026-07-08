@@ -8,6 +8,14 @@ function getExtendedEnv(): NodeJS.ProcessEnv {
   return { ...process.env, PATH: extendedPath };
 }
 
+// Per-call wall-clock cap. Agent-scale prompts (QA planner with a discovery
+// digest + existing-coverage section) legitimately run past the old 120s cap,
+// so the default is 4 minutes; override with CLAUDE_CLI_TIMEOUT_MS.
+function cliTimeoutMs(): number {
+  const raw = Number(process.env.CLAUDE_CLI_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 240_000;
+}
+
 export class ClaudeCLIProvider implements AIProvider {
   async generate(options: GenerateOptions): Promise<string> {
     const { prompt, systemPrompt, signal } = options;
@@ -43,7 +51,18 @@ export class ClaudeCLIProvider implements AIProvider {
         stderr += data.toString();
       });
 
+      const timeoutMs = cliTimeoutMs();
+      const timer = setTimeout(() => {
+        child.kill("SIGTERM");
+        reject(
+          new Error(
+            `Claude CLI error: timed out after ${Math.round(timeoutMs / 1000)}s`,
+          ),
+        );
+      }, timeoutMs);
+
       child.on("close", (code) => {
+        clearTimeout(timer);
         signal?.removeEventListener("abort", onAbort);
         if (code === 0) {
           resolve(stdout.trim());
@@ -57,15 +76,10 @@ export class ClaudeCLIProvider implements AIProvider {
       });
 
       child.on("error", (error) => {
+        clearTimeout(timer);
         signal?.removeEventListener("abort", onAbort);
         reject(new Error(`Claude CLI error: ${error.message}`));
       });
-
-      // 2 minute timeout
-      setTimeout(() => {
-        child.kill("SIGTERM");
-        reject(new Error("Claude CLI error: timed out after 120s"));
-      }, 120000);
 
       // Write prompt via stdin to avoid E2BIG on large prompts
       child.stdin.write(fullPrompt);
