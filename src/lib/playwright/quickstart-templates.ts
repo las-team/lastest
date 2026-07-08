@@ -223,15 +223,35 @@ ${renderEbBootstrap()}
       return c && c.value && /session|auth|token|sid|jwt/i.test(c.name || '');
     });
   }
+  // A visible, non-empty error element = real rejection. Next.js renders an
+  // always-on 1px screen-reader route announcer with role="alert"
+  // (#__next-route-announcer__) — treating IT as a rejection made every
+  // signup on a Next app race its own redirect and false-fail.
+  async function visibleAuthError() {
+    const locs = page.locator('[role="alert"]:visible, .error:visible, [data-error]:visible');
+    const count = Math.min(await locs.count().catch(function () { return 0; }), 5);
+    for (let i = 0; i < count; i++) {
+      const el = locs.nth(i);
+      const id = (await el.getAttribute('id').catch(function () { return null; })) || '';
+      if (id === '__next-route-announcer__') continue;
+      const t = ((await el.textContent().catch(function () { return ''; })) || '').replace(/\\s+/g, ' ').trim();
+      if (t.length >= 4) return true;
+    }
+    return false;
+  }
   let authed = false;
   const authDeadline = Date.now() + 30000;
   while (Date.now() < authDeadline) {
     if (!AUTH_URL_RE.test(page.url()) || (await hasSessionCookie())) { authed = true; break; }
-    const rejected = await page.locator('[role="alert"]:visible, .error:visible, [data-error]:visible').first().isVisible().catch(function () { return false; });
-    if (rejected) break;
+    if (await visibleAuthError()) break;
     await page.waitForTimeout(500);
   }
   await settle();
+  // Success can land moments after the poll gives up (sign-up → consent
+  // server-action → hard navigation) — re-check both signals before judging.
+  if (!authed) {
+    authed = !AUTH_URL_RE.test(page.url()) || (await hasSessionCookie());
+  }
 
   stepLogger.log('Scenario 3: Post-signup landing');
   const verifyBanner = page.getByText(
@@ -419,7 +439,10 @@ ${renderEbBootstrap()}
     await submit.click().catch(function () {});
     await Promise.race([
       page.waitForURL(/dashboard|onboarding|welcome|home|app|projects|account/i, { timeout: 15000 }),
-      page.waitForSelector('[role="alert"]:visible, .error:visible, [data-error]:visible', { timeout: 15000 }),
+      // :not(#__next-route-announcer__) — Next's always-present sr-only alert
+      // must not short-circuit the wait (see visibleAuthError in the signup
+      // template).
+      page.waitForSelector('[role="alert"]:not(#__next-route-announcer__):visible, .error:visible, [data-error]:visible', { timeout: 15000 }),
     ]).catch(function () {});
   }
   await settle();
@@ -432,7 +455,7 @@ ${renderEbBootstrap()}
   if (onAuthUrl && (await stillSignInCta.isVisible().catch(() => false))) {
     await page.screenshot({ path: screenshotPath, fullPage: true });
     let errText = '';
-    const errLoc = page.locator('[role="alert"], [aria-live="polite"], [aria-live="assertive"], .error, .field-error, [class*="text-red"], [class*="text-destructive"]').first();
+    const errLoc = page.locator('[role="alert"]:not(#__next-route-announcer__), [aria-live="polite"], [aria-live="assertive"], .error, .field-error, [class*="text-red"], [class*="text-destructive"]').first();
     if (await errLoc.isVisible().catch(() => false)) {
       errText = ((await errLoc.textContent().catch(() => '')) || '').replace(/\\s+/g, ' ').trim().slice(0, 200);
     }

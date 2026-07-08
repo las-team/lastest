@@ -2954,6 +2954,10 @@ export interface QaPageSnapshot {
   testIds: string[];
   candidateSelectors: string[];
   apiEndpoints: Array<{ method: string; path: string; status: number }>;
+  /** Console errors observed while this page loaded — surfaces third-party /
+   *  analytics noise so the planner can route-block it or downgrade the
+   *  console check layer (the executor reds on ANY console error otherwise). */
+  consoleErrors?: string[];
 }
 
 export interface QaDiscovery {

@@ -61,6 +61,11 @@ CRITICAL RULES:
 - Output ONLY the fixed code block, no explanations
 - Do not add test.fixme() — always attempt a real fix
 
+PRESERVE THE TEST'S INTENT (do not "fix" a test by defeating its purpose):
+- NEVER delete or loosen an assertion just to make the test pass. Fix broken SELECTORS and TIMING; if an assertion is correct but the app genuinely misbehaves, leave that assertion failing — a real product bug is a valid test result, not something to heal away.
+- NEVER remove intentional failure injection (page.route(...).abort()/fulfill({ status: 500 })) or negative-input steps. Those tests are SUPPOSED to drive an error path; heal the assertion about the error UI, not the injection.
+- "Flexible matchers for dynamic data" means matching a stable pattern (e.g. a currency/number shape), NOT weakening a specific expected value into an always-true check (toBeVisible on the body, .toBeTruthy(), removing the assertion).
+
 ${SELECTOR_ROBUSTNESS_RULES}`;
 
 // ---------------------------------------------------------------------------
@@ -74,7 +79,14 @@ ${SELECTOR_ROBUSTNESS_RULES}`;
 export async function agentHealTestCore(
   repositoryId: string,
   testId: string,
-  options?: { cdpEndpoint?: string; signal?: AbortSignal },
+  options?: {
+    cdpEndpoint?: string;
+    signal?: AbortSignal;
+    /** Caller-supplied statement of what the test is meant to prove (QA agent
+     *  passes the plan item's coverage groups + end-state requirement) so the
+     *  healer preserves that intent instead of loosening assertions to pass. */
+    intent?: string;
+  },
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   try {
     const test = await queries.getTest(testId);
@@ -82,9 +94,11 @@ export async function agentHealTestCore(
       return { success: false, error: "Test not found" };
     }
 
-    // Get latest error
+    // Get latest error. getTestResultsByTest is ordered newest-first, so the
+    // most recent failure is results[0] — NOT results.at(-1), which is the
+    // oldest run and would make the healer diagnose a stale error/DOM snapshot.
     const results = await queries.getTestResultsByTest(testId);
-    const latestResult = results[results.length - 1];
+    const latestResult = results[0];
     const errorMessage =
       latestResult?.errorMessage || "Test failed with unknown error";
 
@@ -122,7 +136,11 @@ ${test.code}
 \`\`\`
 ${errorMessage}
 \`\`\`
-${domDiffContext}
+${domDiffContext}${
+      options?.intent
+        ? `\n**What this test must prove (preserve this intent — do not weaken assertions to force a pass):**\n${options.intent}\n`
+        : ""
+    }
 **Base URL:** ${seed.baseUrl}
 
 Navigate to the relevant page using MCP tools, inspect the current UI state via browser_snapshot, diagnose why the test fails, and output the fixed test code.

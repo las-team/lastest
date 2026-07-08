@@ -92,6 +92,14 @@ export const QA_GROUPS: Array<{
 
 export const QA_GROUP_IDS = QA_GROUPS.map((g) => g.id);
 
+/** Defensive backstop on plan size. Browser tests generate SEQUENTIALLY on a
+ *  single Embedded Browser (each with a multi-minute timeout), so an unbounded
+ *  plan can run for hours. The planner prompt asks for a small set; these caps
+ *  keep a runaway plan bounded even if it ignores that. Overflow trims lowest
+ *  priority first (see sanitizeQaPlan). */
+export const MAX_PLAN_ITEMS = 20;
+export const MAX_PLAN_JOURNEYS = 5;
+
 export function normalizeQaGroups(groups: QaTestGroup[]): QaTestGroup[] {
   const valid = groups.filter((g): g is QaTestGroup =>
     QA_GROUP_IDS.includes(g),
@@ -216,6 +224,31 @@ export function isQaTestPlan(v: unknown): v is QaTestPlan {
   return p.items.length > 0;
 }
 
+/** First concrete reason a value fails isQaTestPlan, or null when it passes.
+ *  Fed into the planner-retry prompt so the model gets a specific correction
+ *  instead of a blind "that wasn't valid JSON". */
+export function explainInvalidQaPlan(v: unknown): string | null {
+  if (!v || typeof v !== "object")
+    return "top-level value is not a JSON object";
+  const p = v as Record<string, unknown>;
+  const profile = p.appProfile as Record<string, unknown> | undefined;
+  if (!profile || typeof profile.summary !== "string") {
+    return 'missing "appProfile.summary" (a string)';
+  }
+  if (!Array.isArray(p.journeys)) return '"journeys" must be an array';
+  const badJourney = p.journeys.findIndex((j) => !isJourney(j));
+  if (badJourney !== -1) {
+    return `journeys[${badJourney}] is malformed — each journey needs id, title, priority (P1|P2|P3), steps[], businessOutcome, endStateVerification`;
+  }
+  if (!Array.isArray(p.items)) return '"items" must be an array';
+  if (p.items.length === 0) return '"items" is empty — plan at least one test';
+  const badItem = p.items.findIndex((i) => !isPlanItem(i));
+  if (badItem !== -1) {
+    return `items[${badItem}] is malformed — each item needs id, group or groups[], title, priority (P1|P2|P3), scenario; api items need api.path and a valid api.method`;
+  }
+  return null;
+}
+
 /** Drop plan items whose groups the user did not select (multi-group items
  *  survive with disallowed groups stripped), backfill the primary `group`
  *  when the AI only emitted `groups`, and clear orphaned journey references.
@@ -225,8 +258,10 @@ export function sanitizeQaPlan(
   groups: QaTestGroup[],
 ): QaTestPlan {
   const allowed = new Set(groups);
-  const journeyIds = new Set(plan.journeys.map((j) => j.id));
-  const items: QaPlanItem[] = [];
+  // Cap journeys first so item journey-refs resolve against the kept set.
+  const journeys = plan.journeys.slice(0, MAX_PLAN_JOURNEYS);
+  const journeyIds = new Set(journeys.map((j) => j.id));
+  let items: QaPlanItem[] = [];
   for (const raw of plan.items) {
     const kept = itemGroups(raw).filter((g) => allowed.has(g));
     if (kept.length === 0) continue;
@@ -236,7 +271,20 @@ export function sanitizeQaPlan(
     }
     items.push(item);
   }
-  return { ...plan, items };
+  // Backstop overflow: keep original order under the cap; when over it, trim
+  // lowest-priority first (stable within a priority) so P1 coverage survives.
+  if (items.length > MAX_PLAN_ITEMS) {
+    const rank: Record<QaPriority, number> = { P1: 0, P2: 1, P3: 2 };
+    items = items
+      .map((it, idx) => ({ it, idx }))
+      .sort(
+        (a, b) => rank[a.it.priority] - rank[b.it.priority] || a.idx - b.idx,
+      )
+      .slice(0, MAX_PLAN_ITEMS)
+      .sort((a, b) => a.idx - b.idx)
+      .map((x) => x.it);
+  }
+  return { ...plan, journeys, items };
 }
 
 export function enabledPlanItems(plan: QaTestPlan): QaPlanItem[] {
@@ -299,6 +347,14 @@ function pageDigest(p: QaPageSnapshot): string {
         .join("; ")}`,
     );
   }
+  if (p.consoleErrors?.length) {
+    lines.push(
+      `Console errors on load (pre-existing noise — NOT caused by tests): ${p.consoleErrors
+        .slice(0, 8)
+        .map((e) => `"${e}"`)
+        .join("; ")}`,
+    );
+  }
   return lines.join("\n");
 }
 
@@ -317,13 +373,29 @@ export function buildDiscoveryDigest(discovery: QaDiscovery): string {
     sections.push("## Routes from source code\n(none found by static scan)");
   }
   sections.push("## Live crawl (rendered DOM — authoritative for selectors)");
-  for (const page of discovery.crawledPages) {
-    sections.push(pageDigest(page));
+
+  // Add whole page digests until the budget is spent, then stop at the page
+  // boundary and say how many were dropped — never slice mid-page, which would
+  // hand the planner a half-described page it can't ground selectors in.
+  const header = sections.join("\n\n");
+  const pages = discovery.crawledPages;
+  let budget = MAX_DIGEST_CHARS - header.length;
+  const pageSections: string[] = [];
+  let included = 0;
+  for (const page of pages) {
+    const section = pageDigest(page);
+    if (included > 0 && section.length + 2 > budget) break;
+    pageSections.push(section);
+    budget -= section.length + 2;
+    included += 1;
   }
-  const digest = sections.join("\n\n");
-  return digest.length > MAX_DIGEST_CHARS
-    ? digest.slice(0, MAX_DIGEST_CHARS) + "\n…(truncated)"
-    : digest;
+  const omitted = pages.length - included;
+  const body = pageSections.join("\n\n");
+  const suffix =
+    omitted > 0
+      ? `\n\n…(${omitted} more crawled page${omitted > 1 ? "s" : ""} omitted to fit the context budget)`
+      : "";
+  return `${header}\n\n${body}${suffix}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -345,7 +417,9 @@ const BEST_PRACTICES = `TEST DESIGN PRINCIPLES (follow strictly):
 - Resilience: abort/fail API calls, offline mode, 500/429 responses — assert graceful error UI, no blank screens, no data loss.
 - Negative: per-form input matrices — empty, whitespace, boundary lengths (min−1/min/max/max+1), wrong type, unicode/emoji, inert XSS payload strings, oversized input, double-submit.
 - Selector strategy for scenarios: reference elements by role+name or data-testid exactly as they appear in the discovery digest. NEVER invent selectors.
+- Console noise: the executor fails a test on ANY console error. When the digest reports pre-existing console errors for a page (third-party/analytics noise present before any test runs), the scenario for a non-resilience test on that page MUST instruct blocking those third-party requests (page.route the offending host to abort/fulfill) so the test only fails on errors it actually caused.
 - Every test must be independent and idempotent where possible.
+- Idempotent test data: any scenario that CREATES a record (signup, new order, new item, invited user) must use a per-run unique value for the uniqueness-constrained field (email, name, slug, title). Instruct the generator to stamp it at runtime (e.g. \`user-\${Date.now().toString(36)}@example.com\`) — a hardcoded value passes once, then fails every re-run on "already exists". Note this in the scenario for create flows.
 
 CONSOLIDATION (minimize test count): the platform runs EVERY check layer (visual, a11y/axe, performance/CWV, console, network, text, DOM) on each test execution automatically. When multiple coverage angles exercise the same page or flow, plan ONE test tagged with all applicable groups instead of separate tests — never plan a standalone a11y or perf test for a page another planned test already visits; tag that test instead. Compatibility rules:
 - smoke, ui, hybrid, journey, a11y, perf combine freely in one test.
@@ -375,7 +449,7 @@ RULES:
 - selectorHints must be copied from the digest's verified selectors / data-testid lists — never invented.
 - pagePath is relative to the target URL (e.g. "/login").
 - "businessArea" is REQUIRED on every item and journey: a short, consistent functional-domain name (e.g. "Authentication", "Accounts", "Checkout", "Marketing"). Use 2-5 distinct areas total and reuse the exact same spelling across items — they become the rows of a coverage matrix.
-- Every selected group must appear in at least one item's "groups". Plan the SMALLEST test set that achieves this — typically 1-2 items per page/flow — and 1-3 journeys. Quality over quantity: every item must be executable against the discovered pages.
+- Every selected group must appear in at least one item's "groups". Plan the SMALLEST test set that achieves this — typically 1-2 items per page/flow — and 1-3 journeys. Quality over quantity: every item must be executable against the discovered pages. HARD LIMITS: at most ${MAX_PLAN_ITEMS} items and ${MAX_PLAN_JOURNEYS} journeys — consolidate rather than exceed them (tests generate one at a time, so a bloated plan is slow and low-signal).
 - If credentials are provided, journeys may include login; if not, plan public-surface coverage only.`;
 }
 
@@ -498,11 +572,11 @@ const GROUP_GENERATION_GUIDANCE: Partial<Record<QaTestGroup, string>> = {
   resilience:
     "This is a RESILIENCE test. Use page.route() to inject failures BEFORE the interaction (e.g. await page.route('**/api/**', route => route.abort('failed')) or route.fulfill({ status: 500, body: '{}' })). Then perform the interaction and assert graceful error UI: an error message is visible, the page did not blank, and data was not silently lost. Unroute afterwards if the scenario continues.",
   negative:
-    "This is a NEGATIVE test. Drive the form(s) through the invalid-input matrix in the scenario (empty, boundary, wrong type, XSS-payload-as-inert-text). Assert validation feedback appears and no invalid submission succeeds.",
+    "This is a NEGATIVE test. Drive the form(s) through the invalid-input matrix in the scenario (empty, boundary, wrong type, XSS-payload-as-inert-text). Assert validation feedback appears and no invalid submission succeeds. When a valid control case creates a record, make its unique field per-run unique (see below).",
   hybrid:
     "This is a HYBRID test. Where the scenario says to verify via API, use the page's fetch from the browser context (const res = await page.evaluate(...fetch...)) against the same origin and assert on the JSON, in addition to UI assertions.",
   journey:
-    "This is a BUSINESS-OUTCOME JOURNEY. Complete the full flow and then PROVE the outcome per the end-state verification (assert the persisted result is visible: updated balance, created record in a list, confirmation with a real identifier). A success toast alone is insufficient.",
+    "This is a BUSINESS-OUTCOME JOURNEY. Complete the full flow and then PROVE the outcome per the end-state verification (assert the persisted result is visible: updated balance, created record in a list, confirmation with a real identifier). A success toast alone is insufficient. If the flow creates a record with a uniqueness-constrained field (email/name/slug), generate that value at runtime with a unique suffix (e.g. `item-` + Date.now().toString(36)) so the journey stays green on every re-run instead of failing on 'already exists'.",
 };
 
 export function buildGeneratorPrompt(opts: {

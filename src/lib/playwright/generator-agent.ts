@@ -33,12 +33,13 @@ WORKFLOW:
 6. Identify the reliable selectors from the snapshots (role-based locators preferred)
 7. Generate the final test code using discovered selectors
 
-MULTI-SCENARIO TESTS:
-When given multiple scenarios, create ONE test function that covers all of them in sequence.
-After verifying each scenario, take a screenshot as a checkpoint using a unique filename:
-  await page.screenshot({ path: screenshotPath.replace('.png', '-scenario-1.png'), fullPage: true });
-The final screenshot should use the original screenshotPath.
+SCENARIO / CHECKPOINT STRUCTURE:
+You are usually given ONE scenario made of numbered steps. Take a screenshot checkpoint after each KEY state the scenario reaches — the initial page, and each state a later check layer needs to see (an opened dialog, an error/validation state, the post-submit confirmation). The platform runs axe / Core Web Vitals / visual diffing on EVERY captured state, so a state that is never screenshotted is never checked. Use a unique filename per checkpoint and the original screenshotPath for the final one:
+  await page.screenshot({ path: screenshotPath.replace('.png', '-step-1.png'), fullPage: true });
+If given multiple independent scenarios, cover them in one test function in sequence.
 Group related interactions (same page/route) together for efficiency — don't navigate away and back unnecessarily.
+
+OVERLAYS: If a cookie/consent banner, newsletter, or intro modal is present and would intercept clicks, dismiss it first (accept/close) via a verified selector before interacting with the page under test.
 
 OUTPUT FORMAT:
 Generate a single JavaScript function with this exact signature — NO imports, NO TypeScript:
@@ -70,6 +71,7 @@ CRITICAL RULES:
 - Use stepLogger.log() for step descriptions — prefix with "Scenario N:" for multi-scenario tests
 - ALWAYS use regex for URL checks: await expect(page).toHaveURL(/\\/path/)
 - Every variable must use const or let
+- UNIQUE TEST DATA: when the test creates a record (signup, new item, invite), build the uniqueness-constrained field at runtime with a unique suffix — e.g. const email = \`user-\${Date.now().toString(36)}@example.com\`. Never hardcode a value that a unique constraint will reject on the second run.
 - Output ONLY the code block, no explanations
 
 ${SELECTOR_ROBUSTNESS_RULES}`;

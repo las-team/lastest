@@ -1,15 +1,35 @@
 import { chromium, type Browser } from "playwright";
 
+interface CapturedCookie {
+  name?: string;
+  value?: string;
+  domain?: string;
+  path?: string;
+  expires?: number;
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: "Strict" | "Lax" | "None";
+}
+
 /**
- * Inject a captured storage_state (cookies + localStorage) into the EB's default
- * browser context over CDP, so the next agent phase starts already-signed-in.
- * This removes LLM/deterministic login replays when a session was already
- * captured moments earlier.
+ * Inject a captured storage_state (cookies + localStorage) into the EB's live
+ * page over CDP, so the next agent phase starts already-signed-in.
  *
- * Targets `browser.contexts()[0]` — the persistent default context that
- * `@playwright/mcp --cdp-endpoint` reuses — NOT a fresh `newContext` (which MCP
- * would never see). `browser.close()` over connectOverCDP only disconnects the
- * CDP session; it does not terminate the EB's Chromium (mirrors play-agent.ts).
+ * IMPORTANT: Playwright's `context.addCookies()` is the WRONG tool here. The
+ * EB's page lives in a non-default browser context (`browser.newContext()` in
+ * the EB service); over `connectOverCDP`, `addCookies` writes to a cookie
+ * store the page's network stack never reads — the cookie shows up in
+ * `context.cookies()` but Chromium NEVER SENDS it (verified against a live EB
+ * pod: `document.cookie` stays empty, requests carry no Cookie header).
+ * A page-level CDP `Network.setCookie` writes to the page's real store and
+ * authenticates immediately. Reads (`storageState()`) are unaffected.
+ *
+ * localStorage is set by driving the EB's OWN page to each origin — a
+ * `context.newPage()` can land in a different context with a separate
+ * storage bucket, same failure mode as the cookies.
+ *
+ * `browser.close()` over connectOverCDP only disconnects the CDP session; it
+ * does not terminate the EB's Chromium (mirrors play-agent.ts).
  *
  * Returns whether enough session material (cookies and/or localStorage) was
  * injected to consider the browser pre-authenticated. IndexedDB-only captures
@@ -22,7 +42,7 @@ export async function injectStorageStateIntoEb(
   let browser: Browser | null = null;
   try {
     const parsed = JSON.parse(storageStateJson) as {
-      cookies?: Array<Record<string, unknown>>;
+      cookies?: CapturedCookie[];
       origins?: Array<{
         origin?: string;
         localStorage?: Array<{ name: string; value: string }>;
@@ -40,23 +60,46 @@ export async function injectStorageStateIntoEb(
     browser = await chromium.connectOverCDP(cdpUrl);
     const ctx = browser.contexts()[0];
     if (!ctx) return false;
+    const page = ctx.pages()[0] ?? (await ctx.newPage());
 
+    let injected = false;
     if (cookies.length > 0) {
-      // Cookies come straight from Playwright's own storageState() capture, so
-      // they already match addCookies' param shape — route through `unknown` to
-      // satisfy the structural check on the loosely-parsed JSON.
-      await ctx.addCookies(
-        cookies as unknown as Parameters<typeof ctx.addCookies>[0],
-      );
+      const cdp = await ctx.newCDPSession(page);
+      try {
+        for (const c of cookies) {
+          if (!c.name || typeof c.value !== "string") continue;
+          const ok = await cdp
+            .send("Network.setCookie", {
+              name: c.name,
+              value: c.value,
+              domain: c.domain,
+              path: c.path ?? "/",
+              secure: c.secure,
+              httpOnly: c.httpOnly,
+              sameSite: c.sameSite,
+              // -1 marks a session cookie in Playwright captures — omit so
+              // CDP treats it as a session cookie instead of expired.
+              ...(typeof c.expires === "number" && c.expires > 0
+                ? { expires: Math.floor(c.expires) }
+                : {}),
+            })
+            .then((r) => (r as { success?: boolean }).success !== false)
+            .catch(() => false);
+          injected = injected || ok;
+        }
+      } finally {
+        await cdp.detach().catch(() => {});
+      }
     }
+
     for (const o of origins) {
       const ls = Array.isArray(o.localStorage) ? o.localStorage : [];
       if (!o.origin || ls.length === 0) continue;
-      const page = await ctx.newPage();
       try {
-        await page
-          .goto(o.origin, { waitUntil: "domcontentloaded", timeout: 10000 })
-          .catch(() => {});
+        await page.goto(o.origin, {
+          waitUntil: "domcontentloaded",
+          timeout: 10000,
+        });
         await page.evaluate((items) => {
           for (const it of items) {
             try {
@@ -66,11 +109,12 @@ export async function injectStorageStateIntoEb(
             }
           }
         }, ls);
-      } finally {
-        await page.close().catch(() => {});
+        injected = true;
+      } catch {
+        // Best-effort per origin — cookies may already be enough.
       }
     }
-    return true;
+    return injected;
   } catch (err) {
     console.warn(
       `[EB storage-state] injection failed: ${
