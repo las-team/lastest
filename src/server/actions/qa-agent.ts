@@ -18,6 +18,24 @@ import { toProxyStreamUrl } from "@/lib/eb/stream-url";
 import { appendStreamToken } from "@/lib/eb/stream-token";
 import { crawlTargetApp } from "@/lib/qa-agent/crawl";
 import {
+  findAuthLinksOnEb,
+  findExistingAuthSetup,
+  loginWithCredsOnEb,
+  probeAndCaptureOnEb,
+  validateStorageStateOnEb,
+  type ExistingAuthSetup,
+} from "@/lib/qa-agent/auth";
+import { injectStorageStateIntoEb } from "@/lib/eb/inject-storage-state";
+import { captureStorageState } from "@/lib/quickstart/storage-capture";
+import {
+  renderAuthLoginCode,
+  renderAuthSetupCode,
+  renderQuickstartEmail,
+  renderQuickstartPassword,
+  slugify,
+  utcStamp,
+} from "@/lib/playwright/quickstart-templates";
+import {
   buildApiDefinition,
   buildDiscoveryDigest,
   buildExistingCoverageDigest,
@@ -42,19 +60,24 @@ import type {
   AgentStepId,
   AgentStepState,
   PwAgentType,
+  QaAuthState,
   QaDiscovery,
   QaGeneratedTest,
   QaPlanItem,
   QaRunMode,
   QaTestGroup,
   QaTestPlan,
+  TestSetupOverrides,
 } from "@/lib/db/schema";
 
 /**
  * QA Agent — the dedicated comprehensive-suite builder behind the /qa-agent
- * page. Orchestrates specialist subagents through an eight-phase pipeline:
+ * page. Orchestrates specialist subagents through a nine-phase pipeline:
  *
  *   qa_setup       orchestrator  preflight (AI provider, GitHub, target URL)
+ *   qa_login       orchestrator  resolve auth: existing setup/storage state →
+ *                                provided creds (verified live) → agent
+ *                                self-registration → public-only fallback
  *   qa_discover    scout         static route scan + live EB crawl (DOM,
  *                                selectors, observed API endpoints)
  *   qa_plan        planner       best-practices test plan grounded in discovery
@@ -82,6 +105,12 @@ const QA_STEP_DEFINITIONS: Array<{
     id: "qa_setup",
     label: "Preflight",
     description: "Validate target URL, AI provider, and GitHub connection",
+  },
+  {
+    id: "qa_login",
+    label: "Login",
+    description:
+      "Resolve authentication — existing setup, provided credentials, or an agent-registered account",
   },
   {
     id: "qa_discover",
@@ -404,6 +433,395 @@ async function runQaSetup(
   return true;
 }
 
+// ── Step: qa_login ───────────────────────────────────────────────────────────
+
+/** Create (or refresh) the repo's reusable QA login setup test so the
+ *  captured session can be re-established by the executor when it expires. */
+async function upsertQaLoginSetupTest(
+  repositoryId: string,
+  opts: { email: string; password: string; loginUrl: string },
+): Promise<string | undefined> {
+  try {
+    const name = "QA agent — auth login";
+    const code = renderAuthLoginCode(opts);
+    const tests = await queries.getTestsByRepo(repositoryId);
+    const existing = tests.find((t) => t.name === name);
+    if (existing) {
+      await queries.updateTest(existing.id, { code });
+      return existing.id;
+    }
+    const created = await queries.createTest({ repositoryId, name, code });
+    return created.id;
+  } catch (err) {
+    console.warn("[QaAgent] login setup test upsert failed:", err);
+    return undefined;
+  }
+}
+
+/**
+ * Resolve how this run authenticates, cheapest-and-safest option first:
+ *   1. existing repo setup (default setup steps / storage states), validated
+ *      live on an EB when possible;
+ *   2. user-provided credentials — verified with a real login, session
+ *      captured as a storage state for discovery + generated tests;
+ *   3. agent self-registration (opt-out) — signup URL strictly from the DOM;
+ *   4. fallback: creds tested inline during discovery, or public-only with
+ *      the auth surface itself mapped by the crawl.
+ * The step never fails the pipeline — every unresolved path degrades.
+ */
+async function runQaLogin(
+  sessionId: string,
+  teamId: string,
+  repositoryId: string,
+  signal: AbortSignal,
+): Promise<boolean> {
+  await setStepActive(sessionId, "qa_login");
+  const session = await queries.getAgentSession(sessionId);
+  if (!session?.metadata.qaTargetUrl) return false;
+  const targetUrl = session.metadata.qaTargetUrl;
+  const credentials = credentialsFrom(session.metadata);
+  const allowRegistration = session.metadata.qaAllowRegistration !== false;
+
+  const SUB_EXISTING = 0;
+  const SUB_CREDS = 1;
+  const SUB_REGISTER = 2;
+  const SUB_RESOLVE = 3;
+  const substeps: NonNullable<AgentStepState["substeps"]> = [
+    { label: "Check existing setup", status: "running", agent: "orchestrator" },
+    { label: "Test provided credentials", status: "pending", agent: "ranger" },
+    { label: "Register test account", status: "pending", agent: "ranger" },
+    {
+      label: "Resolve auth strategy",
+      status: "pending",
+      agent: "orchestrator",
+    },
+  ];
+  await updateSubsteps(sessionId, "qa_login", substeps);
+  emitActivity(
+    teamId,
+    repositoryId,
+    sessionId,
+    "step:start",
+    "Resolving login — existing setup, credentials, or registration",
+    { stepId: "qa_login", agentType: "orchestrator" },
+  );
+
+  const existing = await findExistingAuthSetup(repositoryId).catch(
+    (): ExistingAuthSetup => ({ defaultSetupInUse: false }),
+  );
+
+  let auth: QaAuthState | null = null;
+  let authLinks: { loginUrl?: string; signupUrl?: string } = {};
+  let runnerId: string | undefined;
+
+  try {
+    // One EB for validation, link discovery, and the live credential test.
+    // Unavailability is NOT fatal: resolution degrades and discovery (which
+    // claims its own EB later) picks up the deferred validation.
+    let cdpUrl: string | undefined;
+    const eb = await claimEmbeddedBrowserForAgent(EB_CLAIM_TIMEOUT_MS, () => {
+      mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+    }).catch(() => undefined);
+    await mergeMetadata(sessionId, {
+      queuedForBrowser: false,
+      ...(eb ? { streamUrl: proxiedStream(eb.streamUrl) } : {}),
+    });
+    if (eb) {
+      runnerId = eb.runnerId;
+      cdpUrl = eb.cdpUrl;
+    }
+
+    // 1) Existing setup infrastructure (setup steps / storage states).
+    if (existing.storageStateId) {
+      const row = await queries
+        .getStorageState(existing.storageStateId)
+        .catch(() => null);
+      const stateName = existing.storageStateName ?? "storage state";
+      if (!row?.storageStateJson) {
+        substeps[SUB_EXISTING] = {
+          ...substeps[SUB_EXISTING],
+          status: "done",
+          detail: `"${stateName}" could not be loaded — continuing`,
+        };
+      } else if (!cdpUrl) {
+        // Accept unvalidated; discovery validates after injecting it.
+        auth = {
+          strategy: "existing_setup",
+          validated: false,
+          storageStateId: existing.storageStateId,
+          setupTestId: existing.setupTestId,
+          defaultSetupInUse: existing.defaultSetupInUse,
+          notes: "No browser available — validation deferred to discovery",
+        };
+        substeps[SUB_EXISTING] = {
+          ...substeps[SUB_EXISTING],
+          status: "done",
+          detail: `"${stateName}" found (validation deferred — no browser)`,
+        };
+      } else {
+        const check = await validateStorageStateOnEb(
+          cdpUrl,
+          row.storageStateJson,
+          targetUrl,
+        );
+        if (check.validated || check.deferred) {
+          auth = {
+            strategy: "existing_setup",
+            validated: check.validated,
+            storageStateId: existing.storageStateId,
+            setupTestId: existing.setupTestId,
+            defaultSetupInUse: existing.defaultSetupInUse,
+            notes: check.deferred
+              ? "IndexedDB-only capture — validation deferred to discovery"
+              : undefined,
+          };
+          substeps[SUB_EXISTING] = {
+            ...substeps[SUB_EXISTING],
+            status: "done",
+            detail: check.validated
+              ? `"${stateName}" validated live — reusing it`
+              : `"${stateName}" accepted (IndexedDB-only, validation deferred)`,
+          };
+        } else {
+          substeps[SUB_EXISTING] = {
+            ...substeps[SUB_EXISTING],
+            status: "done",
+            detail: `"${stateName}" session is stale — continuing`,
+          };
+        }
+      }
+    } else if (existing.defaultSetupInUse) {
+      substeps[SUB_EXISTING] = {
+        ...substeps[SUB_EXISTING],
+        status: "done",
+        detail:
+          "Repo default setup steps found (test/script) — they run before every test",
+      };
+    } else {
+      substeps[SUB_EXISTING] = {
+        ...substeps[SUB_EXISTING],
+        status: "done",
+        detail: "No setup tests, scripts, or storage states in this repo",
+      };
+    }
+    await updateSubsteps(sessionId, "qa_login", substeps);
+    if (await isStopped(sessionId, signal)) return false;
+
+    // Discover the app's real login/signup links once (DOM only, no guessing) —
+    // both the credential test and registration need them.
+    if (
+      !auth &&
+      cdpUrl &&
+      (credentials || (allowRegistration && !existing.defaultSetupInUse))
+    ) {
+      authLinks = await findAuthLinksOnEb(cdpUrl, targetUrl);
+    }
+
+    // 2) User-provided credentials — verify with a real login and capture the
+    //    session so discovery and generated tests start authenticated.
+    if (!auth && credentials && cdpUrl) {
+      substeps[SUB_CREDS] = { ...substeps[SUB_CREDS], status: "running" };
+      await updateSubsteps(sessionId, "qa_login", substeps);
+      const login = await loginWithCredsOnEb({
+        cdpUrl,
+        targetUrl,
+        loginUrl: authLinks.loginUrl,
+        credentials,
+      });
+      if (login.ok && login.storageStateJson) {
+        const persisted = await queries.createStorageState({
+          repositoryId,
+          name: `QA agent login ${utcStamp()}`,
+          storageStateJson: login.storageStateJson,
+        });
+        const setupTestId = await upsertQaLoginSetupTest(repositoryId, {
+          email: credentials.email,
+          password: credentials.password,
+          loginUrl: authLinks.loginUrl ?? targetUrl,
+        });
+        auth = {
+          strategy: "user_creds",
+          validated: true,
+          storageStateId: persisted.id,
+          setupTestId,
+          defaultSetupInUse: existing.defaultSetupInUse,
+          loginUrl: authLinks.loginUrl,
+        };
+        substeps[SUB_CREDS] = {
+          ...substeps[SUB_CREDS],
+          status: "done",
+          detail: "Logged in — session captured for reuse",
+        };
+      } else {
+        substeps[SUB_CREDS] = {
+          ...substeps[SUB_CREDS],
+          status: "error",
+          detail: `Could not verify credentials${login.detail ? ` — ${login.detail}` : ""}; discovery will retry inline`,
+        };
+      }
+    } else {
+      substeps[SUB_CREDS] = {
+        ...substeps[SUB_CREDS],
+        status: "done",
+        detail: auth
+          ? "Not needed"
+          : credentials
+            ? "No browser available — credentials will be tested during discovery"
+            : "No credentials provided",
+      };
+    }
+    await updateSubsteps(sessionId, "qa_login", substeps);
+    if (await isStopped(sessionId, signal)) return false;
+
+    // 3) Agent self-registration (opt-out). Signup URL strictly from the DOM;
+    //    skipped when the user gave creds or the repo already has setup steps.
+    const canRegister =
+      !auth && !credentials && allowRegistration && !existing.defaultSetupInUse;
+    if (canRegister && authLinks.signupUrl) {
+      substeps[SUB_REGISTER] = { ...substeps[SUB_REGISTER], status: "running" };
+      await updateSubsteps(sessionId, "qa_login", substeps);
+      // captureStorageState runs the signup in its own disposable runner/EB
+      // (1-job-1-EB) — release ours before it claims.
+      if (runnerId) {
+        await mergeMetadata(sessionId, { streamUrl: undefined }).catch(
+          () => {},
+        );
+        await releasePoolEB(runnerId).catch(() => {});
+        runnerId = undefined;
+        cdpUrl = undefined;
+      }
+      const repo = await queries.getRepository(repositoryId);
+      const team = await queries.getTeam(teamId).catch(() => undefined);
+      const stamp = utcStamp();
+      const slug = slugify(repo?.name ?? "qa-agent");
+      const template =
+        team?.quickstartEmailTemplate ?? "viktor+{slug}{stamp}@lastest.cloud";
+      const email = renderQuickstartEmail(template, slug, stamp);
+      const password = renderQuickstartPassword(stamp);
+      const code = renderAuthSetupCode({
+        email,
+        password,
+        registerUrl: authLinks.signupUrl,
+      });
+      const setupTest = await queries.createTest({
+        repositoryId,
+        name: `QA agent — auth signup ${stamp}`,
+        code,
+      });
+      const captured = await captureStorageState({
+        repositoryId,
+        baseUrl: targetUrl,
+        testCode: code,
+        name: `QA agent signup ${slug} ${stamp}`,
+      });
+      if (captured.captured && captured.storageStateId) {
+        // Store the fresh account like user creds so credentialsFrom() and the
+        // generator fallback keep working; encrypted at rest by the query layer.
+        await mergeMetadata(sessionId, {
+          quickstartEmail: email,
+          quickstartPassword: password,
+          credsProvided: true,
+        });
+        auth = {
+          strategy: "self_registered",
+          validated: true,
+          storageStateId: captured.storageStateId,
+          setupTestId: setupTest.id,
+          registeredEmail: email,
+          signupUrl: authLinks.signupUrl,
+        };
+        substeps[SUB_REGISTER] = {
+          ...substeps[SUB_REGISTER],
+          status: "done",
+          detail: `Registered ${email} — session captured`,
+        };
+      } else {
+        substeps[SUB_REGISTER] = {
+          ...substeps[SUB_REGISTER],
+          status: "error",
+          detail: captured.failureReason ?? "signup did not complete",
+        };
+      }
+    } else {
+      substeps[SUB_REGISTER] = {
+        ...substeps[SUB_REGISTER],
+        status: "done",
+        detail: auth
+          ? "Not needed"
+          : credentials
+            ? "Skipped — credentials were provided"
+            : !allowRegistration
+              ? "Disabled for this run"
+              : existing.defaultSetupInUse
+                ? "Skipped — repo default setup already covers auth"
+                : "No sign-up link found in the app's DOM",
+      };
+    }
+    await updateSubsteps(sessionId, "qa_login", substeps);
+    if (await isStopped(sessionId, signal)) return false;
+
+    // 4) Fallback — never fails the pipeline.
+    if (!auth) {
+      if (existing.defaultSetupInUse) {
+        auth = {
+          strategy: "existing_setup",
+          validated: false,
+          setupTestId: existing.setupTestId,
+          defaultSetupInUse: true,
+          notes:
+            "Repo default setup steps run before every test — validated at execution",
+        };
+      } else if (credentials) {
+        auth = {
+          strategy: "creds_untested",
+          validated: false,
+          notes: "Credentials will be tested inline during discovery",
+        };
+      } else {
+        auth = { strategy: "public_only", validated: false };
+      }
+    }
+    auth.loginUrl = auth.loginUrl ?? authLinks.loginUrl;
+    auth.signupUrl = auth.signupUrl ?? authLinks.signupUrl;
+
+    const strategyLabel: Record<QaAuthState["strategy"], string> = {
+      existing_setup: "reusing existing setup",
+      user_creds: "credentials verified",
+      self_registered: "account registered by the agent",
+      creds_untested: "credentials untested — discovery will try them",
+      public_only: "public surface only",
+    };
+    substeps[SUB_RESOLVE] = {
+      ...substeps[SUB_RESOLVE],
+      status: "done",
+      detail: strategyLabel[auth.strategy],
+    };
+    await updateSubsteps(sessionId, "qa_login", substeps);
+
+    await mergeMetadata(sessionId, {
+      qaAuth: auth,
+      authMode: auth.strategy === "public_only" ? "public_only" : "login",
+    });
+    await setStepCompleted(sessionId, "qa_login", {
+      strategy: auth.strategy,
+      validated: auth.validated,
+      ...(auth.storageStateId ? { storageStateId: auth.storageStateId } : {}),
+    });
+    emitActivity(
+      teamId,
+      repositoryId,
+      sessionId,
+      "step:complete",
+      `Login resolved: ${strategyLabel[auth.strategy]}`,
+      { stepId: "qa_login", agentType: "orchestrator" },
+    );
+    return true;
+  } finally {
+    await mergeMetadata(sessionId, { streamUrl: undefined }).catch(() => {});
+    if (runnerId) await releasePoolEB(runnerId).catch(() => {});
+  }
+}
+
 // ── Step: qa_discover ────────────────────────────────────────────────────────
 
 async function runQaDiscover(
@@ -508,10 +926,34 @@ async function runQaDiscover(
         queuedForBrowser: false,
         streamUrl: proxiedStream(eb.streamUrl),
       });
-      const credentials = credentialsFrom(session.metadata);
+
+      // Start the crawl from the post-login state when qa_login resolved a
+      // storage state; otherwise fall back to the inline first-page login
+      // ("creds tested during discovery"). Unresolved auth also prioritizes
+      // login/signup links so the auth surface itself gets mapped.
+      const qaAuth = session.metadata.qaAuth;
+      let preAuthed = false;
+      if (qaAuth?.storageStateId) {
+        const state = await queries
+          .getStorageState(qaAuth.storageStateId)
+          .catch(() => null);
+        if (state?.storageStateJson) {
+          preAuthed = await injectStorageStateIntoEb(
+            eb.cdpUrl,
+            state.storageStateJson,
+          );
+        }
+      }
+      const credentials = preAuthed
+        ? undefined
+        : credentialsFrom(session.metadata);
       crawled = await crawlTargetApp(eb.cdpUrl, targetUrl, {
         maxPages: MAX_CRAWL_PAGES,
         credentials,
+        prioritizeAuthLinks:
+          !qaAuth ||
+          qaAuth.strategy === "public_only" ||
+          qaAuth.strategy === "creds_untested",
         signal,
         onPage: (snapshot, index) => {
           substeps[1] = {
@@ -534,10 +976,38 @@ async function runQaDiscover(
         status: crawled.pages.length > 0 ? "done" : "error",
         detail:
           crawled.pages.length > 0
-            ? `${crawled.pages.length} pages, ${crawled.pages.reduce((n, p) => n + p.apiEndpoints.length, 0)} API calls observed${crawled.loginAttempted ? ", logged in" : ""}`
+            ? `${crawled.pages.length} pages, ${crawled.pages.reduce((n, p) => n + p.apiEndpoints.length, 0)} API calls observed${preAuthed ? ", pre-authenticated" : crawled.loginAttempted ? ", logged in" : ""}`
             : "No pages could be mapped",
       };
       await updateSubsteps(sessionId, "qa_discover", substeps);
+
+      // Post-crawl auth bookkeeping while we still hold the EB: upgrade a
+      // creds_untested resolution whose inline login worked (capture the
+      // session for generation), and settle deferred validation.
+      if (
+        qaAuth &&
+        ((qaAuth.strategy === "creds_untested" && crawled.loginAttempted) ||
+          (preAuthed && !qaAuth.validated))
+      ) {
+        const probe = await probeAndCaptureOnEb(eb.cdpUrl, targetUrl);
+        if (probe.authed) {
+          let upgraded = { ...qaAuth, validated: true };
+          if (qaAuth.strategy === "creds_untested" && probe.storageStateJson) {
+            const persisted = await queries.createStorageState({
+              repositoryId,
+              name: `QA agent login ${utcStamp()}`,
+              storageStateJson: probe.storageStateJson,
+            });
+            upgraded = {
+              ...upgraded,
+              strategy: "user_creds",
+              storageStateId: persisted.id,
+              notes: "Credentials verified during discovery",
+            };
+          }
+          await mergeMetadata(sessionId, { qaAuth: upgraded });
+        }
+      }
     }
   } catch (err) {
     substeps[1] = {
@@ -797,6 +1267,25 @@ async function runQaGenerate(
     return false;
   }
   const credentials = credentialsFrom(session.metadata);
+  // Auth resolved by qa_login: a storage state (or repo default setup) means
+  // generated tests start pre-authenticated via setup steps instead of
+  // scripting their own login with prompt-injected credentials.
+  const qaAuth = session.metadata.qaAuth;
+  const preAuthenticated = Boolean(
+    qaAuth?.storageStateId || qaAuth?.defaultSetupInUse,
+  );
+  const authSetupOverrides: TestSetupOverrides | undefined =
+    qaAuth?.storageStateId && !qaAuth.defaultSetupInUse
+      ? {
+          skippedDefaultStepIds: [],
+          extraSteps: [
+            {
+              stepType: "storage_state",
+              storageStateId: qaAuth.storageStateId,
+            },
+          ],
+        }
+      : undefined;
   const items = enabledPlanItems(plan);
   // Resume-safe: skip items that already produced a test in a prior attempt.
   const ledger: QaGeneratedTest[] = [
@@ -964,6 +1453,17 @@ async function runQaGenerate(
         streamUrl: proxiedStream(eb.streamUrl),
       });
 
+      // Pre-authenticate the generation EB too, so the generator verifies
+      // selectors against the same post-login state the tests will run in.
+      if (qaAuth?.storageStateId) {
+        const state = await queries
+          .getStorageState(qaAuth.storageStateId)
+          .catch(() => null);
+        if (state?.storageStateJson) {
+          await injectStorageStateIntoEb(eb.cdpUrl, state.storageStateJson);
+        }
+      }
+
       const { agentCreateTest } =
         await import("@/lib/playwright/generator-agent");
 
@@ -993,7 +1493,8 @@ async function runQaGenerate(
                 item,
                 plan,
                 targetUrl,
-                credentials,
+                credentials: preAuthenticated ? undefined : credentials,
+                auth: { preAuthenticated },
               }),
             },
             {
@@ -1009,6 +1510,11 @@ async function runQaGenerate(
               code: result.code,
               targetUrl,
               playwrightOverrides: itemPlaywrightOverrides(itemGroups(item)),
+              // Chain the captured login session; when repo defaults already
+              // cover auth this stays undefined (defaults apply to every test).
+              ...(authSetupOverrides
+                ? { setupOverrides: authSetupOverrides }
+                : {}),
               ...(qaBot ? { createdByBotId: qaBot.id } : {}),
             });
             substeps[subIdx] = {
@@ -1460,13 +1966,23 @@ const MODE_PIPELINES: Record<QaRunMode, AgentStepId[]> = {
   // reports which plan items the current suite already covers vs. the gaps.
   refresh_spec: [
     "qa_setup",
+    "qa_login",
     "qa_discover",
     "qa_plan",
     "qa_plan_review",
     "qa_summary",
   ],
-  // Reuse the latest plan/discovery; generate only uncovered items.
-  fill_gaps: ["qa_setup", "qa_generate", "qa_execute", "qa_heal", "qa_summary"],
+  // Reuse the latest plan/discovery; generate only uncovered items. qa_login
+  // still runs: generation/execution need auth context, and a prior capture
+  // may have expired — a still-valid one resolves in seconds via option (a).
+  fill_gaps: [
+    "qa_setup",
+    "qa_login",
+    "qa_generate",
+    "qa_execute",
+    "qa_heal",
+    "qa_summary",
+  ],
 };
 
 function buildStepsForMode(mode: QaRunMode): AgentStepState[] {
@@ -1504,6 +2020,9 @@ async function executeQaPipeline(
       switch (stepId) {
         case "qa_setup":
           ok = await runQaSetup(sessionId, teamId, repositoryId, signal);
+          break;
+        case "qa_login":
+          ok = await runQaLogin(sessionId, teamId, repositoryId, signal);
           break;
         case "qa_discover":
           ok = await runQaDiscover(sessionId, teamId, repositoryId, signal);
@@ -1558,6 +2077,9 @@ export interface StartQaAgentInput {
   email?: string;
   password?: string;
   autoApprove?: boolean;
+  /** Allow the qa_login step to self-register a throwaway account when no
+   *  creds/setup exist and a signup link is found in the DOM. Default true. */
+  allowRegistration?: boolean;
 }
 
 export async function startQaAgent(
@@ -1629,6 +2151,7 @@ export async function startQaAgent(
       qaMode: mode,
       qaGroups: normalizeQaGroups(input.groups),
       qaAutoApprove: Boolean(input.autoApprove),
+      qaAllowRegistration: input.allowRegistration ?? true,
       credsProvided,
       authMode: credsProvided ? "login" : "public_only",
       ...planSeed,

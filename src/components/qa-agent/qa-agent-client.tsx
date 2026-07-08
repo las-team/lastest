@@ -183,6 +183,9 @@ function PhaseTimeline({ session }: { session: AgentSession }) {
                       : "text-muted-foreground"
                   }`}
                 >
+                  {step.id === "qa_login" && (
+                    <Lock className="inline h-3 w-3 mr-0.5 align-[-1px]" />
+                  )}
                   {step.label}
                 </span>
               </div>
@@ -276,6 +279,7 @@ function SetupCard({
   aiConfigured,
   hasStoredPlan,
   storedPlanInfo,
+  hasExistingAuthSetup,
   loading,
   error,
   onStart,
@@ -285,6 +289,7 @@ function SetupCard({
   aiConfigured: boolean;
   hasStoredPlan: boolean;
   storedPlanInfo: string | null;
+  hasExistingAuthSetup: boolean;
   loading: boolean;
   error: string | null;
   onStart: (opts: {
@@ -294,6 +299,7 @@ function SetupCard({
     email?: string;
     password?: string;
     autoApprove?: boolean;
+    allowRegistration?: boolean;
   }) => void;
 }) {
   const [targetUrl, setTargetUrl] = useState(defaultUrl);
@@ -301,6 +307,7 @@ function SetupCard({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [autoApprove, setAutoApprove] = useState(false);
+  const [allowRegistration, setAllowRegistration] = useState(true);
   const [groups, setGroups] = useState<Set<QaTestGroup>>(
     () => new Set(QA_GROUPS.map((g) => g.id)),
   );
@@ -447,9 +454,35 @@ function SetupCard({
           </div>
         </div>
         <p className="text-xs text-muted-foreground -mt-3">
-          Credentials are encrypted at rest and let the agent plan and verify
-          authenticated journeys. Without them it covers the public surface.
+          Credentials are encrypted at rest. The Login step verifies them live,
+          captures the session, and runs discovery on the post-login state — any
+          existing setup script or storage state is checked first.
         </p>
+        {hasExistingAuthSetup && (
+          <Badge
+            variant="outline"
+            className="bg-success/10 text-success border-success/30"
+          >
+            <Lock className="h-3 w-3" />
+            Existing login setup detected — the agent will reuse it
+          </Badge>
+        )}
+
+        <div className="flex items-center justify-between rounded-md border p-3">
+          <div>
+            <div className="text-sm font-medium">
+              Allow the agent to register a test account
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Used only when no credentials or working setup exist and a sign-up
+              page is discovered — creates a throwaway account on the target app
+            </div>
+          </div>
+          <Switch
+            checked={allowRegistration}
+            onCheckedChange={setAllowRegistration}
+          />
+        </div>
 
         {mode !== "fill_gaps" && (
           <div className="space-y-1.5">
@@ -519,6 +552,7 @@ function SetupCard({
               email: email.trim() || undefined,
               password: password || undefined,
               autoApprove,
+              allowRegistration,
             })
           }
         >
@@ -546,6 +580,7 @@ export function QaAgentClient({
   aiConfigured,
   hasStoredPlan,
   storedPlanInfo,
+  hasExistingAuthSetup,
   initialSession,
 }: {
   repositoryId: string;
@@ -556,6 +591,9 @@ export function QaAgentClient({
   /** A prior run stored a plan — enables the "fill coverage gaps" mode. */
   hasStoredPlan: boolean;
   storedPlanInfo: string | null;
+  /** Repo already has default setup steps or a storage state — the Login
+   *  step will check/reuse them. */
+  hasExistingAuthSetup: boolean;
   initialSession: AgentSession | null;
 }) {
   const {
@@ -594,6 +632,7 @@ export function QaAgentClient({
         aiConfigured={aiConfigured}
         hasStoredPlan={hasStoredPlan}
         storedPlanInfo={storedPlanInfo}
+        hasExistingAuthSetup={hasExistingAuthSetup}
         loading={loading}
         error={error}
         onStart={start}

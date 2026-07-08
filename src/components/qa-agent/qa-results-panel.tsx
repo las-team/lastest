@@ -190,7 +190,7 @@ export function QaSummaryPanel({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/40">
-                    <th className="text-left px-3 py-1.5 font-medium">
+                    <th className="w-full text-left px-3 py-1.5 font-medium">
                       Business area
                     </th>
                     {QA_GROUPS.filter((g) =>
@@ -198,10 +198,10 @@ export function QaSummaryPanel({
                     ).map((g) => (
                       <th
                         key={g.id}
-                        className="text-center px-2 py-1.5 font-medium whitespace-nowrap"
-                        title={g.description}
+                        className="w-14 text-center px-1.5 py-1.5 font-medium text-xs whitespace-nowrap"
+                        title={`${g.label} — ${g.description}`}
                       >
-                        {g.label}
+                        {g.short}
                       </th>
                     ))}
                   </tr>

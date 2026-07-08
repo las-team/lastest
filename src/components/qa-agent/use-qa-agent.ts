@@ -21,6 +21,7 @@ export interface StartQaOptions {
   email?: string;
   password?: string;
   autoApprove?: boolean;
+  allowRegistration?: boolean;
 }
 
 /**
@@ -196,7 +197,7 @@ export function useQaAgent(
     session?.steps.filter(
       (s) => s.status === "completed" || s.status === "skipped",
     ).length ?? 0;
-  const totalSteps = session?.steps.length ?? 8;
+  const totalSteps = session?.steps.length ?? 9;
   const progress =
     totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0;
 

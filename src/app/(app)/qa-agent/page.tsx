@@ -6,6 +6,8 @@ import {
   getRecentAgentSessions,
   getGithubAccountByTeam,
   getAISettings,
+  getDefaultSetupSteps,
+  getStorageStates,
 } from "@/lib/db/queries";
 import { getEnvironmentConfig } from "@/server/actions/environment";
 import { QaAgentClient } from "@/components/qa-agent/qa-agent-client";
@@ -46,14 +48,29 @@ export default async function QaAgentPage() {
   const activeBranch =
     selectedRepo.selectedBranch || selectedRepo.defaultBranch || "main";
 
-  const [qaSession, recentSessions, ghAccount, envConfig, aiSettings] =
-    await Promise.all([
-      getLatestAgentSession(selectedRepo.id, "qa").catch(() => null),
-      getRecentAgentSessions(selectedRepo.id, "qa", 10).catch(() => []),
-      teamId ? getGithubAccountByTeam(teamId).catch(() => null) : null,
-      getEnvironmentConfig(selectedRepo.id).catch(() => null),
-      getAISettings(selectedRepo.id).catch(() => null),
-    ]);
+  const [
+    qaSession,
+    recentSessions,
+    ghAccount,
+    envConfig,
+    aiSettings,
+    hasDefaultSetupSteps,
+    hasLiveStorageState,
+  ] = await Promise.all([
+    getLatestAgentSession(selectedRepo.id, "qa").catch(() => null),
+    getRecentAgentSessions(selectedRepo.id, "qa", 10).catch(() => []),
+    teamId ? getGithubAccountByTeam(teamId).catch(() => null) : null,
+    getEnvironmentConfig(selectedRepo.id).catch(() => null),
+    getAISettings(selectedRepo.id).catch(() => null),
+    getDefaultSetupSteps(selectedRepo.id)
+      .then((steps) => steps.length > 0)
+      .catch(() => false),
+    getStorageStates(selectedRepo.id)
+      .then((rows) =>
+        rows.some((s) => !s.expiresAt || s.expiresAt.getTime() > Date.now()),
+      )
+      .catch(() => false),
+  ]);
 
   // Latest stored plan (any prior full/refresh run) powers the fill-gaps mode.
   const planSource = recentSessions.find((s) => s.metadata.qaPlan);
@@ -75,6 +92,9 @@ export default async function QaAgentPage() {
   );
   const defaultUrl =
     selectedRepo.branchBaseUrls?.[activeBranch] ?? envConfig?.baseUrl ?? "";
+  // The Login step checks setup steps / storage states first — surface that
+  // in the setup form so the user knows creds may be unnecessary.
+  const hasExistingAuthSetup = hasDefaultSetupSteps || hasLiveStorageState;
 
   // Credentials never reach the client; drop the password from the snapshot.
   const initialSession = qaSession
@@ -108,6 +128,7 @@ export default async function QaAgentPage() {
           aiConfigured={aiConfigured}
           hasStoredPlan={Boolean(storedPlan)}
           storedPlanInfo={storedPlanInfo}
+          hasExistingAuthSetup={hasExistingAuthSetup}
           initialSession={initialSession}
         />
       </div>

@@ -2607,6 +2607,7 @@ export type AgentStepId =
   | "ranger_browse"
   // QA Agent (dedicated comprehensive-suite builder, /qa-agent page)
   | "qa_setup"
+  | "qa_login"
   | "qa_discover"
   | "qa_plan"
   | "qa_plan_review"
@@ -2829,6 +2830,40 @@ export type QaTestGroup =
   | "journey";
 
 export type QaPriority = "P1" | "P2" | "P3";
+
+/** How the qa_login step resolved authentication for the run. */
+export type QaAuthStrategy =
+  /** Repo setup infrastructure reused (default setup steps / storage state). */
+  | "existing_setup"
+  /** User-provided credentials verified on the EB; storage state captured. */
+  | "user_creds"
+  /** The agent registered its own throwaway account and captured a session. */
+  | "self_registered"
+  /** Credentials exist but could not be verified — discovery tests them inline. */
+  | "creds_untested"
+  /** No auth resolvable — public surface only (discovery maps the auth pages). */
+  | "public_only";
+
+/** Outcome of the qa_login resolution cascade. Holds no secrets — registered
+ *  credentials go into quickstartEmail/quickstartPassword (encrypted at rest). */
+export interface QaAuthState {
+  strategy: QaAuthStrategy;
+  /** The authed heuristic was confirmed live on an EB (no password field,
+   *  final URL not an auth page). False = deferred to discovery/execution. */
+  validated: boolean;
+  storageStateId?: string;
+  /** Login/signup setup test created or found for reuse via setupOverrides. */
+  setupTestId?: string;
+  /** Repo default setup steps already cover auth — generated tests must NOT
+   *  add extraSteps (the executor applies defaults to every test already). */
+  defaultSetupInUse?: boolean;
+  /** Observed in the target app's DOM — never URL-guessed. */
+  loginUrl?: string;
+  /** Observed in the target app's DOM — never URL-guessed. */
+  signupUrl?: string;
+  registeredEmail?: string;
+  notes?: string;
+}
 
 /** A critical user journey with a verifiable business outcome. */
 export interface QaPlanJourney {
@@ -3060,6 +3095,12 @@ export interface AgentSessionMetadata {
   qaGroups?: QaTestGroup[];
   /** Skip the human plan-review gate and generate immediately. */
   qaAutoApprove?: boolean;
+  /** Allow the qa_login step to self-register a throwaway account when no
+   *  credentials/setup exist and a signup link is discovered in the DOM.
+   *  Absent = allowed (opt-out via the setup form). */
+  qaAllowRegistration?: boolean;
+  /** Resolved auth strategy for this run, decided by the qa_login step. */
+  qaAuth?: QaAuthState;
   /** Live + static discovery output feeding the planner. */
   qaDiscovery?: QaDiscovery;
   /** The structured test plan produced by the planner subagent. */
