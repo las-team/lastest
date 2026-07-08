@@ -28,6 +28,7 @@ import {
   CheckCircle2,
   Circle,
   CircleDashed,
+  FileText,
   Github,
   Loader2,
   Lock,
@@ -39,6 +40,7 @@ import {
   RotateCcw,
   SkipForward,
   UserRound,
+  X,
   XCircle,
 } from "lucide-react";
 
@@ -300,6 +302,7 @@ function SetupCard({
     password?: string;
     autoApprove?: boolean;
     allowRegistration?: boolean;
+    docs?: Array<{ name: string; contentBase64: string }>;
   }) => void;
 }) {
   const [targetUrl, setTargetUrl] = useState(defaultUrl);
@@ -308,9 +311,40 @@ function SetupCard({
   const [password, setPassword] = useState("");
   const [autoApprove, setAutoApprove] = useState(false);
   const [allowRegistration, setAllowRegistration] = useState(true);
+  const [docs, setDocs] = useState<File[]>([]);
   const [groups, setGroups] = useState<Set<QaTestGroup>>(
     () => new Set(QA_GROUPS.map((g) => g.id)),
   );
+
+  const addDocs = (files: FileList | null) => {
+    if (!files) return;
+    setDocs((prev) => {
+      const next = [...prev];
+      for (const file of Array.from(files)) {
+        if (file.size > 10 * 1024 * 1024) continue;
+        if (next.some((f) => f.name === file.name)) continue;
+        next.push(file);
+      }
+      return next.slice(0, 5);
+    });
+  };
+
+  const encodeDocs = async (): Promise<
+    Array<{ name: string; contentBase64: string }>
+  > => {
+    const encoded: Array<{ name: string; contentBase64: string }> = [];
+    for (const file of docs) {
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      const CHUNK = 0x8000;
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+      }
+      encoded.push({ name: file.name, contentBase64: btoa(binary) });
+    }
+    return encoded;
+  };
 
   const toggleGroup = (id: QaTestGroup) => {
     setGroups((prev) => {
@@ -486,6 +520,58 @@ function SetupCard({
 
         {mode !== "fill_gaps" && (
           <div className="space-y-1.5">
+            <Label htmlFor="qa-docs" className="flex items-center gap-1.5">
+              <FileText className="h-3 w-3" />
+              Product documentation{" "}
+              <span className="text-muted-foreground">(optional)</span>
+            </Label>
+            <Input
+              id="qa-docs"
+              type="file"
+              multiple
+              accept=".md,.txt,.pdf,.docx"
+              onChange={(e) => {
+                addDocs(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            {docs.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {docs.map((file) => (
+                  <Badge
+                    key={file.name}
+                    variant="outline"
+                    className="gap-1 text-xs font-normal"
+                  >
+                    <FileText className="h-3 w-3" />
+                    {file.name}
+                    <button
+                      type="button"
+                      className="ml-0.5 text-muted-foreground hover:text-foreground"
+                      onClick={() =>
+                        setDocs((prev) =>
+                          prev.filter((f) => f.name !== file.name),
+                        )
+                      }
+                      aria-label={`Remove ${file.name}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Requirements, specs, or manuals (.md/.txt/.pdf/.docx, up to 5
+              files). The planner treats them as authoritative for intended
+              behavior — including flows the crawl can&apos;t reach. Only a
+              condensed digest is stored.
+            </p>
+          </div>
+        )}
+
+        {mode !== "fill_gaps" && (
+          <div className="space-y-1.5">
             <Label>Coverage groups</Label>
             <div className="grid sm:grid-cols-2 gap-1.5">
               {QA_GROUPS.map((group) => (
@@ -544,7 +630,7 @@ function SetupCard({
 
         <Button
           disabled={!canStart}
-          onClick={() =>
+          onClick={async () =>
             onStart({
               targetUrl: targetUrl.trim(),
               mode,
@@ -553,6 +639,10 @@ function SetupCard({
               password: password || undefined,
               autoApprove,
               allowRegistration,
+              docs:
+                mode !== "fill_gaps" && docs.length > 0
+                  ? await encodeDocs()
+                  : undefined,
             })
           }
         >
@@ -674,6 +764,8 @@ export function QaAgentClient({
               </div>
               <div className="text-xs opacity-80 truncate">
                 {repositoryName} → {session.metadata.qaTargetUrl}
+                {(session.metadata.qaDocs?.length ?? 0) > 0 &&
+                  ` · ${session.metadata.qaDocs!.length} doc${session.metadata.qaDocs!.length === 1 ? "" : "s"} provided`}
               </div>
             </div>
             <div className="flex items-center gap-2">

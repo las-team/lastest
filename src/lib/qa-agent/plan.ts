@@ -1,3 +1,4 @@
+import { buildCodeCheckDigest } from "./code-check";
 import type {
   ApiTestDefinition,
   QaDiscovery,
@@ -361,6 +362,9 @@ function pageDigest(p: QaPageSnapshot): string {
 export function buildDiscoveryDigest(discovery: QaDiscovery): string {
   const sections: string[] = [];
   sections.push(`Target URL: ${discovery.targetUrl}`);
+  if (discovery.codeCheck) {
+    sections.push(buildCodeCheckDigest(discovery.codeCheck));
+  }
   if (discovery.staticRoutes?.length) {
     sections.push(
       `## Routes from source code (${discovery.framework ?? "unknown framework"})\n` +
@@ -445,7 +449,7 @@ RULES:
 - "scenario" must be generator-ready: numbered concrete steps with expected results, grounded in the discovery digest (real button labels, real form fields, real paths).
 - "groups" lists EVERY coverage group the test satisfies, most-defining first — the scenario must genuinely exercise each listed group (a11y: reaches the key interaction states; perf: plain navigation to the page; ui: user-visible interaction).
 - Every journey needs at least one covering item with "journey" in its groups and journeyId set (traceability).
-- Items with "api" in groups MUST include the "api" object using an endpoint observed in discovery. Do not plan api items for endpoints you did not observe.
+- Items with "api" in groups MUST include the "api" object using an endpoint observed during the live crawl OR declared in the code analysis. Do not invent endpoints that appear in neither.
 - selectorHints must be copied from the digest's verified selectors / data-testid lists — never invented.
 - pagePath is relative to the target URL (e.g. "/login").
 - "businessArea" is REQUIRED on every item and journey: a short, consistent functional-domain name (e.g. "Authentication", "Accounts", "Checkout", "Marketing"). Use 2-5 distinct areas total and reuse the exact same spelling across items — they become the rows of a coverage matrix.
@@ -469,6 +473,9 @@ export function buildPlannerUserPrompt(opts: {
    *  buildExistingCoverageDigest). Present on refresh/spec runs so the
    *  planner designs against the CURRENT suite instead of a blank slate. */
   existingCoverage?: string;
+  /** Condensed uploaded product documentation (requirements/specs/manuals) —
+   *  authoritative for intended behavior, journeys, and business areas. */
+  docsDigest?: string;
 }): string {
   const groupList = opts.groups
     .map((g) => {
@@ -483,6 +490,11 @@ export function buildPlannerUserPrompt(opts: {
       ? "Authenticated session available: YES — the discovery crawl ran signed-in and every generated test starts authenticated. The DISCOVERY DIGEST below is the signed-in, in-app surface. Plan coverage of THAT in-app surface (the real product features the crawl mapped — dashboards, lists, detail pages, settings, create/edit flows). Do NOT reduce the plan to public login/register/marketing pages; those are the gateway, not the product. Journeys must exercise the primary in-app outcome, not just reaching the app."
       : "Authenticated session available: NO — public surface only. Plan coverage of the public pages the crawl mapped (login, register, forgot-password, marketing) only; do not plan tests that require being signed in.",
   ];
+  if (opts.docsDigest) {
+    parts.push(
+      `PRODUCT DOCUMENTATION was provided (below). Treat it as AUTHORITATIVE for intended behavior: derive journeys, business outcomes, business areas, and priorities from it; use its terminology; and plan coverage for documented behavior even when the crawl did not reach it (note "documented, not observed in crawl" in the rationale — such items still need concrete, cautious scenarios).\n\n--- PRODUCT DOCUMENTATION ---\n${opts.docsDigest}`,
+    );
+  }
   if (opts.existingCoverage) {
     parts.push(
       `The repository ALREADY CONTAINS the automated tests listed below (created by earlier runs or by hand). Design the plan for the application as it is NOW: keep the plan complete (every journey and coverage angle listed, so traceability stays whole), and when a scenario is already well covered by an existing test, reuse that test's exact name as the item title so it can be matched — do not invent a variation of it. Focus new/changed scenarios on what the existing suite does NOT cover.\n\n--- EXISTING TESTS ---\n${opts.existingCoverage}`,

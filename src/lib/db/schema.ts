@@ -2967,6 +2967,16 @@ export interface QaDiscovery {
   staticRoutes?: Array<{ path: string; type: string }>;
   framework?: string;
   githubConnected: boolean;
+  /** Code-check output (repo-aware mode): stack facts, testing implications,
+   *  and API endpoints declared in code. Shape in src/lib/qa-agent/code-check. */
+  codeCheck?: {
+    framework?: string;
+    authMechanism?: string;
+    apiLayer?: string;
+    projectDescription?: string;
+    testingNotes: string[];
+    declaredEndpoints: Array<{ method: string; path: string; file: string }>;
+  };
 }
 
 /** How a QA session runs. `full` is the complete pipeline; `refresh_spec`
@@ -3107,6 +3117,12 @@ export interface AgentSessionMetadata {
   qaAuth?: QaAuthState;
   /** Live + static discovery output feeding the planner. */
   qaDiscovery?: QaDiscovery;
+  /** Uploaded product docs (name + decoded size only — raw files are never
+   *  persisted). */
+  qaDocs?: Array<{ name: string; chars: number }>;
+  /** Condensed documentation text the planner treats as authoritative for
+   *  intended behavior. Capped (see src/lib/qa-agent/docs.ts). */
+  qaDocsDigest?: string;
   /** The structured test plan produced by the planner subagent. */
   qaPlan?: QaTestPlan;
   /** User feedback captured on "request changes" — fed to the planner rerun. */
