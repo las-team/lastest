@@ -176,6 +176,89 @@ export function QaSummaryPanel({
           ))}
         </div>
 
+        {summary.matrix && Object.keys(summary.matrix).length > 0 && (
+          <div className="space-y-1">
+            <h4 className="text-sm font-medium">
+              Coverage matrix{" "}
+              <span className="text-xs font-normal text-muted-foreground">
+                — business area × test group (covered+generated / planned, ✓
+                passing this run)
+              </span>
+            </h4>
+            <div className="rounded-md border overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/40">
+                    <th className="text-left px-3 py-1.5 font-medium">
+                      Business area
+                    </th>
+                    {QA_GROUPS.filter((g) =>
+                      Object.values(summary.matrix!).some((row) => row[g.id]),
+                    ).map((g) => (
+                      <th
+                        key={g.id}
+                        className="text-center px-2 py-1.5 font-medium whitespace-nowrap"
+                        title={g.description}
+                      >
+                        {g.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {Object.entries(summary.matrix).map(([area, row]) => (
+                    <tr key={area}>
+                      <td className="px-3 py-1.5 font-medium whitespace-nowrap">
+                        {area}
+                      </td>
+                      {QA_GROUPS.filter((g) =>
+                        Object.values(summary.matrix!).some((r) => r[g.id]),
+                      ).map((g) => {
+                        const cell = row[g.id];
+                        if (!cell || cell.planned === 0) {
+                          return (
+                            <td
+                              key={g.id}
+                              className="text-center px-2 py-1.5 text-muted-foreground/40"
+                            >
+                              —
+                            </td>
+                          );
+                        }
+                        const done = cell.covered + cell.generated;
+                        const complete =
+                          cell.covered + cell.passed === cell.planned;
+                        const hasGap = done < cell.planned;
+                        return (
+                          <td
+                            key={g.id}
+                            className={`text-center px-2 py-1.5 whitespace-nowrap ${
+                              complete
+                                ? "text-success"
+                                : hasGap
+                                  ? "text-warning"
+                                  : ""
+                            }`}
+                            title={`planned ${cell.planned} · covered ${cell.covered} · generated ${cell.generated} · passing ${cell.passed}`}
+                          >
+                            {done}/{cell.planned}
+                            {cell.passed > 0 && (
+                              <span className="text-xs text-success">
+                                {" "}
+                                {cell.passed}✓
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {groupRows.length > 0 && (
           <div className="space-y-1">
             <h4 className="text-sm font-medium">By group</h4>

@@ -133,7 +133,8 @@ function isJourney(v: unknown): v is QaPlanJourney {
     PRIORITIES.includes(j.priority as QaPriority) &&
     isStringArray(j.steps) &&
     typeof j.businessOutcome === "string" &&
-    typeof j.endStateVerification === "string"
+    typeof j.endStateVerification === "string" &&
+    (j.businessArea === undefined || typeof j.businessArea === "string")
   );
 }
 
@@ -145,7 +146,8 @@ function isPlanItem(v: unknown): v is QaPlanItem {
     !QA_GROUP_IDS.includes(i.group as QaTestGroup) ||
     typeof i.title !== "string" ||
     !PRIORITIES.includes(i.priority as QaPriority) ||
-    typeof i.scenario !== "string"
+    typeof i.scenario !== "string" ||
+    (i.businessArea !== undefined && typeof i.businessArea !== "string")
   ) {
     return false;
   }
@@ -309,8 +311,8 @@ ${BEST_PRACTICES}
 OUTPUT: a single JSON object, no markdown fences, no commentary, matching exactly:
 {
   "appProfile": { "summary": string, "businessDomain": string, "primaryOutcome": string },
-  "journeys": [ { "id": "J1", "title": string, "priority": "P1"|"P2"|"P3", "steps": [string], "businessOutcome": string, "endStateVerification": string } ],
-  "items": [ { "id": "T1", "group": <group>, "title": string, "priority": "P1"|"P2"|"P3", "journeyId": string?, "pagePath": string?, "rationale": string, "scenario": string, "selectorHints": [string]?, "api": { "method": "GET"|"POST"|"PUT"|"PATCH"|"DELETE", "path": string, "expectedStatus": number }? } ],
+  "journeys": [ { "id": "J1", "title": string, "priority": "P1"|"P2"|"P3", "businessArea": string, "steps": [string], "businessOutcome": string, "endStateVerification": string } ],
+  "items": [ { "id": "T1", "group": <group>, "title": string, "priority": "P1"|"P2"|"P3", "journeyId": string?, "businessArea": string, "pagePath": string?, "rationale": string, "scenario": string, "selectorHints": [string]?, "api": { "method": "GET"|"POST"|"PUT"|"PATCH"|"DELETE", "path": string, "expectedStatus": number }? } ],
   "entryCriteria": [string],
   "exitCriteria": [string],
   "risks": [string]
@@ -322,6 +324,7 @@ RULES:
 - Items in group "api" MUST include the "api" object using an endpoint observed in discovery. Do not plan api items for endpoints you did not observe.
 - selectorHints must be copied from the digest's verified selectors / data-testid lists — never invented.
 - pagePath is relative to the target URL (e.g. "/login").
+- "businessArea" is REQUIRED on every item and journey: a short, consistent functional-domain name (e.g. "Authentication", "Accounts", "Checkout", "Marketing"). Use 2-5 distinct areas total and reuse the exact same spelling across items — they become the rows of a coverage matrix.
 - 2-4 items per selected group, 1-3 journeys. Quality over quantity: every item must be executable against the discovered pages.
 - If credentials are provided, journeys may include login; if not, plan public-surface coverage only.`;
 }
@@ -575,6 +578,33 @@ export function computeQaSummary(
       .filter((g) => g.testId && coveringItems.has(g.planItemId))
       .map((g) => g.testId!) as string[];
   }
+
+  // Coverage matrix: business area × test group. Rows come from the plan's
+  // businessArea labels ("General" when the planner omitted one).
+  const ledgerByItem = new Map(generated.map((g) => [g.planItemId, g]));
+  const matrix: NonNullable<QaSummaryData["matrix"]> = {};
+  for (const item of items) {
+    const area = item.businessArea?.trim() || "General";
+    const row = (matrix[area] ??= {});
+    const cell = (row[item.group] ??= {
+      planned: 0,
+      covered: 0,
+      generated: 0,
+      passed: 0,
+    });
+    cell.planned += 1;
+    const entry = ledgerByItem.get(item.id);
+    if (!entry) continue;
+    if (entry.status === "covered") {
+      cell.covered += 1;
+    } else if (entry.status !== "generating" && entry.testId) {
+      cell.generated += 1;
+      if (entry.status === "passed" || entry.status === "healed") {
+        cell.passed += 1;
+      }
+    }
+  }
+
   return {
     planned: items.length,
     generated: generatedCount,
@@ -583,6 +613,7 @@ export function computeQaSummary(
     failed,
     healed,
     byGroup,
+    matrix,
     journeyCoverage,
   };
 }

@@ -170,6 +170,14 @@ export function QaPlanReview({
                           <span className="font-medium truncate">
                             {item.title}
                           </span>
+                          {item.businessArea && (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] px-1.5 text-muted-foreground shrink-0"
+                            >
+                              {item.businessArea}
+                            </Badge>
+                          )}
                           {item.pagePath && (
                             <code className="text-[10px] text-muted-foreground">
                               {item.pagePath}
