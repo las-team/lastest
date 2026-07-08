@@ -450,13 +450,20 @@ RULES:
 - pagePath is relative to the target URL (e.g. "/login").
 - "businessArea" is REQUIRED on every item and journey: a short, consistent functional-domain name (e.g. "Authentication", "Accounts", "Checkout", "Marketing"). Use 2-5 distinct areas total and reuse the exact same spelling across items — they become the rows of a coverage matrix.
 - Every selected group must appear in at least one item's "groups". Plan the SMALLEST test set that achieves this — typically 1-2 items per page/flow — and 1-3 journeys. Quality over quantity: every item must be executable against the discovered pages. HARD LIMITS: at most ${MAX_PLAN_ITEMS} items and ${MAX_PLAN_JOURNEYS} journeys — consolidate rather than exceed them (tests generate one at a time, so a bloated plan is slow and low-signal).
-- If credentials are provided, journeys may include login; if not, plan public-surface coverage only.`;
+- Ground the plan in the DISCOVERY DIGEST's actual crawled pages. When the digest's crawled pages are signed-in, in-app pages (a dashboard, resource lists, detail/settings pages), the app IS authenticated for this run — plan coverage of that in-app product surface. Never collapse an authenticated run into public login/register pages that the crawl did not even map; the auth pages are the gateway, not the product.
+- Authentication: when an authenticated session is available (see the user message), plan the in-app surface and journeys need NOT script a login (the session is applied automatically) — do not spend items on the login form unless login itself is a listed coverage goal. When no authenticated session is available, plan public-surface coverage only.`;
 }
 
 export function buildPlannerUserPrompt(opts: {
   digest: string;
   groups: QaTestGroup[];
-  credsProvided: boolean;
+  /** The discovery crawl ran with an authenticated session AND generated tests
+   *  will run authenticated (typed credentials, a captured storage state, or
+   *  repo default setup steps). When true the planner must cover the
+   *  discovered signed-in in-app surface, not just public auth/marketing pages.
+   *  This is auth AVAILABILITY, not "plaintext credentials were typed" — a
+   *  storage-state session counts. */
+  authenticated: boolean;
   feedback?: string;
   /** Digest of tests that already exist in the repo (see
    *  buildExistingCoverageDigest). Present on refresh/spec runs so the
@@ -472,7 +479,9 @@ export function buildPlannerUserPrompt(opts: {
   const parts = [
     `Design the test plan for the application described below.`,
     `Selected coverage groups:\n${groupList}`,
-    `Login credentials available: ${opts.credsProvided ? "YES — journeys may authenticate" : "NO — public surface only"}`,
+    opts.authenticated
+      ? "Authenticated session available: YES — the discovery crawl ran signed-in and every generated test starts authenticated. The DISCOVERY DIGEST below is the signed-in, in-app surface. Plan coverage of THAT in-app surface (the real product features the crawl mapped — dashboards, lists, detail pages, settings, create/edit flows). Do NOT reduce the plan to public login/register/marketing pages; those are the gateway, not the product. Journeys must exercise the primary in-app outcome, not just reaching the app."
+      : "Authenticated session available: NO — public surface only. Plan coverage of the public pages the crawl mapped (login, register, forgot-password, marketing) only; do not plan tests that require being signed in.",
   ];
   if (opts.existingCoverage) {
     parts.push(

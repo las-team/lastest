@@ -1180,7 +1180,20 @@ async function runQaPlan(
     return false;
   }
   const groups = normalizeQaGroups(session.metadata.qaGroups ?? []);
-  const credsProvided = Boolean(session.metadata.credsProvided);
+  // Whether the plan should target the authenticated in-app surface. This is
+  // auth AVAILABILITY, not "plaintext credentials were typed": qa_login may
+  // resolve auth via a captured/existing storage state or repo default setup
+  // (existing_setup / registered / creds verified), in which case the crawl
+  // ran signed-in and generated tests start authenticated too. Mirrors the
+  // `preAuthenticated` calc in runQaPlanReview. Using credsProvided alone here
+  // wrongly told the planner "public surface only" on storage-state runs, so it
+  // discarded the whole authed digest and planned only login pages.
+  const qaAuth = session.metadata.qaAuth;
+  const authenticated = Boolean(
+    session.metadata.credsProvided ||
+    qaAuth?.storageStateId ||
+    qaAuth?.defaultSetupInUse,
+  );
   const feedback = session.metadata.qaPlannerFeedback;
 
   const substeps: NonNullable<AgentStepState["substeps"]> = [
@@ -1223,7 +1236,7 @@ async function runQaPlan(
       buildPlannerUserPrompt({
         digest,
         groups,
-        credsProvided,
+        authenticated,
         existingCoverage,
         feedback:
           [feedback, extraFeedback].filter(Boolean).join("\n") || undefined,
