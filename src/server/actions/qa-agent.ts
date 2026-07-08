@@ -26,8 +26,9 @@ import {
   buildPlannerUserPrompt,
   computeQaSummary,
   enabledPlanItems,
-  groupPlaywrightOverrides,
   isQaTestPlan,
+  itemGroups,
+  itemPlaywrightOverrides,
   matchPlanToExistingTests,
   normalizeQaGroups,
   sanitizeQaPlan,
@@ -43,6 +44,7 @@ import type {
   PwAgentType,
   QaDiscovery,
   QaGeneratedTest,
+  QaPlanItem,
   QaRunMode,
   QaTestGroup,
   QaTestPlan,
@@ -730,7 +732,7 @@ async function runQaPlan(
     byGroup: Object.fromEntries(
       QA_GROUPS.map((g) => [
         g.id,
-        sanitized.items.filter((i) => i.group === g.id).length,
+        sanitized.items.filter((i) => itemGroups(i).includes(g.id)).length,
       ]).filter(([, n]) => (n as number) > 0),
     ),
   });
@@ -819,6 +821,7 @@ async function runQaGenerate(
     ledger.push({
       planItemId: item.id,
       group: item.group,
+      groups: itemGroups(item),
       testId,
       name: item.title,
       status: "covered",
@@ -842,6 +845,8 @@ async function runQaGenerate(
 
   const groupLabel = (g: QaTestGroup) =>
     QA_GROUPS.find((m) => m.id === g)?.label ?? g;
+  const itemLabel = (item: QaPlanItem) =>
+    itemGroups(item).map(groupLabel).join(" + ");
 
   // Areas: one per group, flat, prefixed for recognizability in /tests.
   const areaIdByGroup = new Map<QaTestGroup, string>();
@@ -859,7 +864,7 @@ async function runQaGenerate(
 
   const substeps: NonNullable<AgentStepState["substeps"]> = pending.map(
     (item) => ({
-      label: `${groupLabel(item.group)}: ${item.title}`,
+      label: `${itemLabel(item)}: ${item.title}`,
       status: "pending",
       agent: "generator",
     }),
@@ -874,7 +879,9 @@ async function runQaGenerate(
   };
 
   // API items need no browser — build headless definitions directly.
-  const apiItems = pending.filter((i) => i.group === "api" && i.api);
+  const apiItems = pending.filter(
+    (i) => itemGroups(i).includes("api") && i.api,
+  );
   const browserItems = pending.filter((i) => !apiItems.includes(i));
 
   for (const item of apiItems) {
@@ -892,6 +899,7 @@ async function runQaGenerate(
       await upsertLedger({
         planItemId: item.id,
         group: item.group,
+        groups: itemGroups(item),
         name: item.title,
         status: "generation_failed",
         error: "Plan item had no API definition",
@@ -913,6 +921,7 @@ async function runQaGenerate(
     await upsertLedger({
       planItemId: item.id,
       group: item.group,
+      groups: itemGroups(item),
       testId: test.id,
       name: item.title,
       status: "generated",
@@ -969,7 +978,7 @@ async function runQaGenerate(
           repositoryId,
           sessionId,
           "substep:update",
-          `Generator working on "${item.title}" (${item.group})`,
+          `Generator working on "${item.title}" (${itemGroups(item).join(" + ")})`,
           { stepId: "qa_generate", agentType: "generator" },
         );
         try {
@@ -999,7 +1008,7 @@ async function runQaGenerate(
               name: item.title,
               code: result.code,
               targetUrl,
-              playwrightOverrides: groupPlaywrightOverrides(item.group),
+              playwrightOverrides: itemPlaywrightOverrides(itemGroups(item)),
               ...(qaBot ? { createdByBotId: qaBot.id } : {}),
             });
             substeps[subIdx] = {
@@ -1010,6 +1019,7 @@ async function runQaGenerate(
             await upsertLedger({
               planItemId: item.id,
               group: item.group,
+              groups: itemGroups(item),
               testId: test.id,
               name: item.title,
               status: "generated",
@@ -1019,7 +1029,7 @@ async function runQaGenerate(
               repositoryId,
               sessionId,
               "artifact:created",
-              `Generated test "${item.title}" (${item.group})`,
+              `Generated test "${item.title}" (${itemGroups(item).join(" + ")})`,
               {
                 stepId: "qa_generate",
                 agentType: "generator",
@@ -1040,6 +1050,7 @@ async function runQaGenerate(
             await upsertLedger({
               planItemId: item.id,
               group: item.group,
+              groups: itemGroups(item),
               name: item.title,
               status: "generation_failed",
               error: result.error,
@@ -1057,6 +1068,7 @@ async function runQaGenerate(
           await upsertLedger({
             planItemId: item.id,
             group: item.group,
+            groups: itemGroups(item),
             name: item.title,
             status: "generation_failed",
             error: msg,
@@ -1405,6 +1417,7 @@ async function runQaSummary(
       .map((i) => ({
         planItemId: i.id,
         group: i.group,
+        groups: itemGroups(i),
         testId: coveredBy.get(i.id),
         name: i.title,
         status: "covered" as const,

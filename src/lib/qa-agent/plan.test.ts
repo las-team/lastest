@@ -9,6 +9,8 @@ import {
   enabledPlanItems,
   groupPlaywrightOverrides,
   isQaTestPlan,
+  itemGroups,
+  itemPlaywrightOverrides,
   matchPlanToExistingTests,
   normalizeQaGroups,
   sanitizeQaPlan,
@@ -17,6 +19,7 @@ import type {
   QaDiscovery,
   QaGeneratedTest,
   QaPageSnapshot,
+  QaPlanItem,
   QaTestPlan,
 } from "@/lib/db/schema";
 
@@ -489,5 +492,111 @@ describe("coverage matrix", () => {
     expect(isQaTestPlan(plan)).toBe(true);
     (plan.items[0] as unknown as Record<string, unknown>).businessArea = 42;
     expect(isQaTestPlan(plan)).toBe(false);
+  });
+});
+
+describe("multi-group plan items", () => {
+  const multiItem = (overrides: Partial<QaPlanItem> = {}): QaPlanItem => ({
+    id: "T9",
+    group: "smoke",
+    groups: ["smoke", "a11y", "perf"],
+    title: "Landing renders, accessible, fast",
+    priority: "P1",
+    scenario: "1. Open / 2. Expect heading Welcome",
+    ...overrides,
+  });
+
+  it("itemGroups falls back to [group] and normalizes order/dupes", () => {
+    expect(itemGroups(validPlan().items[1])).toEqual(["smoke"]);
+    // Primary first, rest in canonical order, dupes dropped.
+    expect(
+      itemGroups(multiItem({ groups: ["a11y", "perf", "smoke", "a11y"] })),
+    ).toEqual(["a11y", "smoke", "perf"]);
+  });
+
+  it("validator accepts groups arrays and rejects invalid ids in them", () => {
+    const plan = validPlan();
+    plan.items.push(multiItem());
+    expect(isQaTestPlan(plan)).toBe(true);
+    // groups-only item (no primary group) is accepted; sanitize backfills.
+    const groupsOnly = multiItem();
+    delete (groupsOnly as Partial<QaPlanItem>).group;
+    plan.items[plan.items.length - 1] = groupsOnly;
+    expect(isQaTestPlan(plan)).toBe(true);
+    plan.items[plan.items.length - 1] = multiItem({
+      groups: ["smoke", "nope" as never],
+    });
+    expect(isQaTestPlan(plan)).toBe(false);
+  });
+
+  it("sanitize strips unselected groups, keeps the item, backfills group", () => {
+    const plan = validPlan();
+    const groupsOnly = multiItem({ groups: ["a11y", "smoke", "perf"] });
+    delete (groupsOnly as Partial<QaPlanItem>).group;
+    plan.items.push(groupsOnly);
+    const out = sanitizeQaPlan(plan, ["journey", "smoke"]);
+    const kept = out.items.find((i) => i.id === "T9")!;
+    expect(kept.groups).toEqual(["smoke"]);
+    expect(kept.group).toBe("smoke");
+    // Item with no surviving group is dropped (T3 is api-only).
+    expect(out.items.some((i) => i.id === "T3")).toBe(false);
+  });
+
+  it("itemPlaywrightOverrides merges overrides across groups", () => {
+    expect(itemPlaywrightOverrides(["smoke", "a11y", "perf"])).toEqual({
+      a11yMode: "enforce",
+      perfMode: "enforce",
+    });
+    expect(itemPlaywrightOverrides(["ui", "resilience"])).toEqual({
+      networkMode: "log",
+      consoleMode: "log",
+    });
+    expect(itemPlaywrightOverrides(["smoke", "ui"])).toBeUndefined();
+  });
+
+  it("generator prompt lists all groups and stacks their guidance", () => {
+    const plan = validPlan();
+    const prompt = buildGeneratorPrompt({
+      item: multiItem(),
+      plan,
+      targetUrl: "https://app.example.com",
+    });
+    expect(prompt).toContain("Coverage groups: smoke + a11y + perf");
+    expect(prompt).toContain("SMOKE test");
+    expect(prompt).toContain("ACCESSIBILITY test");
+    expect(prompt).toContain("PERFORMANCE test");
+  });
+
+  it("summary counts a multi-group test in every tagged bucket and cell", () => {
+    const plan = validPlan();
+    plan.items = [multiItem({ businessArea: "Marketing" })];
+    const summary = computeQaSummary(plan, [
+      {
+        planItemId: "T9",
+        group: "smoke",
+        groups: ["smoke", "a11y", "perf"],
+        testId: "t-9",
+        name: "Landing renders, accessible, fast",
+        status: "passed",
+      },
+    ]);
+    // One test, three coverage marks.
+    expect(summary.planned).toBe(1);
+    expect(summary.generated).toBe(1);
+    expect(summary.passed).toBe(1);
+    for (const g of ["smoke", "a11y", "perf"] as const) {
+      expect(summary.byGroup[g]).toMatchObject({
+        planned: 1,
+        generated: 1,
+        passed: 1,
+      });
+      expect(summary.matrix?.Marketing?.[g]).toEqual({
+        planned: 1,
+        covered: 0,
+        generated: 1,
+        passed: 1,
+      });
+    }
+    expect(summary.byGroup.ui).toBeUndefined();
   });
 });

@@ -91,6 +91,16 @@ export function normalizeQaGroups(groups: QaTestGroup[]): QaTestGroup[] {
   return QA_GROUP_IDS.filter((g) => set.has(g));
 }
 
+/** All coverage groups a plan item satisfies: `groups` (deduped, primary
+ *  first, rest in canonical order) or `[group]` for legacy single-group
+ *  items. One generated test counts toward every group returned here. */
+export function itemGroups(item: QaPlanItem): QaTestGroup[] {
+  const raw = item.groups?.filter((g) => QA_GROUP_IDS.includes(g));
+  if (!raw?.length) return [item.group];
+  const rest = new Set(raw.filter((g) => g !== raw[0]));
+  return [raw[0], ...QA_GROUP_IDS.filter((g) => rest.has(g))];
+}
+
 /**
  * Per-group check-layer overrides applied to generated tests. Sparse — absent
  * keys fall through to repo defaults (see TestPlaywrightOverrides). a11y and
@@ -112,6 +122,20 @@ export function groupPlaywrightOverrides(
     default:
       return undefined;
   }
+}
+
+/** Merged check-layer overrides for a (possibly multi-group) plan item.
+ *  Group override keys are disjoint (a11yMode / perfMode / networkMode+
+ *  consoleMode), so a plain spread-merge is conflict-free. */
+export function itemPlaywrightOverrides(
+  groups: QaTestGroup[],
+): TestPlaywrightOverrides | undefined {
+  let merged: TestPlaywrightOverrides | undefined;
+  for (const group of groups) {
+    const overrides = groupPlaywrightOverrides(group);
+    if (overrides) merged = { ...merged, ...overrides };
+  }
+  return merged;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,9 +165,15 @@ function isJourney(v: unknown): v is QaPlanJourney {
 function isPlanItem(v: unknown): v is QaPlanItem {
   if (!v || typeof v !== "object") return false;
   const i = v as Record<string, unknown>;
+  const hasGroup = QA_GROUP_IDS.includes(i.group as QaTestGroup);
+  const hasGroups =
+    Array.isArray(i.groups) &&
+    i.groups.length > 0 &&
+    i.groups.every((g) => QA_GROUP_IDS.includes(g as QaTestGroup));
+  if (i.groups !== undefined && !hasGroups) return false;
   if (
     typeof i.id !== "string" ||
-    !QA_GROUP_IDS.includes(i.group as QaTestGroup) ||
+    (!hasGroup && !hasGroups) ||
     typeof i.title !== "string" ||
     !PRIORITIES.includes(i.priority as QaPriority) ||
     typeof i.scenario !== "string" ||
@@ -175,24 +205,27 @@ export function isQaTestPlan(v: unknown): v is QaTestPlan {
   return p.items.length > 0;
 }
 
-/** Drop plan items in groups the user did not select, and orphaned journey
- *  references. Keeps the plan internally consistent after AI generation. */
+/** Drop plan items whose groups the user did not select (multi-group items
+ *  survive with disallowed groups stripped), backfill the primary `group`
+ *  when the AI only emitted `groups`, and clear orphaned journey references.
+ *  Keeps the plan internally consistent after AI generation. */
 export function sanitizeQaPlan(
   plan: QaTestPlan,
   groups: QaTestGroup[],
 ): QaTestPlan {
   const allowed = new Set(groups);
   const journeyIds = new Set(plan.journeys.map((j) => j.id));
-  return {
-    ...plan,
-    items: plan.items
-      .filter((i) => allowed.has(i.group))
-      .map((i) =>
-        i.journeyId && !journeyIds.has(i.journeyId)
-          ? { ...i, journeyId: undefined }
-          : i,
-      ),
-  };
+  const items: QaPlanItem[] = [];
+  for (const raw of plan.items) {
+    const kept = itemGroups(raw).filter((g) => allowed.has(g));
+    if (kept.length === 0) continue;
+    const item: QaPlanItem = { ...raw, group: kept[0], groups: kept };
+    if (item.journeyId && !journeyIds.has(item.journeyId)) {
+      item.journeyId = undefined;
+    }
+    items.push(item);
+  }
+  return { ...plan, items };
 }
 
 export function enabledPlanItems(plan: QaTestPlan): QaPlanItem[] {
@@ -301,7 +334,12 @@ const BEST_PRACTICES = `TEST DESIGN PRINCIPLES (follow strictly):
 - Resilience: abort/fail API calls, offline mode, 500/429 responses — assert graceful error UI, no blank screens, no data loss.
 - Negative: per-form input matrices — empty, whitespace, boundary lengths (min−1/min/max/max+1), wrong type, unicode/emoji, inert XSS payload strings, oversized input, double-submit.
 - Selector strategy for scenarios: reference elements by role+name or data-testid exactly as they appear in the discovery digest. NEVER invent selectors.
-- Every test must be independent and idempotent where possible.`;
+- Every test must be independent and idempotent where possible.
+
+CONSOLIDATION (minimize test count): the platform runs EVERY check layer (visual, a11y/axe, performance/CWV, console, network, text, DOM) on each test execution automatically. When multiple coverage angles exercise the same page or flow, plan ONE test tagged with all applicable groups instead of separate tests — never plan a standalone a11y or perf test for a page another planned test already visits; tag that test instead. Compatibility rules:
+- smoke, ui, hybrid, journey, a11y, perf combine freely in one test.
+- resilience and negative may combine with each other (both expect console/network noise) but NEVER with smoke or journey (smoke is production-safe read-only; an injected failure invalidates outcome proof).
+- api never combines (headless, no browser).`;
 
 export function buildPlannerSystemPrompt(): string {
   return `You are a principal QA architect designing a comprehensive automated test suite for a web application. You are given real discovery data: rendered-DOM page maps, verified selectors, observed API endpoints, and (when available) routes from the app's source code.
@@ -312,7 +350,7 @@ OUTPUT: a single JSON object, no markdown fences, no commentary, matching exactl
 {
   "appProfile": { "summary": string, "businessDomain": string, "primaryOutcome": string },
   "journeys": [ { "id": "J1", "title": string, "priority": "P1"|"P2"|"P3", "businessArea": string, "steps": [string], "businessOutcome": string, "endStateVerification": string } ],
-  "items": [ { "id": "T1", "group": <group>, "title": string, "priority": "P1"|"P2"|"P3", "journeyId": string?, "businessArea": string, "pagePath": string?, "rationale": string, "scenario": string, "selectorHints": [string]?, "api": { "method": "GET"|"POST"|"PUT"|"PATCH"|"DELETE", "path": string, "expectedStatus": number }? } ],
+  "items": [ { "id": "T1", "groups": [<group>, ...], "title": string, "priority": "P1"|"P2"|"P3", "journeyId": string?, "businessArea": string, "pagePath": string?, "rationale": string, "scenario": string, "selectorHints": [string]?, "api": { "method": "GET"|"POST"|"PUT"|"PATCH"|"DELETE", "path": string, "expectedStatus": number }? } ],
   "entryCriteria": [string],
   "exitCriteria": [string],
   "risks": [string]
@@ -320,12 +358,13 @@ OUTPUT: a single JSON object, no markdown fences, no commentary, matching exactl
 
 RULES:
 - "scenario" must be generator-ready: numbered concrete steps with expected results, grounded in the discovery digest (real button labels, real form fields, real paths).
-- Every journey needs at least one covering item with group "journey" and journeyId set (traceability).
-- Items in group "api" MUST include the "api" object using an endpoint observed in discovery. Do not plan api items for endpoints you did not observe.
+- "groups" lists EVERY coverage group the test satisfies, most-defining first — the scenario must genuinely exercise each listed group (a11y: reaches the key interaction states; perf: plain navigation to the page; ui: user-visible interaction).
+- Every journey needs at least one covering item with "journey" in its groups and journeyId set (traceability).
+- Items with "api" in groups MUST include the "api" object using an endpoint observed in discovery. Do not plan api items for endpoints you did not observe.
 - selectorHints must be copied from the digest's verified selectors / data-testid lists — never invented.
 - pagePath is relative to the target URL (e.g. "/login").
 - "businessArea" is REQUIRED on every item and journey: a short, consistent functional-domain name (e.g. "Authentication", "Accounts", "Checkout", "Marketing"). Use 2-5 distinct areas total and reuse the exact same spelling across items — they become the rows of a coverage matrix.
-- 2-4 items per selected group, 1-3 journeys. Quality over quantity: every item must be executable against the discovered pages.
+- Every selected group must appear in at least one item's "groups". Plan the SMALLEST test set that achieves this — typically 1-2 items per page/flow — and 1-3 journeys. Quality over quantity: every item must be executable against the discovered pages.
 - If credentials are provided, journeys may include login; if not, plan public-surface coverage only.`;
 }
 
@@ -462,15 +501,22 @@ export function buildGeneratorPrompt(opts: {
   credentials?: { email: string; password: string };
 }): string {
   const { item, plan } = opts;
+  const groups = itemGroups(item);
   const journey = item.journeyId
     ? plan.journeys.find((j) => j.id === item.journeyId)
     : undefined;
   const parts: string[] = [];
   parts.push(`Test: ${item.title}`);
-  parts.push(`Coverage group: ${item.group} · Priority: ${item.priority}`);
+  parts.push(
+    `Coverage group${groups.length > 1 ? "s" : ""}: ${groups.join(" + ")} · Priority: ${item.priority}`,
+  );
   if (item.pagePath) parts.push(`Page under test: ${item.pagePath}`);
-  const guidance = GROUP_GENERATION_GUIDANCE[item.group];
-  if (guidance) parts.push(guidance);
+  // Multi-group items get every group's guidance (canonical order, primary
+  // first — itemGroups guarantees that), so one test serves all its tags.
+  for (const group of groups) {
+    const guidance = GROUP_GENERATION_GUIDANCE[group];
+    if (guidance) parts.push(guidance);
+  }
   parts.push(`Scenario:\n${item.scenario}`);
   if (journey) {
     parts.push(
@@ -542,9 +588,13 @@ export function computeQaSummary(
     covered: 0,
     passed: 0,
   });
+  // A multi-group test counts toward EVERY group it is tagged with — per-group
+  // buckets measure coverage, not test count (top-level totals stay per-test).
   for (const item of items) {
-    const bucket = (byGroup[item.group] ??= emptyBucket());
-    bucket.planned += 1;
+    for (const group of itemGroups(item)) {
+      const bucket = (byGroup[group] ??= emptyBucket());
+      bucket.planned += 1;
+    }
   }
   let generatedCount = 0;
   let covered = 0;
@@ -552,19 +602,20 @@ export function computeQaSummary(
   let failed = 0;
   let healed = 0;
   for (const g of generated) {
-    const bucket = (byGroup[g.group] ??= emptyBucket());
+    const groups = g.groups?.length ? g.groups : [g.group];
+    const buckets = groups.map((grp) => (byGroup[grp] ??= emptyBucket()));
     if (g.status === "covered") {
       covered += 1;
-      bucket.covered += 1;
+      for (const bucket of buckets) bucket.covered += 1;
       continue;
     }
     if (g.status !== "generation_failed" && g.status !== "generating") {
       generatedCount += 1;
-      bucket.generated += 1;
+      for (const bucket of buckets) bucket.generated += 1;
     }
     if (g.status === "passed" || g.status === "healed") {
       passed += 1;
-      bucket.passed += 1;
+      for (const bucket of buckets) bucket.passed += 1;
     }
     if (g.status === "healed") healed += 1;
     if (g.status === "failed") failed += 1;
@@ -586,21 +637,24 @@ export function computeQaSummary(
   for (const item of items) {
     const area = item.businessArea?.trim() || "General";
     const row = (matrix[area] ??= {});
-    const cell = (row[item.group] ??= {
-      planned: 0,
-      covered: 0,
-      generated: 0,
-      passed: 0,
-    });
-    cell.planned += 1;
     const entry = ledgerByItem.get(item.id);
-    if (!entry) continue;
-    if (entry.status === "covered") {
-      cell.covered += 1;
-    } else if (entry.status !== "generating" && entry.testId) {
-      cell.generated += 1;
-      if (entry.status === "passed" || entry.status === "healed") {
-        cell.passed += 1;
+    // A multi-group test marks every group column it is tagged with.
+    for (const group of itemGroups(item)) {
+      const cell = (row[group] ??= {
+        planned: 0,
+        covered: 0,
+        generated: 0,
+        passed: 0,
+      });
+      cell.planned += 1;
+      if (!entry) continue;
+      if (entry.status === "covered") {
+        cell.covered += 1;
+      } else if (entry.status !== "generating" && entry.testId) {
+        cell.generated += 1;
+        if (entry.status === "passed" || entry.status === "healed") {
+          cell.passed += 1;
+        }
       }
     }
   }
