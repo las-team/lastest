@@ -239,21 +239,22 @@ describe("buildDiscoveryDigest", () => {
 });
 
 describe("buildPlannerUserPrompt", () => {
-  it("states credential availability and embeds feedback", () => {
-    const withCreds = buildPlannerUserPrompt({
+  it("states auth availability and embeds feedback", () => {
+    const authed = buildPlannerUserPrompt({
       digest: "D",
       groups: ["journey", "smoke"],
-      credsProvided: true,
+      authenticated: true,
     });
-    expect(withCreds).toContain("YES — journeys may authenticate");
+    expect(authed).toContain("Authenticated session available: YES");
+    expect(authed).toContain("in-app surface");
     const rejected = buildPlannerUserPrompt({
       digest: "D",
       groups: ["journey"],
-      credsProvided: false,
+      authenticated: false,
       feedback: "Cover the transfer form too",
     });
     expect(rejected).toContain("Cover the transfer form too");
-    expect(rejected).toContain("NO — public surface only");
+    expect(rejected).toContain("Authenticated session available: NO");
   });
 });
 
@@ -433,7 +434,7 @@ describe("existing coverage in planner prompt", () => {
     const prompt = buildPlannerUserPrompt({
       digest: "D",
       groups: ["journey"],
-      credsProvided: false,
+      authenticated: false,
       existingCoverage: '- "Login smoke"',
     });
     expect(prompt).toContain("ALREADY CONTAINS");
