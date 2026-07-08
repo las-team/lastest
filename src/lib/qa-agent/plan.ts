@@ -26,6 +26,8 @@ import type {
 export const QA_GROUPS: Array<{
   id: QaTestGroup;
   label: string;
+  /** Compact label for narrow matrix column headers. */
+  short: string;
   description: string;
   /** journey is always planned; the user cannot deselect it. */
   locked?: boolean;
@@ -33,6 +35,7 @@ export const QA_GROUPS: Array<{
   {
     id: "journey",
     label: "Business journeys",
+    short: "Journey",
     description:
       "Critical user journeys with verified business outcomes (e.g. order placed)",
     locked: true,
@@ -40,41 +43,49 @@ export const QA_GROUPS: Array<{
   {
     id: "smoke",
     label: "Smoke",
+    short: "Smoke",
     description: "Fast, read-mostly checks of critical paths — the PR gate",
   },
   {
     id: "api",
     label: "API",
+    short: "API",
     description: "Headless HTTP tests against observed API endpoints",
   },
   {
     id: "ui",
     label: "UI",
+    short: "UI",
     description: "User-visible flows and interactions per page",
   },
   {
     id: "hybrid",
     label: "Hybrid",
+    short: "Hybrid",
     description: "API-seeded state exercised and verified through the UI",
   },
   {
     id: "a11y",
     label: "Accessibility",
+    short: "A11y",
     description: "WCAG 2.2 AA checks (axe) on key pages and interaction states",
   },
   {
     id: "perf",
     label: "Performance",
+    short: "Perf",
     description: "Core Web Vitals budgets (LCP/CLS/TTFB) on key pages",
   },
   {
     id: "resilience",
     label: "Resilience",
+    short: "Resil",
     description: "Network failure injection and error-path behavior",
   },
   {
     id: "negative",
     label: "Negative",
+    short: "Neg",
     description: "Input validation matrices, boundaries, and abuse strings",
   },
 ];
@@ -499,6 +510,10 @@ export function buildGeneratorPrompt(opts: {
   plan: QaTestPlan;
   targetUrl: string;
   credentials?: { email: string; password: string };
+  /** When qa_login captured a session, tests start authenticated via setup
+   *  steps — the generator must not script a login (and gets no plaintext
+   *  credentials). */
+  auth?: { preAuthenticated: boolean };
 }): string {
   const { item, plan } = opts;
   const groups = itemGroups(item);
@@ -530,7 +545,11 @@ export function buildGeneratorPrompt(opts: {
         .join("\n")}`,
     );
   }
-  if (opts.credentials) {
+  if (opts.auth?.preAuthenticated) {
+    parts.push(
+      "The browser session starts already authenticated — a stored login session is applied as a setup step before the test runs. Do NOT write login steps; navigate straight to the page under test.",
+    );
+  } else if (opts.credentials) {
     parts.push(
       `If the scenario requires authentication, log in first with email "${opts.credentials.email}" and password "${opts.credentials.password}".`,
     );

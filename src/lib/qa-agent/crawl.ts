@@ -1,5 +1,6 @@
 import { chromium, type Page } from "playwright";
 import type { QaPageSnapshot } from "@/lib/db/schema";
+import { isAuthLink } from "@/lib/qa-agent/auth-links";
 
 /**
  * QA Agent live discovery crawl. Connects to a provisioned Embedded Browser
@@ -21,6 +22,9 @@ export interface QaCrawlOptions {
   onPage?: (snapshot: QaPageSnapshot, index: number) => void;
   /** Login before crawling: fills the first form containing a password field. */
   credentials?: { email: string; password: string };
+  /** Rank login/signup/register links first when picking pages to follow, so
+   *  public-only discovery reliably maps the auth surface within maxPages. */
+  prioritizeAuthLinks?: boolean;
   signal?: AbortSignal;
 }
 
@@ -138,6 +142,7 @@ function pickNextLinks(
   base: URL,
   visited: Set<string>,
   count: number,
+  prioritizeAuth = false,
 ): string[] {
   const seen = new Set<string>();
   const candidates: Array<{ url: string; score: number }> = [];
@@ -150,14 +155,18 @@ function pickNextLinks(
     // Prefer labeled nav links with shallow paths; skip asset-ish URLs.
     if (/\.(png|jpe?g|svg|css|js|pdf|zip)(\?|$)/i.test(url.pathname)) continue;
     const depth = url.pathname.split("/").filter(Boolean).length;
-    const score = (link.text ? 0 : 5) + depth;
+    const authBonus =
+      prioritizeAuth && isAuthLink(link.text, url.pathname) ? 10 : 0;
+    const score = (link.text ? 0 : 5) + depth - authBonus;
     candidates.push({ url: key, score });
   }
   candidates.sort((a, b) => a.score - b.score);
   return candidates.slice(0, count).map((c) => c.url);
 }
 
-async function attemptLogin(
+/** Fill and submit the first form containing a password field. Shared with the
+ *  qa_login step, which drives the same deterministic login on its own EB. */
+export async function attemptLogin(
   page: Page,
   credentials: { email: string; password: string },
 ): Promise<boolean> {
@@ -265,6 +274,7 @@ export async function crawlTargetApp(
           base,
           visited,
           maxPages - pages.length,
+          options.prioritizeAuthLinks,
         )) {
           queue.push(next);
         }

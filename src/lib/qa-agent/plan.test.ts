@@ -286,6 +286,29 @@ describe("buildGeneratorPrompt", () => {
     });
     expect(withCreds).toContain("qa@example.com");
   });
+
+  it("pre-authenticated sessions forbid login steps and omit credentials", () => {
+    const plan = validPlan();
+    const prompt = buildGeneratorPrompt({
+      item: plan.items[1],
+      plan,
+      targetUrl: "https://app.example.com",
+      auth: { preAuthenticated: true },
+    });
+    expect(prompt).toContain("already authenticated");
+    expect(prompt).toContain("Do NOT write login steps");
+    expect(prompt).not.toContain("s3cret");
+
+    const notPreAuthed = buildGeneratorPrompt({
+      item: plan.items[1],
+      plan,
+      targetUrl: "https://app.example.com",
+      credentials: { email: "qa@example.com", password: "s3cret" },
+      auth: { preAuthenticated: false },
+    });
+    expect(notPreAuthed).not.toContain("already authenticated");
+    expect(notPreAuthed).toContain("qa@example.com");
+  });
 });
 
 describe("buildApiDefinition", () => {

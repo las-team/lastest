@@ -1,12 +1,22 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { QaTestPlan } from "@/lib/db/schema";
+import type {
+  QaPlanItem,
+  QaPlanJourney,
+  QaTestGroup,
+  QaTestPlan,
+} from "@/lib/db/schema";
 import { itemGroups, QA_GROUPS } from "@/lib/qa-agent/plan";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Check,
@@ -32,6 +42,88 @@ function PriorityBadge({ priority }: { priority: string }) {
     >
       {priority}
     </Badge>
+  );
+}
+
+const groupLabel = (id: QaTestGroup) =>
+  QA_GROUPS.find((g) => g.id === id)?.label ?? id;
+
+/** Full plan-item details shown on hover over a matrix row's title. */
+function ItemDetailCard({
+  item,
+  groups,
+  journey,
+}: {
+  item: QaPlanItem;
+  groups: QaTestGroup[];
+  journey?: QaPlanJourney;
+}) {
+  return (
+    <div className="space-y-2 text-xs">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <PriorityBadge priority={item.priority} />
+        <span className="text-sm font-medium">{item.title}</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-1">
+        {groups.map((g) => (
+          <Badge key={g} variant="secondary" className="text-[10px] px-1.5">
+            {groupLabel(g)}
+          </Badge>
+        ))}
+        {item.pagePath && (
+          <code className="text-[10px] text-muted-foreground">
+            {item.pagePath}
+          </code>
+        )}
+      </div>
+      <div>
+        <div className="font-medium text-muted-foreground">Scenario</div>
+        <div className="whitespace-pre-line">{item.scenario}</div>
+      </div>
+      {item.rationale && (
+        <div>
+          <div className="font-medium text-muted-foreground">Rationale</div>
+          <div>{item.rationale}</div>
+        </div>
+      )}
+      {item.api && (
+        <div>
+          <div className="font-medium text-muted-foreground">API</div>
+          <code className="text-[11px]">
+            {item.api.method} {item.api.path}
+            {item.api.expectedStatus ? ` → ${item.api.expectedStatus}` : ""}
+          </code>
+        </div>
+      )}
+      {journey && (
+        <div>
+          <div className="font-medium text-muted-foreground">
+            Journey: {journey.title}
+          </div>
+          <div>
+            {journey.businessOutcome}
+            <span className="text-muted-foreground">
+              {" "}
+              · verified by: {journey.endStateVerification}
+            </span>
+          </div>
+        </div>
+      )}
+      {item.selectorHints && item.selectorHints.length > 0 && (
+        <div>
+          <div className="font-medium text-muted-foreground">
+            Verified selectors
+          </div>
+          <div className="space-y-0.5">
+            {item.selectorHints.map((s) => (
+              <code key={s} className="block text-[11px] break-all">
+                {s}
+              </code>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -159,14 +251,16 @@ export function QaPlanReview({
               <thead>
                 <tr className="border-b bg-muted/40">
                   {!readOnly && <th className="w-8 px-2 py-1.5" />}
-                  <th className="text-left px-3 py-1.5 font-medium">Test</th>
+                  <th className="w-full text-left px-3 py-1.5 font-medium">
+                    Test
+                  </th>
                   {presentGroups.map((g) => (
                     <th
                       key={g.id}
-                      className="text-center px-2 py-1.5 font-medium whitespace-nowrap"
-                      title={g.description}
+                      className="w-12 text-center px-1.5 py-1.5 font-medium text-xs whitespace-nowrap"
+                      title={`${g.label} — ${g.description}`}
                     >
-                      {g.label}
+                      {g.short}
                     </th>
                   ))}
                 </tr>
@@ -193,10 +287,33 @@ export function QaPlanReview({
                           />
                         </td>
                       )}
-                      <td className="px-3 py-2 min-w-64">
-                        <div className="flex items-center gap-2">
+                      <td className="w-full min-w-72 px-3 py-2">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                           <PriorityBadge priority={item.priority} />
-                          <span className="font-medium">{item.title}</span>
+                          <HoverCard openDelay={150} closeDelay={100}>
+                            <HoverCardTrigger asChild>
+                              <span className="font-medium cursor-help underline-offset-4 decoration-dotted decoration-muted-foreground/60 hover:underline">
+                                {item.title}
+                              </span>
+                            </HoverCardTrigger>
+                            <HoverCardContent
+                              align="start"
+                              className="w-96 max-h-96 overflow-y-auto"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <ItemDetailCard
+                                item={item}
+                                groups={groups}
+                                journey={
+                                  item.journeyId
+                                    ? plan.journeys.find(
+                                        (j) => j.id === item.journeyId,
+                                      )
+                                    : undefined
+                                }
+                              />
+                            </HoverCardContent>
+                          </HoverCard>
                           {item.businessArea && (
                             <Badge
                               variant="outline"
@@ -221,7 +338,7 @@ export function QaPlanReview({
                         return (
                           <td
                             key={g.id}
-                            className="text-center px-2 py-2 align-middle"
+                            className="text-center px-1.5 py-2 align-middle"
                             title={
                               covers
                                 ? `${g.label}${primary ? " (primary)" : ""}`
