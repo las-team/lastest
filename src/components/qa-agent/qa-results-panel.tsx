@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   CheckCircle2,
   ExternalLink,
+  FileCheck,
   FileCode,
   Loader2,
   Wrench,
@@ -37,6 +38,11 @@ const STATUS_META: Record<
     label: "Gen failed",
     className: "bg-destructive/10 text-destructive border-destructive/30",
     icon: XCircle,
+  },
+  covered: {
+    label: "Covered",
+    className: "bg-info/10 text-info border-info/30",
+    icon: FileCheck,
   },
   passed: {
     label: "Passed",
@@ -149,12 +155,19 @@ export function QaSummaryPanel({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           {[
             { label: "Planned", value: summary.planned },
+            { label: "Covered", value: summary.covered ?? 0 },
             { label: "Generated", value: summary.generated },
             { label: "Passing", value: summary.passed },
-            { label: "Healed", value: summary.healed },
+            {
+              label: "Gaps",
+              value: Math.max(
+                0,
+                summary.planned - (summary.covered ?? 0) - summary.generated,
+              ),
+            },
           ].map((stat) => (
             <div key={stat.label} className="rounded-md border p-3 text-center">
               <div className="text-2xl font-semibold">{stat.value}</div>
@@ -176,6 +189,7 @@ export function QaSummaryPanel({
                   >
                     <span>{group.label}</span>
                     <span className="text-muted-foreground text-xs">
+                      {(row.covered ?? 0) > 0 && `${row.covered} covered · `}
                       {row.generated}/{row.planned} generated · {row.passed}{" "}
                       passing
                     </span>

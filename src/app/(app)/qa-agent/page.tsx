@@ -3,6 +3,7 @@ import { getCurrentSession } from "@/lib/auth";
 import {
   getSelectedRepository,
   getLatestAgentSession,
+  getRecentAgentSessions,
   getGithubAccountByTeam,
   getAISettings,
 } from "@/lib/db/queries";
@@ -45,12 +46,24 @@ export default async function QaAgentPage() {
   const activeBranch =
     selectedRepo.selectedBranch || selectedRepo.defaultBranch || "main";
 
-  const [qaSession, ghAccount, envConfig, aiSettings] = await Promise.all([
-    getLatestAgentSession(selectedRepo.id, "qa").catch(() => null),
-    teamId ? getGithubAccountByTeam(teamId).catch(() => null) : null,
-    getEnvironmentConfig(selectedRepo.id).catch(() => null),
-    getAISettings(selectedRepo.id).catch(() => null),
-  ]);
+  const [qaSession, recentSessions, ghAccount, envConfig, aiSettings] =
+    await Promise.all([
+      getLatestAgentSession(selectedRepo.id, "qa").catch(() => null),
+      getRecentAgentSessions(selectedRepo.id, "qa", 10).catch(() => []),
+      teamId ? getGithubAccountByTeam(teamId).catch(() => null) : null,
+      getEnvironmentConfig(selectedRepo.id).catch(() => null),
+      getAISettings(selectedRepo.id).catch(() => null),
+    ]);
+
+  // Latest stored plan (any prior full/refresh run) powers the fill-gaps mode.
+  const planSource = recentSessions.find((s) => s.metadata.qaPlan);
+  const storedPlan = planSource?.metadata.qaPlan;
+  const storedPlanInfo = storedPlan
+    ? `${storedPlan.items.length} items, ${storedPlan.journeys.length} journeys` +
+      (planSource?.createdAt
+        ? ` (from ${new Date(planSource.createdAt).toLocaleDateString()})`
+        : "")
+    : null;
 
   const githubConnected = Boolean(
     ghAccount?.accessToken &&
@@ -93,6 +106,8 @@ export default async function QaAgentPage() {
           defaultUrl={defaultUrl}
           githubConnected={githubConnected}
           aiConfigured={aiConfigured}
+          hasStoredPlan={Boolean(storedPlan)}
+          storedPlanInfo={storedPlanInfo}
           initialSession={initialSession}
         />
       </div>

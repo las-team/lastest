@@ -426,6 +426,27 @@ export async function getLatestAgentSession(
   return row ? decryptAgentSessionRow(row) : row;
 }
 
+/** Recent sessions of a kind for a repo, newest first (any status). Used by
+ *  the QA agent's segmented modes to locate the latest stored plan. */
+export async function getRecentAgentSessions(
+  repositoryId: string,
+  kind: AgentSessionKind,
+  limit = 10,
+) {
+  const rows = await db
+    .select()
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.repositoryId, repositoryId),
+        eq(agentSessions.kind, kind),
+      ),
+    )
+    .orderBy(desc(agentSessions.createdAt))
+    .limit(limit);
+  return rows.map(decryptAgentSessionRow);
+}
+
 export async function updateAgentSession(
   id: string,
   data: {

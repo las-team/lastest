@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { AgentSession, QaTestGroup } from "@/lib/db/schema";
+import type { AgentSession, QaRunMode, QaTestGroup } from "@/lib/db/schema";
 import {
   startQaAgent,
   approveQaPlan,
@@ -16,6 +16,7 @@ const POLL_INTERVAL = 2000;
 
 export interface StartQaOptions {
   targetUrl: string;
+  mode?: QaRunMode;
   groups: QaTestGroup[];
   email?: string;
   password?: string;

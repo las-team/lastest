@@ -5,6 +5,7 @@ import Link from "next/link";
 import type {
   AgentSession,
   AgentStepState,
+  QaRunMode,
   QaTestGroup,
 } from "@/lib/db/schema";
 import { QA_GROUPS } from "@/lib/qa-agent/plan";
@@ -31,8 +32,10 @@ import {
   Loader2,
   Lock,
   MonitorPlay,
+  PackagePlus,
   Pause,
   Play,
+  RefreshCw,
   RotateCcw,
   SkipForward,
   UserRound,
@@ -220,10 +223,39 @@ function PhaseTimeline({ session }: { session: AgentSession }) {
 // Setup form
 // ---------------------------------------------------------------------------
 
+const RUN_MODES: Array<{
+  id: QaRunMode;
+  label: string;
+  description: string;
+  /** Needs a previously stored plan. */
+  needsPlan?: boolean;
+}> = [
+  {
+    id: "full",
+    label: "Full run",
+    description: "Discover → plan → review → generate → run → heal → summary",
+  },
+  {
+    id: "refresh_spec",
+    label: "Refresh specification",
+    description:
+      "Re-discover the app and re-plan against the current suite (code or manual test changes) — no generation, ends with a covered-vs-gaps report",
+  },
+  {
+    id: "fill_gaps",
+    label: "Fill coverage gaps",
+    description:
+      "Reuse the latest plan and generate + run only the items not yet covered by an existing test",
+    needsPlan: true,
+  },
+];
+
 function SetupCard({
   defaultUrl,
   githubConnected,
   aiConfigured,
+  hasStoredPlan,
+  storedPlanInfo,
   loading,
   error,
   onStart,
@@ -231,10 +263,13 @@ function SetupCard({
   defaultUrl: string;
   githubConnected: boolean;
   aiConfigured: boolean;
+  hasStoredPlan: boolean;
+  storedPlanInfo: string | null;
   loading: boolean;
   error: string | null;
   onStart: (opts: {
     targetUrl: string;
+    mode: QaRunMode;
     groups: QaTestGroup[];
     email?: string;
     password?: string;
@@ -242,6 +277,7 @@ function SetupCard({
   }) => void;
 }) {
   const [targetUrl, setTargetUrl] = useState(defaultUrl);
+  const [mode, setMode] = useState<QaRunMode>("full");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [autoApprove, setAutoApprove] = useState(false);
@@ -272,10 +308,57 @@ function SetupCard({
         <p className="text-sm text-muted-foreground">
           The QA agent discovers your app (source routes + live DOM), designs a
           risk-prioritized plan across the selected coverage groups, waits for
-          your approval, then generates, runs, and heals the suite.
+          your approval, then generates, runs, and heals the suite. Re-run it
+          any time — repeat runs plan against the tests that already exist.
         </p>
       </CardHeader>
       <CardContent className="space-y-5">
+        <div className="space-y-1.5">
+          <Label>Run mode</Label>
+          <div className="grid sm:grid-cols-3 gap-1.5">
+            {RUN_MODES.map((m) => {
+              const disabled = Boolean(m.needsPlan && !hasStoredPlan);
+              const selected = mode === m.id;
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => setMode(m.id)}
+                  className={`rounded-md border p-2.5 text-left text-sm transition-colors ${
+                    selected
+                      ? "border-primary bg-primary/5"
+                      : "hover:bg-muted/50"
+                  } ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
+                >
+                  <span className="font-medium flex items-center gap-1.5">
+                    {m.id === "full" && <Play className="h-3.5 w-3.5" />}
+                    {m.id === "refresh_spec" && (
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    )}
+                    {m.id === "fill_gaps" && (
+                      <PackagePlus className="h-3.5 w-3.5" />
+                    )}
+                    {m.label}
+                  </span>
+                  <span className="block text-xs text-muted-foreground mt-0.5">
+                    {m.description}
+                  </span>
+                  {m.needsPlan && !hasStoredPlan && (
+                    <span className="block text-[11px] text-warning mt-1">
+                      Run full or refresh first to store a plan
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          {mode === "fill_gaps" && storedPlanInfo && (
+            <p className="text-xs text-muted-foreground">
+              Using stored plan: {storedPlanInfo}
+            </p>
+          )}
+        </div>
         <div className="flex flex-wrap gap-2">
           <Badge
             variant="outline"
@@ -348,52 +431,56 @@ function SetupCard({
           authenticated journeys. Without them it covers the public surface.
         </p>
 
-        <div className="space-y-1.5">
-          <Label>Coverage groups</Label>
-          <div className="grid sm:grid-cols-2 gap-1.5">
-            {QA_GROUPS.map((group) => (
-              <label
-                key={group.id}
-                className={`flex items-start gap-2 rounded-md border p-2 text-sm ${
-                  group.locked
-                    ? "opacity-90"
-                    : "cursor-pointer hover:bg-muted/50"
-                }`}
-              >
-                <Checkbox
-                  checked={groups.has(group.id)}
-                  disabled={group.locked}
-                  onCheckedChange={() => toggleGroup(group.id)}
-                  className="mt-0.5"
-                />
-                <span>
-                  <span className="font-medium">
-                    {group.label}
-                    {group.locked && (
-                      <span className="text-xs text-muted-foreground font-normal">
-                        {" "}
-                        (always on)
-                      </span>
-                    )}
+        {mode !== "fill_gaps" && (
+          <div className="space-y-1.5">
+            <Label>Coverage groups</Label>
+            <div className="grid sm:grid-cols-2 gap-1.5">
+              {QA_GROUPS.map((group) => (
+                <label
+                  key={group.id}
+                  className={`flex items-start gap-2 rounded-md border p-2 text-sm ${
+                    group.locked
+                      ? "opacity-90"
+                      : "cursor-pointer hover:bg-muted/50"
+                  }`}
+                >
+                  <Checkbox
+                    checked={groups.has(group.id)}
+                    disabled={group.locked}
+                    onCheckedChange={() => toggleGroup(group.id)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="font-medium">
+                      {group.label}
+                      {group.locked && (
+                        <span className="text-xs text-muted-foreground font-normal">
+                          {" "}
+                          (always on)
+                        </span>
+                      )}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      {group.description}
+                    </span>
                   </span>
-                  <span className="block text-xs text-muted-foreground">
-                    {group.description}
-                  </span>
-                </span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between rounded-md border p-3">
-          <div>
-            <div className="text-sm font-medium">Auto-approve plan</div>
-            <div className="text-xs text-muted-foreground">
-              Skip the human review gate and generate immediately
+                </label>
+              ))}
             </div>
           </div>
-          <Switch checked={autoApprove} onCheckedChange={setAutoApprove} />
-        </div>
+        )}
+
+        {mode !== "fill_gaps" && (
+          <div className="flex items-center justify-between rounded-md border p-3">
+            <div>
+              <div className="text-sm font-medium">Auto-approve plan</div>
+              <div className="text-xs text-muted-foreground">
+                Skip the human review gate and continue immediately
+              </div>
+            </div>
+            <Switch checked={autoApprove} onCheckedChange={setAutoApprove} />
+          </div>
+        )}
 
         {error && (
           <div className="flex items-start gap-1.5 text-sm text-destructive">
@@ -407,6 +494,7 @@ function SetupCard({
           onClick={() =>
             onStart({
               targetUrl: targetUrl.trim(),
+              mode,
               groups: [...groups],
               email: email.trim() || undefined,
               password: password || undefined,
@@ -436,6 +524,8 @@ export function QaAgentClient({
   defaultUrl,
   githubConnected,
   aiConfigured,
+  hasStoredPlan,
+  storedPlanInfo,
   initialSession,
 }: {
   repositoryId: string;
@@ -443,6 +533,9 @@ export function QaAgentClient({
   defaultUrl: string;
   githubConnected: boolean;
   aiConfigured: boolean;
+  /** A prior run stored a plan — enables the "fill coverage gaps" mode. */
+  hasStoredPlan: boolean;
+  storedPlanInfo: string | null;
   initialSession: AgentSession | null;
 }) {
   const {
@@ -479,6 +572,8 @@ export function QaAgentClient({
         defaultUrl={defaultUrl}
         githubConnected={githubConnected}
         aiConfigured={aiConfigured}
+        hasStoredPlan={hasStoredPlan}
+        storedPlanInfo={storedPlanInfo}
         loading={loading}
         error={error}
         onStart={start}
@@ -505,6 +600,17 @@ export function QaAgentClient({
               <div className="font-medium">
                 QA agent — {statusMeta.label}
                 {awaitingReview && ": review the plan below"}
+                {session.metadata.qaMode &&
+                  session.metadata.qaMode !== "full" && (
+                    <Badge
+                      variant="outline"
+                      className="ml-2 align-middle text-[10px] px-1.5"
+                    >
+                      {session.metadata.qaMode === "refresh_spec"
+                        ? "spec refresh"
+                        : "fill gaps"}
+                    </Badge>
+                  )}
               </div>
               <div className="text-xs opacity-80 truncate">
                 {repositoryName} → {session.metadata.qaTargetUrl}

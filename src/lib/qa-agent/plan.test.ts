@@ -2,12 +2,14 @@ import { describe, it, expect } from "vitest";
 import {
   buildApiDefinition,
   buildDiscoveryDigest,
+  buildExistingCoverageDigest,
   buildGeneratorPrompt,
   buildPlannerUserPrompt,
   computeQaSummary,
   enabledPlanItems,
   groupPlaywrightOverrides,
   isQaTestPlan,
+  matchPlanToExistingTests,
   normalizeQaGroups,
   sanitizeQaPlan,
 } from "./plan";
@@ -342,5 +344,96 @@ describe("computeQaSummary", () => {
     plan.items[2].enabled = false;
     const summary = computeQaSummary(plan, []);
     expect(summary.planned).toBe(2);
+  });
+});
+
+describe("matchPlanToExistingTests", () => {
+  const items = () => validPlan().items;
+  const existing = [
+    { id: "ex-1", name: "Complete a transfer" },
+    { id: "ex-2", name: "landing RENDERS!" },
+  ];
+
+  it("matches by normalized title", () => {
+    const m = matchPlanToExistingTests(items(), existing);
+    expect(m.get("T1")).toBe("ex-1");
+    expect(m.get("T2")).toBe("ex-2");
+    expect(m.has("T3")).toBe(false);
+  });
+
+  it("prefers prior-ledger links and ignores dead test ids", () => {
+    const ledger: QaGeneratedTest[] = [
+      {
+        planItemId: "T3",
+        group: "api",
+        testId: "ex-1",
+        name: "old name",
+        status: "passed",
+      },
+      {
+        planItemId: "T2",
+        group: "smoke",
+        testId: "deleted-test",
+        name: "Landing renders",
+        status: "passed",
+      },
+    ];
+    const m = matchPlanToExistingTests(items(), existing, ledger);
+    expect(m.get("T3")).toBe("ex-1"); // ledger link wins
+    expect(m.get("T2")).toBe("ex-2"); // dead id falls back to title match
+  });
+
+  it("returns empty when nothing exists", () => {
+    expect(matchPlanToExistingTests(items(), []).size).toBe(0);
+  });
+});
+
+describe("buildExistingCoverageDigest", () => {
+  it("lists names with area and api marker", () => {
+    const digest = buildExistingCoverageDigest([
+      { id: "1", name: "Login smoke", functionalAreaName: "QA: Smoke" },
+      { id: "2", name: "Accounts endpoint", testType: "api" },
+    ]);
+    expect(digest).toContain('"Login smoke" (area: QA: Smoke)');
+    expect(digest).toContain('"Accounts endpoint" [api]');
+  });
+});
+
+describe("existing coverage in planner prompt", () => {
+  it("embeds the existing-tests section when provided", () => {
+    const prompt = buildPlannerUserPrompt({
+      digest: "D",
+      groups: ["journey"],
+      credsProvided: false,
+      existingCoverage: '- "Login smoke"',
+    });
+    expect(prompt).toContain("ALREADY CONTAINS");
+    expect(prompt).toContain('- "Login smoke"');
+  });
+});
+
+describe("computeQaSummary with covered entries", () => {
+  it("counts covered separately and keeps journey traceability", () => {
+    const plan = validPlan();
+    const summary = computeQaSummary(plan, [
+      {
+        planItemId: "T1",
+        group: "journey",
+        testId: "ex-1",
+        name: "Complete a transfer",
+        status: "covered",
+      },
+      {
+        planItemId: "T2",
+        group: "smoke",
+        testId: "new-1",
+        name: "Landing renders",
+        status: "passed",
+      },
+    ]);
+    expect(summary.covered).toBe(1);
+    expect(summary.generated).toBe(1);
+    expect(summary.byGroup.journey).toMatchObject({ covered: 1, generated: 0 });
+    expect(summary.journeyCoverage.J1).toEqual(["ex-1"]);
   });
 });
