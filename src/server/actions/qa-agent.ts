@@ -44,6 +44,7 @@ import {
   buildPlannerUserPrompt,
   computeQaSummary,
   enabledPlanItems,
+  explainInvalidQaPlan,
   isQaTestPlan,
   itemGroups,
   itemPlaywrightOverrides,
@@ -483,11 +484,13 @@ async function runQaLogin(
   const allowRegistration = session.metadata.qaAllowRegistration !== false;
 
   const SUB_EXISTING = 0;
-  const SUB_CREDS = 1;
-  const SUB_REGISTER = 2;
-  const SUB_RESOLVE = 3;
+  const SUB_SETUP_RUN = 1;
+  const SUB_CREDS = 2;
+  const SUB_REGISTER = 3;
+  const SUB_RESOLVE = 4;
   const substeps: NonNullable<AgentStepState["substeps"]> = [
     { label: "Check existing setup", status: "running", agent: "orchestrator" },
+    { label: "Run existing setup test", status: "pending", agent: "ranger" },
     { label: "Test provided credentials", status: "pending", agent: "ranger" },
     { label: "Register test account", status: "pending", agent: "ranger" },
     {
@@ -607,12 +610,117 @@ async function runQaLogin(
     await updateSubsteps(sessionId, "qa_login", substeps);
     if (await isStopped(sessionId, signal)) return false;
 
+    // 1b) A setup test/script exists but no valid storage state — RUN it to
+    //     mint a fresh session. Discovery can't execute per-test setup steps
+    //     itself, so this is what makes "a setup test that works is already
+    //     in place" usable for a post-login crawl.
+    let setupRunFailed = false;
+    if (!auth && (existing.setupTestId || existing.setupScriptId)) {
+      const stepName = existing.setupStepName ?? "setup step";
+      substeps[SUB_SETUP_RUN] = {
+        ...substeps[SUB_SETUP_RUN],
+        status: "running",
+        detail: `Running "${stepName}"`,
+      };
+      await updateSubsteps(sessionId, "qa_login", substeps);
+      const source = existing.setupTestId
+        ? await queries.getTest(existing.setupTestId).catch(() => null)
+        : await queries
+            .getSetupScript(existing.setupScriptId!)
+            .catch(() => null);
+      const code = source?.code;
+      if (!code) {
+        setupRunFailed = true;
+        substeps[SUB_SETUP_RUN] = {
+          ...substeps[SUB_SETUP_RUN],
+          status: "error",
+          detail: `"${stepName}" has no code — continuing`,
+        };
+      } else {
+        // Arbitrary setup code must not run in-process: captureStorageState
+        // executes it in its own disposable runner/EB; ours stays claimed for
+        // the validation probe right after.
+        const captured = await captureStorageState({
+          repositoryId,
+          baseUrl: targetUrl,
+          testCode: code,
+          name: `QA agent setup ${utcStamp()}`,
+        });
+        if (captured.captured && captured.storageStateId) {
+          let validated = false;
+          let deferred = !cdpUrl;
+          if (cdpUrl) {
+            const fresh = await queries
+              .getStorageState(captured.storageStateId)
+              .catch(() => null);
+            if (fresh?.storageStateJson) {
+              const check = await validateStorageStateOnEb(
+                cdpUrl,
+                fresh.storageStateJson,
+                targetUrl,
+              );
+              validated = check.validated;
+              deferred = check.deferred;
+            } else {
+              deferred = true;
+            }
+          }
+          if (validated || deferred) {
+            auth = {
+              strategy: "existing_setup",
+              validated,
+              storageStateId: captured.storageStateId,
+              setupTestId: existing.setupTestId,
+              defaultSetupInUse: existing.defaultSetupInUse,
+              notes: deferred
+                ? `Session refreshed by running "${stepName}" — validation deferred to discovery`
+                : `Session refreshed by running "${stepName}"`,
+            };
+            substeps[SUB_SETUP_RUN] = {
+              ...substeps[SUB_SETUP_RUN],
+              status: "done",
+              detail: validated
+                ? `Ran "${stepName}" — fresh session captured and validated`
+                : `Ran "${stepName}" — fresh session captured (validation deferred)`,
+            };
+          } else {
+            setupRunFailed = true;
+            substeps[SUB_SETUP_RUN] = {
+              ...substeps[SUB_SETUP_RUN],
+              status: "error",
+              detail: `"${stepName}" ran but the session did not authenticate`,
+            };
+          }
+        } else {
+          setupRunFailed = true;
+          substeps[SUB_SETUP_RUN] = {
+            ...substeps[SUB_SETUP_RUN],
+            status: "error",
+            detail: captured.failureReason ?? `"${stepName}" failed`,
+          };
+        }
+      }
+    } else {
+      substeps[SUB_SETUP_RUN] = {
+        ...substeps[SUB_SETUP_RUN],
+        status: "done",
+        detail: auth ? "Not needed" : "No setup test or script to run",
+      };
+    }
+    await updateSubsteps(sessionId, "qa_login", substeps);
+    if (await isStopped(sessionId, signal)) return false;
+
+    // A broken/uncapturable default setup shouldn't block the rest of the
+    // cascade — creds and registration may still produce a working session.
+    const defaultSetupCoversAuth =
+      existing.defaultSetupInUse && !setupRunFailed;
+
     // Discover the app's real login/signup links once (DOM only, no guessing) —
     // both the credential test and registration need them.
     if (
       !auth &&
       cdpUrl &&
-      (credentials || (allowRegistration && !existing.defaultSetupInUse))
+      (credentials || (allowRegistration && !defaultSetupCoversAuth))
     ) {
       authLinks = await findAuthLinksOnEb(cdpUrl, targetUrl);
     }
@@ -674,9 +782,10 @@ async function runQaLogin(
     if (await isStopped(sessionId, signal)) return false;
 
     // 3) Agent self-registration (opt-out). Signup URL strictly from the DOM;
-    //    skipped when the user gave creds or the repo already has setup steps.
+    //    skipped when the user gave creds or the repo's default setup already
+    //    produced/covers a working session (a failed setup run re-opens this).
     const canRegister =
-      !auth && !credentials && allowRegistration && !existing.defaultSetupInUse;
+      !auth && !credentials && allowRegistration && !defaultSetupCoversAuth;
     if (canRegister && authLinks.signupUrl) {
       substeps[SUB_REGISTER] = { ...substeps[SUB_REGISTER], status: "running" };
       await updateSubsteps(sessionId, "qa_login", substeps);
@@ -752,7 +861,7 @@ async function runQaLogin(
             ? "Skipped — credentials were provided"
             : !allowRegistration
               ? "Disabled for this run"
-              : existing.defaultSetupInUse
+              : defaultSetupCoversAuth
                 ? "Skipped — repo default setup already covers auth"
                 : "No sign-up link found in the app's DOM",
       };
@@ -768,8 +877,9 @@ async function runQaLogin(
           validated: false,
           setupTestId: existing.setupTestId,
           defaultSetupInUse: true,
-          notes:
-            "Repo default setup steps run before every test — validated at execution",
+          notes: setupRunFailed
+            ? "Repo default setup could not produce a session — discovery runs without login; execution still applies the default steps"
+            : "Repo default setup steps run before every test — validated at execution",
         };
       } else if (credentials) {
         auth = {
@@ -950,10 +1060,10 @@ async function runQaDiscover(
       crawled = await crawlTargetApp(eb.cdpUrl, targetUrl, {
         maxPages: MAX_CRAWL_PAGES,
         credentials,
-        prioritizeAuthLinks:
-          !qaAuth ||
-          qaAuth.strategy === "public_only" ||
-          qaAuth.strategy === "creds_untested",
+        loginUrl: qaAuth?.loginUrl,
+        // No injected session and no creds to try → make sure the crawl at
+        // least maps the login/signup surface itself.
+        prioritizeAuthLinks: !preAuthed && !credentials,
         signal,
         onPage: (snapshot, index) => {
           substeps[1] = {
@@ -1139,8 +1249,15 @@ async function runQaPlan(
     lastRaw = raw;
     plan = parseAiJson(raw, isQaTestPlan, { source: "qa-plan" });
     if (!plan) {
+      // Surface the specific validation failure (parsed shape when we could
+      // parse it, else a generic note) so the retry is a targeted correction.
+      const parsedShape = parseAiJson(raw, (x): x is unknown => true, {
+        source: "qa-plan-explain",
+      });
+      const reason =
+        explainInvalidQaPlan(parsedShape) ?? "the JSON was invalid";
       const retry = await callPlanner(
-        "Your previous response was not a valid plan JSON object. Respond with ONLY the JSON object described in the system prompt.",
+        `Your previous response was not a valid plan: ${reason}. Fix exactly that and respond with ONLY the JSON object described in the system prompt.`,
       );
       lastRaw = retry;
       plan = parseAiJson(retry, isQaTestPlan, { source: "qa-plan-retry" });
@@ -1776,6 +1893,30 @@ async function runQaHeal(
     return true;
   }
 
+  // Statement of each failing test's purpose, so the healer preserves it
+  // instead of loosening assertions (resilience injections, negative-input
+  // gates, and journey end-state proofs must survive the fix).
+  const plan = session?.metadata.qaPlan;
+  const planItemById = new Map(
+    (plan?.items ?? []).map((i) => [i.id, i] as const),
+  );
+  const healIntentFor = (entry: QaGeneratedTest): string | undefined => {
+    const item = planItemById.get(entry.planItemId);
+    const groups = (entry.groups?.length ? entry.groups : [entry.group]).join(
+      " + ",
+    );
+    const lines = [`Coverage groups: ${groups}.`];
+    const journey = item?.journeyId
+      ? plan?.journeys.find((j) => j.id === item.journeyId)
+      : undefined;
+    if (journey) {
+      lines.push(
+        `Business outcome: ${journey.businessOutcome}. Required end-state proof: ${journey.endStateVerification}.`,
+      );
+    }
+    return lines.join(" ");
+  };
+
   const substeps: NonNullable<AgentStepState["substeps"]> = failing.map(
     (g) => ({
       label: `Healing "${g.name}"`,
@@ -1817,6 +1958,7 @@ async function runQaHeal(
           const result = await agentHealTestCore(repositoryId, entry.testId!, {
             cdpEndpoint: eb.cdpUrl,
             signal: AbortSignal.any([signal, timeoutSignal]),
+            intent: healIntentFor(entry),
           });
           if (result.success && result.code) {
             await queries.updateTest(entry.testId!, { code: result.code });

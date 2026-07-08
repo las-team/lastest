@@ -20,6 +20,10 @@ export interface ExistingAuthSetup {
   storageStateName?: string;
   /** First default setup step that is a test (its id, for qaAuth.setupTestId). */
   setupTestId?: string;
+  /** First default setup step that is a script — runnable to mint a fresh
+   *  session when no (valid) storage state exists. */
+  setupScriptId?: string;
+  setupStepName?: string;
   /** Repo default setup steps include a test/script/storage_state — the
    *  executor already applies them to every test. */
   defaultSetupInUse: boolean;
@@ -49,7 +53,18 @@ export async function findExistingAuthSetup(
       result.storageStateName = storageStep.storageStateName ?? undefined;
     }
     const testStep = defaults.find((s) => s.stepType === "test" && s.testId);
-    if (testStep?.testId) result.setupTestId = testStep.testId;
+    if (testStep?.testId) {
+      result.setupTestId = testStep.testId;
+      result.setupStepName = testStep.testName ?? undefined;
+    } else {
+      const scriptStep = defaults.find(
+        (s) => s.stepType === "script" && s.scriptId,
+      );
+      if (scriptStep?.scriptId) {
+        result.setupScriptId = scriptStep.scriptId;
+        result.setupStepName = scriptStep.scriptName ?? undefined;
+      }
+    }
   }
 
   if (!result.storageStateId) {

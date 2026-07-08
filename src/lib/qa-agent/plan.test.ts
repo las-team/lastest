@@ -230,8 +230,11 @@ describe("buildDiscoveryDigest", () => {
         ),
       }),
     );
-    expect(huge.length).toBeLessThanOrEqual(24_000 + 20);
-    expect(huge.endsWith("…(truncated)")).toBe(true);
+    // Truncates at a page boundary (never mid-page) with an omission note,
+    // and drops the last crawled page rather than slicing it in half.
+    expect(huge.length).toBeLessThanOrEqual(24_000 + 100);
+    expect(huge).toContain("omitted to fit the context budget");
+    expect(huge).not.toContain("/p39");
   });
 });
 
