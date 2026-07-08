@@ -182,7 +182,8 @@ export function QaSummaryPanel({
               Coverage matrix{" "}
               <span className="text-xs font-normal text-muted-foreground">
                 — business area × test group (covered+generated / planned, ✓
-                passing this run)
+                passing this run; a multi-group test counts in every column it
+                covers)
               </span>
             </h4>
             <div className="rounded-md border overflow-x-auto">

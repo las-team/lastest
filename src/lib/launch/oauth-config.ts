@@ -1,14 +1,24 @@
 /**
- * Config for the implicit OAuth handoff that mints a launch-scoped token for
- * the launch.lastest.cloud frontend. The redirect-URI allowlist is the key
- * guard against open-redirect / token-leak: we only ever hand a token back to
- * an origin on this list.
+ * Config for the implicit OAuth handoff that mints scoped tokens for the
+ * static lastest-www frontends (launch board, playground leaderboard). The
+ * redirect-URI allowlist is the key guard against open-redirect / token-leak:
+ * we only ever hand a token back to an origin on this list.
  */
 
 import { DEFAULT_LAUNCH } from "@/lib/db/schema";
 
 export const LAUNCH_CLIENT_ID = "launch-www";
 export const LAUNCH_SCOPE = DEFAULT_LAUNCH.scope; // 'launch:vote launch:submit'
+
+export const PLAYGROUND_CLIENT_ID = "playground-www";
+export const PLAYGROUND_SCOPE = "playground:score";
+
+// clientId → the full scope string that client may be granted. Requested
+// scopes are intersected with this in /oauth/authorize.
+const CLIENT_SCOPES: Record<string, string> = {
+  [LAUNCH_CLIENT_ID]: LAUNCH_SCOPE,
+  [PLAYGROUND_CLIENT_ID]: PLAYGROUND_SCOPE,
+};
 
 /** Allowed origins a token may be returned to. Configurable via env for staging. */
 export function allowedRedirectOrigins(): string[] {
@@ -24,6 +34,7 @@ export function allowedRedirectOrigins(): string[] {
         .filter(Boolean)
     : [
         "https://launch.lastest.cloud",
+        "https://playground.lastest.cloud",
         "https://lastest.cloud",
         "https://www.lastest.cloud",
       ];
@@ -43,7 +54,12 @@ export function allowedRedirectOrigins(): string[] {
 }
 
 export function isValidClientId(clientId: string | null): boolean {
-  return clientId === LAUNCH_CLIENT_ID;
+  return clientId != null && clientId in CLIENT_SCOPES;
+}
+
+/** Full scope string a registered client may be granted (null if unknown). */
+export function scopeForClient(clientId: string | null): string | null {
+  return clientId != null ? (CLIENT_SCOPES[clientId] ?? null) : null;
 }
 
 export function isAllowedRedirectUri(redirectUri: string | null): boolean {

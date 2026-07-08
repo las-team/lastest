@@ -2850,7 +2850,12 @@ export interface QaPlanJourney {
  *  ApiTestDefinition instead of a browser test. */
 export interface QaPlanItem {
   id: string;
+  /** Primary group — drives functional-area assignment and legacy plans. */
   group: QaTestGroup;
+  /** All coverage groups this single test satisfies (primary first). One
+   *  test execution runs every check layer, so a page visit can serve
+   *  smoke+ui+a11y+perf at once. Absent = [group] (legacy plans). */
+  groups?: QaTestGroup[];
   title: string;
   priority: QaPriority;
   /** Traceability link to the journey this test covers, when applicable. */
@@ -2945,6 +2950,8 @@ export type QaGeneratedTestStatus =
 export interface QaGeneratedTest {
   planItemId: string;
   group: QaTestGroup;
+  /** All coverage groups of the source plan item (primary first). */
+  groups?: QaTestGroup[];
   /** Absent when generation failed before a test row was created. */
   testId?: string;
   name: string;

@@ -1,14 +1,15 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { QaTestGroup, QaTestPlan } from "@/lib/db/schema";
-import { QA_GROUPS } from "@/lib/qa-agent/plan";
+import type { QaTestPlan } from "@/lib/db/schema";
+import { itemGroups, QA_GROUPS } from "@/lib/qa-agent/plan";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  Check,
   CheckCircle2,
   ClipboardList,
   Loader2,
@@ -56,15 +57,23 @@ export function QaPlanReview({
   const [showFeedback, setShowFeedback] = useState(false);
 
   const items = plan.items;
-  const itemsByGroup = useMemo(() => {
-    const map = new Map<QaTestGroup, typeof items>();
-    for (const item of items) {
-      const list = map.get(item.group) ?? [];
-      list.push(item);
-      map.set(item.group, list);
-    }
-    return map;
-  }, [items]);
+  // Matrix axes: only groups that at least one item is tagged with become
+  // columns; rows are items sorted by business area then priority.
+  const presentGroups = useMemo(
+    () =>
+      QA_GROUPS.filter((g) => items.some((i) => itemGroups(i).includes(g.id))),
+    [items],
+  );
+  const sortedItems = useMemo(
+    () =>
+      [...items].sort((a, b) => {
+        const areaA = a.businessArea?.trim() || "General";
+        const areaB = b.businessArea?.trim() || "General";
+        if (areaA !== areaB) return areaA.localeCompare(areaB);
+        return a.priority.localeCompare(b.priority);
+      }),
+    [items],
+  );
 
   const enabledCount = plan.items.length - disabled.size;
 
@@ -138,38 +147,56 @@ export function QaPlanReview({
           </div>
         )}
 
-        <div className="space-y-3">
-          {QA_GROUPS.filter((g) => itemsByGroup.has(g.id)).map((group) => (
-            <div key={group.id} className="space-y-1.5">
-              <h4 className="text-sm font-medium">
-                {group.label}{" "}
-                <span className="text-xs font-normal text-muted-foreground">
-                  ({itemsByGroup.get(group.id)!.length})
-                </span>
-              </h4>
-              <div className="space-y-1">
-                {itemsByGroup.get(group.id)!.map((item) => {
+        <div className="space-y-1">
+          <h4 className="text-sm font-medium">
+            Coverage matrix{" "}
+            <span className="text-xs font-normal text-muted-foreground">
+              — one test can cover several groups in a single execution
+            </span>
+          </h4>
+          <div className="rounded-md border overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/40">
+                  {!readOnly && <th className="w-8 px-2 py-1.5" />}
+                  <th className="text-left px-3 py-1.5 font-medium">Test</th>
+                  {presentGroups.map((g) => (
+                    <th
+                      key={g.id}
+                      className="text-center px-2 py-1.5 font-medium whitespace-nowrap"
+                      title={g.description}
+                    >
+                      {g.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {sortedItems.map((item) => {
                   const isDisabled = disabled.has(item.id);
+                  const groups = itemGroups(item);
                   return (
-                    <label
+                    <tr
                       key={item.id}
-                      className={`flex items-start gap-2.5 rounded-md border p-2.5 text-sm ${
-                        readOnly ? "" : "cursor-pointer hover:bg-muted/50"
-                      } ${isDisabled ? "opacity-50" : ""}`}
+                      className={`${readOnly ? "" : "cursor-pointer hover:bg-muted/50"} ${
+                        isDisabled ? "opacity-50" : ""
+                      }`}
+                      onClick={readOnly ? undefined : () => toggle(item.id)}
                     >
                       {!readOnly && (
-                        <Checkbox
-                          checked={!isDisabled}
-                          onCheckedChange={() => toggle(item.id)}
-                          className="mt-0.5"
-                        />
+                        <td className="px-2 py-2 align-top">
+                          <Checkbox
+                            checked={!isDisabled}
+                            onCheckedChange={() => toggle(item.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="mt-0.5"
+                          />
+                        </td>
                       )}
-                      <div className="min-w-0 flex-1 space-y-0.5">
+                      <td className="px-3 py-2 min-w-64">
                         <div className="flex items-center gap-2">
                           <PriorityBadge priority={item.priority} />
-                          <span className="font-medium truncate">
-                            {item.title}
-                          </span>
+                          <span className="font-medium">{item.title}</span>
                           {item.businessArea && (
                             <Badge
                               variant="outline"
@@ -187,13 +214,40 @@ export function QaPlanReview({
                         <div className="text-xs text-muted-foreground line-clamp-2 whitespace-pre-line">
                           {item.scenario}
                         </div>
-                      </div>
-                    </label>
+                      </td>
+                      {presentGroups.map((g) => {
+                        const covers = groups.includes(g.id);
+                        const primary = item.group === g.id;
+                        return (
+                          <td
+                            key={g.id}
+                            className="text-center px-2 py-2 align-middle"
+                            title={
+                              covers
+                                ? `${g.label}${primary ? " (primary)" : ""}`
+                                : undefined
+                            }
+                          >
+                            {covers ? (
+                              <Check
+                                className={`h-4 w-4 inline ${
+                                  primary ? "text-success" : "text-success/50"
+                                }`}
+                              />
+                            ) : (
+                              <span className="text-muted-foreground/40">
+                                —
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
                   );
                 })}
-              </div>
-            </div>
-          ))}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         {!readOnly && (

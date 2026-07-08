@@ -21,7 +21,7 @@ import * as queries from "@/lib/db/queries";
 import {
   isValidClientId,
   isAllowedRedirectUri,
-  LAUNCH_SCOPE,
+  scopeForClient,
 } from "@/lib/launch/oauth-config";
 import { DEFAULT_LAUNCH } from "@/lib/db/schema";
 
@@ -32,13 +32,14 @@ export async function GET(request: NextRequest) {
   const clientId = sp.get("client_id");
   const redirectUri = sp.get("redirect_uri");
   const responseType = sp.get("response_type") ?? "token";
-  const requestedScope = sp.get("scope") ?? LAUNCH_SCOPE;
   const state = sp.get("state") ?? "";
 
   // Hard failures (never redirect to an un-allowed URI — that's the token-leak guard).
   if (!isValidClientId(clientId)) {
     return NextResponse.json({ error: "invalid_client" }, { status: 400 });
   }
+  const clientScope = scopeForClient(clientId)!;
+  const requestedScope = sp.get("scope") ?? clientScope;
   if (!isAllowedRedirectUri(redirectUri)) {
     return NextResponse.json(
       { error: "invalid_redirect_uri" },
@@ -62,13 +63,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // Grant only scopes we support (intersect requested with LAUNCH_SCOPE).
-  const supported = LAUNCH_SCOPE.split(" ");
+  // Grant only scopes the client is registered for (intersect requested).
+  const supported = clientScope.split(" ");
   const granted =
     requestedScope
       .split(/\s+/)
       .filter((s) => supported.includes(s))
-      .join(" ") || LAUNCH_SCOPE;
+      .join(" ") || clientScope;
 
   const token = randomBytes(32).toString("base64url");
   const ttl = DEFAULT_LAUNCH.tokenTtlSeconds;
