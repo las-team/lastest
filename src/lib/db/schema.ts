@@ -5140,6 +5140,57 @@ export type LaunchEvent = typeof launchEvents.$inferSelect;
 export type NewLaunchEvent = typeof launchEvents.$inferInsert;
 
 // ============================================
+// Playground score & leaderboard
+// ============================================
+//
+// Per-user scores earned on the /playground exercises of the static
+// lastest-www frontend. The achievement registry (id → points, completion
+// bonuses) is vendored from that repo in src/lib/playground/registry.ts —
+// points are always taken from the server-side registry, never from the
+// client. Mutations require a `playground:score` token (sessions.kind =
+// 'launch', minted by /oauth/authorize for client `playground-www`). See
+// src/lib/playground/* + src/app/api/v1/playground/[...path]/route.ts.
+
+// Tunables for the playground leaderboard — same role as DEFAULT_LAUNCH.
+export const DEFAULT_PLAYGROUND = {
+  // Anti-gaming velocity caps. The full registry is ~75 achievements, so a
+  // legitimate speedrun of everything fits well inside one hour's budget.
+  achievementsPerAccountPerHour: 120,
+  progressPostsPerAccountPerMinute: 30,
+  // Leaderboard window.
+  leaderboardDefaultLimit: 50,
+  leaderboardMaxLimit: 100,
+  leaderboardCacheTtlMs: 60_000,
+  // Scope string the implicit OAuth flow grants (client `playground-www`).
+  scope: "playground:score",
+} as const;
+
+export const playgroundAchievements = pgTable(
+  "playground_achievements",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    achievementId: text("achievement_id").notNull(), // e.g. 'buttons.double-click'
+    points: integer("points").notNull(), // denormalized from the registry at insert
+    earnedAt: timestamp("earned_at"), // client claim, clamped to [account creation, now]
+    createdAt: timestamp("created_at"), // server receive time (authoritative for ties)
+  },
+  (table) => [
+    uniqueIndex("uq_playground_achievements_user_achievement").on(
+      table.userId,
+      table.achievementId,
+    ),
+    index("idx_playground_achievements_user").on(table.userId),
+  ],
+);
+
+export type PlaygroundAchievement = typeof playgroundAchievements.$inferSelect;
+export type NewPlaygroundAchievement =
+  typeof playgroundAchievements.$inferInsert;
+
+// ============================================
 // Billing — Stripe integration
 // ============================================
 //
