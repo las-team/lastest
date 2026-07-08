@@ -498,6 +498,225 @@ export function buildPlannerUserPrompt(opts: {
 }
 
 // ---------------------------------------------------------------------------
+// Journey refiner — turn a human's plain-language journeys into structured,
+// grounded journeys + covering items and MERGE them into an existing plan.
+// The condensed digest loses domain intent; this lets the human inject the
+// journeys they care about and have the AI make them executable, without
+// re-planning (existing items and the reviewer's enable/disable choices stay).
+// ---------------------------------------------------------------------------
+
+/** The AI journey refiner returns only NEW additions to merge into the plan. */
+export interface RefinedJourneys {
+  journeys: QaPlanJourney[];
+  items: QaPlanItem[];
+}
+
+/** Hard cap on how many items ONE refine call can add, on top of the plan's
+ *  existing items. Bounds sequential browser-generation time. */
+export const MAX_REFINED_NEW_ITEMS = MAX_PLAN_ITEMS;
+
+export function isRefinedJourneys(v: unknown): v is RefinedJourneys {
+  if (!v || typeof v !== "object") return false;
+  const r = v as Record<string, unknown>;
+  if (!Array.isArray(r.journeys) || !r.journeys.every(isJourney)) return false;
+  if (!Array.isArray(r.items) || !r.items.every(isPlanItem)) return false;
+  return r.journeys.length > 0 || r.items.length > 0;
+}
+
+/** First concrete reason a value fails isRefinedJourneys, for retry prompts. */
+export function explainInvalidRefinedJourneys(v: unknown): string | null {
+  if (!v || typeof v !== "object")
+    return "top-level value is not a JSON object";
+  const r = v as Record<string, unknown>;
+  if (!Array.isArray(r.journeys)) return '"journeys" must be an array';
+  const badJourney = r.journeys.findIndex((j) => !isJourney(j));
+  if (badJourney !== -1) {
+    return `journeys[${badJourney}] is malformed — each journey needs id, title, priority (P1|P2|P3), steps[], businessOutcome, endStateVerification`;
+  }
+  if (!Array.isArray(r.items)) return '"items" must be an array';
+  const badItem = r.items.findIndex((i) => !isPlanItem(i));
+  if (badItem !== -1) {
+    return `items[${badItem}] is malformed — each item needs id, group or groups[], title, priority (P1|P2|P3), scenario`;
+  }
+  if (r.journeys.length === 0 && r.items.length === 0) {
+    return "produced no journeys and no items — refine the user's journeys into at least one journey and one covering item";
+  }
+  return null;
+}
+
+export function buildJourneyRefinerSystemPrompt(): string {
+  return `You are a principal QA architect. A QA engineer has written one or more user journeys in plain language that they want ADDED to an existing, already-approved test plan for a web application. Refine each into a rigorous, executable journey plus the covering test items that prove it, grounded in the real discovery data (rendered-DOM page maps, verified selectors, observed API endpoints).
+
+${BEST_PRACTICES}
+
+OUTPUT: a single JSON object, no markdown fences, no commentary, matching exactly:
+{
+  "journeys": [ { "id": "U1", "title": string, "priority": "P1"|"P2"|"P3", "businessArea": string, "steps": [string], "businessOutcome": string, "endStateVerification": string } ],
+  "items": [ { "id": "UT1", "groups": [<group>, ...], "title": string, "priority": "P1"|"P2"|"P3", "journeyId": string, "businessArea": string, "pagePath": string?, "rationale": string, "scenario": string, "selectorHints": [string]?, "api": { "method": ..., "path": string, "expectedStatus": number }? } ]
+}
+
+RULES:
+- Output ONLY the NEW journeys the user asked for and the items that cover them — do NOT restate the existing plan (it is shown for context so you avoid duplicating it).
+- Refine, don't merely echo: turn each plain-language journey into concrete numbered steps, a real business outcome, and an end-state verification that proves the outcome beyond a toast.
+- Ground every step, selector, and path in the DISCOVERY DIGEST. If the user's journey references a page or action not present in the digest, plan the closest real flow the digest supports and note the assumption in "rationale" — never invent selectors or routes.
+- Each journey needs at least one covering item with "journey" in its groups and journeyId set to that journey's id.
+- Respect the selected coverage groups only. Consolidate: one item may carry several compatible groups (see CONSOLIDATION).
+- Keep it tight: at most one or two items per journey unless the user's journey is genuinely multi-page. Every item must be executable against the discovered pages.`;
+}
+
+export function buildJourneyRefinerUserPrompt(opts: {
+  digest: string;
+  groups: QaTestGroup[];
+  userJourneys: string[];
+  /** Titles of the plan's current journeys + items, so the refiner does not
+   *  duplicate coverage that already exists. */
+  existingPlanDigest: string;
+  authenticated: boolean;
+}): string {
+  const groupList = opts.groups
+    .map((g) => {
+      const meta = QA_GROUPS.find((m) => m.id === g);
+      return `- ${g}: ${meta?.description ?? ""}`;
+    })
+    .join("\n");
+  const journeyList = opts.userJourneys
+    .map((j, i) => `${i + 1}. ${j}`)
+    .join("\n");
+  return [
+    `Refine the user-supplied journeys below into structured journeys + covering test items, grounded in the discovery digest.`,
+    `Selected coverage groups:\n${groupList}`,
+    opts.authenticated
+      ? "Authenticated session available: YES — the discovery digest is the signed-in, in-app surface and generated tests run authenticated. Plan the journeys against that in-app surface."
+      : "Authenticated session available: NO — public surface only.",
+    `--- USER-SUPPLIED JOURNEYS (refine these) ---\n${journeyList}`,
+    `--- EXISTING PLAN (context only — DO NOT duplicate) ---\n${opts.existingPlanDigest}`,
+    `--- DISCOVERY DIGEST ---\n${opts.digest}`,
+  ].join("\n\n");
+}
+
+/** Compact digest of a plan's current journeys + item titles for the refiner. */
+export function buildExistingPlanDigest(plan: QaTestPlan): string {
+  const journeys = plan.journeys.length
+    ? plan.journeys.map((j) => `- journey: "${j.title}"`).join("\n")
+    : "(none)";
+  const items = plan.items.length
+    ? plan.items.map((i) => `- test: "${i.title}"`).join("\n")
+    : "(none)";
+  return `Journeys:\n${journeys}\n\nTests:\n${items}`;
+}
+
+const PRIORITY_RANK: Record<QaPriority, number> = { P1: 0, P2: 1, P3: 2 };
+
+/**
+ * Merge AI-refined journeys/items into an existing plan WITHOUT disturbing the
+ * existing items or the reviewer's enable/disable choices. Deduplicates against
+ * existing titles, strips groups the user didn't select, remaps AI ids to fresh
+ * collision-free ids (preserving journey→item links), guarantees journey-linked
+ * items carry the "journey" group, and bounds how many new items are added so
+ * sequential browser generation stays tractable. Returns the merged plan plus a
+ * count of items that were dropped by the budget.
+ */
+export function mergeRefinedJourneys(
+  plan: QaTestPlan,
+  refined: RefinedJourneys,
+  groups: QaTestGroup[],
+): {
+  plan: QaTestPlan;
+  addedJourneys: number;
+  addedItems: number;
+  trimmed: number;
+} {
+  const allowed = new Set(groups);
+  const existingItemTitles = new Set(
+    plan.items.map((i) => normalizeTitle(i.title)),
+  );
+  const existingJourneyByTitle = new Map(
+    plan.journeys.map((j) => [normalizeTitle(j.title), j.id]),
+  );
+
+  // Journeys: dedup by title (map dup ids onto the existing journey), remap the
+  // rest to fresh U-prefixed ids. Journeys are cheap metadata — allow up to
+  // MAX_PLAN_JOURNEYS new ones on top of the existing set.
+  const idMap = new Map<string, string>();
+  const newJourneys: QaPlanJourney[] = [];
+  let jn = plan.journeys.length;
+  for (const rj of refined.journeys) {
+    const dupId = existingJourneyByTitle.get(normalizeTitle(rj.title));
+    if (dupId) {
+      idMap.set(rj.id, dupId);
+      continue;
+    }
+    if (newJourneys.length >= MAX_PLAN_JOURNEYS) continue;
+    const newId = `U${++jn}`;
+    idMap.set(rj.id, newId);
+    newJourneys.push({ ...rj, id: newId });
+  }
+  const journeyIds = new Set([
+    ...plan.journeys.map((j) => j.id),
+    ...newJourneys.map((j) => j.id),
+  ]);
+
+  // Items: strip disallowed groups, dedup by title, remap ids + journeyId,
+  // ensure journey-linked items carry the "journey" group.
+  const candidates: QaPlanItem[] = [];
+  let tn = plan.items.length;
+  for (const ri of refined.items) {
+    let kept = itemGroups(ri).filter((g) => allowed.has(g));
+    if (kept.length === 0) continue;
+    if (existingItemTitles.has(normalizeTitle(ri.title))) continue;
+    const mappedJourneyId = ri.journeyId ? idMap.get(ri.journeyId) : undefined;
+    const journeyId =
+      mappedJourneyId && journeyIds.has(mappedJourneyId)
+        ? mappedJourneyId
+        : undefined;
+    if (journeyId && allowed.has("journey") && !kept.includes("journey")) {
+      kept = ["journey", ...kept];
+    }
+    candidates.push({
+      ...ri,
+      id: `U${++tn}`,
+      group: kept[0],
+      groups: kept,
+      journeyId,
+    });
+  }
+
+  // Bound new items so combined stays near MAX_PLAN_ITEMS, but always admit a
+  // few of the user's items even when the plan is already full (explicit ask).
+  const budget = Math.max(4, MAX_PLAN_ITEMS - plan.items.length);
+  const ranked = candidates
+    .map((it, idx) => ({ it, idx }))
+    .sort(
+      (a, b) =>
+        PRIORITY_RANK[a.it.priority] - PRIORITY_RANK[b.it.priority] ||
+        a.idx - b.idx,
+    );
+  const keptItems = ranked.slice(0, budget).map((x) => x.it);
+  // Restore original refiner order for the kept subset (stable, readable plan).
+  const keptIds = new Set(keptItems.map((i) => i.id));
+  const newItems = candidates.filter((i) => keptIds.has(i.id));
+  // Drop journeys that ended up with no covering item (deduped or trimmed away)
+  // — an orphan journey would show as an empty matrix row with nothing to run.
+  const linkedJourneyIds = new Set(
+    newItems.map((i) => i.journeyId).filter(Boolean) as string[],
+  );
+  const admittedJourneys = newJourneys.filter((j) =>
+    linkedJourneyIds.has(j.id),
+  );
+
+  return {
+    plan: {
+      ...plan,
+      journeys: [...plan.journeys, ...admittedJourneys],
+      items: [...plan.items, ...newItems],
+    },
+    addedJourneys: admittedJourneys.length,
+    addedItems: newItems.length,
+    trimmed: candidates.length - newItems.length,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Existing-coverage matching (segmented re-runs)
 // ---------------------------------------------------------------------------
 
@@ -597,6 +816,11 @@ export function buildGeneratorPrompt(opts: {
    *  steps — the generator must not script a login (and gets no plaintext
    *  credentials). */
   auth?: { preAuthenticated: boolean };
+  /** How the app authenticates, resolved by qa_login. Passed so the generator
+   *  always knows the auth story of the page it's exploring — the login page it
+   *  will be redirected to if the session lapses, and the sign-up page for
+   *  register/onboarding scenarios. Never URL-guessed (DOM-observed). */
+  loginContext?: { loginUrl?: string; signupUrl?: string };
 }): string {
   const { item, plan } = opts;
   const groups = itemGroups(item);
@@ -628,13 +852,23 @@ export function buildGeneratorPrompt(opts: {
         .join("\n")}`,
     );
   }
+  const login = opts.loginContext;
+  const loginRef = login?.loginUrl
+    ? ` The app's login page is ${login.loginUrl}${login.signupUrl ? ` and its sign-up page is ${login.signupUrl}` : ""} (DOM-observed).`
+    : "";
   if (opts.auth?.preAuthenticated) {
     parts.push(
-      "The browser session starts already authenticated — a stored login session is applied as a setup step before the test runs. Do NOT write login steps; navigate straight to the page under test.",
+      `The browser session starts already authenticated — a stored login session is applied as a setup step before the test runs. Do NOT write login steps; navigate straight to the page under test. If you are unexpectedly redirected to a login page during exploration the injected session lapsed — do not script a manual login to work around it; report it.${loginRef}`,
     );
   } else if (opts.credentials) {
     parts.push(
-      `If the scenario requires authentication, log in first with email "${opts.credentials.email}" and password "${opts.credentials.password}".`,
+      `If the scenario requires authentication, log in first${login?.loginUrl ? ` at ${login.loginUrl}` : ""} with email "${opts.credentials.email}" and password "${opts.credentials.password}".${login?.signupUrl ? ` The sign-up page is ${login.signupUrl}.` : ""}`,
+    );
+  } else if (loginRef) {
+    // Public-surface run: no session, no creds — still tell the generator where
+    // auth lives so login/register/forgot-password scenarios ground correctly.
+    parts.push(
+      `No authenticated session is available for this run.${loginRef}`,
     );
   }
   return parts.join("\n\n");

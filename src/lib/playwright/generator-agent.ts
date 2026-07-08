@@ -148,8 +148,13 @@ export async function agentCreateTest(
 
     prompt += `\n\nTarget base URL: ${seed.baseUrl}`;
     prompt += `\nNavigate to the page, explore it using MCP tools, then generate the test code.`;
-    if (seed.hasLoginSetup) {
-      prompt += `\n\n**IMPORTANT: Do NOT include login/auth/setup steps in your generated test code. The seed fixture handles authentication during your MCP exploration, but at runtime a separate setup script logs in BEFORE the test runs. Your test should assume the user is already logged in — start directly on the page being tested.**`;
+    // The QA agent may have injected an authenticated session directly into the
+    // exploration browser (context.preAuthenticated) even when the repo has no
+    // login-bearing default setup step (seed.hasLoginSetup is false for a
+    // per-test storage_state override). Honor either signal so the generator's
+    // auth story matches the browser it is actually driving.
+    if (seed.hasLoginSetup || context.preAuthenticated) {
+      prompt += `\n\n**IMPORTANT: Do NOT include login/auth/setup steps in your generated test code. Authentication is applied automatically before the test runs (an injected session or a setup script), and your MCP exploration browser is already signed in. Your test should assume the user is already logged in — start directly on the page being tested. If exploration lands on a login page, the session lapsed: report it rather than scripting a manual login.**`;
     }
     prompt += `\n\n---\n\n${seed.seedPrompt}`;
 

@@ -129,6 +129,12 @@ export interface TestGenerationContext {
   functionalAreaId?: string;
   testName?: string;
   baseUrl?: string;
+  /** The caller has already applied an authenticated session to the exploration
+   *  browser (e.g. QA agent injected a storage state over CDP). When set, the
+   *  generator is told to assume it is logged in and NOT to script a login,
+   *  overriding the repo-default seed auth heuristic — the two auth stories must
+   *  not contradict. */
+  preAuthenticated?: boolean;
 }
 
 export interface GeneratedTest {
