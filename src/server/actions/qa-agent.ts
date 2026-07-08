@@ -969,6 +969,7 @@ async function runQaDiscover(
 
   const substeps: NonNullable<AgentStepState["substeps"]> = [
     { label: "Static route scan", status: "running", agent: "scout" },
+    { label: "Code analysis", status: "pending", agent: "diver" },
     { label: "Live crawl", status: "pending", agent: "ranger" },
   ];
   await updateSubsteps(sessionId, "qa_discover", substeps);
@@ -981,19 +982,19 @@ async function runQaDiscover(
     { stepId: "qa_discover", agentType: "scout" },
   );
 
+  const repo = await queries.getRepository(repositoryId);
+  const ghAccount = await queries
+    .getGithubAccountByTeam(teamId)
+    .catch(() => undefined);
+  const githubConnected = Boolean(
+    ghAccount?.accessToken && repo?.provider === "github" && repo.owner,
+  );
+  const branch = repo?.selectedBranch || repo?.defaultBranch || "main";
+
   // 1) Static routes: reuse a prior scan; else run the GitHub-tree scanner.
   let staticRoutes: Array<{ path: string; type: string }> = [];
   let framework: string | undefined;
-  let githubConnected = false;
   try {
-    const repo = await queries.getRepository(repositoryId);
-    const ghAccount = await queries
-      .getGithubAccountByTeam(teamId)
-      .catch(() => undefined);
-    githubConnected = Boolean(
-      ghAccount?.accessToken && repo?.provider === "github" && repo.owner,
-    );
-
     const existing = await queries.getRoutesByRepo(repositoryId);
     if (existing.length > 0) {
       staticRoutes = existing.map((r) => ({ path: r.path, type: r.type }));
@@ -1005,7 +1006,7 @@ async function runQaDiscover(
         accessToken: ghAccount.accessToken,
         owner: repo.owner ?? "",
         repo: repo.name ?? "",
-        branch: repo.selectedBranch || repo.defaultBranch || "main",
+        branch,
       });
       const result = await scanner.scan();
       staticRoutes = result.routes.map((r) => ({
@@ -1032,8 +1033,84 @@ async function runQaDiscover(
 
   if (await isStopped(sessionId, signal)) return false;
 
-  // 2) Live crawl on an Embedded Browser (streamed to the page live view).
+  // 2) Code check (repo-aware mode): stack intelligence + endpoints declared
+  //    in code — facts the crawl can't see, feeding the planner digest.
+  let codeCheck: QaDiscovery["codeCheck"];
   substeps[1] = { ...substeps[1], status: "running" };
+  await updateSubsteps(sessionId, "qa_discover", substeps);
+  if (githubConnected && repo && ghAccount?.accessToken) {
+    try {
+      const [{ gatherCodebaseIntelligence }, { getRepoTree, getFileContent }] =
+        await Promise.all([
+          import("@/lib/ai/codebase-intelligence"),
+          import("@/lib/github/content"),
+        ]);
+      const { extractDeclaredEndpoints } =
+        await import("@/lib/qa-agent/code-check");
+      const token = ghAccount.accessToken;
+      const owner = repo.owner ?? "";
+      const name = repo.name ?? "";
+      const [intel, tree] = await Promise.all([
+        gatherCodebaseIntelligence(token, owner, name, branch).catch(
+          () => null,
+        ),
+        getRepoTree(token, owner, name, branch).catch(() => null),
+      ]);
+      const declaredEndpoints = tree
+        ? await extractDeclaredEndpoints(tree.tree, (path) =>
+            getFileContent(token, owner, name, path, branch),
+          )
+        : [];
+      if (intel || declaredEndpoints.length > 0) {
+        codeCheck = {
+          framework: intel?.framework,
+          authMechanism: intel?.authMechanism,
+          apiLayer: intel?.apiLayer,
+          projectDescription: intel?.projectDescription,
+          testingNotes: [
+            ...(intel?.keyDeps.map(
+              (d) => `${d.name}: ${d.testingImplication}`,
+            ) ?? []),
+            ...(intel?.testingRecommendations ?? []),
+          ].slice(0, 12),
+          declaredEndpoints,
+        };
+      }
+      substeps[1] = {
+        ...substeps[1],
+        status: "done",
+        detail: codeCheck
+          ? `${codeCheck.declaredEndpoints.length} declared endpoints · ${codeCheck.framework ?? "stack unknown"}`
+          : "no code intelligence available",
+      };
+      emitActivity(
+        teamId,
+        repositoryId,
+        sessionId,
+        "substep:update",
+        `Code analysis: ${codeCheck?.declaredEndpoints.length ?? 0} declared endpoints, stack ${codeCheck?.framework ?? "unknown"}`,
+        { stepId: "qa_discover", agentType: "diver" },
+      );
+    } catch (err) {
+      substeps[1] = {
+        ...substeps[1],
+        status: "error",
+        detail: err instanceof Error ? err.message : "code analysis failed",
+      };
+    }
+  } else {
+    substeps[1] = {
+      ...substeps[1],
+      status: "done",
+      detail: "skipped — GitHub not connected",
+    };
+  }
+  await updateSubsteps(sessionId, "qa_discover", substeps);
+
+  if (await isStopped(sessionId, signal)) return false;
+
+  // 3) Live crawl on an Embedded Browser (streamed to the page live view).
+  substeps[2] = { ...substeps[2], status: "running" };
   await updateSubsteps(sessionId, "qa_discover", substeps);
 
   let runnerId: string | undefined;
@@ -1046,8 +1123,8 @@ async function runQaDiscover(
       mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
     });
     if (!eb) {
-      substeps[1] = {
-        ...substeps[1],
+      substeps[2] = {
+        ...substeps[2],
         status: "error",
         detail: "No embedded browser available",
       };
@@ -1088,8 +1165,8 @@ async function runQaDiscover(
         prioritizeAuthLinks: !preAuthed && !credentials,
         signal,
         onPage: (snapshot, index) => {
-          substeps[1] = {
-            ...substeps[1],
+          substeps[2] = {
+            ...substeps[2],
             detail: `${index + 1} pages mapped — ${snapshot.finalUrl}`,
           };
           updateSubsteps(sessionId, "qa_discover", substeps).catch(() => {});
@@ -1103,8 +1180,8 @@ async function runQaDiscover(
           );
         },
       });
-      substeps[1] = {
-        ...substeps[1],
+      substeps[2] = {
+        ...substeps[2],
         status: crawled.pages.length > 0 ? "done" : "error",
         detail:
           crawled.pages.length > 0
@@ -1142,8 +1219,8 @@ async function runQaDiscover(
       }
     }
   } catch (err) {
-    substeps[1] = {
-      ...substeps[1],
+    substeps[2] = {
+      ...substeps[2],
       status: "error",
       detail: err instanceof Error ? err.message : "crawl failed",
     };
@@ -1168,6 +1245,7 @@ async function runQaDiscover(
     staticRoutes: staticRoutes.length > 0 ? staticRoutes : undefined,
     framework,
     githubConnected,
+    codeCheck,
   };
   await mergeMetadata(sessionId, { qaDiscovery: discovery });
   await setStepCompleted(sessionId, "qa_discover", {
@@ -1251,6 +1329,7 @@ async function runQaPlan(
         groups,
         authenticated,
         existingCoverage,
+        docsDigest: session.metadata.qaDocsDigest || undefined,
         feedback:
           [feedback, extraFeedback].filter(Boolean).join("\n") || undefined,
       }),
@@ -2246,6 +2325,9 @@ export interface StartQaAgentInput {
   targetUrl: string;
   /** full (default) | refresh_spec | fill_gaps — see QaRunMode. */
   mode?: QaRunMode;
+  /** Product documentation uploads (.md/.txt/.pdf/.docx, base64) — the
+   *  planner treats their content as authoritative for intended behavior. */
+  docs?: Array<{ name: string; contentBase64: string }>;
   groups: QaTestGroup[];
   email?: string;
   password?: string;
@@ -2290,6 +2372,17 @@ export async function startQaAgent(
   const credsProvided = Boolean(input.email?.trim() && input.password);
   const steps = buildStepsForMode(mode);
 
+  // Decode uploaded product docs into the planner's documentation digest.
+  // Only the digest + per-file summaries persist — never the raw upload.
+  let docsSeed: Partial<AgentSessionMetadata> = {};
+  if (input.docs?.length) {
+    const { processUploadedDocs } = await import("@/lib/qa-agent/docs");
+    const { summaries, digest } = await processUploadedDocs(input.docs);
+    if (digest) {
+      docsSeed = { qaDocs: summaries, qaDocsDigest: digest };
+    }
+  }
+
   // fill_gaps reuses the newest stored plan (from any prior full/refresh run)
   // instead of re-discovering and re-planning.
   let planSeed: Partial<AgentSessionMetadata> = {};
@@ -2328,6 +2421,7 @@ export async function startQaAgent(
       credsProvided,
       authMode: credsProvided ? "login" : "public_only",
       ...planSeed,
+      ...docsSeed,
       ...(credsProvided
         ? {
             quickstartEmail: input.email!.trim(),

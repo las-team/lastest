@@ -23,6 +23,8 @@ export interface StartQaOptions {
   password?: string;
   autoApprove?: boolean;
   allowRegistration?: boolean;
+  /** Uploaded product docs, base64-encoded (.md/.txt/.pdf/.docx). */
+  docs?: Array<{ name: string; contentBase64: string }>;
 }
 
 /**
