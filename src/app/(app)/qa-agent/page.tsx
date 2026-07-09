@@ -8,7 +8,9 @@ import {
   getAISettings,
   getDefaultSetupSteps,
   getStorageStates,
+  getQaTasksByRepo,
 } from "@/lib/db/queries";
+import type { AgentSession } from "@/lib/db/schema";
 import { getEnvironmentConfig } from "@/server/actions/environment";
 import { QaAgentClient } from "@/components/qa-agent/qa-agent-client";
 import { Bot } from "lucide-react";
@@ -51,6 +53,7 @@ export default async function QaAgentPage() {
   const [
     qaSession,
     recentSessions,
+    qaTasks,
     ghAccount,
     envConfig,
     aiSettings,
@@ -59,6 +62,7 @@ export default async function QaAgentPage() {
   ] = await Promise.all([
     getLatestAgentSession(selectedRepo.id, "qa").catch(() => null),
     getRecentAgentSessions(selectedRepo.id, "qa", 10).catch(() => []),
+    getQaTasksByRepo(selectedRepo.id).catch(() => []),
     teamId ? getGithubAccountByTeam(teamId).catch(() => null) : null,
     getEnvironmentConfig(selectedRepo.id).catch(() => null),
     getAISettings(selectedRepo.id).catch(() => null),
@@ -97,18 +101,16 @@ export default async function QaAgentPage() {
   const hasExistingAuthSetup = hasDefaultSetupSteps || hasLiveStorageState;
 
   // Credentials never reach the client; drop the password from the snapshot.
-  const initialSession = qaSession
-    ? {
-        ...qaSession,
-        metadata: (({ quickstartPassword: _pw, ...rest }) => rest)(
-          qaSession.metadata,
-        ),
-      }
-    : null;
+  const sanitize = (s: AgentSession): AgentSession => ({
+    ...s,
+    metadata: (({ quickstartPassword: _pw, ...rest }) => rest)(s.metadata),
+  });
+  const initialSession = qaSession ? sanitize(qaSession) : null;
+  const sanitizedRecent = recentSessions.map(sanitize);
 
   return (
     <div className="flex-1 p-6 overflow-auto">
-      <div className="max-w-4xl mx-auto space-y-6">
+      <div className="max-w-5xl mx-auto space-y-6">
         <header className="space-y-1">
           <h1 className="text-2xl font-semibold flex items-center gap-2">
             <Bot className="h-6 w-6" />
@@ -130,6 +132,8 @@ export default async function QaAgentPage() {
           storedPlanInfo={storedPlanInfo}
           hasExistingAuthSetup={hasExistingAuthSetup}
           initialSession={initialSession}
+          recentSessions={sanitizedRecent}
+          initialTasks={qaTasks}
         />
       </div>
     </div>

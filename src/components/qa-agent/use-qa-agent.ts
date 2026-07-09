@@ -6,6 +6,7 @@ import {
   startQaAgent,
   approveQaPlan,
   rerunQaPlanner,
+  rerunQaSession,
   addQaUserJourneys,
   pauseQaAgent,
   resumeQaAgent,
@@ -139,6 +140,33 @@ export function useQaAgent(
     [repositoryId, storageKey, startPolling],
   );
 
+  /** Re-run a prior session with its stored configuration (history rows). */
+  const rerun = useCallback(
+    async (sourceSessionId: string) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await rerunQaSession(sourceSessionId);
+        if (storageKey) localStorage.setItem(storageKey, result.sessionId);
+        startPolling(result.sessionId);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to re-run");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [storageKey, startPolling],
+  );
+
+  /** Attach to a session started elsewhere (e.g. the task dispatcher). */
+  const attach = useCallback(
+    (sid: string) => {
+      if (storageKey) localStorage.setItem(storageKey, sid);
+      startPolling(sid);
+    },
+    [storageKey, startPolling],
+  );
+
   const approve = useCallback(
     (disabledItemIds: string[]) =>
       session
@@ -239,6 +267,8 @@ export function useQaAgent(
     isTerminal,
     progress,
     start,
+    rerun,
+    attach,
     approve,
     requestChanges,
     addJourneys,

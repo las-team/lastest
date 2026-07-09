@@ -41,3 +41,4 @@ export * from "./queries/awards";
 export * from "./queries/launch";
 export * from "./queries/playground";
 export * from "./queries/billing";
+export * from "./queries/qa-tasks";
