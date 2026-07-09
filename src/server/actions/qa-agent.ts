@@ -1034,27 +1034,39 @@ async function runQaDiscover(
   if (await isStopped(sessionId, signal)) return false;
 
   // 2) Code check (repo-aware mode): stack intelligence + endpoints declared
-  //    in code — facts the crawl can't see, feeding the planner digest.
+  //    in code — facts the crawl can't see, feeding the planner digest. When
+  //    the scanned branch differs from the base branch, also diff the two so
+  //    the planner knows exactly which functions/endpoints this branch (PR)
+  //    adds or changes and can target them.
   let codeCheck: QaDiscovery["codeCheck"];
+  let prChanges: QaDiscovery["prChanges"];
   substeps[1] = { ...substeps[1], status: "running" };
   await updateSubsteps(sessionId, "qa_discover", substeps);
   if (githubConnected && repo && ghAccount?.accessToken) {
     try {
-      const [{ gatherCodebaseIntelligence }, { getRepoTree, getFileContent }] =
-        await Promise.all([
-          import("@/lib/ai/codebase-intelligence"),
-          import("@/lib/github/content"),
-        ]);
+      const [
+        { gatherCodebaseIntelligence },
+        { getRepoTree, getFileContent, compareBranches },
+      ] = await Promise.all([
+        import("@/lib/ai/codebase-intelligence"),
+        import("@/lib/github/content"),
+      ]);
       const { extractDeclaredEndpoints } =
         await import("@/lib/qa-agent/code-check");
       const token = ghAccount.accessToken;
       const owner = repo.owner ?? "";
       const name = repo.name ?? "";
-      const [intel, tree] = await Promise.all([
+      const baseBranch = repo.defaultBranch || "main";
+      const [intel, tree, comparison] = await Promise.all([
         gatherCodebaseIntelligence(token, owner, name, branch).catch(
           () => null,
         ),
         getRepoTree(token, owner, name, branch).catch(() => null),
+        branch !== baseBranch
+          ? compareBranches(token, owner, name, baseBranch, branch).catch(
+              () => null,
+            )
+          : Promise.resolve(null),
       ]);
       const declaredEndpoints = tree
         ? await extractDeclaredEndpoints(tree.tree, (path) =>
@@ -1076,19 +1088,29 @@ async function runQaDiscover(
           declaredEndpoints,
         };
       }
+      if (comparison && comparison.files.length > 0) {
+        const { computePrChanges } = await import("@/lib/qa-agent/pr-check");
+        const computed = computePrChanges(comparison, declaredEndpoints);
+        if (computed.files.length > 0) prChanges = computed;
+      }
+      const prDetail = prChanges
+        ? ` · branch diff vs ${prChanges.baseBranch}: ${prChanges.files.length} files, ${prChanges.symbols.length} functions, ${prChanges.endpoints.length} endpoints`
+        : "";
       substeps[1] = {
         ...substeps[1],
         status: "done",
         detail: codeCheck
-          ? `${codeCheck.declaredEndpoints.length} declared endpoints · ${codeCheck.framework ?? "stack unknown"}`
-          : "no code intelligence available",
+          ? `${codeCheck.declaredEndpoints.length} declared endpoints · ${codeCheck.framework ?? "stack unknown"}${prDetail}`
+          : prChanges
+            ? `no code intelligence available${prDetail}`
+            : "no code intelligence available",
       };
       emitActivity(
         teamId,
         repositoryId,
         sessionId,
         "substep:update",
-        `Code analysis: ${codeCheck?.declaredEndpoints.length ?? 0} declared endpoints, stack ${codeCheck?.framework ?? "unknown"}`,
+        `Code analysis: ${codeCheck?.declaredEndpoints.length ?? 0} declared endpoints, stack ${codeCheck?.framework ?? "unknown"}${prDetail}`,
         { stepId: "qa_discover", agentType: "diver" },
       );
     } catch (err) {
@@ -1246,6 +1268,7 @@ async function runQaDiscover(
     framework,
     githubConnected,
     codeCheck,
+    prChanges,
   };
   await mergeMetadata(sessionId, { qaDiscovery: discovery });
   await setStepCompleted(sessionId, "qa_discover", {
@@ -2184,6 +2207,13 @@ async function runQaSummary(
   }
 
   const summary = computeQaSummary(plan, ledger);
+  // Branch-aware runs: report, per function/endpoint the branch changed,
+  // whether a test now covers it (the PR coverage panel).
+  const prChanges = session.metadata.qaDiscovery?.prChanges;
+  if (prChanges) {
+    const { computePrCoverage } = await import("@/lib/qa-agent/pr-check");
+    summary.prCoverage = computePrCoverage(prChanges, plan, ledger);
+  }
   await mergeMetadata(sessionId, { qaSummary: summary });
   await setStepCompleted(sessionId, "qa_summary", {
     planned: summary.planned,
@@ -2201,9 +2231,12 @@ async function runQaSummary(
     repositoryId,
     sessionId,
     "session:complete",
-    session.metadata.qaMode === "refresh_spec"
+    (session.metadata.qaMode === "refresh_spec"
       ? `Specification refreshed: ${summary.planned} planned, ${summary.covered} covered by existing tests, ${gaps} gaps`
-      : `QA suite build complete: ${summary.generated} tests generated, ${summary.covered} already covered, ${summary.passed} passing`,
+      : `QA suite build complete: ${summary.generated} tests generated, ${summary.covered} already covered, ${summary.passed} passing`) +
+      (summary.prCoverage
+        ? ` · branch changes covered: ${summary.prCoverage.coveredCount}/${summary.prCoverage.entries.length}`
+        : ""),
   );
   return true;
 }

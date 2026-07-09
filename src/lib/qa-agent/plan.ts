@@ -1,4 +1,5 @@
 import { buildCodeCheckDigest } from "./code-check";
+import { buildPrChangesDigest } from "./pr-check";
 import type {
   ApiTestDefinition,
   QaDiscovery,
@@ -197,7 +198,8 @@ function isPlanItem(v: unknown): v is QaPlanItem {
     typeof i.title !== "string" ||
     !PRIORITIES.includes(i.priority as QaPriority) ||
     typeof i.scenario !== "string" ||
-    (i.businessArea !== undefined && typeof i.businessArea !== "string")
+    (i.businessArea !== undefined && typeof i.businessArea !== "string") ||
+    (i.changeRefs !== undefined && !isStringArray(i.changeRefs))
   ) {
     return false;
   }
@@ -365,6 +367,9 @@ export function buildDiscoveryDigest(discovery: QaDiscovery): string {
   if (discovery.codeCheck) {
     sections.push(buildCodeCheckDigest(discovery.codeCheck));
   }
+  if (discovery.prChanges) {
+    sections.push(buildPrChangesDigest(discovery.prChanges));
+  }
   if (discovery.staticRoutes?.length) {
     sections.push(
       `## Routes from source code (${discovery.framework ?? "unknown framework"})\n` +
@@ -439,7 +444,7 @@ OUTPUT: a single JSON object, no markdown fences, no commentary, matching exactl
 {
   "appProfile": { "summary": string, "businessDomain": string, "primaryOutcome": string },
   "journeys": [ { "id": "J1", "title": string, "priority": "P1"|"P2"|"P3", "businessArea": string, "steps": [string], "businessOutcome": string, "endStateVerification": string } ],
-  "items": [ { "id": "T1", "groups": [<group>, ...], "title": string, "priority": "P1"|"P2"|"P3", "journeyId": string?, "businessArea": string, "pagePath": string?, "rationale": string, "scenario": string, "selectorHints": [string]?, "api": { "method": "GET"|"POST"|"PUT"|"PATCH"|"DELETE", "path": string, "expectedStatus": number }? } ],
+  "items": [ { "id": "T1", "groups": [<group>, ...], "title": string, "priority": "P1"|"P2"|"P3", "journeyId": string?, "businessArea": string, "pagePath": string?, "rationale": string, "scenario": string, "selectorHints": [string]?, "changeRefs": [string]?, "api": { "method": "GET"|"POST"|"PUT"|"PATCH"|"DELETE", "path": string, "expectedStatus": number }? } ],
   "entryCriteria": [string],
   "exitCriteria": [string],
   "risks": [string]
@@ -455,7 +460,8 @@ RULES:
 - "businessArea" is REQUIRED on every item and journey: a short, consistent functional-domain name (e.g. "Authentication", "Accounts", "Checkout", "Marketing"). Use 2-5 distinct areas total and reuse the exact same spelling across items — they become the rows of a coverage matrix.
 - Every selected group must appear in at least one item's "groups". Plan the SMALLEST test set that achieves this — typically 1-2 items per page/flow — and 1-3 journeys. Quality over quantity: every item must be executable against the discovered pages. HARD LIMITS: at most ${MAX_PLAN_ITEMS} items and ${MAX_PLAN_JOURNEYS} journeys — consolidate rather than exceed them (tests generate one at a time, so a bloated plan is slow and low-signal).
 - Ground the plan in the DISCOVERY DIGEST's actual crawled pages. When the digest's crawled pages are signed-in, in-app pages (a dashboard, resource lists, detail/settings pages), the app IS authenticated for this run — plan coverage of that in-app product surface. Never collapse an authenticated run into public login/register pages that the crawl did not even map; the auth pages are the gateway, not the product.
-- Authentication: when an authenticated session is available (see the user message), plan the in-app surface and journeys need NOT script a login (the session is applied automatically) — do not spend items on the login form unless login itself is a listed coverage goal. When no authenticated session is available, plan public-surface coverage only.`;
+- Authentication: when an authenticated session is available (see the user message), plan the in-app surface and journeys need NOT script a login (the session is applied automatically) — do not spend items on the login form unless login itself is a listed coverage goal. When no authenticated session is available, plan public-surface coverage only.
+- Branch changes: when the digest contains a "Changes on branch" section (a PR/branch diff), treat those changes as the highest-risk surface — every user-observable listed change needs a covering item (raise its priority accordingly), and each covering item MUST set "changeRefs" to the exact ref strings it covers, copied verbatim from the digest's [ref: …] tags. Only skip a listed change when it has no user-facing surface (say so in a risk note).`;
 }
 
 export function buildPlannerUserPrompt(opts: {

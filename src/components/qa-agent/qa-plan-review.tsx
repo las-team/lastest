@@ -22,6 +22,7 @@ import {
   Check,
   CheckCircle2,
   ClipboardList,
+  GitBranch,
   Loader2,
   MessageSquareWarning,
   Route,
@@ -119,6 +120,20 @@ function ItemDetailCard({
             {item.selectorHints.map((s) => (
               <code key={s} className="block text-[11px] break-all">
                 {s}
+              </code>
+            ))}
+          </div>
+        </div>
+      )}
+      {item.changeRefs && item.changeRefs.length > 0 && (
+        <div>
+          <div className="font-medium text-muted-foreground">
+            Covers branch changes
+          </div>
+          <div className="space-y-0.5">
+            {item.changeRefs.map((r) => (
+              <code key={r} className="block text-[11px] break-all">
+                {r}
               </code>
             ))}
           </div>
@@ -337,6 +352,16 @@ export function QaPlanReview({
                               className="text-[10px] px-1.5 text-muted-foreground shrink-0"
                             >
                               {item.businessArea}
+                            </Badge>
+                          )}
+                          {item.changeRefs && item.changeRefs.length > 0 && (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] px-1.5 shrink-0 gap-1 bg-info/10 text-info border-info/30"
+                              title={`Covers branch changes: ${item.changeRefs.join(", ")}`}
+                            >
+                              <GitBranch className="h-3 w-3" />
+                              PR change
                             </Badge>
                           )}
                           {item.pagePath && (

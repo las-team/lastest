@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type {
   QaGeneratedTest,
+  QaPrCoverageEntry,
   QaSummaryData,
   QaTestGroup,
   QaTestPlan,
@@ -12,9 +13,11 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   CheckCircle2,
+  CircleDashed,
   ExternalLink,
   FileCheck,
   FileCode,
+  GitBranch,
   Loader2,
   Wrench,
   XCircle,
@@ -138,6 +141,120 @@ export function QaGeneratedTestsPanel({
   );
 }
 
+const PR_STATUS_META: Record<
+  QaPrCoverageEntry["status"],
+  { label: string; className: string; icon: typeof CheckCircle2 }
+> = {
+  passed: {
+    label: "Passing",
+    className: "bg-success/10 text-success border-success/30",
+    icon: CheckCircle2,
+  },
+  covered: {
+    label: "Covered",
+    className: "bg-info/10 text-info border-info/30",
+    icon: FileCheck,
+  },
+  generated: {
+    label: "Test created",
+    className: "bg-info/10 text-info border-info/30",
+    icon: FileCode,
+  },
+  planned: {
+    label: "Planned only",
+    className: "bg-warning/10 text-warning border-warning/30",
+    icon: CircleDashed,
+  },
+  uncovered: {
+    label: "Uncovered",
+    className: "bg-destructive/10 text-destructive border-destructive/30",
+    icon: XCircle,
+  },
+};
+
+const PR_CHANGE_LABEL: Record<QaPrCoverageEntry["change"], string> = {
+  added: "new",
+  modified: "changed",
+  removed: "removed",
+};
+
+/** Per-change coverage of the branch diff — which functions/endpoints the
+ *  working branch touched and whether a test now exercises each one. */
+function QaPrCoverageSection({
+  prCoverage,
+}: {
+  prCoverage: NonNullable<QaSummaryData["prCoverage"]>;
+}) {
+  if (prCoverage.entries.length === 0) return null;
+  const total = prCoverage.entries.length;
+  return (
+    <div className="space-y-1">
+      <h4 className="flex items-center gap-1.5 text-sm font-medium">
+        <GitBranch className="h-3.5 w-3.5" />
+        Branch changes coverage{" "}
+        <span className="text-xs font-normal text-muted-foreground">
+          — <code>{prCoverage.headBranch}</code> vs{" "}
+          <code>{prCoverage.baseBranch}</code>:{" "}
+          <span
+            className={
+              prCoverage.coveredCount === total
+                ? "text-success"
+                : "text-warning"
+            }
+          >
+            {prCoverage.coveredCount}/{total}
+          </span>{" "}
+          changed functions & endpoints have tests
+        </span>
+      </h4>
+      <div className="rounded-md border divide-y">
+        {prCoverage.entries.map((entry) => {
+          const meta = PR_STATUS_META[entry.status];
+          const Icon = meta.icon;
+          return (
+            <div
+              key={`${entry.kind}:${entry.ref}`}
+              className="flex items-center gap-2 px-3 py-1.5 text-sm"
+            >
+              <Badge
+                variant="outline"
+                className={`text-[10px] px-1.5 shrink-0 gap-1 ${meta.className}`}
+              >
+                <Icon className="h-3 w-3" />
+                {meta.label}
+              </Badge>
+              <code className="truncate text-xs">{entry.ref}</code>
+              <span className="text-[10px] text-muted-foreground shrink-0">
+                {PR_CHANGE_LABEL[entry.change]}{" "}
+                {entry.kind === "endpoint" ? "endpoint" : "function"}
+              </span>
+              <span
+                className="ml-auto truncate text-[10px] text-muted-foreground max-w-[220px]"
+                title={entry.file}
+              >
+                {entry.file}
+              </span>
+              {entry.testIds[0] && (
+                <Link
+                  href={`/tests/${entry.testIds[0]}`}
+                  className="text-muted-foreground hover:text-foreground shrink-0"
+                  title={
+                    entry.testIds.length > 1
+                      ? `Open test (1 of ${entry.testIds.length})`
+                      : "Open test"
+                  }
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </Link>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function QaSummaryPanel({
   summary,
   plan,
@@ -175,6 +292,10 @@ export function QaSummaryPanel({
             </div>
           ))}
         </div>
+
+        {summary.prCoverage && (
+          <QaPrCoverageSection prCoverage={summary.prCoverage} />
+        )}
 
         {summary.matrix && Object.keys(summary.matrix).length > 0 && (
           <div className="space-y-1">
