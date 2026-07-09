@@ -19,6 +19,7 @@ import {
   GitCommit,
   Wrench,
   Bot,
+  Lock,
 } from "lucide-react";
 import Image from "next/image";
 import {
@@ -31,6 +32,7 @@ import { ActivityFeedIndicator } from "@/components/activity-feed/activity-feed-
 import { UserMenu } from "@/components/auth/user-menu";
 import { InlineScore } from "@/components/gamification/user-score-chip";
 import { SidebarQuickActions } from "./sidebar-quick-actions";
+import { hasQaAgentAccess } from "@/lib/billing/feature-access";
 import type { Repository, User, Team, EmbeddedSession } from "@/lib/db/schema";
 
 interface SidebarProps {
@@ -112,6 +114,9 @@ export function Sidebar({
   const earlyAdopter = team?.earlyAdopterMode ?? false;
   const gamificationEnabled = team?.gamificationEnabled ?? false;
   const verifyPhaseEnabled = team?.verifyPhaseEnabled ?? false;
+  // QA Agent is a Pro-tier feature — surface a lock on the nav item so the
+  // gated destination doesn't look identical to unlocked pages.
+  const qaAgentLocked = team ? !hasQaAgentAccess(team.plan) : false;
 
   const filteredDefinitionNav = earlyAdopter
     ? definitionNav
@@ -256,6 +261,7 @@ export function Sidebar({
               const isActive =
                 pathname === item.href || pathname.startsWith(item.href);
               const isVerify = item.name === "Verify";
+              const isLockedQaAgent = item.name === "QA Agent" && qaAgentLocked;
               return (
                 <li key={item.name}>
                   <Link
@@ -269,6 +275,21 @@ export function Sidebar({
                   >
                     <item.icon className="h-4 w-4" />
                     <span className="flex-1">{item.name}</span>
+                    {isLockedQaAgent && (
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-full px-1.5 h-[18px] text-[10px] font-semibold leading-none ring-1",
+                          isActive
+                            ? "bg-white/20 text-primary-foreground ring-white/30"
+                            : "bg-primary/10 text-primary ring-primary/20",
+                        )}
+                        aria-label="Pro feature"
+                        title="QA Agent is available on the Pro plan"
+                      >
+                        <Lock className="h-2.5 w-2.5" />
+                        Pro
+                      </span>
+                    )}
                     {isVerify && verifyPendingCount > 0 && (
                       <span
                         className={cn(

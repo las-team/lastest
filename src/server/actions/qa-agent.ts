@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import * as queries from "@/lib/db/queries";
 import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
+import { assertQaAgentAccess } from "@/lib/billing/feature-access";
 import {
   assertSafeOutboundUrl,
   SsrfBlockedError,
@@ -2401,6 +2402,7 @@ export async function startQaAgent(
   input: StartQaAgentInput,
 ): Promise<{ sessionId: string }> {
   const { team } = await requireRepoAccess(input.repositoryId);
+  assertQaAgentAccess(team.plan);
 
   const targetUrl = input.targetUrl.trim().replace(/\/+$/, "");
   if (!/^https?:\/\//i.test(targetUrl)) {
@@ -2513,6 +2515,7 @@ async function requireQaSession(sessionId: string): Promise<{
   teamId: string;
 }> {
   const { team } = await requireTeamAccess();
+  assertQaAgentAccess(team.plan);
   const session = await queries.getAgentSession(sessionId);
   if (!session || session.kind !== "qa") {
     throw new Error("QA session not found");
@@ -3123,6 +3126,7 @@ async function requireQaTask(
   taskId: string,
 ): Promise<{ task: QaTask; teamId: string }> {
   const { team } = await requireTeamAccess();
+  assertQaAgentAccess(team.plan);
   const task = await queries.getQaTask(taskId);
   if (!task || task.teamId !== team.id) {
     throw new Error("Task not found");
@@ -3139,6 +3143,7 @@ export async function addQaTask(input: {
   source?: Extract<QaTaskSource, "user" | "coverage_gap">;
 }): Promise<{ taskId: string }> {
   const { team, user } = await requireRepoAccess(input.repositoryId);
+  assertQaAgentAccess(team.plan);
   const title = input.title.trim().slice(0, MAX_TASK_TITLE);
   if (!title) throw new Error("The task needs a title");
   const task = await queries.createQaTask({
