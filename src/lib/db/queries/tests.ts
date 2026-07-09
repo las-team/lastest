@@ -672,6 +672,47 @@ export async function createTestResult(data: Omit<NewTestResult, "id">) {
 }
 
 /**
+ * One latest test_result per test in a repo, carrying only the fields the App
+ * Map needs (screenshots + urlTrajectory). PG DISTINCT ON picks a single row
+ * per test_id; when `branch` is given, branch-matching runs win over other
+ * branches, then most-recent-first. Only rows that actually captured a URL
+ * trajectory are returned. One query — avoids the per-test N+1 of calling
+ * getTestResultsByTest in a loop.
+ */
+export async function getLatestTestResultsWithTrajectoryByRepo(
+  repositoryId: string,
+  branch?: string,
+) {
+  const branchRank = branch
+    ? sql<number>`case when ${testRuns.gitBranch} = ${branch} then 0 else 1 end`
+    : null;
+  const orderBy = branchRank
+    ? [testResults.testId, branchRank, desc(testRuns.startedAt)]
+    : [testResults.testId, desc(testRuns.startedAt)];
+  return db
+    .selectDistinctOn([testResults.testId], {
+      testId: testResults.testId,
+      testName: tests.name,
+      screenshots: testResults.screenshots,
+      urlTrajectory: testResults.urlTrajectory,
+      status: testResults.status,
+      gitBranch: testRuns.gitBranch,
+      startedAt: testRuns.startedAt,
+    })
+    .from(testResults)
+    .innerJoin(testRuns, eq(testResults.testRunId, testRuns.id))
+    .innerJoin(tests, eq(testResults.testId, tests.id))
+    .where(
+      and(
+        eq(tests.repositoryId, repositoryId),
+        isNull(tests.deletedAt),
+        isNotNull(testResults.urlTrajectory),
+      ),
+    )
+    .orderBy(...orderBy);
+}
+
+/**
  * Most recent test_result for `testId` from a test_run other than `excludeTestRunId`.
  * Used as the multi-layer comparison baseline. Joins on test_runs to sort by
  * startedAt; ignores results from the in-flight run.

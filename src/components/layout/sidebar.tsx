@@ -20,6 +20,7 @@ import {
   Wrench,
   Bot,
   Lock,
+  Waypoints,
 } from "lucide-react";
 import Image from "next/image";
 import {
@@ -72,6 +73,7 @@ const EARLY_ADOPTER_ITEMS = new Set([
 
 const definitionNav = [
   { name: "Tests", href: "/tests", icon: FileCode },
+  { name: "App Map", href: "/app-map", icon: Waypoints },
   { name: "Setup", href: "/setup", icon: Wrench },
   { name: "Compose", href: "/compose", icon: Layers },
 ];
