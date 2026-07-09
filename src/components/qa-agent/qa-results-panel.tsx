@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import type {
   QaGeneratedTest,
@@ -286,6 +287,12 @@ export function QaSummaryPanel({
   onRequestCoverage?: (hint: CoverageRequestHint) => void;
   requestPending?: boolean;
 }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    // Hydration guard: timeAgo() drifts between server render and client mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
   const groupRows = QA_GROUPS.filter((g) => summary.byGroup[g.id]);
   const gaps = Math.max(
     0,
@@ -301,7 +308,7 @@ export function QaSummaryPanel({
             <CheckCircle2 className="h-4 w-4" />
           )}
           {persistent ? "Coverage dashboard" : "Coverage summary"}
-          {persistent && updatedAt && (
+          {persistent && updatedAt && mounted && (
             <span className="text-xs font-normal text-muted-foreground">
               — updated {timeAgo(new Date(updatedAt))}
             </span>

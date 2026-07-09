@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import type { QaTask, QaTaskStatus } from "@/lib/db/schema";
+import Link from "next/link";
+import type { QaTask, QaTaskStatus, QaTaskTestRef } from "@/lib/db/schema";
 import { timeAgo } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ import {
   CheckCircle2,
   CircleDashed,
   Crosshair,
+  FlaskConical,
   ListTodo,
   Loader2,
   Plug,
@@ -83,6 +85,38 @@ function SourceChip({ task }: { task: QaTask }) {
       <UserRound className="h-3 w-3" />
       {task.createdByName?.split(/[@\s]/)[0] ?? "you"}
     </Badge>
+  );
+}
+
+// Chip tone by the test's outcome at settle time.
+const TEST_REF_CLASSES: Record<QaTaskTestRef["status"], string> = {
+  passed: "bg-success/10 text-success border-success/30",
+  healed: "bg-success/10 text-success border-success/30",
+  failed: "bg-destructive/10 text-destructive border-destructive/30",
+  covered: "text-muted-foreground",
+  generated: "bg-info/10 text-info border-info/30",
+  generating: "bg-info/10 text-info border-info/30",
+  generation_failed: "bg-destructive/10 text-destructive border-destructive/30",
+};
+
+function TestRefChips({ refs }: { refs: QaTaskTestRef[] }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      {refs.map((ref) => (
+        <Link key={ref.testId} href={`/tests/${ref.testId}`}>
+          <Badge
+            variant="outline"
+            className={`text-[10px] px-1.5 gap-1 max-w-full hover:opacity-80 ${
+              TEST_REF_CLASSES[ref.status] ?? "text-muted-foreground"
+            }`}
+            title={`${ref.name} — ${ref.status.replace("_", " ")}`}
+          >
+            <FlaskConical className="h-3 w-3 shrink-0" />
+            <span className="truncate">{ref.name}</span>
+          </Badge>
+        </Link>
+      ))}
+    </div>
   );
 }
 
