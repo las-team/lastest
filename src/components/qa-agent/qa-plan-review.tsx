@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import type {
+  QaDiscovery,
   QaPlanItem,
   QaPlanJourney,
   QaTestGroup,
@@ -22,6 +24,8 @@ import {
   Check,
   CheckCircle2,
   ClipboardList,
+  ExternalLink,
+  FileCheck,
   GitBranch,
   Loader2,
   MessageSquareWarning,
@@ -139,12 +143,60 @@ function ItemDetailCard({
           </div>
         </div>
       )}
+      {item.existingTestId && (
+        <div>
+          <div className="font-medium text-muted-foreground">
+            Already covered by existing test
+          </div>
+          <Link
+            href={`/tests/${item.existingTestId}`}
+            className="text-info hover:underline"
+          >
+            {item.existingTestName ?? "Open test"}
+          </Link>
+        </div>
+      )}
     </div>
+  );
+}
+
+/** Which code the discovery analyzed — branch, base, and the PR-diff facts
+ *  (or the reason there is no diff). Answers "what was this plan based on". */
+function AnalyzedCodeLine({ discovery }: { discovery: QaDiscovery }) {
+  if (!discovery.githubConnected || !discovery.branch) return null;
+  const pr = discovery.prChanges;
+  const onBase =
+    !discovery.baseBranch || discovery.branch === discovery.baseBranch;
+  return (
+    <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+      <GitBranch className="h-3.5 w-3.5" />
+      Code analyzed from branch <code>{discovery.branch}</code>
+      {pr ? (
+        <>
+          {" "}
+          — diff vs <code>{pr.baseBranch}</code>: {pr.files.length} files,{" "}
+          {pr.symbols.length} functions, {pr.endpoints.length} endpoints to
+          cover
+        </>
+      ) : onBase ? (
+        <>
+          {" "}
+          — this is the base branch, so there is no PR diff to target (pick a
+          feature branch in the repo settings to get PR-focused coverage)
+        </>
+      ) : (
+        <>
+          {" "}
+          — no diff vs <code>{discovery.baseBranch}</code> was available
+        </>
+      )}
+    </p>
   );
 }
 
 export function QaPlanReview({
   plan,
+  discovery,
   readOnly,
   loading,
   onApprove,
@@ -152,6 +204,8 @@ export function QaPlanReview({
   onAddJourneys,
 }: {
   plan: QaTestPlan;
+  /** Discovery the plan was based on — shows branch/diff provenance. */
+  discovery?: QaDiscovery;
   /** True when the plan is shown outside the review gate (no actions). */
   readOnly?: boolean;
   loading?: boolean;
@@ -200,6 +254,7 @@ export function QaPlanReview({
   );
 
   const enabledCount = plan.items.length - disabled.size;
+  const existingCount = items.filter((i) => i.existingTestId).length;
 
   const toggle = (id: string) => {
     setDisabled((prev) => {
@@ -233,6 +288,7 @@ export function QaPlanReview({
             </>
           )}
         </p>
+        {discovery && <AnalyzedCodeLine discovery={discovery} />}
       </CardHeader>
       <CardContent className="space-y-5">
         {plan.journeys.length > 0 && (
@@ -276,6 +332,8 @@ export function QaPlanReview({
             Coverage matrix{" "}
             <span className="text-xs font-normal text-muted-foreground">
               — one test can cover several groups in a single execution
+              {existingCount > 0 &&
+                ` · ${existingCount} of ${items.length} already covered by existing tests (marked "exists" — approving reuses them instead of generating duplicates)`}
             </span>
           </h4>
           <div className="rounded-md border overflow-x-auto">
@@ -363,6 +421,23 @@ export function QaPlanReview({
                               <GitBranch className="h-3 w-3" />
                               PR change
                             </Badge>
+                          )}
+                          {item.existingTestId && (
+                            <Link
+                              href={`/tests/${item.existingTestId}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="shrink-0"
+                              title={`Already covered by existing test: ${item.existingTestName ?? item.existingTestId}`}
+                            >
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] px-1.5 gap-1 bg-success/10 text-success border-success/30"
+                              >
+                                <FileCheck className="h-3 w-3" />
+                                exists
+                                <ExternalLink className="h-2.5 w-2.5" />
+                              </Badge>
+                            </Link>
                           )}
                           {item.pagePath && (
                             <code className="text-[10px] text-muted-foreground">

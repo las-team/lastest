@@ -2908,6 +2908,10 @@ export interface QaPlanItem {
   /** Exact ref strings from the branch-diff digest this item covers (symbol
    *  names, "METHOD /path" endpoints, file paths) — drives PR coverage. */
   changeRefs?: string[];
+  /** Set at plan time when a pre-existing test already covers this item
+   *  (matchPlanToExistingTests) — the review UI shows what already exists. */
+  existingTestId?: string;
+  existingTestName?: string;
   api?: {
     method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
     path: string;
@@ -3027,6 +3031,12 @@ export interface QaDiscovery {
   staticRoutes?: Array<{ path: string; type: string }>;
   framework?: string;
   githubConnected: boolean;
+  /** Branch the static scan + code check analyzed (the repo's selected
+   *  branch, falling back to its default branch). */
+  branch?: string;
+  /** Base branch for the PR diff (the repo's default branch). branch ===
+   *  baseBranch means the run analyzed the base itself — no diff exists. */
+  baseBranch?: string;
   /** Code-check output (repo-aware mode): stack facts, testing implications,
    *  and API endpoints declared in code. Shape in src/lib/qa-agent/code-check. */
   codeCheck?: {

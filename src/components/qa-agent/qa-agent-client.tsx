@@ -860,6 +860,7 @@ export function QaAgentClient({
         <QaPlanReview
           key={awaitingReview ? "review" : "readonly"}
           plan={plan}
+          discovery={session?.metadata.qaDiscovery}
           readOnly={!awaitingReview}
           loading={loading}
           onApprove={approve}
