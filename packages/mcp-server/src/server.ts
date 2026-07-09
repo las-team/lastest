@@ -1906,6 +1906,166 @@ export function createServer(client: LastestClient): McpServer {
     },
   );
 
+  // ===== lastest_qa_agent (ongoing QA agent: status, runs, direction queue) =====
+  server.tool(
+    "lastest_qa_agent",
+    'Drive the ongoing QA agent for a repository (needs repositoryId). `action`: "status" (live session, latest coverage summary, task board, trigger config), "start_run" (start an autonomous run — optional mode full|refresh_spec|fill_gaps and targetUrl; 409 when a session is already running), "run_status" (poll a session by sessionId), "add_task" (queue a directive on the agent\'s task board — it picks tasks up when idle, works them with the right protocol, and replies on the card), "list_tasks" (the task board).',
+    {
+      action: z
+        .enum(["status", "start_run", "run_status", "add_task", "list_tasks"])
+        .describe(
+          '"status" = agent overview; "start_run" = start a run; "run_status" = poll a run; "add_task" = queue a directive; "list_tasks" = task board',
+        ),
+      repositoryId: z
+        .string()
+        .optional()
+        .describe("Repository ID (required for all actions except run_status)"),
+      sessionId: z
+        .string()
+        .optional()
+        .describe("QA session ID (run_status only)"),
+      mode: z
+        .enum(["full", "refresh_spec", "fill_gaps"])
+        .optional()
+        .describe(
+          "start_run only. Omit to let the agent pick (fill_gaps when a stored plan exists, else full).",
+        ),
+      targetUrl: z
+        .string()
+        .optional()
+        .describe(
+          "start_run only. Override the target app URL (defaults to the last run's URL or the repo's env base URL).",
+        ),
+      title: z
+        .string()
+        .optional()
+        .describe(
+          'add_task only. The directive, e.g. "Cover the billing flow".',
+        ),
+      description: z
+        .string()
+        .optional()
+        .describe("add_task only. Extra context for the agent."),
+    },
+    async (
+      params,
+    ): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
+      const action = params.action as
+        | "status"
+        | "start_run"
+        | "run_status"
+        | "add_task"
+        | "list_tasks";
+      const repositoryId = params.repositoryId as string | undefined;
+
+      const respond = (response: ToolResponse) => ({
+        content: [
+          { type: "text" as const, text: JSON.stringify(response, null, 2) },
+        ],
+      });
+      const needRepo = () =>
+        respond({
+          status: "error",
+          summary: "repositoryId is required for this action",
+          details: {},
+        });
+
+      if (action === "run_status") {
+        if (!params.sessionId) {
+          return respond({
+            status: "error",
+            summary: "sessionId is required for run_status",
+            details: {},
+          });
+        }
+        const session = (await client.getQaSession(
+          params.sessionId as string,
+        )) as Record<string, unknown>;
+        return respond({
+          status: `run_${session.status}`,
+          summary: `QA session ${session.id}: ${session.status} (step: ${session.currentStepId ?? "?"})`,
+          details: session,
+        });
+      }
+
+      if (!repositoryId) return needRepo();
+
+      if (action === "status") {
+        const status = (await client.getQaAgentStatus(repositoryId)) as Record<
+          string,
+          unknown
+        >;
+        const live = status.liveSession as Record<string, unknown> | null;
+        const tasks = (status.tasks ?? []) as Array<Record<string, unknown>>;
+        const queued = tasks.filter((t) => t.status === "queued").length;
+        return respond({
+          status: live ? "agent_working" : "agent_idle",
+          summary: live
+            ? `QA agent is ${live.status} (step: ${live.currentStepId ?? "?"}) on ${live.targetUrl ?? "?"}`
+            : `QA agent is idle. ${queued} task(s) queued.`,
+          details: status,
+        });
+      }
+
+      if (action === "start_run") {
+        // The v1 API answers 409 when a session is already running (the
+        // client surfaces non-2xx as a thrown error) — convert that into a
+        // "queue a task instead" hint rather than a hard failure.
+        try {
+          const result = (await client.startQaAgentRun(repositoryId, {
+            mode: params.mode as string | undefined,
+            targetUrl: params.targetUrl as string | undefined,
+          })) as Record<string, unknown>;
+          return respond({
+            status: "run_started",
+            summary: `QA agent run started (session ${result.sessionId}). Poll with action:"run_status".`,
+            details: result,
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return respond({
+            status: "not_started",
+            summary: `Could not start: ${message}`,
+            actionRequired: [
+              'Queue the work with action:"add_task" instead — the agent picks tasks up as soon as it is idle.',
+            ],
+            details: { error: message },
+          });
+        }
+      }
+
+      if (action === "add_task") {
+        if (!params.title || !(params.title as string).trim()) {
+          return respond({
+            status: "error",
+            summary: "title is required for add_task",
+            details: {},
+          });
+        }
+        const task = (await client.addQaTask(repositoryId, {
+          title: params.title as string,
+          description: params.description as string | undefined,
+        })) as Record<string, unknown>;
+        return respond({
+          status: "task_queued",
+          summary: `Task "${task.title}" queued for the QA agent. It will pick it up when idle and reply on the card; check with action:"list_tasks".`,
+          details: task,
+        });
+      }
+
+      // action === 'list_tasks'
+      const tasks = (await client.listQaTasks(repositoryId)) as Array<
+        Record<string, unknown>
+      >;
+      const byStatus = (s: string) => tasks.filter((t) => t.status === s);
+      return respond({
+        status: "tasks_listed",
+        summary: `${byStatus("queued").length} queued · ${byStatus("working").length} working · ${byStatus("needs_input").length} waiting on a human · ${byStatus("done").length} done`,
+        details: { tasks },
+      });
+    },
+  );
+
   // ===== Workflow verbs (standalone, unchanged) =====
 
   // --- lastest_run_tests ---

@@ -3305,6 +3305,39 @@ export const qaTasks = pgTable(
 export type QaTask = typeof qaTasks.$inferSelect;
 export type NewQaTask = typeof qaTasks.$inferInsert;
 
+/** Per-repo automation config for the QA agent: an optional cron schedule and
+ *  an optional PR-webhook trigger. One row per repository; both triggers start
+ *  autonomous sessions (review gate auto-approved) and are skipped with an
+ *  activity event when a session is already running. */
+export const qaAgentTriggers = pgTable("qa_agent_triggers", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  repositoryId: text("repository_id")
+    .references(() => repositories.id, { onDelete: "cascade" })
+    .notNull()
+    .unique(),
+  teamId: text("team_id").notNull(),
+  /** Cron schedule (5-field expression, UTC). */
+  scheduleEnabled: boolean("schedule_enabled").notNull().default(false),
+  cronExpression: text("cron_expression"),
+  scheduleMode: text("schedule_mode")
+    .$type<QaRunMode>()
+    .notNull()
+    .default("fill_gaps"),
+  /** Run on PR opened/synchronize webhooks. */
+  prEnabled: boolean("pr_enabled").notNull().default(false),
+  prMode: text("pr_mode").$type<QaRunMode>().notNull().default("refresh_spec"),
+  nextRunAt: timestamp("next_run_at"),
+  lastRunAt: timestamp("last_run_at"),
+  lastSessionId: text("last_session_id"),
+  createdAt: timestamp("created_at").$defaultFn(() => new Date()),
+  updatedAt: timestamp("updated_at").$defaultFn(() => new Date()),
+});
+
+export type QaAgentTrigger = typeof qaAgentTriggers.$inferSelect;
+export type NewQaAgentTrigger = typeof qaAgentTriggers.$inferInsert;
+
 // ── Bug Reports ──────────────────────────────────────────────────────────────
 
 export type BugReportSeverity = "low" | "medium" | "high";

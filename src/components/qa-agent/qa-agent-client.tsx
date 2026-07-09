@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import type {
   ActivitySourceType,
   AgentSession,
+  QaAgentTrigger,
   QaRunMode,
   QaTask,
   QaTestGroup,
@@ -22,6 +23,11 @@ import type { CoverageRequestHint } from "./qa-results-panel";
 import { BrowserViewer } from "@/components/embedded-browser/browser-viewer-client";
 import { QaTaskBoard } from "./qa-task-board";
 import { QaRunHistory } from "./qa-run-history";
+import {
+  QaTriggerConfig,
+  describeTriggers,
+  triggerStateFrom,
+} from "./qa-trigger-config";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -483,6 +489,7 @@ export function QaAgentClient({
   initialSession,
   recentSessions,
   initialTasks,
+  initialTriggerConfig,
 }: {
   repositoryId: string;
   repositoryName: string;
@@ -500,6 +507,8 @@ export function QaAgentClient({
   recentSessions: AgentSession[];
   /** Direction-queue snapshot for the task board. */
   initialTasks: QaTask[];
+  /** Automation config (cron/PR triggers), null when never configured. */
+  initialTriggerConfig: QaAgentTrigger | null;
 }) {
   const {
     session,
@@ -538,6 +547,9 @@ export function QaAgentClient({
   }, []);
 
   const [setupOpen, setSetupOpen] = useState(false);
+  const [triggerState, setTriggerState] = useState(() =>
+    triggerStateFrom(initialTriggerConfig),
+  );
 
   // A dispatcher-started task run isn't in this tab's polling loop yet —
   // attach as soon as the board reports its session id.
@@ -644,6 +656,7 @@ export function QaAgentClient({
         loading={loading}
         setupOpen={showSetup}
         canStartRun={!neverRan}
+        triggerSummary={describeTriggers(triggerState)}
         onToggleSetup={() => setSetupOpen((v) => !v)}
         onPause={pause}
         onResume={resume}
@@ -749,6 +762,14 @@ export function QaAgentClient({
         onAdd={addTask}
         onRetry={retryTask}
         onDrop={dropTask}
+      />
+
+      {/* Automation triggers (cron + PR) */}
+      <QaTriggerConfig
+        repositoryId={repositoryId}
+        githubConnected={githubConnected}
+        state={triggerState}
+        onSaved={setTriggerState}
       />
 
       <QaRunHistory

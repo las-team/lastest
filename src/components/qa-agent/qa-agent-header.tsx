@@ -95,6 +95,7 @@ export function QaAgentHeader({
   loading,
   setupOpen,
   canStartRun,
+  triggerSummary,
   onToggleSetup,
   onPause,
   onResume,
@@ -113,6 +114,8 @@ export function QaAgentHeader({
   loading: boolean;
   setupOpen: boolean;
   canStartRun: boolean;
+  /** From the automation config — e.g. "manual runs · task queue · on PR". */
+  triggerSummary: string;
   onToggleSetup: () => void;
   onPause: () => void;
   onResume: () => void;
@@ -242,8 +245,7 @@ export function QaAgentHeader({
           <Progress value={progress} className="h-1.5" />
         )}
         <div className="text-[11px] text-muted-foreground">
-          Triggers: manual runs · task queue · re-runs — PR and schedule
-          triggers are coming next
+          Triggers: {triggerSummary} — configure below
         </div>
       </CardContent>
     </Card>
