@@ -990,6 +990,7 @@ async function runQaDiscover(
     ghAccount?.accessToken && repo?.provider === "github" && repo.owner,
   );
   const branch = repo?.selectedBranch || repo?.defaultBranch || "main";
+  const baseBranch = repo?.defaultBranch || "main";
 
   // 1) Static routes: reuse a prior scan; else run the GitHub-tree scanner.
   let staticRoutes: Array<{ path: string; type: string }> = [];
@@ -1019,7 +1020,7 @@ async function runQaDiscover(
       ...substeps[0],
       status: "done",
       detail: githubConnected
-        ? `${staticRoutes.length} routes (${framework ?? "unknown"})`
+        ? `${staticRoutes.length} routes (${framework ?? "unknown"}) · branch ${branch}`
         : "skipped — GitHub not connected",
     };
   } catch (err) {
@@ -1056,7 +1057,6 @@ async function runQaDiscover(
       const token = ghAccount.accessToken;
       const owner = repo.owner ?? "";
       const name = repo.name ?? "";
-      const baseBranch = repo.defaultBranch || "main";
       const [intel, tree, comparison] = await Promise.all([
         gatherCodebaseIntelligence(token, owner, name, branch).catch(
           () => null,
@@ -1093,17 +1093,18 @@ async function runQaDiscover(
         const computed = computePrChanges(comparison, declaredEndpoints);
         if (computed.files.length > 0) prChanges = computed;
       }
+      // Always say which branch was analyzed and why there is / isn't a diff.
       const prDetail = prChanges
-        ? ` · branch diff vs ${prChanges.baseBranch}: ${prChanges.files.length} files, ${prChanges.symbols.length} functions, ${prChanges.endpoints.length} endpoints`
-        : "";
+        ? ` · diff ${branch} vs ${baseBranch}: ${prChanges.files.length} files, ${prChanges.symbols.length} functions, ${prChanges.endpoints.length} endpoints`
+        : branch === baseBranch
+          ? ` · branch ${branch} = base (no PR diff — select a feature branch on the repo to target PR changes)`
+          : ` · diff ${branch} vs ${baseBranch}: none available`;
       substeps[1] = {
         ...substeps[1],
         status: "done",
         detail: codeCheck
           ? `${codeCheck.declaredEndpoints.length} declared endpoints · ${codeCheck.framework ?? "stack unknown"}${prDetail}`
-          : prChanges
-            ? `no code intelligence available${prDetail}`
-            : "no code intelligence available",
+          : `no code intelligence available${prDetail}`,
       };
       emitActivity(
         teamId,
@@ -1267,6 +1268,7 @@ async function runQaDiscover(
     staticRoutes: staticRoutes.length > 0 ? staticRoutes : undefined,
     framework,
     githubConnected,
+    ...(githubConnected ? { branch, baseBranch } : {}),
     codeCheck,
     prChanges,
   };
@@ -1430,11 +1432,29 @@ async function runQaPlan(
   }
 
   const sanitized = sanitizeQaPlan(plan, groups);
+
+  // Annotate items a pre-existing test already covers so the review matrix
+  // shows what exists vs what this run would create. Same matcher the
+  // generate/summary steps use, run early for the human gate.
+  const existingNameById = new Map(existingTests.map((t) => [t.id, t.name]));
+  const preCovered = matchPlanToExistingTests(sanitized.items, existingTests);
+  for (const item of sanitized.items) {
+    const testId = preCovered.get(item.id);
+    if (testId) {
+      item.existingTestId = testId;
+      item.existingTestName = existingNameById.get(testId);
+    } else {
+      // Re-plans must not carry stale matches from a previous plan round.
+      delete item.existingTestId;
+      delete item.existingTestName;
+    }
+  }
+
   substeps[0] = {
     ...substeps[0],
     status: "done",
     durationMs: Date.now() - started,
-    outputSummary: `${sanitized.journeys.length} journeys, ${sanitized.items.length} test items`,
+    outputSummary: `${sanitized.journeys.length} journeys, ${sanitized.items.length} test items${preCovered.size > 0 ? `, ${preCovered.size} already covered by existing tests` : ""}`,
   };
   await updateSubsteps(sessionId, "qa_plan", substeps);
   await mergeMetadata(sessionId, {
@@ -1456,7 +1476,7 @@ async function runQaPlan(
     repositoryId,
     sessionId,
     "step:complete",
-    `Plan ready: ${sanitized.journeys.length} journeys, ${sanitized.items.length} tests across ${groups.length} groups`,
+    `Plan ready: ${sanitized.journeys.length} journeys, ${sanitized.items.length} tests across ${groups.length} groups${preCovered.size > 0 ? ` (${preCovered.size} already covered by existing tests)` : ""}`,
     { stepId: "qa_plan", agentType: "planner" },
   );
   return true;
