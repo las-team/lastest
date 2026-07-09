@@ -3,7 +3,11 @@
 import { revalidatePath } from "next/cache";
 import * as queries from "@/lib/db/queries";
 import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
-import { assertQaAgentAccess } from "@/lib/billing/feature-access";
+import {
+  assertQaAgentAccess,
+  hasQaAgentAccess,
+} from "@/lib/billing/feature-access";
+import { getNextRunTime, isValidCron } from "@/lib/scheduling/cron";
 import {
   assertSafeOutboundUrl,
   SsrfBlockedError,
@@ -74,6 +78,7 @@ import type {
   QaGeneratedTest,
   QaPlanItem,
   QaRunMode,
+  QaSessionTrigger,
   QaTask,
   QaTaskSource,
   QaTestGroup,
@@ -2995,6 +3000,39 @@ async function finalizeQaTaskAndDispatch(
 // registry).
 const dispatchingRepos = new Set<string>();
 
+/** Everything an autonomous run borrows from run history: target URL (env
+ *  config fallback), stored plan/discovery, groups, and credentials. Shared by
+ *  the task dispatcher and the schedule/PR/MCP trigger starts. */
+async function resolveQaRunSeed(repositoryId: string): Promise<{
+  targetUrl: string | undefined;
+  planSource: AgentSession | undefined;
+  groups: QaTestGroup[];
+  creds: { email: string; password: string } | undefined;
+  allowRegistration: boolean;
+}> {
+  const recent = await queries.getRecentAgentSessions(repositoryId, "qa", 10);
+  const planSource = recent.find((s) => s.metadata.qaPlan);
+  let targetUrl =
+    planSource?.metadata.qaTargetUrl ??
+    recent.find((s) => s.metadata.qaTargetUrl)?.metadata.qaTargetUrl;
+  if (!targetUrl) {
+    const env = await queries
+      .getEnvironmentConfig(repositoryId)
+      .catch(() => null);
+    targetUrl = env?.baseUrl || undefined;
+  }
+  const credSession = recent.find((s) => credentialsFrom(s.metadata));
+  return {
+    targetUrl,
+    planSource,
+    groups: normalizeQaGroups(
+      planSource?.metadata.qaGroups ?? QA_GROUPS.map((g) => g.id),
+    ),
+    creds: credSession ? credentialsFrom(credSession.metadata) : undefined,
+    allowRegistration: planSource?.metadata.qaAllowRegistration ?? true,
+  };
+}
+
 /** Claim the oldest queued task and run a task-scoped session for it. */
 async function dispatchNextQaTask(
   teamId: string,
@@ -3009,11 +3047,8 @@ async function dispatchNextQaTask(
     const task = await queries.getNextQueuedQaTask(repositoryId);
     if (!task) return;
 
-    const recent = await queries.getRecentAgentSessions(repositoryId, "qa", 10);
-    const planSource = recent.find((s) => s.metadata.qaPlan);
-    const targetUrl =
-      planSource?.metadata.qaTargetUrl ??
-      recent.find((s) => s.metadata.qaTargetUrl)?.metadata.qaTargetUrl;
+    const { targetUrl, planSource, groups, creds, allowRegistration } =
+      await resolveQaRunSeed(repositoryId);
     if (!targetUrl) {
       await queries.updateQaTask(task.id, {
         status: "needs_input",
@@ -3038,10 +3073,6 @@ async function dispatchNextQaTask(
     const directive = [task.title, task.description ?? ""]
       .filter(Boolean)
       .join("\n");
-    const credSession = recent.find((s) => credentialsFrom(s.metadata));
-    const creds = credSession
-      ? credentialsFrom(credSession.metadata)
-      : undefined;
 
     const session = await queries.createAgentSession({
       repositoryId,
@@ -3053,12 +3084,10 @@ async function dispatchNextQaTask(
       metadata: {
         qaTargetUrl: targetUrl,
         qaMode: mode,
-        qaGroups: normalizeQaGroups(
-          planSource?.metadata.qaGroups ?? QA_GROUPS.map((g) => g.id),
-        ),
+        qaGroups: groups,
         // Queue runs are autonomous — no human at the review gate.
         qaAutoApprove: true,
-        qaAllowRegistration: planSource?.metadata.qaAllowRegistration ?? true,
+        qaAllowRegistration: allowRegistration,
         credsProvided: Boolean(creds),
         authMode: creds ? "login" : "public_only",
         ...(creds
@@ -3140,12 +3169,15 @@ export async function addQaTask(input: {
   repositoryId: string;
   title: string;
   description?: string;
-  source?: Extract<QaTaskSource, "user" | "coverage_gap">;
+  /** "mcp" is passed by the v1 API when an external agent files the task —
+   *  the board renders it with a distinct actor chip. */
+  source?: QaTaskSource;
 }): Promise<{ taskId: string }> {
   const { team, user } = await requireRepoAccess(input.repositoryId);
   assertQaAgentAccess(team.plan);
   const title = input.title.trim().slice(0, MAX_TASK_TITLE);
   if (!title) throw new Error("The task needs a title");
+  const actorName = user.name || user.email || null;
   const task = await queries.createQaTask({
     repositoryId: input.repositoryId,
     teamId: team.id,
@@ -3154,7 +3186,8 @@ export async function addQaTask(input: {
       input.description?.trim().slice(0, MAX_TASK_DESCRIPTION) || null,
     source: input.source ?? "user",
     createdById: user.id,
-    createdByName: user.name || user.email || null,
+    createdByName:
+      input.source === "mcp" && actorName ? `${actorName} · MCP` : actorName,
   });
   emitActivity(
     team.id,
@@ -3249,4 +3282,181 @@ export async function listQaTasks(repositoryId: string): Promise<QaTask[]> {
     dispatchNextQaTask(team.id, repositoryId).catch(() => {});
   }
   return tasks;
+}
+
+// ── Automation triggers (schedule / PR / MCP) ────────────────────────────────
+
+/** Session-less start used by the scheduler tick, the PR webhook, and the v1
+ *  API (MCP). Borrows target URL / plan / groups / creds from run history via
+ *  resolveQaRunSeed, auto-approves the gate, and SKIPS (with an activity
+ *  event) when a session is already running — triggers never preempt.
+ *
+ *  NOT a UI action: callers are trusted server code that already resolved the
+ *  team (webhook signature, scheduler row, or bearer-authed v1 route). */
+export async function startQaAgentFromTrigger(opts: {
+  repositoryId: string;
+  teamId: string;
+  trigger: Extract<QaSessionTrigger, "schedule" | "pr" | "mcp">;
+  mode?: QaRunMode;
+  targetUrl?: string;
+  /** Extra context for the activity feed (e.g. "PR #12 sync", token owner). */
+  reason?: string;
+}): Promise<{ sessionId?: string; skipped?: string }> {
+  const { repositoryId, teamId } = opts;
+
+  // Triggers respect the same plan gate as the UI.
+  const team = await queries.getTeam(teamId);
+  if (!team || !hasQaAgentAccess(team.plan)) {
+    return { skipped: "QA agent not available on the team's plan" };
+  }
+
+  const active = await queries.getActiveAgentSession(repositoryId, "qa");
+  if (active) {
+    emitActivity(
+      teamId,
+      repositoryId,
+      active.id,
+      "substep:update",
+      `QA ${opts.trigger} trigger skipped — a session is already running${
+        opts.reason ? ` (${opts.reason})` : ""
+      }`,
+    );
+    return { skipped: "A QA session is already running" };
+  }
+
+  const seed = await resolveQaRunSeed(repositoryId);
+  const targetUrl =
+    opts.targetUrl?.trim().replace(/\/+$/, "") || seed.targetUrl;
+  if (!targetUrl) {
+    return {
+      skipped:
+        "No target URL — run the QA agent once from the UI (or pass targetUrl)",
+    };
+  }
+  try {
+    await assertSafeOutboundUrl(targetUrl);
+  } catch (err) {
+    if (err instanceof SsrfBlockedError) {
+      return { skipped: `URL rejected: ${err.message}` };
+    }
+    throw err;
+  }
+
+  // Mode default: reuse the stored plan cheaply when one exists (fill_gaps);
+  // otherwise a full autonomous run.
+  let mode: QaRunMode = opts.mode ?? (seed.planSource ? "fill_gaps" : "full");
+  if (mode === "fill_gaps" && !seed.planSource) mode = "full";
+
+  const session = await queries.createAgentSession({
+    repositoryId,
+    teamId,
+    kind: "qa",
+    status: "active",
+    currentStepId: "qa_setup",
+    steps: buildStepsForMode(mode),
+    metadata: {
+      qaTargetUrl: targetUrl,
+      qaMode: mode,
+      qaGroups: seed.groups,
+      qaAutoApprove: true,
+      qaAllowRegistration: seed.allowRegistration,
+      credsProvided: Boolean(seed.creds),
+      authMode: seed.creds ? "login" : "public_only",
+      ...(seed.creds
+        ? {
+            quickstartEmail: seed.creds.email,
+            quickstartPassword: seed.creds.password,
+          }
+        : {}),
+      ...(mode === "fill_gaps" && seed.planSource
+        ? {
+            qaPlan: seed.planSource.metadata.qaPlan,
+            qaDiscovery: seed.planSource.metadata.qaDiscovery,
+            qaPlanSourceSessionId: seed.planSource.id,
+          }
+        : {}),
+      qaTrigger: opts.trigger,
+    },
+  });
+
+  emitActivity(
+    teamId,
+    repositoryId,
+    session.id,
+    "session:start",
+    `QA agent started by ${opts.trigger} trigger on ${targetUrl} (${mode.replace("_", " ")})${
+      opts.reason ? ` — ${opts.reason}` : ""
+    }`,
+  );
+  executeQaPipeline(session.id, teamId, repositoryId, "qa_setup").catch((err) =>
+    console.error("[QaAgent] unhandled:", err),
+  );
+  return { sessionId: session.id };
+}
+
+const TRIGGER_MODES: QaRunMode[] = ["full", "refresh_spec", "fill_gaps"];
+
+export interface QaTriggerConfigInput {
+  scheduleEnabled?: boolean;
+  cronExpression?: string | null;
+  scheduleMode?: QaRunMode;
+  prEnabled?: boolean;
+  prMode?: QaRunMode;
+}
+
+/** Current automation config for the repo (null when never configured). */
+export async function getQaTriggerConfig(repositoryId: string) {
+  await requireRepoAccess(repositoryId);
+  return (await queries.getQaAgentTrigger(repositoryId)) ?? null;
+}
+
+/** Upsert the repo's automation config; recomputes nextRunAt on save. */
+export async function updateQaTriggerConfig(
+  repositoryId: string,
+  input: QaTriggerConfigInput,
+) {
+  const { team } = await requireRepoAccess(repositoryId);
+  assertQaAgentAccess(team.plan);
+
+  const patch: Parameters<typeof queries.upsertQaAgentTrigger>[2] = {};
+  if (input.scheduleEnabled !== undefined) {
+    patch.scheduleEnabled = input.scheduleEnabled;
+  }
+  if (input.cronExpression !== undefined) {
+    const cron = input.cronExpression?.trim() || null;
+    if (cron && !isValidCron(cron)) {
+      throw new Error("Invalid cron expression (5 fields expected)");
+    }
+    patch.cronExpression = cron;
+  }
+  if (input.scheduleMode !== undefined) {
+    if (!TRIGGER_MODES.includes(input.scheduleMode)) {
+      throw new Error("Invalid schedule mode");
+    }
+    patch.scheduleMode = input.scheduleMode;
+  }
+  if (input.prEnabled !== undefined) patch.prEnabled = input.prEnabled;
+  if (input.prMode !== undefined) {
+    if (!TRIGGER_MODES.includes(input.prMode)) {
+      throw new Error("Invalid PR mode");
+    }
+    patch.prMode = input.prMode;
+  }
+
+  // Recompute the next fire time from the effective (post-patch) state.
+  const existing = await queries.getQaAgentTrigger(repositoryId);
+  const effectiveEnabled =
+    patch.scheduleEnabled ?? existing?.scheduleEnabled ?? false;
+  const effectiveCron =
+    patch.cronExpression !== undefined
+      ? patch.cronExpression
+      : (existing?.cronExpression ?? null);
+  patch.nextRunAt =
+    effectiveEnabled && effectiveCron
+      ? getNextRunTime(effectiveCron, new Date())
+      : null;
+
+  const row = await queries.upsertQaAgentTrigger(repositoryId, team.id, patch);
+  revalidatePath("/qa-agent");
+  return row;
 }

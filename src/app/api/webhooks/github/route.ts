@@ -98,6 +98,27 @@ export async function POST(request: NextRequest) {
         // Trigger build for PR
         await createAndRunBuild("webhook", undefined, repositoryId);
 
+        // Optionally kick the QA agent (per-repo qa_agent_triggers config).
+        // Never blocks the webhook response — the agent run is fire-and-forget
+        // and skips itself when a session is already running.
+        if (repositoryId) {
+          void (async () => {
+            const trigger = await queries.getQaAgentTrigger(repositoryId);
+            if (!trigger?.prEnabled) return;
+            const { startQaAgentFromTrigger } =
+              await import("@/server/actions/qa-agent");
+            await startQaAgentFromTrigger({
+              repositoryId,
+              teamId: trigger.teamId,
+              trigger: "pr",
+              mode: trigger.prMode,
+              reason: `PR #${data.pull_request.number} ${data.action}`,
+            });
+          })().catch((error) =>
+            console.error("[webhook] QA agent PR trigger failed:", error),
+          );
+        }
+
         return NextResponse.json({ message: "Build triggered for PR" });
       }
 

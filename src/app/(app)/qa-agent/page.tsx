@@ -9,6 +9,7 @@ import {
   getDefaultSetupSteps,
   getStorageStates,
   getQaTasksByRepo,
+  getQaAgentTrigger,
 } from "@/lib/db/queries";
 import type { AgentSession } from "@/lib/db/schema";
 import { getEnvironmentConfig } from "@/server/actions/environment";
@@ -74,6 +75,7 @@ export default async function QaAgentPage() {
     qaSession,
     recentSessions,
     qaTasks,
+    qaTriggerConfig,
     ghAccount,
     envConfig,
     aiSettings,
@@ -83,6 +85,9 @@ export default async function QaAgentPage() {
     getLatestAgentSession(selectedRepo.id, "qa").catch(() => null),
     getRecentAgentSessions(selectedRepo.id, "qa", 10).catch(() => []),
     getQaTasksByRepo(selectedRepo.id).catch(() => []),
+    getQaAgentTrigger(selectedRepo.id)
+      .then((t) => t ?? null)
+      .catch(() => null),
     teamId ? getGithubAccountByTeam(teamId).catch(() => null) : null,
     getEnvironmentConfig(selectedRepo.id).catch(() => null),
     getAISettings(selectedRepo.id).catch(() => null),
@@ -154,6 +159,7 @@ export default async function QaAgentPage() {
           initialSession={initialSession}
           recentSessions={sanitizedRecent}
           initialTasks={qaTasks}
+          initialTriggerConfig={qaTriggerConfig}
         />
       </div>
     </div>

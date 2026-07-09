@@ -31,6 +31,11 @@ export function ensureSchedulerStarted() {
       console.error("[scheduler] Error processing due schedules:", error);
     }
     try {
+      await processDueQaTriggers();
+    } catch (error) {
+      console.error("[scheduler] Error processing QA agent triggers:", error);
+    }
+    try {
       await processLaunchCohorts();
     } catch (error) {
       console.error("[scheduler] Error processing launch cohorts:", error);
@@ -103,5 +108,56 @@ async function processDueSchedules() {
     }
   } finally {
     processing = false;
+  }
+}
+
+let qaProcessing = false;
+
+/** Fire due QA agent cron triggers. Mirrors processDueSchedules: nextRunAt is
+ *  advanced BEFORE starting so a slow run can't double-fire; a busy agent
+ *  means the fire is skipped (startQaAgentFromTrigger reports why). */
+async function processDueQaTriggers() {
+  if (qaProcessing) return;
+  qaProcessing = true;
+
+  try {
+    const due = await queries.getDueQaAgentTriggers();
+
+    for (const trigger of due) {
+      try {
+        if (!trigger.cronExpression) continue;
+        const nextRunAt = getNextRunTime(trigger.cronExpression, new Date());
+        await queries.markQaAgentTriggerFired(trigger.id, { nextRunAt });
+
+        // Import dynamically to avoid circular dependencies
+        const { startQaAgentFromTrigger } =
+          await import("@/server/actions/qa-agent");
+        const result = await startQaAgentFromTrigger({
+          repositoryId: trigger.repositoryId,
+          teamId: trigger.teamId,
+          trigger: "schedule",
+          mode: trigger.scheduleMode,
+        });
+
+        if (result.sessionId) {
+          await queries.markQaAgentTriggerFired(trigger.id, {
+            nextRunAt,
+            lastRunAt: new Date(),
+            lastSessionId: result.sessionId,
+          });
+          console.log(
+            `[scheduler] Started scheduled QA agent session ${result.sessionId}`,
+          );
+        } else if (result.skipped) {
+          console.log(
+            `[scheduler] QA agent trigger skipped: ${result.skipped}`,
+          );
+        }
+      } catch (error) {
+        console.error("[scheduler] Failed to fire QA agent trigger:", error);
+      }
+    }
+  } finally {
+    qaProcessing = false;
   }
 }
