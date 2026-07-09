@@ -13,14 +13,34 @@ import {
 import type { AgentSession } from "@/lib/db/schema";
 import { getEnvironmentConfig } from "@/server/actions/environment";
 import { QaAgentClient } from "@/components/qa-agent/qa-agent-client";
+import { QaAgentUpgradeGate } from "@/components/qa-agent/qa-agent-upgrade-gate";
+import {
+  hasQaAgentAccess,
+  qaAgentMinPlanName,
+} from "@/lib/billing/feature-access";
+import { planConfig } from "@/lib/billing/plans";
 import { Bot } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
 export default async function QaAgentPage() {
   const session = await getCurrentSession();
-  const teamId = session?.team?.id;
+  const team = session?.team;
+  const teamId = team?.id;
   const userId = session?.user?.id;
+
+  // QA Agent is a Pro-tier feature. Gate before anything else so teams below
+  // the required plan always land on the upgrade screen (regardless of whether
+  // they've connected a repo yet).
+  if (team && !hasQaAgentAccess(team.plan)) {
+    return (
+      <QaAgentUpgradeGate
+        currentPlanName={planConfig(team.plan).name}
+        requiredPlanName={qaAgentMinPlanName()}
+      />
+    );
+  }
+
   const selectedRepo = teamId
     ? await getSelectedRepository(userId, teamId)
     : null;
