@@ -90,6 +90,7 @@ import type {
   QaSessionTrigger,
   QaTask,
   QaTaskSource,
+  QaTaskTestRef,
   QaTaskTriage,
   QaTestGroup,
   QaTestPlan,
@@ -2226,22 +2227,27 @@ async function runQaSummary(
     return false;
   }
 
-  // Spec-refresh runs skip generation, so their ledger is empty — build it
-  // here from existing-coverage matches so the summary shows exactly which
-  // plan items the current suite covers and which are gaps (fill_gaps input).
+  // The ledger only contains items this session actually worked — task-scoped
+  // runs carry just the directive's items, and spec-refresh runs none at all.
+  // Coverage is a whole-plan statement, so backfill "covered" entries for
+  // every enabled item the run didn't touch but an existing test already
+  // satisfies. Without this, a scoped run's summary reports the untouched
+  // majority of the plan as gaps and the dashboard "loses" coverage even
+  // though no test was deleted and no plan item added.
   let ledger = session.metadata.qaGeneratedTests ?? [];
-  if (ledger.length === 0) {
+  const inLedger = new Set(ledger.map((g) => g.planItemId));
+  const untouched = enabledPlanItems(plan).filter((i) => !inLedger.has(i.id));
+  if (untouched.length > 0) {
     const [existingTests, priorLedger] = await Promise.all([
       loadExistingTests(repositoryId).catch(() => []),
       loadPriorLedger(session).catch(() => undefined),
     ]);
-    const items = enabledPlanItems(plan);
     const coveredBy = matchPlanToExistingTests(
-      items,
+      untouched,
       existingTests,
       priorLedger,
     );
-    ledger = items
+    const backfilled = untouched
       .filter((i) => coveredBy.has(i.id))
       .map((i) => ({
         planItemId: i.id,
@@ -2251,7 +2257,10 @@ async function runQaSummary(
         name: i.title,
         status: "covered" as const,
       }));
-    await mergeMetadata(sessionId, { qaGeneratedTests: ledger });
+    if (backfilled.length > 0) {
+      ledger = [...ledger, ...backfilled];
+      await mergeMetadata(sessionId, { qaGeneratedTests: ledger });
+    }
   }
 
   const summary = computeQaSummary(plan, ledger);
@@ -3008,6 +3017,18 @@ function buildTaskReply(session: AgentSession): string {
   return `Done — ${parts.join(", ")}. Coverage dashboard updated.`;
 }
 
+/** Tests the session's run touched for THIS task — the card's linked chips.
+ *  Targeted runs list exactly the directive's items; unscoped runs list every
+ *  ledger entry that produced or matched a test. */
+function buildTaskTestRefs(session: AgentSession | null): QaTaskTestRef[] {
+  if (!session) return [];
+  const taskItemIds = session.metadata.qaTaskItemIds;
+  return (session.metadata.qaGeneratedTests ?? [])
+    .filter((g) => g.testId)
+    .filter((g) => !taskItemIds?.length || taskItemIds.includes(g.planItemId))
+    .map((g) => ({ testId: g.testId!, name: g.name, status: g.status }));
+}
+
 /** Write a terminal session's outcome back onto its task card. */
 async function finalizeTask(
   task: QaTask,
@@ -3019,6 +3040,7 @@ async function finalizeTask(
     await queries.updateQaTask(task.id, {
       status: "done",
       agentReply: buildTaskReply(session),
+      tests: buildTaskTestRefs(session),
       completedAt: new Date(),
     });
     emitActivity(
@@ -3041,6 +3063,8 @@ async function finalizeTask(
   await queries.updateQaTask(task.id, {
     status: "needs_input",
     agentReply: reply,
+    // Partial progress still links: tests generated before the failure.
+    tests: buildTaskTestRefs(session),
     completedAt: new Date(),
   });
   emitActivity(
@@ -3471,6 +3495,7 @@ export async function retryQaTask(
     status: "queued",
     sessionId: null,
     agentReply: null,
+    tests: null,
     startedAt: null,
     completedAt: null,
   });
