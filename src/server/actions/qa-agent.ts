@@ -66,6 +66,15 @@ import {
   type ExistingTestSummary,
   type RefinedJourneys,
 } from "@/lib/qa-agent/plan";
+import {
+  buildTaskPlanFromTriage,
+  buildTaskTriageSystemPrompt,
+  buildTaskTriageUserPrompt,
+  explainInvalidTaskTriage,
+  isTaskTriageResult,
+  triageTestsToPlanItems,
+  type TaskTriageResult,
+} from "@/lib/qa-agent/task-triage";
 import type {
   ActivityEventType,
   AgentSession,
@@ -81,6 +90,7 @@ import type {
   QaSessionTrigger,
   QaTask,
   QaTaskSource,
+  QaTaskTriage,
   QaTestGroup,
   QaTestPlan,
   TestSetupOverrides,
@@ -202,6 +212,9 @@ function emitActivity(
     artifactId?: string;
     artifactLabel?: string;
     durationMs?: number;
+    /** ai_prompt_logs id when this event was produced by an AI call — links
+     *  the event to the exact prompt + response for debugging. */
+    promptLogId?: string;
   },
 ) {
   emitAndPersistActivityEvent({
@@ -218,7 +231,7 @@ function emitActivity(
     artifactId: opts?.artifactId ?? null,
     artifactLabel: opts?.artifactLabel ?? null,
     durationMs: opts?.durationMs ?? null,
-    promptLogId: null,
+    promptLogId: opts?.promptLogId ?? null,
   }).catch((err) => console.error("[QaAgent] activity emit error:", err));
 }
 
@@ -1559,7 +1572,14 @@ async function runQaGenerate(
           ],
         }
       : undefined;
-  const items = enabledPlanItems(plan);
+  // Task-scoped runs (Direct the agent): only the items the directive
+  // resolved to are work — the rest of the stored plan is context. Scoping
+  // here keeps the ledger, and therefore execute/heal/reply, on-directive.
+  const allItems = enabledPlanItems(plan);
+  const taskItemIds = session.metadata.qaTaskItemIds;
+  const items = taskItemIds?.length
+    ? allItems.filter((i) => taskItemIds.includes(i.id))
+    : allItems;
   // Resume-safe: skip items that already produced a test in a prior attempt.
   const ledger: QaGeneratedTest[] = [
     ...(session.metadata.qaGeneratedTests ?? []),
@@ -2634,6 +2654,9 @@ async function refineAndMergeJourneysIntoPlan(
   success: boolean;
   addedJourneys?: number;
   addedItems?: number;
+  /** Ids of the plan items the merge added — task runs scope generation to
+   *  exactly these. */
+  addedItemIds?: string[];
   error?: string;
 }> {
   const sessionId = session.id;
@@ -2720,6 +2743,7 @@ async function refineAndMergeJourneysIntoPlan(
     success: true,
     addedJourneys: merged.addedJourneys,
     addedItems: merged.addedItems,
+    addedItemIds: merged.addedItemIds,
   };
 }
 
@@ -2896,12 +2920,29 @@ export async function rerunQaSession(
 
 // ── Direction queue (qa_tasks) ───────────────────────────────────────────────
 //
-// The team (and later, external agents via MCP) drops directives into a queue;
-// whenever no QA session is active the dispatcher claims the oldest queued
-// task, selects the protocol (fill-gaps against the stored plan when one
-// exists, else a full run with the directive fed to the planner), runs it with
-// the review gate auto-approved, and writes the agent's reply back onto the
-// task card.
+// The team (and external agents via MCP) drops directives into a queue; when
+// no QA session is active the dispatcher claims the oldest queued task and
+// TRIAGES it with a small logged AI call (see qa-agent/task-triage.ts):
+//
+//   targeted + stored plan   fill_gaps scoped to the directive — the journey
+//                            refiner merges it into the plan and ONLY the
+//                            items it adds are generated, run, and healed
+//   targeted + no plan       fill_gaps against a minimal plan synthesized
+//                            from the triage's own tests — straight to the
+//                            generator, no discovery pass
+//   explore                  full pipeline — the scout re-discovers the app,
+//                            the planner must cover the directive, then
+//                            generate → execute → heal as usual
+//   coverage_gap source      no triage: the task IS the fill-the-gaps
+//                            protocol against the stored plan
+//
+// Auth is reused from run history (storage state / verified creds) — by the
+// time a directive lands here, login is a solved problem, so qa_login resolves
+// in seconds instead of re-registering. Runs are autonomous (review gate
+// auto-approved) and the agent's reply is written back onto the task card.
+// The triage prompt/response is logged to ai_prompt_logs (qa_task_triage) and
+// linked from a task:triaged activity event + the session's qaTaskTriage
+// metadata, so routing decisions can be debugged and improved later.
 
 const TERMINAL_SESSION_STATUSES: AgentSession["status"][] = [
   "completed",
@@ -2911,9 +2952,35 @@ const TERMINAL_SESSION_STATUSES: AgentSession["status"][] = [
 
 const MAX_TASK_TITLE = 200;
 const MAX_TASK_DESCRIPTION = 2000;
+const TRIAGE_TIMEOUT_MS = 2 * 60 * 1000;
 
 /** The agent's reply for a completed task run — the card's "done" comment. */
 function buildTaskReply(session: AgentSession): string {
+  // Targeted run: report only the directive's own items, not the whole plan.
+  const taskItemIds = session.metadata.qaTaskItemIds;
+  if (taskItemIds?.length) {
+    const scoped = (session.metadata.qaGeneratedTests ?? []).filter((g) =>
+      taskItemIds.includes(g.planItemId),
+    );
+    const generated = scoped.filter(
+      (g) => g.testId && g.status !== "covered",
+    ).length;
+    const covered = scoped.filter((g) => g.status === "covered").length;
+    const passed = scoped.filter(
+      (g) => g.status === "passed" || g.status === "healed",
+    ).length;
+    const healed = scoped.filter((g) => g.status === "healed").length;
+    const stillFailing = scoped.filter((g) => g.status === "failed").length;
+    const genFailed = scoped.filter(
+      (g) => g.status === "generation_failed",
+    ).length;
+    const parts = [`generated ${generated}`, `${passed} passing`];
+    if (covered > 0) parts.push(`${covered} already covered`);
+    if (healed > 0) parts.push(`${healed} healed`);
+    if (stillFailing > 0) parts.push(`${stillFailing} still failing`);
+    if (genFailed > 0) parts.push(`${genFailed} could not be generated`);
+    return `Done — ${parts.join(", ")} for this directive.`;
+  }
   const s = session.metadata.qaSummary;
   if (!s) return "Run completed. Coverage dashboard updated.";
   const genFailed = (session.metadata.qaGeneratedTests ?? []).filter(
@@ -3033,7 +3100,103 @@ async function resolveQaRunSeed(repositoryId: string): Promise<{
   };
 }
 
-/** Claim the oldest queued task and run a task-scoped session for it. */
+/** Park a task as needs_input with an actionable reply, before or instead of
+ *  a run. The human retries (→ queued) or drops it. */
+async function parkTask(
+  task: QaTask,
+  teamId: string,
+  repositoryId: string,
+  reply: string,
+  sessionId?: string,
+): Promise<void> {
+  await queries.updateQaTask(task.id, {
+    status: "needs_input",
+    agentReply: reply,
+    completedAt: new Date(),
+  });
+  emitActivity(
+    teamId,
+    repositoryId,
+    sessionId ?? task.id,
+    "task:failed",
+    `Task needs input: ${task.title}`,
+  );
+}
+
+/** Scope a directive with one small AI call — "targeted" (generate the named
+ *  coverage directly) vs "explore" (broad; scout + planner first). The prompt
+ *  and response land in ai_prompt_logs under qa_task_triage; the returned
+ *  promptLogId links the decision back to that row. Throws when the model
+ *  can't produce a valid decision — the caller parks the task, never guesses. */
+async function triageQaTask(
+  repositoryId: string,
+  directive: string,
+  seed: Awaited<ReturnType<typeof resolveQaRunSeed>>,
+): Promise<TaskTriageResult & { promptLogId?: string }> {
+  const settings = await queries.getAISettings(repositoryId);
+  const config = getAIConfig(settings);
+  const plan = seed.planSource?.metadata.qaPlan;
+  const knownPagePaths = plan
+    ? [
+        ...new Set(
+          plan.items
+            .map((i) => i.pagePath)
+            .filter((p): p is string => Boolean(p)),
+        ),
+      ]
+    : undefined;
+  const systemPrompt = buildTaskTriageSystemPrompt();
+  const userPrompt = buildTaskTriageUserPrompt({
+    directive,
+    groups: seed.groups,
+    existingPlanDigest: plan ? buildExistingPlanDigest(plan) : undefined,
+    knownPagePaths,
+    authenticated: Boolean(seed.creds),
+  });
+
+  let promptLogId: string | undefined;
+  const call = (extra?: string): Promise<string> =>
+    generateWithAI(
+      config,
+      extra ? `${userPrompt}\n\n${extra}` : userPrompt,
+      systemPrompt,
+      {
+        repositoryId,
+        actionType: "qa_task_triage",
+        responseFormat: "json_object",
+        signal: AbortSignal.timeout(TRIAGE_TIMEOUT_MS),
+        onLogCreated: (id) => {
+          promptLogId = id;
+        },
+      },
+    );
+
+  const raw = await call();
+  let triage = parseAiJson(raw, isTaskTriageResult, {
+    source: "qa-task-triage",
+  });
+  if (!triage) {
+    const shape = parseAiJson(raw, (x): x is unknown => true, {
+      source: "qa-task-triage-explain",
+    });
+    const reason = explainInvalidTaskTriage(shape) ?? "the JSON was invalid";
+    const retry = await call(
+      `Your previous response was not valid: ${reason}. Respond with ONLY the JSON object described in the system prompt.`,
+    );
+    triage = parseAiJson(retry, isTaskTriageResult, {
+      source: "qa-task-triage-retry",
+    });
+  }
+  if (!triage) {
+    throw new Error(
+      "The AI could not turn this directive into a routing decision",
+    );
+  }
+  return { ...triage, promptLogId };
+}
+
+/** Claim the oldest queued task, triage its directive, and run the matching
+ *  task-scoped session (see the section comment above for the protocols). */
 async function dispatchNextQaTask(
   teamId: string,
   repositoryId: string,
@@ -3047,32 +3210,72 @@ async function dispatchNextQaTask(
     const task = await queries.getNextQueuedQaTask(repositoryId);
     if (!task) return;
 
-    const { targetUrl, planSource, groups, creds, allowRegistration } =
-      await resolveQaRunSeed(repositoryId);
+    const seed = await resolveQaRunSeed(repositoryId);
+    const { targetUrl, planSource, groups, creds, allowRegistration } = seed;
     if (!targetUrl) {
-      await queries.updateQaTask(task.id, {
-        status: "needs_input",
-        agentReply:
-          "I don't have a target URL yet — start one QA run from the form first, then retry this task.",
-        completedAt: new Date(),
-      });
-      emitActivity(
+      await parkTask(
+        task,
         teamId,
         repositoryId,
-        task.id,
-        "task:failed",
-        `Task needs input: ${task.title}`,
+        "I don't have a target URL yet — start one QA run from the form first, then retry this task.",
       );
       return;
     }
 
-    // Protocol selection: with a stored plan the task becomes a targeted
-    // fill-gaps run (directive merged into the plan below); without one it's
-    // a full run with the directive fed straight to the planner.
-    const mode: QaRunMode = planSource ? "fill_gaps" : "full";
     const directive = [task.title, task.description ?? ""]
       .filter(Boolean)
       .join("\n");
+    const storedPlan = planSource?.metadata.qaPlan;
+    const storedDiscovery = planSource?.metadata.qaDiscovery;
+
+    // Route the directive. The task stays "queued" while triaging so a crash
+    // here leaves it claimable; coverage_gap tasks skip triage — they ARE the
+    // fill-the-remaining-gaps protocol.
+    let triage: (TaskTriageResult & { promptLogId?: string }) | null = null;
+    if (task.source !== "coverage_gap") {
+      try {
+        triage = await triageQaTask(repositoryId, directive, seed);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await parkTask(
+          task,
+          teamId,
+          repositoryId,
+          `I couldn't scope this directive: ${msg}. Reword it or retry.`,
+        );
+        return;
+      }
+    }
+
+    const protocol:
+      | "gap_fill" // unscoped fill_gaps against the stored plan
+      | "explore" // full pipeline, directive fed to the planner
+      | "targeted_refine" // fill_gaps scoped to refiner-merged items
+      | "targeted_direct" = // fill_gaps against a synthesized mini plan
+      task.source === "coverage_gap"
+        ? storedPlan
+          ? "gap_fill"
+          : "explore"
+        : triage!.scope === "explore"
+          ? "explore"
+          : storedPlan && storedDiscovery
+            ? "targeted_refine"
+            : triage!.tests.length > 0
+              ? "targeted_direct"
+              : "explore"; // targeted, but nothing concrete to target against
+
+    const directItems =
+      protocol === "targeted_direct"
+        ? triageTestsToPlanItems(triage!.tests, groups)
+        : [];
+    const mode: QaRunMode = protocol === "explore" ? "full" : "fill_gaps";
+    const qaTaskTriage: QaTaskTriage | undefined = triage
+      ? {
+          scope: triage.scope,
+          reason: triage.reason,
+          promptLogId: triage.promptLogId,
+        }
+      : undefined;
 
     const session = await queries.createAgentSession({
       repositoryId,
@@ -3096,15 +3299,21 @@ async function dispatchNextQaTask(
               quickstartPassword: creds.password,
             }
           : {}),
-        ...(planSource
+        ...(protocol === "gap_fill" || protocol === "targeted_refine"
           ? {
-              qaPlan: planSource.metadata.qaPlan,
-              qaDiscovery: planSource.metadata.qaDiscovery,
-              qaPlanSourceSessionId: planSource.id,
+              qaPlan: planSource!.metadata.qaPlan,
+              qaDiscovery: planSource!.metadata.qaDiscovery,
+              qaPlanSourceSessionId: planSource!.id,
             }
-          : {
-              qaPlannerFeedback: `Directive from the team's task queue — the plan must cover it:\n${directive}`,
-            }),
+          : protocol === "targeted_direct"
+            ? {
+                qaPlan: buildTaskPlanFromTriage(directive, directItems),
+                qaTaskItemIds: directItems.map((i) => i.id),
+              }
+            : {
+                qaPlannerFeedback: `Directive from the team's task queue — the plan must cover it:\n${directive}`,
+              }),
+        ...(qaTaskTriage ? { qaTaskTriage } : {}),
         qaTaskId: task.id,
         qaTrigger: "task",
       },
@@ -3122,26 +3331,72 @@ async function dispatchNextQaTask(
       "task:started",
       `QA agent picked up task: ${task.title}`,
     );
-
-    // Merge the directive into the reused plan so fill-gaps generates the
-    // asked-for work, not just leftover gaps. Best-effort: plain fill-gaps IS
-    // the protocol for coverage_gap tasks, and still runs if the refiner fails.
-    if (mode === "fill_gaps" && task.source !== "coverage_gap") {
-      const fresh = await queries.getAgentSession(session.id);
-      if (fresh) {
-        const merged = await refineAndMergeJourneysIntoPlan(
-          fresh,
-          teamId,
-          parseUserJourneys(directive),
-        );
-        if (!merged.success) {
-          console.warn(
-            "[QaAgent] task directive merge failed:",
-            merged.error ?? "unknown",
-          );
-        }
-      }
+    if (qaTaskTriage) {
+      emitActivity(
+        teamId,
+        repositoryId,
+        session.id,
+        "task:triaged",
+        `Directive scoped as ${qaTaskTriage.scope}: ${qaTaskTriage.reason}`,
+        {
+          detail: {
+            protocol,
+            scope: qaTaskTriage.scope,
+            reason: qaTaskTriage.reason,
+          },
+          promptLogId: qaTaskTriage.promptLogId,
+        },
+      );
     }
+
+    // targeted_refine: merge the directive into the reused plan and scope the
+    // run to exactly the items it adds. This is a hard gate — a failed merge
+    // parks the task instead of silently running an unrelated gap-fill.
+    let workingNote: string;
+    if (protocol === "targeted_refine") {
+      const fresh = await queries.getAgentSession(session.id);
+      const merged = fresh
+        ? await refineAndMergeJourneysIntoPlan(
+            fresh,
+            teamId,
+            parseUserJourneys(directive),
+          )
+        : { success: false as const, error: "Session vanished before refine" };
+      if (!merged.success) {
+        await queries.updateAgentSession(session.id, {
+          status: "failed",
+          completedAt: new Date(),
+        });
+        await parkTask(
+          task,
+          teamId,
+          repositoryId,
+          `I couldn't turn this directive into plan items: ${merged.error ?? "unknown error"}. Reword it or retry.`,
+          session.id,
+        );
+        return;
+      }
+      const ids = merged.addedItemIds ?? [];
+      if (ids.length > 0) {
+        await mergeMetadata(session.id, { qaTaskItemIds: ids });
+        workingNote = `Scoped as targeted — generating ${ids.length} test${ids.length === 1 ? "" : "s"} for this directive, then running and healing them.`;
+      } else {
+        // Every refined item deduplicated against the stored plan: the
+        // directive is already planned. Run an unscoped gap-fill so the
+        // planned-but-never-generated case still produces the asked-for tests.
+        workingNote =
+          "The stored plan already covers this — filling its remaining gaps (generate, run, heal).";
+      }
+    } else if (protocol === "targeted_direct") {
+      workingNote = `Scoped as targeted — generating ${directItems.length} test${directItems.length === 1 ? "" : "s"} from the directive, then running and healing them.`;
+    } else if (protocol === "explore") {
+      workingNote =
+        "Scoped as a broader run — scouting the app, planning coverage for this directive, then generating, running, and healing.";
+    } else {
+      workingNote =
+        "Filling coverage gaps against the stored plan (generate, run, heal).";
+    }
+    await queries.updateQaTask(task.id, { agentReply: workingNote });
 
     executeQaPipeline(session.id, teamId, repositoryId, "qa_setup").catch(
       (err) => console.error("[QaAgent] unhandled:", err),
