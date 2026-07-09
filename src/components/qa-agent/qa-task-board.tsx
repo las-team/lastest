@@ -187,6 +187,9 @@ function TaskCard({
           <span className="min-w-0">{task.agentReply}</span>
         </div>
       )}
+      {task.tests && task.tests.length > 0 && (
+        <TestRefChips refs={task.tests} />
+      )}
       {task.status === "needs_input" && (
         <Button
           size="sm"
