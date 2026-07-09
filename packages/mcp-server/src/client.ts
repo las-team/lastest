@@ -384,6 +384,34 @@ export class LastestClient {
     return this.get(`/api/v1/repos/${repoId}/coverage`);
   }
 
+  // --- QA Agent (ongoing agent: runs, direction queue) ---
+
+  async getQaAgentStatus(repoId: string): Promise<unknown> {
+    return this.get(`/api/v1/repos/${repoId}/qa-agent`);
+  }
+
+  async startQaAgentRun(
+    repoId: string,
+    opts: { mode?: string; targetUrl?: string } = {},
+  ): Promise<unknown> {
+    return this.post(`/api/v1/repos/${repoId}/qa-agent/runs`, opts);
+  }
+
+  async getQaSession(sessionId: string): Promise<unknown> {
+    return this.get(`/api/v1/qa-sessions/${sessionId}`);
+  }
+
+  async listQaTasks(repoId: string): Promise<unknown> {
+    return this.get(`/api/v1/repos/${repoId}/qa-tasks`);
+  }
+
+  async addQaTask(
+    repoId: string,
+    opts: { title: string; description?: string },
+  ): Promise<unknown> {
+    return this.post(`/api/v1/repos/${repoId}/qa-tasks`, opts);
+  }
+
   // --- AI Operations ---
 
   async createTest(opts: {

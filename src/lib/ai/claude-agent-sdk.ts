@@ -71,7 +71,14 @@ export class ClaudeAgentSDKProvider implements AIProvider {
       ? abortControllerFromSignal(signal)
       : undefined;
 
-    const messages: string[] = [];
+    // The SDK emits the model's final turn twice: once as an `assistant`
+    // message text block, and again as the terminal `result` (subtype
+    // "success") whose `.result` is that same text verbatim. Appending both
+    // yields a doubled reply (e.g. `{json}\n{json}`) that then fails
+    // JSON.parse. Keep the two sources separate and prefer the authoritative
+    // `result`; fall back to the assistant text only if no result arrives.
+    const assistantChunks: string[] = [];
+    let resultText: string | null = null;
     const stderrChunks: string[] = [];
 
     try {
@@ -100,14 +107,14 @@ export class ClaudeAgentSDKProvider implements AIProvider {
         if (message.type === "assistant" && message.message?.content) {
           for (const block of message.message.content) {
             if (block.type === "text") {
-              messages.push(block.text);
+              assistantChunks.push(block.text);
             }
           }
         }
-        // Also collect result messages (success only)
+        // The terminal success result — the authoritative final answer.
         if (message.type === "result" && message.subtype === "success") {
           if (message.result) {
-            messages.push(message.result);
+            resultText = message.result;
           }
         }
         // Capture error results with more detail
@@ -123,17 +130,15 @@ export class ClaudeAgentSDKProvider implements AIProvider {
         }
       }
 
-      return messages.join("\n").trim();
+      return (resultText ?? assistantChunks.join("\n")).trim();
     } catch (error) {
       const stderr = stderrChunks.join("").trim();
       if (error instanceof Error) {
         if (error.message === "Aborted") throw error;
         const parts = [`Claude Agent SDK error: ${error.message}`];
         if (stderr) parts.push(`stderr: ${stderr.slice(0, 1000)}`);
-        if (messages.length > 0)
-          parts.push(
-            `last output: ${messages.slice(-2).join("\n").slice(0, 500)}`,
-          );
+        const lastOutput = resultText ?? assistantChunks.slice(-2).join("\n");
+        if (lastOutput) parts.push(`last output: ${lastOutput.slice(0, 500)}`);
         throw new Error(parts.join(" | "));
       }
       throw error;
@@ -159,6 +164,11 @@ export class ClaudeAgentSDKProvider implements AIProvider {
       : undefined;
 
     let fullText = "";
+    // Tracks whether any assistant text was already streamed this turn. The
+    // SDK's terminal success `result` repeats that same final text, so we only
+    // emit it as a fallback when no assistant text arrived — otherwise the
+    // stream (and fullText) would be doubled. See generate() for the details.
+    let streamedAssistant = false;
     const stderrChunks: string[] = [];
 
     try {
@@ -187,15 +197,18 @@ export class ClaudeAgentSDKProvider implements AIProvider {
           for (const block of message.message.content) {
             if (block.type === "text") {
               fullText += block.text;
+              streamedAssistant = true;
               callbacks.onToken?.(block.text);
             }
           }
         }
-        // Also handle result messages (success only)
+        // Terminal success result — only use it if no assistant text streamed,
+        // since it otherwise duplicates the already-streamed final turn.
         if (
           message.type === "result" &&
           message.subtype === "success" &&
-          message.result
+          message.result &&
+          !streamedAssistant
         ) {
           fullText += message.result;
           callbacks.onToken?.(message.result);

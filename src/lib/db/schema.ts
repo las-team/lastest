@@ -1803,6 +1803,7 @@ export type AIActionType =
   | "agent_generate"
   | "agent_heal"
   | "agent_play"
+  | "qa_plan"
   | "triage"
   | "generate_var_value"
   | "suggest_app_fix";
@@ -2576,7 +2577,7 @@ export type AgentSessionStatus =
   | "failed"
   | "cancelled";
 
-export type AgentSessionKind = "play" | "quickstart" | "ranger";
+export type AgentSessionKind = "play" | "quickstart" | "ranger" | "qa";
 
 export type AgentStepId =
   | "settings_check"
@@ -2603,7 +2604,17 @@ export type AgentStepId =
   | "qs_publish_share"
   // Ranger (EB-backed live page scout, MCP-driven)
   | "ranger_provision"
-  | "ranger_browse";
+  | "ranger_browse"
+  // QA Agent (dedicated comprehensive-suite builder, /qa-agent page)
+  | "qa_setup"
+  | "qa_login"
+  | "qa_discover"
+  | "qa_plan"
+  | "qa_plan_review"
+  | "qa_generate"
+  | "qa_execute"
+  | "qa_heal"
+  | "qa_summary";
 
 export type AgentStepStatus =
   | "pending"
@@ -2801,6 +2812,320 @@ export interface QuickstartAuthSetupMeta {
   mode?: "login" | "signup";
 }
 
+// ── QA Agent (comprehensive suite builder) ──────────────────────────────────
+
+/** Coverage groups the QA agent plans and generates tests for. Mirrors the
+ *  industry-standard suite tiers (smoke/regression) and coverage angles
+ *  (a11y/perf/resilience/negative); `journey` is the business-outcome E2E
+ *  tier (e.g. "an order is actually placed") and is always planned. */
+export type QaTestGroup =
+  | "smoke"
+  | "api"
+  | "ui"
+  | "hybrid"
+  | "a11y"
+  | "perf"
+  | "resilience"
+  | "negative"
+  | "journey";
+
+export type QaPriority = "P1" | "P2" | "P3";
+
+/** How the qa_login step resolved authentication for the run. */
+export type QaAuthStrategy =
+  /** Repo setup infrastructure reused (default setup steps / storage state). */
+  | "existing_setup"
+  /** User-provided credentials verified on the EB; storage state captured. */
+  | "user_creds"
+  /** The agent registered its own throwaway account and captured a session. */
+  | "self_registered"
+  /** Credentials exist but could not be verified — discovery tests them inline. */
+  | "creds_untested"
+  /** No auth resolvable — public surface only (discovery maps the auth pages). */
+  | "public_only";
+
+/** Outcome of the qa_login resolution cascade. Holds no secrets — registered
+ *  credentials go into quickstartEmail/quickstartPassword (encrypted at rest). */
+export interface QaAuthState {
+  strategy: QaAuthStrategy;
+  /** The authed heuristic was confirmed live on an EB (no password field,
+   *  final URL not an auth page). False = deferred to discovery/execution. */
+  validated: boolean;
+  storageStateId?: string;
+  /** Login/signup setup test created or found for reuse via setupOverrides. */
+  setupTestId?: string;
+  /** Repo default setup steps already cover auth — generated tests must NOT
+   *  add extraSteps (the executor applies defaults to every test already). */
+  defaultSetupInUse?: boolean;
+  /** Observed in the target app's DOM — never URL-guessed. */
+  loginUrl?: string;
+  /** Observed in the target app's DOM — never URL-guessed. */
+  signupUrl?: string;
+  registeredEmail?: string;
+  notes?: string;
+}
+
+/** A critical user journey with a verifiable business outcome. */
+export interface QaPlanJourney {
+  id: string;
+  title: string;
+  priority: QaPriority;
+  /** Ordered user-visible steps of the journey. */
+  steps: string[];
+  /** Business/functional domain of the journey (matrix axis). */
+  businessArea?: string;
+  /** The business outcome this journey must produce (e.g. "order placed"). */
+  businessOutcome: string;
+  /** How the outcome is proven beyond UI toasts (end-state via API/data/UI). */
+  endStateVerification: string;
+}
+
+/** One planned test case. `scenario` is generator-ready prose (steps +
+ *  expected results); `api` is set for api-group items and drives a headless
+ *  ApiTestDefinition instead of a browser test. */
+export interface QaPlanItem {
+  id: string;
+  /** Primary group — drives functional-area assignment and legacy plans. */
+  group: QaTestGroup;
+  /** All coverage groups this single test satisfies (primary first). One
+   *  test execution runs every check layer, so a page visit can serve
+   *  smoke+ui+a11y+perf at once. Absent = [group] (legacy plans). */
+  groups?: QaTestGroup[];
+  title: string;
+  priority: QaPriority;
+  /** Traceability link to the journey this test covers, when applicable. */
+  journeyId?: string;
+  /** Business/functional domain this item exercises (e.g. "Authentication",
+   *  "Checkout") — one axis of the coverage matrix. Missing values roll up
+   *  under "General". */
+  businessArea?: string;
+  /** Route/page under test, relative to the target base URL. */
+  pagePath?: string;
+  rationale?: string;
+  scenario: string;
+  /** Verified selectors from discovery the generator should prefer. */
+  selectorHints?: string[];
+  /** Exact ref strings from the branch-diff digest this item covers (symbol
+   *  names, "METHOD /path" endpoints, file paths) — drives PR coverage. */
+  changeRefs?: string[];
+  /** Set at plan time when a pre-existing test already covers this item
+   *  (matchPlanToExistingTests) — the review UI shows what already exists. */
+  existingTestId?: string;
+  existingTestName?: string;
+  api?: {
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+    path: string;
+    expectedStatus?: number;
+    body?: unknown;
+    description?: string;
+  };
+  /** User can exclude items during plan review. Absent = enabled. */
+  enabled?: boolean;
+}
+
+export interface QaTestPlan {
+  appProfile: {
+    summary: string;
+    businessDomain?: string;
+    /** The single most valuable business outcome of the app. */
+    primaryOutcome?: string;
+  };
+  journeys: QaPlanJourney[];
+  items: QaPlanItem[];
+  entryCriteria?: string[];
+  exitCriteria?: string[];
+  risks?: string[];
+}
+
+/** One live-crawled page: rendered-DOM facts + same-origin API endpoints
+ *  observed while the page loaded. Fed (condensed) to the planner. */
+export interface QaPageSnapshot {
+  url: string;
+  finalUrl: string;
+  title: string | null;
+  headings: Array<{ level: number; text: string }>;
+  forms: Array<{
+    name: string | null;
+    action: string | null;
+    method: string;
+    inputs: Array<{
+      tag: string;
+      type: string | null;
+      name: string | null;
+      id: string | null;
+      label: string | null;
+    }>;
+  }>;
+  buttons: string[];
+  links: Array<{ text: string; href: string }>;
+  testIds: string[];
+  candidateSelectors: string[];
+  apiEndpoints: Array<{ method: string; path: string; status: number }>;
+  /** Console errors observed while this page loaded — surfaces third-party /
+   *  analytics noise so the planner can route-block it or downgrade the
+   *  console check layer (the executor reds on ANY console error otherwise). */
+  consoleErrors?: string[];
+}
+
+/** One file changed on the working branch vs the base branch. */
+export interface QaPrChangedFile {
+  path: string;
+  status: "added" | "modified" | "removed" | "renamed";
+  additions: number;
+  deletions: number;
+  previousPath?: string;
+}
+
+/** A function/class/component the branch diff added or modified — extracted
+ *  deterministically from diff hunks (src/lib/qa-agent/pr-check). */
+export interface QaPrSymbol {
+  name: string;
+  kind: "function" | "component" | "class" | "endpoint";
+  file: string;
+  change: "added" | "modified";
+}
+
+/** An API endpoint whose route file the branch diff touched. */
+export interface QaPrEndpoint {
+  method: string;
+  path: string;
+  file: string;
+  change: "added" | "modified" | "removed";
+}
+
+/** Branch/PR diff facts (head vs base) feeding the planner + coverage report. */
+export interface QaPrChanges {
+  baseBranch: string;
+  headBranch: string;
+  files: QaPrChangedFile[];
+  symbols: QaPrSymbol[];
+  endpoints: QaPrEndpoint[];
+  /** True when file/symbol caps dropped part of the diff. */
+  truncated?: boolean;
+}
+
+/** Coverage verdict for one branch change (symbol/endpoint) in the summary. */
+export interface QaPrCoverageEntry {
+  /** Ref string as listed in the digest ("createInvoice", "POST /api/x"). */
+  ref: string;
+  kind: "symbol" | "endpoint";
+  file: string;
+  change: "added" | "modified" | "removed";
+  planItemIds: string[];
+  testIds: string[];
+  status: "passed" | "covered" | "generated" | "planned" | "uncovered";
+}
+
+export interface QaPrCoverage {
+  baseBranch: string;
+  headBranch: string;
+  /** Entries with a live test (passed/covered/generated). */
+  coveredCount: number;
+  entries: QaPrCoverageEntry[];
+}
+
+export interface QaDiscovery {
+  targetUrl: string;
+  crawledPages: QaPageSnapshot[];
+  /** Routes from the static GitHub-tree scan (repo-aware mode only). */
+  staticRoutes?: Array<{ path: string; type: string }>;
+  framework?: string;
+  githubConnected: boolean;
+  /** Branch the static scan + code check analyzed (the repo's selected
+   *  branch, falling back to its default branch). */
+  branch?: string;
+  /** Base branch for the PR diff (the repo's default branch). branch ===
+   *  baseBranch means the run analyzed the base itself — no diff exists. */
+  baseBranch?: string;
+  /** Code-check output (repo-aware mode): stack facts, testing implications,
+   *  and API endpoints declared in code. Shape in src/lib/qa-agent/code-check. */
+  codeCheck?: {
+    framework?: string;
+    authMechanism?: string;
+    apiLayer?: string;
+    projectDescription?: string;
+    testingNotes: string[];
+    declaredEndpoints: Array<{ method: string; path: string; file: string }>;
+  };
+  /** Branch diff vs the base branch (repo-aware mode, head ≠ base): the
+   *  functions/endpoints this branch adds or changes. Feeds the planner
+   *  ("cover these") and the summary's PR coverage report. */
+  prChanges?: QaPrChanges;
+}
+
+/** How a QA session runs. `full` is the complete pipeline; `refresh_spec`
+ *  re-discovers the app and re-plans against existing coverage (no
+ *  generation); `fill_gaps` takes the latest plan and generates only the
+ *  items not already covered by a live test. */
+export type QaRunMode = "full" | "refresh_spec" | "fill_gaps";
+
+/** What started a QA session. `schedule`/`pr`/`mcp` are reserved for the
+ *  trigger phases (cron, PR webhook, MCP control). */
+export type QaSessionTrigger =
+  | "manual"
+  | "task"
+  | "rerun"
+  | "schedule"
+  | "pr"
+  | "mcp";
+
+export type QaGeneratedTestStatus =
+  | "generating"
+  | "generated"
+  | "generation_failed"
+  /** Matched to a pre-existing test (from a prior run or manual authoring) —
+   *  generation skipped, `testId` points at that test. */
+  | "covered"
+  | "passed"
+  | "failed"
+  | "healed";
+
+export interface QaGeneratedTest {
+  planItemId: string;
+  group: QaTestGroup;
+  /** All coverage groups of the source plan item (primary first). */
+  groups?: QaTestGroup[];
+  /** Absent when generation failed before a test row was created. */
+  testId?: string;
+  name: string;
+  status: QaGeneratedTestStatus;
+  error?: string;
+}
+
+/** One cell of the business-area × test-group coverage matrix. */
+export interface QaMatrixCell {
+  planned: number;
+  /** Plan items satisfied by pre-existing tests. */
+  covered: number;
+  generated: number;
+  /** Passing among covered+generated is not knowable for covered (they run
+   *  in normal builds) — `passed` counts this run's passing tests only. */
+  passed: number;
+}
+
+export interface QaSummaryData {
+  planned: number;
+  generated: number;
+  /** Plan items satisfied by pre-existing tests (no generation needed). */
+  covered: number;
+  passed: number;
+  failed: number;
+  healed: number;
+  byGroup: Partial<
+    Record<
+      QaTestGroup,
+      { planned: number; generated: number; covered: number; passed: number }
+    >
+  >;
+  /** Coverage matrix: business area → test group → cell. Areas come from
+   *  QaPlanItem.businessArea ("General" when unset). */
+  matrix?: Record<string, Partial<Record<QaTestGroup, QaMatrixCell>>>;
+  /** journeyId → testIds covering it (traceability matrix). */
+  journeyCoverage: Record<string, string[]>;
+  /** Per-change coverage of the branch diff (repo-aware runs on a branch). */
+  prCoverage?: QaPrCoverage;
+}
+
 export interface AgentSessionMetadata {
   buildIds?: string[];
   fixAttempts?: Record<string, number>;
@@ -2856,6 +3181,53 @@ export interface AgentSessionMetadata {
   rangerUrl?: string;
   /** Deterministic rendered page map produced by the ranger EB browse. */
   rangerPageMap?: Record<string, unknown>;
+  // QA Agent fields (kind = "qa"). Credentials for the target app reuse
+  // quickstartEmail/quickstartPassword above so they get the same AES-256-GCM
+  // encryption-at-rest treatment from the agent-session query layer.
+  /** Target app base URL under test. */
+  qaTargetUrl?: string;
+  /** How this session runs (full | refresh_spec | fill_gaps). Absent on
+   *  sessions created before modes existed — treated as "full". */
+  qaMode?: QaRunMode;
+  /** For fill_gaps runs: the prior session whose plan/discovery was reused. */
+  qaPlanSourceSessionId?: string;
+  /** Coverage groups selected for this run ("journey" is always included). */
+  qaGroups?: QaTestGroup[];
+  /** Skip the human plan-review gate and generate immediately. */
+  qaAutoApprove?: boolean;
+  /** Allow the qa_login step to self-register a throwaway account when no
+   *  credentials/setup exist and a signup link is discovered in the DOM.
+   *  Absent = allowed (opt-out via the setup form). */
+  qaAllowRegistration?: boolean;
+  /** Resolved auth strategy for this run, decided by the qa_login step. */
+  qaAuth?: QaAuthState;
+  /** Live + static discovery output feeding the planner. */
+  qaDiscovery?: QaDiscovery;
+  /** Uploaded product docs (name + decoded size only — raw files are never
+   *  persisted). */
+  qaDocs?: Array<{ name: string; chars: number }>;
+  /** Condensed documentation text the planner treats as authoritative for
+   *  intended behavior. Capped (see src/lib/qa-agent/docs.ts). */
+  qaDocsDigest?: string;
+  /** The structured test plan produced by the planner subagent. */
+  qaPlan?: QaTestPlan;
+  /** User feedback captured on "request changes" — fed to the planner rerun. */
+  qaPlannerFeedback?: string;
+  /** Plain-language journeys the user added at the review gate. Refined by AI
+   *  into structured journeys + covering items and merged into qaPlan; kept for
+   *  provenance and so refresh/rerun paths preserve human-supplied intent. */
+  qaUserJourneys?: string[];
+  /** Per-plan-item generation/execution status ledger. */
+  qaGeneratedTests?: QaGeneratedTest[];
+  /** Test-run ids started by the execute/heal phases. */
+  qaRunIds?: string[];
+  /** Final coverage/traceability summary. */
+  qaSummary?: QaSummaryData;
+  /** Task from the direction queue this session is working (dispatcher-run). */
+  qaTaskId?: string;
+  /** What started this session — powers the run-history provenance chip.
+   *  Absent on sessions created before triggers existed = "manual". */
+  qaTrigger?: QaSessionTrigger;
   [key: string]: unknown;
 }
 
@@ -2880,6 +3252,91 @@ export const agentSessions = pgTable("agent_sessions", {
 
 export type AgentSession = typeof agentSessions.$inferSelect;
 export type NewAgentSession = typeof agentSessions.$inferInsert;
+
+// ── QA Agent Tasks (direction queue for the ongoing QA agent) ───────────────
+
+export type QaTaskStatus =
+  | "queued"
+  | "working"
+  /** The agent finished abnormally (failed/cancelled run) and left a reply —
+   *  the human decides whether to retry (→ queued) or drop (→ cancelled). */
+  | "needs_input"
+  | "done"
+  | "cancelled";
+
+export type QaTaskSource = "user" | "mcp" | "coverage_gap";
+
+/** A directive dropped into the QA agent's queue ("test the billing flow",
+ *  "increase Dashboard a11y coverage"). The dispatcher picks tasks up oldest
+ *  first whenever no QA session is active, runs a task-scoped session, writes
+ *  the agent's reply back, and advances the status — the /qa-agent task board
+ *  renders these as kanban columns. */
+export const qaTasks = pgTable(
+  "qa_tasks",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    repositoryId: text("repository_id")
+      .references(() => repositories.id, { onDelete: "cascade" })
+      .notNull(),
+    teamId: text("team_id").notNull(),
+    title: text("title").notNull(),
+    description: text("description"),
+    status: text("status").$type<QaTaskStatus>().notNull().default("queued"),
+    source: text("source").$type<QaTaskSource>().notNull().default("user"),
+    /** Display name of who filed it (user name or MCP client name). */
+    createdByName: text("created_by_name"),
+    createdById: text("created_by_id"),
+    /** Agent session that is working (or worked) this task. */
+    sessionId: text("session_id"),
+    /** The agent's reply when it finishes — or why it needs input. */
+    agentReply: text("agent_reply"),
+    createdAt: timestamp("created_at").$defaultFn(() => new Date()),
+    updatedAt: timestamp("updated_at").$defaultFn(() => new Date()),
+    startedAt: timestamp("started_at"),
+    completedAt: timestamp("completed_at"),
+  },
+  (table) => [
+    index("idx_qa_tasks_repo_status").on(table.repositoryId, table.status),
+  ],
+);
+
+export type QaTask = typeof qaTasks.$inferSelect;
+export type NewQaTask = typeof qaTasks.$inferInsert;
+
+/** Per-repo automation config for the QA agent: an optional cron schedule and
+ *  an optional PR-webhook trigger. One row per repository; both triggers start
+ *  autonomous sessions (review gate auto-approved) and are skipped with an
+ *  activity event when a session is already running. */
+export const qaAgentTriggers = pgTable("qa_agent_triggers", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  repositoryId: text("repository_id")
+    .references(() => repositories.id, { onDelete: "cascade" })
+    .notNull()
+    .unique(),
+  teamId: text("team_id").notNull(),
+  /** Cron schedule (5-field expression, UTC). */
+  scheduleEnabled: boolean("schedule_enabled").notNull().default(false),
+  cronExpression: text("cron_expression"),
+  scheduleMode: text("schedule_mode")
+    .$type<QaRunMode>()
+    .notNull()
+    .default("fill_gaps"),
+  /** Run on PR opened/synchronize webhooks. */
+  prEnabled: boolean("pr_enabled").notNull().default(false),
+  prMode: text("pr_mode").$type<QaRunMode>().notNull().default("refresh_spec"),
+  nextRunAt: timestamp("next_run_at"),
+  lastRunAt: timestamp("last_run_at"),
+  lastSessionId: text("last_session_id"),
+  createdAt: timestamp("created_at").$defaultFn(() => new Date()),
+  updatedAt: timestamp("updated_at").$defaultFn(() => new Date()),
+});
+
+export type QaAgentTrigger = typeof qaAgentTriggers.$inferSelect;
+export type NewQaAgentTrigger = typeof qaAgentTriggers.$inferInsert;
 
 // ── Bug Reports ──────────────────────────────────────────────────────────────
 
@@ -3321,6 +3778,11 @@ export type ActivityEventType =
   | "step:error"
   | "step:waiting_user"
   | "substep:update"
+  // QA agent direction queue
+  | "task:created"
+  | "task:started"
+  | "task:completed"
+  | "task:failed"
   | "mcp:tool_call"
   | "mcp:tool_result"
   | "mcp:tool_error"
@@ -3350,7 +3812,8 @@ export type ActivitySourceType =
   | "play_agent"
   | "mcp_server"
   | "generate_agent"
-  | "heal_agent";
+  | "heal_agent"
+  | "qa_agent";
 
 export type ActivityArtifactType =
   | "test"

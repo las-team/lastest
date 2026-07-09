@@ -33,12 +33,13 @@ WORKFLOW:
 6. Identify the reliable selectors from the snapshots (role-based locators preferred)
 7. Generate the final test code using discovered selectors
 
-MULTI-SCENARIO TESTS:
-When given multiple scenarios, create ONE test function that covers all of them in sequence.
-After verifying each scenario, take a screenshot as a checkpoint using a unique filename:
-  await page.screenshot({ path: screenshotPath.replace('.png', '-scenario-1.png'), fullPage: true });
-The final screenshot should use the original screenshotPath.
+SCENARIO / CHECKPOINT STRUCTURE:
+You are usually given ONE scenario made of numbered steps. Take a screenshot checkpoint after each KEY state the scenario reaches — the initial page, and each state a later check layer needs to see (an opened dialog, an error/validation state, the post-submit confirmation). The platform runs axe / Core Web Vitals / visual diffing on EVERY captured state, so a state that is never screenshotted is never checked. Use a unique filename per checkpoint and the original screenshotPath for the final one:
+  await page.screenshot({ path: screenshotPath.replace('.png', '-step-1.png'), fullPage: true });
+If given multiple independent scenarios, cover them in one test function in sequence.
 Group related interactions (same page/route) together for efficiency — don't navigate away and back unnecessarily.
+
+OVERLAYS: If a cookie/consent banner, newsletter, or intro modal is present and would intercept clicks, dismiss it first (accept/close) via a verified selector before interacting with the page under test.
 
 OUTPUT FORMAT:
 Generate a single JavaScript function with this exact signature — NO imports, NO TypeScript:
@@ -70,6 +71,7 @@ CRITICAL RULES:
 - Use stepLogger.log() for step descriptions — prefix with "Scenario N:" for multi-scenario tests
 - ALWAYS use regex for URL checks: await expect(page).toHaveURL(/\\/path/)
 - Every variable must use const or let
+- UNIQUE TEST DATA: when the test creates a record (signup, new item, invite), build the uniqueness-constrained field at runtime with a unique suffix — e.g. const email = \`user-\${Date.now().toString(36)}@example.com\`. Never hardcode a value that a unique constraint will reject on the second run.
 - Output ONLY the code block, no explanations
 
 ${SELECTOR_ROBUSTNESS_RULES}`;
@@ -146,8 +148,13 @@ export async function agentCreateTest(
 
     prompt += `\n\nTarget base URL: ${seed.baseUrl}`;
     prompt += `\nNavigate to the page, explore it using MCP tools, then generate the test code.`;
-    if (seed.hasLoginSetup) {
-      prompt += `\n\n**IMPORTANT: Do NOT include login/auth/setup steps in your generated test code. The seed fixture handles authentication during your MCP exploration, but at runtime a separate setup script logs in BEFORE the test runs. Your test should assume the user is already logged in — start directly on the page being tested.**`;
+    // The QA agent may have injected an authenticated session directly into the
+    // exploration browser (context.preAuthenticated) even when the repo has no
+    // login-bearing default setup step (seed.hasLoginSetup is false for a
+    // per-test storage_state override). Honor either signal so the generator's
+    // auth story matches the browser it is actually driving.
+    if (seed.hasLoginSetup || context.preAuthenticated) {
+      prompt += `\n\n**IMPORTANT: Do NOT include login/auth/setup steps in your generated test code. Authentication is applied automatically before the test runs (an injected session or a setup script), and your MCP exploration browser is already signed in. Your test should assume the user is already logged in — start directly on the page being tested. If exploration lands on a login page, the session lapsed: report it rather than scripting a manual login.**`;
     }
     prompt += `\n\n---\n\n${seed.seedPrompt}`;
 

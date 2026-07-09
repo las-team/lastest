@@ -57,6 +57,11 @@
  *   DELETE /api/v1/setup-scripts/:id - Delete a setup script (refuses if still wired into a test)
  *   DELETE /api/v1/tests/:id - Soft-delete a test
  *   DELETE /api/v1/functional-areas/:id - Soft-delete a functional area
+ *   GET  /api/v1/repos/:id/qa-agent - QA agent status (live session, coverage, tasks, triggers)
+ *   POST /api/v1/repos/:id/qa-agent/runs - Start a QA agent run (body: { mode?, targetUrl? }; 409 when busy)
+ *   GET  /api/v1/qa-sessions/:id - QA agent session status (slim, secret-free)
+ *   GET  /api/v1/repos/:id/qa-tasks - List QA agent direction-queue tasks
+ *   POST /api/v1/repos/:id/qa-tasks - Queue a task for the QA agent (body: { title, description? })
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -92,6 +97,37 @@ import type { VideoCaption } from "@/lib/db/schema";
 // downstream server actions share the same resolution path.
 async function verifyAuth(_request: NextRequest) {
   return getCurrentSession();
+}
+
+// Slim, secret-free view of a QA agent session for the v1 API. Session
+// metadata carries encrypted-at-rest credentials (quickstartEmail/Password)
+// and bulky discovery blobs — expose only what an external agent needs.
+function slimQaSession(s: import("@/lib/db/schema").AgentSession) {
+  const m = s.metadata;
+  return {
+    id: s.id,
+    status: s.status,
+    mode: m.qaMode ?? "full",
+    trigger: m.qaTrigger ?? "manual",
+    currentStepId: s.currentStepId,
+    targetUrl: m.qaTargetUrl ?? null,
+    taskId: m.qaTaskId ?? null,
+    steps: s.steps.map((st) => ({
+      id: st.id,
+      status: st.status,
+      label: st.label,
+      error: st.error ?? null,
+    })),
+    generatedTests: (m.qaGeneratedTests ?? []).map((t) => ({
+      name: t.name,
+      group: t.group,
+      status: t.status,
+      testId: t.testId ?? null,
+    })),
+    summary: m.qaSummary ?? null,
+    createdAt: s.createdAt,
+    completedAt: s.completedAt,
+  };
 }
 
 // Coerce an untrusted request body into a clean VideoCaption[] (used by the
@@ -731,6 +767,46 @@ export async function GET(
         return NextResponse.json({ routeCoverage, areaCoverage });
       }
 
+      // GET /api/v1/repos/:id/qa-agent — QA agent status for external agents:
+      // live session, latest coverage summary, direction-queue tasks, triggers
+      if (subResource === "qa-agent") {
+        const [live, recent, tasks, trigger] = await Promise.all([
+          queries.getActiveAgentSession(id, "qa"),
+          queries.getRecentAgentSessions(id, "qa", 5),
+          queries.getQaTasksByRepo(id, { terminalLimit: 10 }),
+          queries.getQaAgentTrigger(id),
+        ]);
+        const summarySource = recent.find((s) => s.metadata.qaSummary);
+        return NextResponse.json({
+          liveSession: live ? slimQaSession(live) : null,
+          recentRuns: recent.map(slimQaSession),
+          coverage: summarySource
+            ? {
+                sessionId: summarySource.id,
+                updatedAt: summarySource.completedAt ?? summarySource.createdAt,
+                summary: summarySource.metadata.qaSummary,
+              }
+            : null,
+          tasks,
+          triggers: trigger
+            ? {
+                scheduleEnabled: trigger.scheduleEnabled,
+                cronExpression: trigger.cronExpression,
+                scheduleMode: trigger.scheduleMode,
+                prEnabled: trigger.prEnabled,
+                prMode: trigger.prMode,
+                nextRunAt: trigger.nextRunAt,
+              }
+            : null,
+        });
+      }
+
+      // GET /api/v1/repos/:id/qa-tasks — direction-queue tasks
+      if (subResource === "qa-tasks") {
+        const tasks = await queries.getQaTasksByRepo(id);
+        return NextResponse.json(tasks);
+      }
+
       // GET /api/v1/repos/:id/export — full export for migration
       if (subResource === "export") {
         const areas = await queries.getFunctionalAreasByRepo(id);
@@ -876,6 +952,19 @@ export async function GET(
     }
 
     // Visual diffs
+    // GET /api/v1/qa-sessions/:id — QA agent session status (slim)
+    if (resource === "qa-sessions" && id) {
+      const s = await queries.getAgentSession(id);
+      if (
+        !s ||
+        s.kind !== "qa" ||
+        (s.teamId && s.teamId !== session.team?.id)
+      ) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      return NextResponse.json(slimQaSession(s));
+    }
+
     if (resource === "diffs" && id && !subResource) {
       // Verify team ownership via diff → build → test run → repo
       if (!(await verifyDiffOwnership(id, session))) {
@@ -1236,6 +1325,83 @@ export async function POST(
   const { resource, id, subResource } = parseSlug(slug);
 
   try {
+    // Start a QA agent run: POST /api/v1/repos/:id/qa-agent/runs
+    // Body: { mode?, targetUrl? }. 409 when a session is already running.
+    if (
+      resource === "repos" &&
+      id &&
+      subResource === "qa-agent" &&
+      slug[3] === "runs"
+    ) {
+      if (!(await verifyRepoOwnership(id, session))) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      const repo = await queries.getRepository(id);
+      if (!repo?.teamId) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      const body = await request.json().catch(() => ({}));
+      const mode = body?.mode;
+      if (
+        mode !== undefined &&
+        !["full", "refresh_spec", "fill_gaps"].includes(mode)
+      ) {
+        return NextResponse.json(
+          { error: "mode must be full | refresh_spec | fill_gaps" },
+          { status: 400 },
+        );
+      }
+      const { startQaAgentFromTrigger } =
+        await import("@/server/actions/qa-agent");
+      const result = await startQaAgentFromTrigger({
+        repositoryId: id,
+        teamId: repo.teamId,
+        trigger: "mcp",
+        mode,
+        targetUrl:
+          typeof body?.targetUrl === "string" ? body.targetUrl : undefined,
+        reason: `via API by ${session.user.name || session.user.email}`,
+      });
+      if (result.sessionId) {
+        return NextResponse.json(
+          { sessionId: result.sessionId },
+          { status: 201 },
+        );
+      }
+      const busy = result.skipped?.includes("already running");
+      return NextResponse.json(
+        { error: result.skipped ?? "Could not start" },
+        { status: busy ? 409 : 400 },
+      );
+    }
+
+    // Queue a QA agent task: POST /api/v1/repos/:id/qa-tasks
+    // Body: { title, description? } — files with source "mcp" so the board
+    // shows the external-agent actor chip.
+    if (resource === "repos" && id && subResource === "qa-tasks" && !slug[3]) {
+      if (!(await verifyRepoOwnership(id, session))) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      const body = await request.json().catch(() => ({}));
+      if (
+        !body?.title ||
+        typeof body.title !== "string" ||
+        !body.title.trim()
+      ) {
+        return NextResponse.json({ error: "title required" }, { status: 400 });
+      }
+      const { addQaTask } = await import("@/server/actions/qa-agent");
+      const { taskId } = await addQaTask({
+        repositoryId: id,
+        title: body.title,
+        description:
+          typeof body.description === "string" ? body.description : undefined,
+        source: "mcp",
+      });
+      const task = await queries.getQaTask(taskId);
+      return NextResponse.json(task, { status: 201 });
+    }
+
     // Create storage state: POST /api/v1/repos/:id/storage-states
     // Body: { name, storageStateJson }
     if (resource === "repos" && id && subResource === "storage-states") {

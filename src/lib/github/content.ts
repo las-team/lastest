@@ -243,6 +243,10 @@ export interface CompareResult {
     additions: number;
     deletions: number;
     changes: number;
+    /** Unified-diff hunk text for this file (absent for binary/huge files). */
+    patch?: string;
+    /** Original path for renamed files. */
+    previousFilename?: string;
   }>;
   baseBranch: string;
   headBranch: string;
@@ -296,12 +300,16 @@ export async function compareBranches(
           additions: number;
           deletions: number;
           changes: number;
+          patch?: string;
+          previous_filename?: string;
         }) => ({
           filename: f.filename,
           status: f.status,
           additions: f.additions,
           deletions: f.deletions,
           changes: f.changes,
+          patch: f.patch,
+          previousFilename: f.previous_filename,
         }),
       ),
       baseBranch,

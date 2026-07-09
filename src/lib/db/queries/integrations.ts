@@ -17,6 +17,7 @@ import type {
   NewGoogleSheetsDataSource,
   NewComposeConfig,
   NewAgentSession,
+  AgentSessionKind,
   AgentSessionStatus,
   AgentStepState,
   AgentStepId,
@@ -380,7 +381,7 @@ export async function getAgentSession(id: string) {
 
 export async function getActiveAgentSession(
   repositoryId: string,
-  kind: "play" | "quickstart" = "play",
+  kind: AgentSessionKind = "play",
 ) {
   // Opportunistic sweep so a stale "active" row doesn't keep the activity
   // feed spinning forever. Cheap when there's nothing to do.
@@ -403,6 +404,47 @@ export async function getActiveAgentSession(
     )
     .orderBy(desc(agentSessions.createdAt));
   return row ? decryptAgentSessionRow(row) : row;
+}
+
+/** Most recent session of a kind for a repo, regardless of status. Used by
+ *  the QA Agent page to show the last run's summary after completion. */
+export async function getLatestAgentSession(
+  repositoryId: string,
+  kind: AgentSessionKind,
+) {
+  const [row] = await db
+    .select()
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.repositoryId, repositoryId),
+        eq(agentSessions.kind, kind),
+      ),
+    )
+    .orderBy(desc(agentSessions.createdAt))
+    .limit(1);
+  return row ? decryptAgentSessionRow(row) : row;
+}
+
+/** Recent sessions of a kind for a repo, newest first (any status). Used by
+ *  the QA agent's segmented modes to locate the latest stored plan. */
+export async function getRecentAgentSessions(
+  repositoryId: string,
+  kind: AgentSessionKind,
+  limit = 10,
+) {
+  const rows = await db
+    .select()
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.repositoryId, repositoryId),
+        eq(agentSessions.kind, kind),
+      ),
+    )
+    .orderBy(desc(agentSessions.createdAt))
+    .limit(limit);
+  return rows.map(decryptAgentSessionRow);
 }
 
 export async function updateAgentSession(
