@@ -1,248 +1,47 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { toast } from "sonner";
 import type {
+  ActivitySourceType,
   AgentSession,
-  AgentStepState,
   QaRunMode,
+  QaTask,
   QaTestGroup,
 } from "@/lib/db/schema";
 import { QA_GROUPS } from "@/lib/qa-agent/plan";
 import { useQaAgent } from "./use-qa-agent";
+import { useQaTasks } from "./use-qa-tasks";
+import { useActivityFeed } from "@/components/activity-feed/use-activity-feed";
+import { QaAgentHeader } from "./qa-agent-header";
+import { PhaseTimeline } from "./qa-phase-timeline";
 import { QaPlanReview } from "./qa-plan-review";
 import { QaGeneratedTestsPanel, QaSummaryPanel } from "./qa-results-panel";
+import type { CoverageRequestHint } from "./qa-results-panel";
 import { BrowserViewer } from "@/components/embedded-browser/browser-viewer-client";
+import { QaTaskBoard } from "./qa-task-board";
+import { QaRunHistory } from "./qa-run-history";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Progress } from "@/components/ui/progress";
 import { Switch } from "@/components/ui/switch";
 import {
   AlertTriangle,
-  Ban,
   Bot,
-  CheckCircle2,
-  Circle,
-  CircleDashed,
   FileText,
   Github,
   Loader2,
   Lock,
   MonitorPlay,
   PackagePlus,
-  Pause,
   Play,
   RefreshCw,
-  RotateCcw,
-  SkipForward,
-  UserRound,
   X,
-  XCircle,
 } from "lucide-react";
-
-// ---------------------------------------------------------------------------
-// Status hero
-// ---------------------------------------------------------------------------
-
-const SESSION_STATUS_META: Record<
-  AgentSession["status"],
-  { label: string; className: string; spin?: boolean; icon: typeof Bot }
-> = {
-  active: {
-    label: "Running",
-    className: "bg-info/10 border-info/30 text-info",
-    spin: true,
-    icon: Loader2,
-  },
-  paused: {
-    label: "Waiting for you",
-    className: "bg-warning/10 border-warning/30 text-warning",
-    icon: UserRound,
-  },
-  completed: {
-    label: "Completed",
-    className: "bg-success/10 border-success/30 text-success",
-    icon: CheckCircle2,
-  },
-  failed: {
-    label: "Failed",
-    className: "bg-destructive/10 border-destructive/30 text-destructive",
-    icon: XCircle,
-  },
-  cancelled: {
-    label: "Cancelled",
-    className: "bg-muted border-border text-muted-foreground",
-    icon: Ban,
-  },
-};
-
-// ---------------------------------------------------------------------------
-// Phase timeline
-// ---------------------------------------------------------------------------
-
-function StepDot({ step }: { step: AgentStepState }) {
-  switch (step.status) {
-    case "completed":
-      return <CheckCircle2 className="h-4 w-4 text-success" />;
-    case "active":
-      return <Loader2 className="h-4 w-4 text-info animate-spin" />;
-    case "waiting_user":
-      return <UserRound className="h-4 w-4 text-warning" />;
-    case "failed":
-      return <XCircle className="h-4 w-4 text-destructive" />;
-    case "skipped":
-      return <SkipForward className="h-4 w-4 text-muted-foreground" />;
-    default:
-      return <Circle className="h-4 w-4 text-muted-foreground/40" />;
-  }
-}
-
-const AGENT_BADGE_STYLES: Record<string, string> = {
-  orchestrator: "bg-primary/10 text-primary border-primary/30",
-  planner: "bg-info/10 text-info border-info/30",
-  scout: "bg-success/10 text-success border-success/30",
-  ranger: "bg-success/10 text-success border-success/30",
-  generator: "bg-warning/10 text-warning border-warning/30",
-  healer: "bg-destructive/10 text-destructive border-destructive/30",
-};
-
-function SubstepRow({
-  substep,
-}: {
-  substep: NonNullable<AgentStepState["substeps"]>[number];
-}) {
-  return (
-    <div className="flex items-start gap-2 text-sm py-0.5">
-      <span className="mt-0.5 shrink-0">
-        {substep.status === "running" ? (
-          <Loader2 className="h-3.5 w-3.5 text-info animate-spin" />
-        ) : substep.status === "done" ? (
-          <CheckCircle2 className="h-3.5 w-3.5 text-success" />
-        ) : substep.status === "error" ? (
-          <XCircle className="h-3.5 w-3.5 text-destructive" />
-        ) : (
-          <CircleDashed className="h-3.5 w-3.5 text-muted-foreground/50" />
-        )}
-      </span>
-      {substep.agent && (
-        <Badge
-          variant="outline"
-          className={`text-[10px] px-1.5 shrink-0 ${AGENT_BADGE_STYLES[substep.agent] ?? ""}`}
-        >
-          {substep.agent}
-        </Badge>
-      )}
-      <span className="min-w-0">
-        <span className="truncate">{substep.label}</span>
-        {substep.detail && (
-          <span className="block text-xs text-muted-foreground truncate">
-            {substep.detail}
-          </span>
-        )}
-      </span>
-      {substep.durationMs !== undefined && (
-        <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-          {(substep.durationMs / 1000).toFixed(1)}s
-        </span>
-      )}
-    </div>
-  );
-}
-
-function PhaseTimeline({ session }: { session: AgentSession }) {
-  const activeStep = session.steps.find(
-    (s) =>
-      s.status === "active" ||
-      s.status === "waiting_user" ||
-      s.status === "failed",
-  );
-  return (
-    <Card>
-      <CardContent className="pt-4 space-y-4">
-        <div className="flex items-start gap-0 overflow-x-auto pb-1">
-          {session.steps.map((step, i) => (
-            <div key={step.id} className="flex items-start min-w-0">
-              {i > 0 && (
-                <div
-                  className={`h-px w-5 sm:w-8 mt-2 shrink-0 ${
-                    step.status === "pending" ? "bg-border" : "bg-success/50"
-                  }`}
-                />
-              )}
-              <div
-                className="flex flex-col items-center gap-1 px-1 min-w-14"
-                title={step.description}
-              >
-                <StepDot step={step} />
-                <span
-                  className={`text-[11px] leading-tight text-center ${
-                    step.status === "active" || step.status === "waiting_user"
-                      ? "text-foreground font-medium"
-                      : "text-muted-foreground"
-                  }`}
-                >
-                  {step.id === "qa_login" && (
-                    <Lock className="inline h-3 w-3 mr-0.5 align-[-1px]" />
-                  )}
-                  {step.label}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {activeStep && (
-          <div className="rounded-md border bg-muted/30 p-3 space-y-1">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <StepDot step={activeStep} />
-              {activeStep.label}
-              <span className="font-normal text-muted-foreground text-xs">
-                {activeStep.description}
-              </span>
-            </div>
-            {activeStep.error && (
-              <div className="flex items-start gap-1.5 text-sm text-destructive">
-                <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                {activeStep.error}
-              </div>
-            )}
-            {activeStep.result?.manual === true && (
-              <div className="mt-2 space-y-2 rounded-md border border-warning/40 bg-warning/5 p-2">
-                <div className="text-xs font-medium">Proceed manually</div>
-                {typeof activeStep.result.manualHint === "string" && (
-                  <p className="text-xs text-muted-foreground">
-                    {activeStep.result.manualHint}
-                  </p>
-                )}
-                {typeof activeStep.result.rawOutput === "string" && (
-                  <div className="space-y-1">
-                    <div className="text-[11px] font-medium text-muted-foreground">
-                      Raw planner output
-                    </div>
-                    <pre className="max-h-64 overflow-auto rounded bg-muted/50 p-2 text-[11px] leading-snug whitespace-pre-wrap break-words">
-                      {activeStep.result.rawOutput}
-                    </pre>
-                  </div>
-                )}
-              </div>
-            )}
-            {(activeStep.substeps?.length ?? 0) > 0 && (
-              <div className="max-h-56 overflow-y-auto">
-                {activeStep.substeps!.map((substep, i) => (
-                  <SubstepRow key={`${substep.label}-${i}`} substep={substep} />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Setup form
@@ -659,8 +458,18 @@ function SetupCard({
 }
 
 // ---------------------------------------------------------------------------
-// Main client
+// Main client — the ongoing agent management page
 // ---------------------------------------------------------------------------
+
+const SOURCE_LABELS: Record<ActivitySourceType, string> = {
+  play_agent: "Play agent",
+  mcp_server: "MCP agent",
+  generate_agent: "Generator agent",
+  heal_agent: "Healer agent",
+  qa_agent: "QA agent",
+};
+
+const EXTERNAL_ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
 
 export function QaAgentClient({
   repositoryId,
@@ -672,6 +481,8 @@ export function QaAgentClient({
   storedPlanInfo,
   hasExistingAuthSetup,
   initialSession,
+  recentSessions,
+  initialTasks,
 }: {
   repositoryId: string;
   repositoryName: string;
@@ -685,134 +496,159 @@ export function QaAgentClient({
    *  step will check/reuse them. */
   hasExistingAuthSetup: boolean;
   initialSession: AgentSession | null;
+  /** Recent runs (any status), newest first — the run-history list. */
+  recentSessions: AgentSession[];
+  /** Direction-queue snapshot for the task board. */
+  initialTasks: QaTask[];
 }) {
   const {
     session,
     loading,
     error,
-    isRunning,
-    isPaused,
-    isTerminal,
     progress,
     start,
+    rerun,
+    attach,
     approve,
     requestChanges,
     addJourneys,
     pause,
     resume,
     cancel,
-    dismiss,
   } = useQaAgent(repositoryId, initialSession);
 
-  const reviewStep = session?.steps.find((s) => s.id === "qa_plan_review");
+  const {
+    tasks,
+    workingTask,
+    pending: taskPending,
+    error: taskError,
+    add: addTask,
+    retry: retryTask,
+    drop: dropTask,
+    refresh: refreshTasks,
+  } = useQaTasks(repositoryId, initialTasks);
+
+  // Team-wide live feed for this repo: powers the header narration for
+  // task-run pickups and the "another agent is working via MCP" indicator.
+  const { events } = useActivityFeed({ repoId: repositoryId });
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => setNowTick(Date.now()), 30_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const [setupOpen, setSetupOpen] = useState(false);
+
+  // A dispatcher-started task run isn't in this tab's polling loop yet —
+  // attach as soon as the board reports its session id.
+  const workingSessionId = workingTask?.sessionId;
+  useEffect(() => {
+    if (workingSessionId && workingSessionId !== session?.id) {
+      attach(workingSessionId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workingSessionId]);
+
+  // Task events arrive over the feed faster than the board's poll — refresh.
+  const lastEvent = events[events.length - 1];
+  useEffect(() => {
+    if (lastEvent?.eventType.startsWith("task:")) void refreshTasks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastEvent?.id]);
+
+  const liveSession =
+    session && (session.status === "active" || session.status === "paused")
+      ? session
+      : null;
+
+  const reviewStep = liveSession?.steps.find((s) => s.id === "qa_plan_review");
   const awaitingReview = reviewStep?.status === "waiting_user";
-  const plan = session?.metadata.qaPlan;
+  const plan = liveSession?.metadata.qaPlan;
+  const planStepDone = Boolean(
+    liveSession?.steps.some(
+      (s) => s.id === "qa_plan" && s.status === "completed",
+    ),
+  );
   const generated = useMemo(
-    () => session?.metadata.qaGeneratedTests ?? [],
-    [session?.metadata.qaGeneratedTests],
+    () => liveSession?.metadata.qaGeneratedTests ?? [],
+    [liveSession?.metadata.qaGeneratedTests],
   );
-  const summary = session?.metadata.qaSummary;
-  const streamUrl = session?.metadata.streamUrl;
-  const queuedForBrowser = session?.metadata.queuedForBrowser;
+  const streamUrl = liveSession?.metadata.streamUrl;
+  const queuedForBrowser = liveSession?.metadata.queuedForBrowser;
 
-  if (!session) {
-    return (
-      <SetupCard
-        defaultUrl={defaultUrl}
-        githubConnected={githubConnected}
-        aiConfigured={aiConfigured}
-        hasStoredPlan={hasStoredPlan}
-        storedPlanInfo={storedPlanInfo}
-        hasExistingAuthSetup={hasExistingAuthSetup}
-        loading={loading}
-        error={error}
-        onStart={start}
-      />
+  // Run history: the polled session is fresher than the server snapshot.
+  const historySessions = useMemo(() => {
+    const map = new Map<string, AgentSession>();
+    if (session) map.set(session.id, session);
+    for (const s of recentSessions) if (!map.has(s.id)) map.set(s.id, s);
+    return [...map.values()].sort(
+      (a, b) =>
+        new Date(b.createdAt ?? 0).getTime() -
+        new Date(a.createdAt ?? 0).getTime(),
     );
-  }
+  }, [session, recentSessions]);
 
-  const statusMeta = SESSION_STATUS_META[session.status];
-  const StatusIcon = statusMeta.icon;
-  const planStepDone = session.steps.some(
-    (s) => s.id === "qa_plan" && s.status === "completed",
+  // Persistent coverage dashboard: the newest summary from any run.
+  const coverageSource = useMemo(
+    () => historySessions.find((s) => s.metadata.qaSummary),
+    [historySessions],
   );
+
+  // Most recent activity from another agent (MCP, quickstart…) on this repo.
+  const externalActivity = useMemo(() => {
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i];
+      if (e.sourceType === "qa_agent") continue;
+      if (
+        new Date(e.createdAt as unknown as string).getTime() <
+        nowTick - EXTERNAL_ACTIVITY_WINDOW_MS
+      ) {
+        return null;
+      }
+      return {
+        summary: e.summary,
+        sourceLabel: SOURCE_LABELS[e.sourceType] ?? e.sourceType,
+      };
+    }
+    return null;
+  }, [events, nowTick]);
+
+  const handleRequestCoverage = useCallback(
+    (hint: CoverageRequestHint) => {
+      const groupLabel = hint.group
+        ? (QA_GROUPS.find((g) => g.id === hint.group)?.label ?? hint.group)
+        : null;
+      const title =
+        hint.area && groupLabel
+          ? `Increase coverage: ${hint.area} × ${groupLabel}`
+          : "Increase overall coverage — close the current gaps";
+      void addTask(title, { source: "coverage_gap" }).then((ok) => {
+        if (ok) toast.success("Coverage task queued for the agent");
+      });
+    },
+    [addTask],
+  );
+
+  const neverRan = historySessions.length === 0;
+  const showSetup = !liveSession && (setupOpen || neverRan);
 
   return (
     <div className="space-y-4">
-      {/* Status hero + controls */}
-      <Card className={`border ${statusMeta.className}`}>
-        <CardContent className="pt-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <StatusIcon
-              className={`h-5 w-5 ${statusMeta.spin ? "animate-spin" : ""}`}
-            />
-            <div className="min-w-0 flex-1">
-              <div className="font-medium">
-                QA agent — {statusMeta.label}
-                {awaitingReview && ": review the plan below"}
-                {session.metadata.qaMode &&
-                  session.metadata.qaMode !== "full" && (
-                    <Badge
-                      variant="outline"
-                      className="ml-2 align-middle text-[10px] px-1.5"
-                    >
-                      {session.metadata.qaMode === "refresh_spec"
-                        ? "spec refresh"
-                        : "fill gaps"}
-                    </Badge>
-                  )}
-              </div>
-              <div className="text-xs opacity-80 truncate">
-                {repositoryName} → {session.metadata.qaTargetUrl}
-                {(session.metadata.qaDocs?.length ?? 0) > 0 &&
-                  ` · ${session.metadata.qaDocs!.length} doc${session.metadata.qaDocs!.length === 1 ? "" : "s"} provided`}
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              {isRunning && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={pause}
-                  disabled={loading}
-                >
-                  <Pause className="h-3.5 w-3.5" />
-                  Pause
-                </Button>
-              )}
-              {isPaused && !awaitingReview && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={resume}
-                  disabled={loading}
-                >
-                  <Play className="h-3.5 w-3.5" />
-                  Resume
-                </Button>
-              )}
-              {(isRunning || isPaused) && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={cancel}
-                  disabled={loading}
-                >
-                  <Ban className="h-3.5 w-3.5" />
-                  Cancel
-                </Button>
-              )}
-              {isTerminal && (
-                <Button size="sm" variant="outline" onClick={dismiss}>
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  New run
-                </Button>
-              )}
-            </div>
-          </div>
-          <Progress value={progress} className="mt-3 h-1.5" />
-        </CardContent>
-      </Card>
+      <QaAgentHeader
+        repositoryName={repositoryName}
+        session={liveSession}
+        awaitingReview={awaitingReview}
+        workingTask={workingTask}
+        externalActivity={externalActivity}
+        progress={progress}
+        loading={loading}
+        setupOpen={showSetup}
+        canStartRun={!neverRan}
+        onToggleSetup={() => setSetupOpen((v) => !v)}
+        onPause={pause}
+        onResume={resume}
+        onCancel={cancel}
+      />
 
       {error && (
         <div className="flex items-start gap-1.5 text-sm text-destructive">
@@ -821,57 +657,106 @@ export function QaAgentClient({
         </div>
       )}
 
-      <PhaseTimeline session={session} />
-
-      {/* Live browser while an agent holds an EB */}
-      {(streamUrl || queuedForBrowser) && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <MonitorPlay className="h-4 w-4" />
-              Live browser
-              <span className="text-xs font-normal text-muted-foreground">
-                {queuedForBrowser
-                  ? "waiting for a browser from the pool…"
-                  : "watching the agent work"}
-              </span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {streamUrl ? (
-              <BrowserViewer
-                streamUrl={streamUrl}
-                interactive={false}
-                hideToolbar
-                className="rounded-md overflow-hidden border"
-              />
-            ) : (
-              <div className="flex items-center justify-center h-40 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                Waiting for an embedded browser…
-              </div>
-            )}
-          </CardContent>
-        </Card>
+      {showSetup && (
+        <div className="animate-in fade-in slide-in-from-top-2 duration-200">
+          <SetupCard
+            defaultUrl={defaultUrl}
+            githubConnected={githubConnected}
+            aiConfigured={aiConfigured}
+            hasStoredPlan={hasStoredPlan}
+            storedPlanInfo={storedPlanInfo}
+            hasExistingAuthSetup={hasExistingAuthSetup}
+            loading={loading}
+            error={error}
+            onStart={(opts) => {
+              setSetupOpen(false);
+              void start(opts);
+            }}
+          />
+        </div>
       )}
 
-      {/* Plan: interactive at the review gate, read-only afterwards */}
-      {plan && (awaitingReview || planStepDone) && (
-        <QaPlanReview
-          key={awaitingReview ? "review" : "readonly"}
-          plan={plan}
-          discovery={session?.metadata.qaDiscovery}
-          readOnly={!awaitingReview}
-          loading={loading}
-          onApprove={approve}
-          onRequestChanges={requestChanges}
-          onAddJourneys={addJourneys}
+      {/* Active run — collapses into history when it ends */}
+      {liveSession && (
+        <>
+          <PhaseTimeline session={liveSession} />
+          {/* Live browser while an agent holds an EB */}
+          {(streamUrl || queuedForBrowser) && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <MonitorPlay className="h-4 w-4" />
+                  Live browser
+                  <span className="text-xs font-normal text-muted-foreground">
+                    {queuedForBrowser
+                      ? "waiting for a browser from the pool…"
+                      : "watching the agent work"}
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {streamUrl ? (
+                  <BrowserViewer
+                    streamUrl={streamUrl}
+                    interactive={false}
+                    hideToolbar
+                    className="rounded-md overflow-hidden border"
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-40 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    Waiting for an embedded browser…
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+          {plan && (awaitingReview || planStepDone) && (
+            <QaPlanReview
+              key={awaitingReview ? "review" : "readonly"}
+              plan={plan}
+              discovery={liveSession.metadata.qaDiscovery}
+              readOnly={!awaitingReview}
+              loading={loading}
+              onApprove={approve}
+              onRequestChanges={requestChanges}
+              onAddJourneys={addJourneys}
+            />
+          )}
+          {generated.length > 0 && (
+            <QaGeneratedTestsPanel generated={generated} />
+          )}
+        </>
+      )}
+
+      {/* Persistent coverage dashboard — the agent's standing artifact */}
+      {coverageSource?.metadata.qaSummary && (
+        <QaSummaryPanel
+          summary={coverageSource.metadata.qaSummary}
+          plan={coverageSource.metadata.qaPlan}
+          persistent
+          updatedAt={coverageSource.completedAt ?? coverageSource.createdAt}
+          onRequestCoverage={handleRequestCoverage}
+          requestPending={taskPending}
         />
       )}
 
-      {generated.length > 0 && <QaGeneratedTestsPanel generated={generated} />}
+      {/* Direction queue */}
+      <QaTaskBoard
+        tasks={tasks}
+        pending={taskPending}
+        error={taskError}
+        onAdd={addTask}
+        onRetry={retryTask}
+        onDrop={dropTask}
+      />
 
-      {summary && <QaSummaryPanel summary={summary} plan={plan} />}
+      <QaRunHistory
+        sessions={historySessions}
+        liveSessionId={liveSession?.id ?? null}
+        loading={loading}
+        onRerun={(sid) => void rerun(sid)}
+      />
     </div>
   );
 }

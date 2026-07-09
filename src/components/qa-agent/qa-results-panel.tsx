@@ -9,7 +9,9 @@ import type {
   QaTestPlan,
 } from "@/lib/db/schema";
 import { QA_GROUPS } from "@/lib/qa-agent/plan";
+import { timeAgo } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   CheckCircle2,
@@ -18,10 +20,20 @@ import {
   FileCheck,
   FileCode,
   GitBranch,
+  LayoutDashboard,
   Loader2,
+  Plus,
+  TrendingUp,
   Wrench,
   XCircle,
 } from "lucide-react";
+
+/** Hint passed to the "ask the agent to increase coverage" CTAs — a specific
+ *  matrix gap (area × group) or blank for a general fill-gaps request. */
+export interface CoverageRequestHint {
+  area?: string;
+  group?: QaTestGroup;
+}
 
 const STATUS_META: Record<
   QaGeneratedTest["status"],
@@ -258,17 +270,59 @@ function QaPrCoverageSection({
 export function QaSummaryPanel({
   summary,
   plan,
+  persistent = false,
+  updatedAt,
+  onRequestCoverage,
+  requestPending = false,
 }: {
   summary: QaSummaryData;
   plan: QaTestPlan | undefined;
+  /** Render as the always-current coverage dashboard (vs a per-run summary). */
+  persistent?: boolean;
+  /** When the summary was produced (persistent framing). */
+  updatedAt?: Date | string | null;
+  /** Queue an "increase coverage" task for the agent — header button and
+   *  per-gap-cell CTAs render only when provided. */
+  onRequestCoverage?: (hint: CoverageRequestHint) => void;
+  requestPending?: boolean;
 }) {
   const groupRows = QA_GROUPS.filter((g) => summary.byGroup[g.id]);
+  const gaps = Math.max(
+    0,
+    summary.planned - (summary.covered ?? 0) - summary.generated,
+  );
   return (
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
-          <CheckCircle2 className="h-4 w-4" />
-          Coverage summary
+          {persistent ? (
+            <LayoutDashboard className="h-4 w-4" />
+          ) : (
+            <CheckCircle2 className="h-4 w-4" />
+          )}
+          {persistent ? "Coverage dashboard" : "Coverage summary"}
+          {persistent && updatedAt && (
+            <span className="text-xs font-normal text-muted-foreground">
+              — updated {timeAgo(new Date(updatedAt))}
+            </span>
+          )}
+          {onRequestCoverage && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="ml-auto"
+              disabled={requestPending}
+              title={
+                gaps > 0
+                  ? `Queue a task to close the ${gaps} remaining gap${gaps === 1 ? "" : "s"}`
+                  : "Queue a task to broaden coverage"
+              }
+              onClick={() => onRequestCoverage({})}
+            >
+              <TrendingUp className="h-3.5 w-3.5" />
+              Increase coverage
+            </Button>
+          )}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -369,6 +423,19 @@ export function QaSummaryPanel({
                                 {" "}
                                 {cell.passed}✓
                               </span>
+                            )}
+                            {hasGap && onRequestCoverage && (
+                              <button
+                                type="button"
+                                className="ml-1 inline-flex align-[-2px] rounded border border-warning/40 text-warning hover:bg-warning/10 disabled:opacity-50"
+                                title={`Ask the agent to cover the ${area} × ${g.label} gap`}
+                                disabled={requestPending}
+                                onClick={() =>
+                                  onRequestCoverage({ area, group: g.id })
+                                }
+                              >
+                                <Plus className="h-3 w-3" />
+                              </button>
                             )}
                           </td>
                         );

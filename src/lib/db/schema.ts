@@ -3059,6 +3059,16 @@ export interface QaDiscovery {
  *  items not already covered by a live test. */
 export type QaRunMode = "full" | "refresh_spec" | "fill_gaps";
 
+/** What started a QA session. `schedule`/`pr`/`mcp` are reserved for the
+ *  trigger phases (cron, PR webhook, MCP control). */
+export type QaSessionTrigger =
+  | "manual"
+  | "task"
+  | "rerun"
+  | "schedule"
+  | "pr"
+  | "mcp";
+
 export type QaGeneratedTestStatus =
   | "generating"
   | "generated"
@@ -3213,6 +3223,11 @@ export interface AgentSessionMetadata {
   qaRunIds?: string[];
   /** Final coverage/traceability summary. */
   qaSummary?: QaSummaryData;
+  /** Task from the direction queue this session is working (dispatcher-run). */
+  qaTaskId?: string;
+  /** What started this session — powers the run-history provenance chip.
+   *  Absent on sessions created before triggers existed = "manual". */
+  qaTrigger?: QaSessionTrigger;
   [key: string]: unknown;
 }
 
@@ -3237,6 +3252,58 @@ export const agentSessions = pgTable("agent_sessions", {
 
 export type AgentSession = typeof agentSessions.$inferSelect;
 export type NewAgentSession = typeof agentSessions.$inferInsert;
+
+// ── QA Agent Tasks (direction queue for the ongoing QA agent) ───────────────
+
+export type QaTaskStatus =
+  | "queued"
+  | "working"
+  /** The agent finished abnormally (failed/cancelled run) and left a reply —
+   *  the human decides whether to retry (→ queued) or drop (→ cancelled). */
+  | "needs_input"
+  | "done"
+  | "cancelled";
+
+export type QaTaskSource = "user" | "mcp" | "coverage_gap";
+
+/** A directive dropped into the QA agent's queue ("test the billing flow",
+ *  "increase Dashboard a11y coverage"). The dispatcher picks tasks up oldest
+ *  first whenever no QA session is active, runs a task-scoped session, writes
+ *  the agent's reply back, and advances the status — the /qa-agent task board
+ *  renders these as kanban columns. */
+export const qaTasks = pgTable(
+  "qa_tasks",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    repositoryId: text("repository_id")
+      .references(() => repositories.id, { onDelete: "cascade" })
+      .notNull(),
+    teamId: text("team_id").notNull(),
+    title: text("title").notNull(),
+    description: text("description"),
+    status: text("status").$type<QaTaskStatus>().notNull().default("queued"),
+    source: text("source").$type<QaTaskSource>().notNull().default("user"),
+    /** Display name of who filed it (user name or MCP client name). */
+    createdByName: text("created_by_name"),
+    createdById: text("created_by_id"),
+    /** Agent session that is working (or worked) this task. */
+    sessionId: text("session_id"),
+    /** The agent's reply when it finishes — or why it needs input. */
+    agentReply: text("agent_reply"),
+    createdAt: timestamp("created_at").$defaultFn(() => new Date()),
+    updatedAt: timestamp("updated_at").$defaultFn(() => new Date()),
+    startedAt: timestamp("started_at"),
+    completedAt: timestamp("completed_at"),
+  },
+  (table) => [
+    index("idx_qa_tasks_repo_status").on(table.repositoryId, table.status),
+  ],
+);
+
+export type QaTask = typeof qaTasks.$inferSelect;
+export type NewQaTask = typeof qaTasks.$inferInsert;
 
 // ── Bug Reports ──────────────────────────────────────────────────────────────
 
@@ -3678,6 +3745,11 @@ export type ActivityEventType =
   | "step:error"
   | "step:waiting_user"
   | "substep:update"
+  // QA agent direction queue
+  | "task:created"
+  | "task:started"
+  | "task:completed"
+  | "task:failed"
   | "mcp:tool_call"
   | "mcp:tool_result"
   | "mcp:tool_error"

@@ -73,6 +73,8 @@ import type {
   QaGeneratedTest,
   QaPlanItem,
   QaRunMode,
+  QaTask,
+  QaTaskSource,
   QaTestGroup,
   QaTestPlan,
   TestSetupOverrides,
@@ -2368,6 +2370,11 @@ async function executeQaPipeline(
     );
   } finally {
     activeControllers.delete(sessionId);
+    // Task-queue bookkeeping: if this session worked a queue task and ended
+    // terminally, write the agent's reply back and advance the queue.
+    await finalizeQaTaskAndDispatch(sessionId, teamId, repositoryId).catch(
+      (err) => console.error("[QaAgent] task finalize error:", err),
+    );
   }
 }
 
@@ -2471,6 +2478,7 @@ export async function startQaAgent(
       qaGroups: normalizeQaGroups(input.groups),
       qaAutoApprove: Boolean(input.autoApprove),
       qaAllowRegistration: input.allowRegistration ?? true,
+      qaTrigger: "manual",
       credsProvided,
       authMode: credsProvided ? "login" : "public_only",
       ...planSeed,
@@ -2604,32 +2612,27 @@ function parseUserJourneys(raw: string): string[] {
 const REFINER_TIMEOUT_MS = 3 * 60 * 1000;
 
 /**
- * Refine plain-language journeys the reviewer supplied at the plan gate into
- * structured, digest-grounded journeys + covering items, and MERGE them into
- * the current plan (existing items and the reviewer's enable/disable choices
- * are preserved — see mergeRefinedJourneys). The session STAYS paused at the
- * review gate showing the augmented plan; nothing advances until the reviewer
- * approves. Counters the "reduced context" quality gap by letting the human
- * inject the journeys the condensed digest lost.
+ * Refine plain-language journeys into structured, digest-grounded journeys +
+ * covering items and MERGE them into the session's current plan (existing
+ * items and enable/disable choices are preserved — see mergeRefinedJourneys).
+ * Shared by the reviewer's "add journeys" gate action and the task
+ * dispatcher (which merges a task directive into a fill-gaps run's plan).
  */
-export async function addQaUserJourneys(
-  sessionId: string,
-  journeysText: string,
+async function refineAndMergeJourneysIntoPlan(
+  session: AgentSession,
+  teamId: string,
+  journeys: string[],
 ): Promise<{
   success: boolean;
   addedJourneys?: number;
   addedItems?: number;
   error?: string;
 }> {
-  const { session, teamId } = await requireQaSession(sessionId);
+  const sessionId = session.id;
   const plan = session.metadata.qaPlan;
   const discovery = session.metadata.qaDiscovery;
   if (!plan || !discovery) {
     return { success: false, error: "No plan to add journeys to" };
-  }
-  const journeys = parseUserJourneys(journeysText);
-  if (journeys.length === 0) {
-    return { success: false, error: "No journeys were provided" };
   }
 
   const repositoryId = session.repositoryId;
@@ -2705,12 +2708,41 @@ export async function addQaUserJourneys(
     `Added ${merged.addedJourneys} journey${merged.addedJourneys === 1 ? "" : "s"} and ${merged.addedItems} test${merged.addedItems === 1 ? "" : "s"} from your input`,
     { stepId: "qa_plan_review", agentType: "planner" },
   );
-  revalidatePath("/qa-agent");
   return {
     success: true,
     addedJourneys: merged.addedJourneys,
     addedItems: merged.addedItems,
   };
+}
+
+/**
+ * Reviewer action at the plan gate: refine plain-language journeys and merge
+ * them into the plan. The session STAYS paused at the review gate showing the
+ * augmented plan; nothing advances until the reviewer approves. Counters the
+ * "reduced context" quality gap by letting the human inject the journeys the
+ * condensed digest lost.
+ */
+export async function addQaUserJourneys(
+  sessionId: string,
+  journeysText: string,
+): Promise<{
+  success: boolean;
+  addedJourneys?: number;
+  addedItems?: number;
+  error?: string;
+}> {
+  const { session, teamId } = await requireQaSession(sessionId);
+  const journeys = parseUserJourneys(journeysText);
+  if (journeys.length === 0) {
+    return { success: false, error: "No journeys were provided" };
+  }
+  const result = await refineAndMergeJourneysIntoPlan(
+    session,
+    teamId,
+    journeys,
+  );
+  if (result.success) revalidatePath("/qa-agent");
+  return result;
 }
 
 export async function pauseQaAgent(
@@ -2762,4 +2794,454 @@ export async function cancelQaAgent(
   );
   revalidatePath("/qa-agent");
   return { success: true };
+}
+
+/** Re-run a prior session with its stored configuration (target URL, mode,
+ *  groups, credentials, docs digest). Powers the run-history "Re-run" action —
+ *  credentials stay server-side (copied between encrypted metadata records). */
+export async function rerunQaSession(
+  sourceSessionId: string,
+): Promise<{ sessionId: string }> {
+  const { session: source, teamId } = await requireQaSession(sourceSessionId);
+  const m = source.metadata;
+  const targetUrl = m.qaTargetUrl;
+  if (!targetUrl) {
+    throw new Error("This run has no stored target URL to re-run against");
+  }
+  try {
+    await assertSafeOutboundUrl(targetUrl);
+  } catch (err) {
+    if (err instanceof SsrfBlockedError) {
+      throw new Error(`URL rejected: ${err.message}`);
+    }
+    throw err;
+  }
+
+  // One active QA session per repo — cancel a running one before starting.
+  const existing = await queries.getActiveAgentSession(
+    source.repositoryId,
+    "qa",
+  );
+  if (existing) {
+    activeControllers.get(existing.id)?.abort();
+    await queries.updateAgentSession(existing.id, {
+      status: "cancelled",
+      completedAt: new Date(),
+    });
+  }
+
+  const mode: QaRunMode = m.qaMode ?? "full";
+  let planSeed: Partial<AgentSessionMetadata> = {};
+  if (mode === "fill_gaps") {
+    if (!m.qaPlan) {
+      throw new Error("The original fill-gaps run has no stored plan");
+    }
+    planSeed = {
+      qaPlan: m.qaPlan,
+      qaDiscovery: m.qaDiscovery,
+      qaPlanSourceSessionId: source.id,
+    };
+  }
+
+  const session = await queries.createAgentSession({
+    repositoryId: source.repositoryId,
+    teamId,
+    kind: "qa",
+    status: "active",
+    currentStepId: "qa_setup",
+    steps: buildStepsForMode(mode),
+    metadata: {
+      qaTargetUrl: targetUrl,
+      qaMode: mode,
+      qaGroups: normalizeQaGroups(m.qaGroups ?? QA_GROUPS.map((g) => g.id)),
+      qaAutoApprove: Boolean(m.qaAutoApprove),
+      qaAllowRegistration: m.qaAllowRegistration ?? true,
+      credsProvided: Boolean(m.credsProvided),
+      authMode: m.credsProvided ? "login" : "public_only",
+      ...(m.credsProvided
+        ? {
+            quickstartEmail: m.quickstartEmail,
+            quickstartPassword: m.quickstartPassword,
+          }
+        : {}),
+      ...(m.qaDocsDigest
+        ? { qaDocs: m.qaDocs, qaDocsDigest: m.qaDocsDigest }
+        : {}),
+      ...planSeed,
+      qaTrigger: "rerun",
+    },
+  });
+
+  emitActivity(
+    teamId,
+    source.repositoryId,
+    session.id,
+    "session:start",
+    `QA agent re-run on ${targetUrl} (${mode.replace("_", " ")})`,
+  );
+  executeQaPipeline(session.id, teamId, source.repositoryId, "qa_setup").catch(
+    (err) => console.error("[QaAgent] unhandled:", err),
+  );
+  revalidatePath("/qa-agent");
+  return { sessionId: session.id };
+}
+
+// ── Direction queue (qa_tasks) ───────────────────────────────────────────────
+//
+// The team (and later, external agents via MCP) drops directives into a queue;
+// whenever no QA session is active the dispatcher claims the oldest queued
+// task, selects the protocol (fill-gaps against the stored plan when one
+// exists, else a full run with the directive fed to the planner), runs it with
+// the review gate auto-approved, and writes the agent's reply back onto the
+// task card.
+
+const TERMINAL_SESSION_STATUSES: AgentSession["status"][] = [
+  "completed",
+  "failed",
+  "cancelled",
+];
+
+const MAX_TASK_TITLE = 200;
+const MAX_TASK_DESCRIPTION = 2000;
+
+/** The agent's reply for a completed task run — the card's "done" comment. */
+function buildTaskReply(session: AgentSession): string {
+  const s = session.metadata.qaSummary;
+  if (!s) return "Run completed. Coverage dashboard updated.";
+  const genFailed = (session.metadata.qaGeneratedTests ?? []).filter(
+    (t) => t.status === "generation_failed",
+  ).length;
+  const parts = [
+    `planned ${s.planned}`,
+    `${s.covered} already covered`,
+    `${s.generated} generated`,
+    `${s.passed} passing`,
+  ];
+  if (s.healed > 0) parts.push(`${s.healed} healed`);
+  if (s.failed > 0) parts.push(`${s.failed} still failing`);
+  if (genFailed > 0) parts.push(`${genFailed} could not be generated`);
+  return `Done — ${parts.join(", ")}. Coverage dashboard updated.`;
+}
+
+/** Write a terminal session's outcome back onto its task card. */
+async function finalizeTask(
+  task: QaTask,
+  session: AgentSession | null,
+  teamId: string,
+  repositoryId: string,
+): Promise<void> {
+  if (session?.status === "completed") {
+    await queries.updateQaTask(task.id, {
+      status: "done",
+      agentReply: buildTaskReply(session),
+      completedAt: new Date(),
+    });
+    emitActivity(
+      teamId,
+      repositoryId,
+      session.id,
+      "task:completed",
+      `Task done: ${task.title}`,
+    );
+    return;
+  }
+  const failedStep = session?.steps.find((s) => s.status === "failed");
+  const reply = !session
+    ? "The session working this task is gone (server restart?). Retry to requeue it."
+    : session.status === "cancelled"
+      ? "The run was cancelled before this task finished. Retry to requeue it."
+      : `The run failed at ${failedStep?.label ?? "an unexpected point"}${
+          failedStep?.error ? `: ${failedStep.error}` : ""
+        }. Retry to requeue it.`;
+  await queries.updateQaTask(task.id, {
+    status: "needs_input",
+    agentReply: reply,
+    completedAt: new Date(),
+  });
+  emitActivity(
+    teamId,
+    repositoryId,
+    session?.id ?? task.id,
+    "task:failed",
+    `Task needs input: ${task.title}`,
+  );
+}
+
+/** Pipeline epilogue: settle the session's task (if any), then advance the
+ *  queue. Safe to call for non-task sessions — dispatch no-ops while any QA
+ *  session is active or paused. */
+async function finalizeQaTaskAndDispatch(
+  sessionId: string,
+  teamId: string,
+  repositoryId: string,
+): Promise<void> {
+  const session = await queries.getAgentSession(sessionId);
+  if (!session || !TERMINAL_SESSION_STATUSES.includes(session.status)) return;
+  const taskId = session.metadata.qaTaskId;
+  if (taskId) {
+    const task = await queries.getQaTask(taskId);
+    if (task && task.status === "working" && task.sessionId === sessionId) {
+      await finalizeTask(task, session, teamId, repositoryId);
+    }
+  }
+  await dispatchNextQaTask(teamId, repositoryId);
+}
+
+// Per-repo dispatch lock — poll-triggered kicks and pipeline epilogues can
+// race; only one claim may run at a time (in-process, same as the controller
+// registry).
+const dispatchingRepos = new Set<string>();
+
+/** Claim the oldest queued task and run a task-scoped session for it. */
+async function dispatchNextQaTask(
+  teamId: string,
+  repositoryId: string,
+): Promise<void> {
+  if (dispatchingRepos.has(repositoryId)) return;
+  dispatchingRepos.add(repositoryId);
+  try {
+    // One QA session per repo — an active/paused session owns the agent.
+    const active = await queries.getActiveAgentSession(repositoryId, "qa");
+    if (active) return;
+    const task = await queries.getNextQueuedQaTask(repositoryId);
+    if (!task) return;
+
+    const recent = await queries.getRecentAgentSessions(repositoryId, "qa", 10);
+    const planSource = recent.find((s) => s.metadata.qaPlan);
+    const targetUrl =
+      planSource?.metadata.qaTargetUrl ??
+      recent.find((s) => s.metadata.qaTargetUrl)?.metadata.qaTargetUrl;
+    if (!targetUrl) {
+      await queries.updateQaTask(task.id, {
+        status: "needs_input",
+        agentReply:
+          "I don't have a target URL yet — start one QA run from the form first, then retry this task.",
+        completedAt: new Date(),
+      });
+      emitActivity(
+        teamId,
+        repositoryId,
+        task.id,
+        "task:failed",
+        `Task needs input: ${task.title}`,
+      );
+      return;
+    }
+
+    // Protocol selection: with a stored plan the task becomes a targeted
+    // fill-gaps run (directive merged into the plan below); without one it's
+    // a full run with the directive fed straight to the planner.
+    const mode: QaRunMode = planSource ? "fill_gaps" : "full";
+    const directive = [task.title, task.description ?? ""]
+      .filter(Boolean)
+      .join("\n");
+    const credSession = recent.find((s) => credentialsFrom(s.metadata));
+    const creds = credSession
+      ? credentialsFrom(credSession.metadata)
+      : undefined;
+
+    const session = await queries.createAgentSession({
+      repositoryId,
+      teamId,
+      kind: "qa",
+      status: "active",
+      currentStepId: "qa_setup",
+      steps: buildStepsForMode(mode),
+      metadata: {
+        qaTargetUrl: targetUrl,
+        qaMode: mode,
+        qaGroups: normalizeQaGroups(
+          planSource?.metadata.qaGroups ?? QA_GROUPS.map((g) => g.id),
+        ),
+        // Queue runs are autonomous — no human at the review gate.
+        qaAutoApprove: true,
+        qaAllowRegistration: planSource?.metadata.qaAllowRegistration ?? true,
+        credsProvided: Boolean(creds),
+        authMode: creds ? "login" : "public_only",
+        ...(creds
+          ? {
+              quickstartEmail: creds.email,
+              quickstartPassword: creds.password,
+            }
+          : {}),
+        ...(planSource
+          ? {
+              qaPlan: planSource.metadata.qaPlan,
+              qaDiscovery: planSource.metadata.qaDiscovery,
+              qaPlanSourceSessionId: planSource.id,
+            }
+          : {
+              qaPlannerFeedback: `Directive from the team's task queue — the plan must cover it:\n${directive}`,
+            }),
+        qaTaskId: task.id,
+        qaTrigger: "task",
+      },
+    });
+
+    await queries.updateQaTask(task.id, {
+      status: "working",
+      sessionId: session.id,
+      startedAt: new Date(),
+    });
+    emitActivity(
+      teamId,
+      repositoryId,
+      session.id,
+      "task:started",
+      `QA agent picked up task: ${task.title}`,
+    );
+
+    // Merge the directive into the reused plan so fill-gaps generates the
+    // asked-for work, not just leftover gaps. Best-effort: plain fill-gaps IS
+    // the protocol for coverage_gap tasks, and still runs if the refiner fails.
+    if (mode === "fill_gaps" && task.source !== "coverage_gap") {
+      const fresh = await queries.getAgentSession(session.id);
+      if (fresh) {
+        const merged = await refineAndMergeJourneysIntoPlan(
+          fresh,
+          teamId,
+          parseUserJourneys(directive),
+        );
+        if (!merged.success) {
+          console.warn(
+            "[QaAgent] task directive merge failed:",
+            merged.error ?? "unknown",
+          );
+        }
+      }
+    }
+
+    executeQaPipeline(session.id, teamId, repositoryId, "qa_setup").catch(
+      (err) => console.error("[QaAgent] unhandled:", err),
+    );
+  } finally {
+    dispatchingRepos.delete(repositoryId);
+  }
+}
+
+async function requireQaTask(
+  taskId: string,
+): Promise<{ task: QaTask; teamId: string }> {
+  const { team } = await requireTeamAccess();
+  const task = await queries.getQaTask(taskId);
+  if (!task || task.teamId !== team.id) {
+    throw new Error("Task not found");
+  }
+  return { task, teamId: team.id };
+}
+
+/** Drop a directive into the QA agent's queue. The dispatcher picks it up as
+ *  soon as no session is running. */
+export async function addQaTask(input: {
+  repositoryId: string;
+  title: string;
+  description?: string;
+  source?: Extract<QaTaskSource, "user" | "coverage_gap">;
+}): Promise<{ taskId: string }> {
+  const { team, user } = await requireRepoAccess(input.repositoryId);
+  const title = input.title.trim().slice(0, MAX_TASK_TITLE);
+  if (!title) throw new Error("The task needs a title");
+  const task = await queries.createQaTask({
+    repositoryId: input.repositoryId,
+    teamId: team.id,
+    title,
+    description:
+      input.description?.trim().slice(0, MAX_TASK_DESCRIPTION) || null,
+    source: input.source ?? "user",
+    createdById: user.id,
+    createdByName: user.name || user.email || null,
+  });
+  emitActivity(
+    team.id,
+    input.repositoryId,
+    task.id,
+    "task:created",
+    `Task queued for the QA agent: ${title}`,
+  );
+  // Fire-and-forget: pickup can involve an AI refine call — don't block the
+  // composer on it.
+  dispatchNextQaTask(team.id, input.repositoryId).catch((err) =>
+    console.error("[QaAgent] dispatch error:", err),
+  );
+  revalidatePath("/qa-agent");
+  return { taskId: task.id };
+}
+
+/** Requeue a needs_input/cancelled task. */
+export async function retryQaTask(
+  taskId: string,
+): Promise<{ success: boolean }> {
+  const { task, teamId } = await requireQaTask(taskId);
+  if (task.status !== "needs_input" && task.status !== "cancelled") {
+    return { success: false };
+  }
+  await queries.updateQaTask(taskId, {
+    status: "queued",
+    sessionId: null,
+    agentReply: null,
+    startedAt: null,
+    completedAt: null,
+  });
+  dispatchNextQaTask(teamId, task.repositoryId).catch((err) =>
+    console.error("[QaAgent] dispatch error:", err),
+  );
+  revalidatePath("/qa-agent");
+  return { success: true };
+}
+
+/** Cancel a task; a working task's session is cancelled with it. */
+export async function dropQaTask(
+  taskId: string,
+): Promise<{ success: boolean }> {
+  const { task, teamId } = await requireQaTask(taskId);
+  if (task.status === "done" || task.status === "cancelled") {
+    return { success: false };
+  }
+  if (task.status === "working" && task.sessionId) {
+    activeControllers.get(task.sessionId)?.abort();
+    await queries.updateAgentSession(task.sessionId, {
+      status: "cancelled",
+      completedAt: new Date(),
+    });
+  }
+  await queries.updateQaTask(taskId, {
+    status: "cancelled",
+    completedAt: new Date(),
+  });
+  emitActivity(
+    teamId,
+    task.repositoryId,
+    task.sessionId ?? task.id,
+    "task:failed",
+    `Task cancelled: ${task.title}`,
+  );
+  revalidatePath("/qa-agent");
+  return { success: true };
+}
+
+/** Board state for the client. Also does lazy reconciliation: a "working"
+ *  task whose session ended without the in-process finalizer (server restart)
+ *  is settled here, and an orphaned queue gets the dispatcher kicked. */
+export async function listQaTasks(repositoryId: string): Promise<QaTask[]> {
+  const { team } = await requireRepoAccess(repositoryId);
+  let tasks = await queries.getQaTasksByRepo(repositoryId);
+
+  let changed = false;
+  for (const task of tasks) {
+    if (task.status !== "working" || !task.sessionId) continue;
+    const session = await queries.getAgentSession(task.sessionId);
+    if (!session || TERMINAL_SESSION_STATUSES.includes(session.status)) {
+      await finalizeTask(task, session ?? null, team.id, repositoryId);
+      changed = true;
+    }
+  }
+  if (changed) tasks = await queries.getQaTasksByRepo(repositoryId);
+
+  if (
+    tasks.some((t) => t.status === "queued") &&
+    !tasks.some((t) => t.status === "working")
+  ) {
+    dispatchNextQaTask(team.id, repositoryId).catch(() => {});
+  }
+  return tasks;
 }
