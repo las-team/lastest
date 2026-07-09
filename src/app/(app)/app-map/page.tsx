@@ -34,6 +34,7 @@ export default async function AppMapPage() {
       <AppMapClient
         initialGraph={result.ok ? result.graph : null}
         emptyReason={result.ok ? null : result.reason}
+        repositoryId={selectedRepo.id}
         branch={branch}
         qaAgentEnabled={qaAgentEnabled}
       />

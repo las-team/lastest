@@ -38,6 +38,8 @@ import {
   X,
   Waypoints,
   Home,
+  Filter,
+  Plus,
 } from "lucide-react";
 import {
   getAppMap,
@@ -52,8 +54,10 @@ import type {
 } from "@/lib/app-map/build-map";
 
 // ── Layout constants ──────────────────────────────────────────────────────────
+// Thumbnail is 16:9 (matches the default 1920×1080 run viewport), so
+// NODE_H = 248 * 9/16 (≈140) + card body (~82).
 const NODE_W = 248;
-const NODE_H = 178;
+const NODE_H = 222;
 
 const COVERAGE_COLOR: Record<CoverageStatus, string> = {
   covered: "#3f9142",
@@ -107,6 +111,36 @@ function computePositions(nodes: AppMapNode[], edges: AppMapEdge[]) {
   return positions;
 }
 
+/** Glob-style exclude pattern → regex. `*` matches any characters, so
+ *  `/r/*` hides `/r/abc` (and deeper). Case-insensitive full match. */
+function patternToRegex(pattern: string): RegExp | null {
+  const cleaned = pattern.trim();
+  if (!cleaned) return null;
+  try {
+    const escaped = cleaned
+      .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+      .replace(/\*/g, ".*");
+    return new RegExp(`^${escaped}$`, "i");
+  } catch {
+    return null;
+  }
+}
+
+/** Suggest exclude patterns: first path segments that fan out into many
+ *  same-shaped pages (share slugs, blog posts…) — prime filter candidates. */
+function suggestPatterns(nodes: AppMapNode[], existing: string[]): string[] {
+  const counts = new Map<string, number>();
+  for (const n of nodes) {
+    const seg = n.path.split("/")[1];
+    if (seg) counts.set(`/${seg}/*`, (counts.get(`/${seg}/*`) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .filter(([p, c]) => c >= 5 && !existing.includes(p))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([p]) => p);
+}
+
 /** Pick the map root: "/" if present, else the source-most node (no incoming
  *  edges, highest out-degree). */
 function pickRootId(nodes: AppMapNode[], edges: AppMapEdge[]): string | null {
@@ -150,8 +184,9 @@ const PageNode = memo(function PageNode({ data }: NodeProps) {
         className="!bg-muted-foreground/60"
       />
 
-      {/* Thumbnail */}
-      <div className="relative h-24 w-full bg-muted flex items-center justify-center">
+      {/* Thumbnail — 16:9, the default run viewport ratio; full-page shots
+          show their above-the-fold region (object-top) instead of a squash. */}
+      <div className="relative aspect-video w-full bg-muted flex items-center justify-center">
         {node.screenshot ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -252,6 +287,7 @@ const nodeTypes = { page: PageNode };
 interface AppMapClientProps {
   initialGraph: AppMapGraph | null;
   emptyReason: "no-repo" | "no-data" | null;
+  repositoryId: string;
   branch: string;
   qaAgentEnabled: boolean;
 }
@@ -259,6 +295,7 @@ interface AppMapClientProps {
 export function AppMapClient({
   initialGraph,
   emptyReason,
+  repositoryId,
   branch,
   qaAgentEnabled,
 }: AppMapClientProps) {
@@ -269,6 +306,48 @@ export function AppMapClient({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [refreshing, startRefresh] = useTransition();
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // ── Exclude filters (glob patterns like "/r/*"), persisted per repo ──
+  // Loaded after mount (not in the initializer) to keep SSR/client HTML equal.
+  const filterStorageKey = `app-map:filters:${repositoryId}`;
+  const [excludePatterns, setExcludePatterns] = useState<string[]>([]);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [patternDraft, setPatternDraft] = useState("");
+  const filtersLoadedRef = useRef(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(filterStorageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setExcludePatterns(parsed.filter((p) => typeof p === "string"));
+        }
+      }
+    } catch {
+      // corrupted entry — start clean
+    }
+    filtersLoadedRef.current = true;
+  }, [filterStorageKey]);
+  useEffect(() => {
+    if (!filtersLoadedRef.current) return;
+    try {
+      localStorage.setItem(filterStorageKey, JSON.stringify(excludePatterns));
+    } catch {
+      // storage full/blocked — filter still works for the session
+    }
+  }, [excludePatterns, filterStorageKey]);
+
+  const addPattern = useCallback((pattern: string) => {
+    const cleaned = pattern.trim();
+    if (!cleaned || !patternToRegex(cleaned)) return;
+    setExcludePatterns((prev) =>
+      prev.includes(cleaned) ? prev : [...prev, cleaned],
+    );
+    setPatternDraft("");
+  }, []);
+  const removePattern = useCallback((pattern: string) => {
+    setExcludePatterns((prev) => prev.filter((p) => p !== pattern));
+  }, []);
 
   // Fullscreen wiring (native) — reuse the video-player pattern.
   useEffect(() => {
@@ -328,21 +407,48 @@ export function AppMapClient({
     });
   }, [branch]);
 
+  // Apply exclude filters, then drop edges whose endpoints were hidden.
+  const filtered = useMemo(() => {
+    const allNodes = graph?.nodes ?? [];
+    const allEdges = graph?.edges ?? [];
+    const regexes = excludePatterns
+      .map(patternToRegex)
+      .filter((r): r is RegExp => r !== null);
+    if (regexes.length === 0) {
+      return { nodes: allNodes, edges: allEdges, hiddenCount: 0 };
+    }
+    const nodes = allNodes.filter((n) => !regexes.some((r) => r.test(n.path)));
+    const kept = new Set(nodes.map((n) => n.id));
+    const edges = allEdges.filter(
+      (e) => kept.has(e.source) && kept.has(e.target),
+    );
+    return { nodes, edges, hiddenCount: allNodes.length - nodes.length };
+  }, [graph, excludePatterns]);
+
+  const suggestions = useMemo(
+    () => suggestPatterns(graph?.nodes ?? [], excludePatterns),
+    [graph, excludePatterns],
+  );
+
   const rootId = useMemo(
-    () => (graph ? pickRootId(graph.nodes, graph.edges) : null),
-    [graph],
+    () => pickRootId(filtered.nodes, filtered.edges),
+    [filtered],
   );
   const positions = useMemo(
-    () => (graph ? computePositions(graph.nodes, graph.edges) : new Map()),
-    [graph],
+    () => computePositions(filtered.nodes, filtered.edges),
+    [filtered],
   );
 
   const rfNodes: Node[] = useMemo(
     () =>
-      (graph?.nodes ?? []).map((n) => ({
+      filtered.nodes.map((n) => ({
         id: n.id,
         type: "page",
         position: positions.get(n.id) ?? { x: 0, y: 0 },
+        // Explicit dimensions so the MiniMap can draw every node immediately
+        // (it renders nothing for nodes it can't size before first measure).
+        width: NODE_W,
+        height: NODE_H,
         data: {
           node: n,
           isRoot: n.id === rootId,
@@ -353,7 +459,7 @@ export function AppMapClient({
         } satisfies PageNodeData,
       })),
     [
-      graph,
+      filtered,
       positions,
       rootId,
       queued,
@@ -365,7 +471,7 @@ export function AppMapClient({
 
   const rfEdges: Edge[] = useMemo(
     () =>
-      (graph?.edges ?? []).map((e) => ({
+      filtered.edges.map((e) => ({
         id: e.id,
         source: e.source,
         target: e.target,
@@ -376,7 +482,7 @@ export function AppMapClient({
           color: edgeStyle(e.kind).stroke as string,
         },
       })),
-    [graph],
+    [filtered],
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
@@ -399,7 +505,12 @@ export function AppMapClient({
     );
   }
 
-  const s = graph.stats;
+  const coveredCount = filtered.nodes.filter(
+    (n) => n.coverageStatus === "covered",
+  ).length;
+  const uncoveredCount = filtered.nodes.filter(
+    (n) => n.coverageStatus === "uncovered",
+  ).length;
 
   return (
     <div ref={containerRef} className="relative flex-1 min-h-0 bg-background">
@@ -408,8 +519,9 @@ export function AppMapClient({
         <Waypoints className="h-4 w-4 text-muted-foreground" />
         <span className="text-sm font-semibold">App Map</span>
         <span className="text-xs text-muted-foreground">
-          {s.nodeCount} pages · {s.coveredCount} covered · {s.uncoveredCount}{" "}
-          uncovered
+          {filtered.nodes.length} pages · {coveredCount} covered ·{" "}
+          {uncoveredCount} uncovered
+          {filtered.hiddenCount > 0 && ` · ${filtered.hiddenCount} hidden`}
         </span>
         <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
           {graph.branch}
@@ -429,6 +541,98 @@ export function AppMapClient({
                 {COVERAGE_LABEL[c]}
               </span>
             ),
+          )}
+        </div>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setFilterOpen((o) => !o)}
+            className={`flex items-center gap-1 rounded-lg border bg-card/95 px-2.5 py-2 text-xs font-medium shadow-sm backdrop-blur hover:bg-muted ${
+              excludePatterns.length > 0 ? "text-primary border-primary/40" : ""
+            }`}
+            title="Filter pages"
+          >
+            <Filter className="h-4 w-4" />
+            {excludePatterns.length > 0 && (
+              <span className="rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground">
+                {excludePatterns.length}
+              </span>
+            )}
+          </button>
+
+          {filterOpen && (
+            <div className="absolute right-0 top-full z-20 mt-2 w-72 rounded-lg border bg-card p-3 shadow-xl">
+              <div className="mb-2 text-xs font-semibold">Hide pages</div>
+              <form
+                className="flex gap-1.5"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  addPattern(patternDraft);
+                }}
+              >
+                <input
+                  value={patternDraft}
+                  onChange={(e) => setPatternDraft(e.target.value)}
+                  placeholder="/r/*"
+                  className="h-7 min-w-0 flex-1 rounded-md border bg-background px-2 font-mono text-xs outline-none focus:ring-1 focus:ring-ring"
+                />
+                <button
+                  type="submit"
+                  disabled={!patternDraft.trim()}
+                  className="flex h-7 items-center gap-1 rounded-md border bg-muted px-2 text-xs font-medium hover:bg-muted/70 disabled:opacity-50"
+                >
+                  <Plus className="h-3 w-3" /> Add
+                </button>
+              </form>
+              <p className="mt-1.5 text-[10px] text-muted-foreground">
+                Glob patterns against the page path — <code>*</code> matches
+                anything.
+              </p>
+
+              {excludePatterns.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {excludePatterns.map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => removePattern(p)}
+                      className="group flex items-center gap-1 rounded-full border bg-muted px-2 py-0.5 font-mono text-[11px] hover:border-destructive/50"
+                      title="Remove filter"
+                    >
+                      {p}
+                      <X className="h-3 w-3 text-muted-foreground group-hover:text-destructive" />
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {suggestions.length > 0 && (
+                <div className="mt-2">
+                  <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Suggested
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {suggestions.map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => addPattern(p)}
+                        className="flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 font-mono text-[11px] text-muted-foreground hover:bg-muted"
+                      >
+                        <Plus className="h-3 w-3" /> {p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {filtered.hiddenCount > 0 && (
+                <div className="mt-2 text-[11px] text-muted-foreground">
+                  {filtered.hiddenCount} page
+                  {filtered.hiddenCount === 1 ? "" : "s"} hidden
+                </div>
+              )}
+            </div>
           )}
         </div>
         <button
