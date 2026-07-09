@@ -642,6 +642,9 @@ export function mergeRefinedJourneys(
   plan: QaTestPlan;
   addedJourneys: number;
   addedItems: number;
+  /** Ids (post-remap) of the items actually added — lets task-scoped runs
+   *  generate exactly the directive's items and nothing else. */
+  addedItemIds: string[];
   trimmed: number;
 } {
   const allowed = new Set(groups);
@@ -730,6 +733,7 @@ export function mergeRefinedJourneys(
     },
     addedJourneys: admittedJourneys.length,
     addedItems: newItems.length,
+    addedItemIds: newItems.map((i) => i.id),
     trimmed: candidates.length - newItems.length,
   };
 }

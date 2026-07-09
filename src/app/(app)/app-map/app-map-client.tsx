@@ -14,6 +14,8 @@ import {
   type Node,
   type Edge,
   type NodeProps,
+  type Viewport,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import Dagre from "@dagrejs/dagre";
@@ -40,6 +42,7 @@ import {
   Home,
   Filter,
   Plus,
+  RotateCcw,
 } from "lucide-react";
 import {
   getAppMap,
@@ -307,35 +310,85 @@ export function AppMapClient({
   const [refreshing, startRefresh] = useTransition();
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // ── Exclude filters (glob patterns like "/r/*"), persisted per repo ──
-  // Loaded after mount (not in the initializer) to keep SSR/client HTML equal.
-  const filterStorageKey = `app-map:filters:${repositoryId}`;
+  // ── Persisted UI state (filters + dragged card positions + viewport),
+  // per repo. Loaded after mount (not in the initializer) to keep SSR/client
+  // HTML equal; the canvas renders only once `hydrated` so the saved viewport
+  // applies at React Flow init instead of jumping after fitView.
+  const stateStorageKey = `app-map:state:${repositoryId}`;
+  const legacyFilterKey = `app-map:filters:${repositoryId}`;
   const [excludePatterns, setExcludePatterns] = useState<string[]>([]);
+  const [positionOverrides, setPositionOverrides] = useState<
+    Record<string, { x: number; y: number }>
+  >({});
+  const viewportRef = useRef<Viewport | null>(null);
+  const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
+  const [hydrated, setHydrated] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [patternDraft, setPatternDraft] = useState("");
-  const filtersLoadedRef = useRef(false);
+
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(filterStorageKey);
+      const raw = localStorage.getItem(stateStorageKey);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          setExcludePatterns(parsed.filter((p) => typeof p === "string"));
+        if (Array.isArray(parsed?.filters)) {
+          setExcludePatterns(
+            parsed.filters.filter((p: unknown) => typeof p === "string"),
+          );
+        }
+        if (parsed?.positions && typeof parsed.positions === "object") {
+          setPositionOverrides(parsed.positions);
+        }
+        if (
+          typeof parsed?.viewport?.x === "number" &&
+          typeof parsed?.viewport?.y === "number" &&
+          typeof parsed?.viewport?.zoom === "number"
+        ) {
+          viewportRef.current = parsed.viewport;
+        }
+      } else {
+        // Migrate the earlier filters-only key.
+        const legacy = localStorage.getItem(legacyFilterKey);
+        if (legacy) {
+          const parsed = JSON.parse(legacy);
+          if (Array.isArray(parsed)) {
+            setExcludePatterns(
+              parsed.filter((p: unknown) => typeof p === "string"),
+            );
+          }
+          localStorage.removeItem(legacyFilterKey);
         }
       }
     } catch {
       // corrupted entry — start clean
     }
-    filtersLoadedRef.current = true;
-  }, [filterStorageKey]);
+    setHydrated(true);
+  }, [stateStorageKey, legacyFilterKey]);
+
+  const persistState = useCallback(
+    (
+      filters: string[],
+      positions: Record<string, { x: number; y: number }>,
+    ) => {
+      try {
+        localStorage.setItem(
+          stateStorageKey,
+          JSON.stringify({
+            filters,
+            positions,
+            viewport: viewportRef.current,
+          }),
+        );
+      } catch {
+        // storage full/blocked — state still works for the session
+      }
+    },
+    [stateStorageKey],
+  );
   useEffect(() => {
-    if (!filtersLoadedRef.current) return;
-    try {
-      localStorage.setItem(filterStorageKey, JSON.stringify(excludePatterns));
-    } catch {
-      // storage full/blocked — filter still works for the session
-    }
-  }, [excludePatterns, filterStorageKey]);
+    if (!hydrated) return;
+    persistState(excludePatterns, positionOverrides);
+  }, [excludePatterns, positionOverrides, hydrated, persistState]);
 
   const addPattern = useCallback((pattern: string) => {
     const cleaned = pattern.trim();
@@ -348,6 +401,25 @@ export function AppMapClient({
   const removePattern = useCallback((pattern: string) => {
     setExcludePatterns((prev) => prev.filter((p) => p !== pattern));
   }, []);
+
+  /** Reset button: clear filters, dragged positions, and the saved viewport,
+   *  back to the auto layout + fit view. */
+  const resetView = useCallback(() => {
+    setExcludePatterns([]);
+    setPositionOverrides({});
+    viewportRef.current = null;
+    try {
+      localStorage.removeItem(stateStorageKey);
+      localStorage.removeItem(legacyFilterKey);
+    } catch {
+      // ignore
+    }
+    // Fit after the un-overridden layout has rendered.
+    requestAnimationFrame(() => {
+      rfInstanceRef.current?.fitView({ padding: 0.15 });
+    });
+    toast.success("Map view reset");
+  }, [stateStorageKey, legacyFilterKey]);
 
   // Fullscreen wiring (native) — reuse the video-player pattern.
   useEffect(() => {
@@ -444,7 +516,9 @@ export function AppMapClient({
       filtered.nodes.map((n) => ({
         id: n.id,
         type: "page",
-        position: positions.get(n.id) ?? { x: 0, y: 0 },
+        // A hand-dragged position wins over the dagre layout.
+        position: positionOverrides[n.id] ??
+          positions.get(n.id) ?? { x: 0, y: 0 },
         // Explicit dimensions so the MiniMap can draw every node immediately
         // (it renders nothing for nodes it can't size before first measure).
         width: NODE_W,
@@ -461,6 +535,7 @@ export function AppMapClient({
     [
       filtered,
       positions,
+      positionOverrides,
       rootId,
       queued,
       requesting,
@@ -637,6 +712,14 @@ export function AppMapClient({
         </div>
         <button
           type="button"
+          onClick={resetView}
+          className="flex items-center gap-1 rounded-lg border bg-card/95 px-2.5 py-2 text-xs font-medium shadow-sm backdrop-blur hover:bg-muted"
+          title="Reset view — clears filters, moved cards, and zoom"
+        >
+          <RotateCcw className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
           onClick={refresh}
           disabled={refreshing}
           className="flex items-center gap-1 rounded-lg border bg-card/95 px-2.5 py-2 text-xs font-medium shadow-sm backdrop-blur hover:bg-muted disabled:opacity-60"
@@ -660,32 +743,49 @@ export function AppMapClient({
         </button>
       </div>
 
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onNodeClick={onNodeClick}
-        nodeTypes={nodeTypes}
-        nodesDraggable
-        fitView
-        minZoom={0.05}
-        maxZoom={2}
-        proOptions={{ hideAttribution: true }}
-      >
-        <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
-        <Controls showInteractive={false} />
-        <MiniMap
-          pannable
-          zoomable
-          nodeColor={(n) =>
-            COVERAGE_COLOR[
-              ((n.data as PageNodeData)?.node?.coverageStatus ??
-                "uncovered") as CoverageStatus
-            ]
-          }
-        />
-      </ReactFlow>
+      {hydrated && (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onNodeClick={onNodeClick}
+          nodeTypes={nodeTypes}
+          nodesDraggable
+          onInit={(instance) => {
+            rfInstanceRef.current = instance;
+          }}
+          // Restore the last visit's pan/zoom; fall back to fitting the graph.
+          fitView={!viewportRef.current}
+          defaultViewport={viewportRef.current ?? undefined}
+          onMoveEnd={(_, viewport) => {
+            viewportRef.current = viewport;
+            persistState(excludePatterns, positionOverrides);
+          }}
+          onNodeDragStop={(_, node) => {
+            setPositionOverrides((prev) => ({
+              ...prev,
+              [node.id]: { x: node.position.x, y: node.position.y },
+            }));
+          }}
+          minZoom={0.05}
+          maxZoom={2}
+          proOptions={{ hideAttribution: true }}
+        >
+          <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
+          <Controls showInteractive={false} />
+          <MiniMap
+            pannable
+            zoomable
+            nodeColor={(n) =>
+              COVERAGE_COLOR[
+                ((n.data as PageNodeData)?.node?.coverageStatus ??
+                  "uncovered") as CoverageStatus
+              ]
+            }
+          />
+        </ReactFlow>
+      )}
 
       {selected && (
         <NodeDetailPanel
