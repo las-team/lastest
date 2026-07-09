@@ -86,7 +86,7 @@ OUTPUT: a single JSON object, no markdown fences, no commentary, matching exactl
 
 RULES:
 - "reason": one sentence explaining the routing decision — it is logged for the team to review.
-- For "targeted": 1-${MAX_TRIAGE_TESTS} tests. Each "scenario" must be concrete and executable: the numbered actions to take plus the end-state verification that proves the outcome beyond a toast. Ground "pagePath" in the KNOWN PAGES list when one is provided; omit it when unsure — never invent routes.
+- For "targeted": 1-${MAX_TRIAGE_TESTS} tests. Each "scenario" must be concrete and executable: the numbered actions to take plus the end-state verification that proves the outcome beyond a toast. Ground "pagePath" in the KNOWN PAGES list or in a route the directive itself names (parameterized segments like /builds/:id are fine — the test navigates to a real instance); omit it when unsure — never invent routes.
 - "group", when set, must be one of the selected coverage group ids.
 - For "explore": "tests" must be [].
 - When a directive names one flow but implies many variants ("all edge cases of checkout"), stay "targeted" only if ${MAX_TRIAGE_TESTS} tests can honestly cover it; otherwise choose "explore".`;
