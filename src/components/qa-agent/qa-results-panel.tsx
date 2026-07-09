@@ -450,20 +450,64 @@ export function QaSummaryPanel({
 
         {groupRows.length > 0 && (
           <div className="space-y-1">
-            <h4 className="text-sm font-medium">By group</h4>
+            <h4 className="text-sm font-medium">
+              By group{" "}
+              <span className="text-xs font-normal text-muted-foreground">
+                — covered+generated / planned (a multi-group test counts in
+                every group it covers, so these rows sum higher than the totals
+                above)
+              </span>
+            </h4>
             <div className="rounded-md border divide-y">
               {groupRows.map((group) => {
                 const row = summary.byGroup[group.id]!;
+                const covered = row.covered ?? 0;
+                const done = covered + row.generated;
+                const gap = Math.max(0, row.planned - done);
+                const complete = gap === 0;
+                const composition = [
+                  covered > 0 && `${covered} existing`,
+                  row.generated > 0 && `${row.generated} new`,
+                  row.passed > 0 && `${row.passed} passing`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ");
                 return (
                   <div
                     key={group.id}
-                    className="flex items-center justify-between px-3 py-1.5 text-sm"
+                    className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm"
                   >
                     <span>{group.label}</span>
-                    <span className="text-muted-foreground text-xs">
-                      {(row.covered ?? 0) > 0 && `${row.covered} covered · `}
-                      {row.generated}/{row.planned} generated · {row.passed}{" "}
-                      passing
+                    <span className="flex items-center gap-2 text-xs">
+                      {composition && (
+                        <span className="text-muted-foreground">
+                          {composition}
+                        </span>
+                      )}
+                      <span
+                        className={`font-medium ${
+                          complete ? "text-success" : "text-warning"
+                        }`}
+                        title={
+                          complete
+                            ? "Fully covered — existing tests satisfy the rest, so nothing needed generating"
+                            : `${gap} planned ${gap === 1 ? "test" : "tests"} not yet covered or generated`
+                        }
+                      >
+                        {done}/{row.planned}
+                      </span>
+                      {gap > 0 && onRequestCoverage && (
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 rounded border border-warning/40 px-1.5 py-0.5 text-warning hover:bg-warning/10 disabled:opacity-50"
+                          title={`Plan & generate ${gap} more ${gap === 1 ? "test" : "tests"} to complete ${group.label} coverage`}
+                          disabled={requestPending}
+                          onClick={() => onRequestCoverage({ group: group.id })}
+                        >
+                          <Plus className="h-3 w-3" />
+                          Plan &amp; generate
+                        </button>
+                      )}
                     </span>
                   </div>
                 );
