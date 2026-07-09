@@ -70,6 +70,11 @@ export function isApiRouteFile(path: string): boolean {
   return appRouterPath(path) !== null || pagesApiPath(path) !== null;
 }
 
+/** URL path an API route file serves, or null when it isn't a route file. */
+export function apiRouteUrlPath(filePath: string): string | null {
+  return appRouterPath(filePath) ?? pagesApiPath(filePath);
+}
+
 /** Pick the API route files worth reading, smallest-path-first for stability. */
 export function selectApiRouteFiles(tree: TreeEntry[]): TreeEntry[] {
   return tree
@@ -112,7 +117,7 @@ export async function extractDeclaredEndpoints(
   const endpoints: QaDeclaredEndpoint[] = [];
   for (const entry of selectApiRouteFiles(tree)) {
     if (endpoints.length >= MAX_ENDPOINTS) break;
-    const urlPath = appRouterPath(entry.path) ?? pagesApiPath(entry.path);
+    const urlPath = apiRouteUrlPath(entry.path);
     if (!urlPath) continue;
     const source = await getContent(entry.path).catch(() => null);
     if (!source) continue;

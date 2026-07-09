@@ -2905,6 +2905,9 @@ export interface QaPlanItem {
   scenario: string;
   /** Verified selectors from discovery the generator should prefer. */
   selectorHints?: string[];
+  /** Exact ref strings from the branch-diff digest this item covers (symbol
+   *  names, "METHOD /path" endpoints, file paths) — drives PR coverage. */
+  changeRefs?: string[];
   api?: {
     method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
     path: string;
@@ -2960,6 +2963,63 @@ export interface QaPageSnapshot {
   consoleErrors?: string[];
 }
 
+/** One file changed on the working branch vs the base branch. */
+export interface QaPrChangedFile {
+  path: string;
+  status: "added" | "modified" | "removed" | "renamed";
+  additions: number;
+  deletions: number;
+  previousPath?: string;
+}
+
+/** A function/class/component the branch diff added or modified — extracted
+ *  deterministically from diff hunks (src/lib/qa-agent/pr-check). */
+export interface QaPrSymbol {
+  name: string;
+  kind: "function" | "component" | "class" | "endpoint";
+  file: string;
+  change: "added" | "modified";
+}
+
+/** An API endpoint whose route file the branch diff touched. */
+export interface QaPrEndpoint {
+  method: string;
+  path: string;
+  file: string;
+  change: "added" | "modified" | "removed";
+}
+
+/** Branch/PR diff facts (head vs base) feeding the planner + coverage report. */
+export interface QaPrChanges {
+  baseBranch: string;
+  headBranch: string;
+  files: QaPrChangedFile[];
+  symbols: QaPrSymbol[];
+  endpoints: QaPrEndpoint[];
+  /** True when file/symbol caps dropped part of the diff. */
+  truncated?: boolean;
+}
+
+/** Coverage verdict for one branch change (symbol/endpoint) in the summary. */
+export interface QaPrCoverageEntry {
+  /** Ref string as listed in the digest ("createInvoice", "POST /api/x"). */
+  ref: string;
+  kind: "symbol" | "endpoint";
+  file: string;
+  change: "added" | "modified" | "removed";
+  planItemIds: string[];
+  testIds: string[];
+  status: "passed" | "covered" | "generated" | "planned" | "uncovered";
+}
+
+export interface QaPrCoverage {
+  baseBranch: string;
+  headBranch: string;
+  /** Entries with a live test (passed/covered/generated). */
+  coveredCount: number;
+  entries: QaPrCoverageEntry[];
+}
+
 export interface QaDiscovery {
   targetUrl: string;
   crawledPages: QaPageSnapshot[];
@@ -2977,6 +3037,10 @@ export interface QaDiscovery {
     testingNotes: string[];
     declaredEndpoints: Array<{ method: string; path: string; file: string }>;
   };
+  /** Branch diff vs the base branch (repo-aware mode, head ≠ base): the
+   *  functions/endpoints this branch adds or changes. Feeds the planner
+   *  ("cover these") and the summary's PR coverage report. */
+  prChanges?: QaPrChanges;
 }
 
 /** How a QA session runs. `full` is the complete pipeline; `refresh_spec`
@@ -3038,6 +3102,8 @@ export interface QaSummaryData {
   matrix?: Record<string, Partial<Record<QaTestGroup, QaMatrixCell>>>;
   /** journeyId → testIds covering it (traceability matrix). */
   journeyCoverage: Record<string, string[]>;
+  /** Per-change coverage of the branch diff (repo-aware runs on a branch). */
+  prCoverage?: QaPrCoverage;
 }
 
 export interface AgentSessionMetadata {
