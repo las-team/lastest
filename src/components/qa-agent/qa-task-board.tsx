@@ -101,12 +101,20 @@ const TEST_REF_CLASSES: Record<QaTaskTestRef["status"], string> = {
 
 function TestRefChips({ refs }: { refs: QaTaskTestRef[] }) {
   return (
-    <div className="flex flex-wrap gap-1">
+    <div className="flex min-w-0 flex-wrap gap-1">
       {refs.map((ref) => (
-        <Link key={ref.testId} href={`/tests/${ref.testId}`}>
+        // Badge's base classes pin it to its content width (w-fit shrink-0
+        // whitespace-nowrap); long test names must shrink + truncate inside
+        // the narrow kanban card instead, so both the link wrapper and the
+        // badge get a min-w-0/max-w-full shrink chain.
+        <Link
+          key={ref.testId}
+          href={`/tests/${ref.testId}`}
+          className="inline-flex min-w-0 max-w-full"
+        >
           <Badge
             variant="outline"
-            className={`text-[10px] px-1.5 gap-1 max-w-full hover:opacity-80 ${
+            className={`min-w-0 max-w-full shrink gap-1 px-1.5 text-[10px] hover:opacity-80 ${
               TEST_REF_CLASSES[ref.status] ?? "text-muted-foreground"
             }`}
             title={`${ref.name} — ${ref.status.replace("_", " ")}`}
