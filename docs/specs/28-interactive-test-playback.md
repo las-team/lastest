@@ -100,6 +100,28 @@ Per the CLAUDE.md Schema Changes checklist (schema.ts → `pnpm db:push` → que
 | `src/lib/share/captions.ts`                          | replace even-split `timingFor` (line 98)              |
 | `src/lib/share/video-fallback.ts`                    | reuse `resolveTestVideoUrl` in test-detail            |
 
+## Implementation notes (v1, shipped)
+
+Deviations from the sections above, chosen during implementation:
+
+- **Console entries are a separate column**, `test_results.console_entries`
+  (`ConsoleEntry[]`), instead of widening `consoleErrors` to a union type —
+  ~40 consumer files treat `consoleErrors` as `string[]` (diffing, triage,
+  issue bodies), and a union would have forced a normalizer into every one
+  of them for zero data gain. `consoleErrors` stays the diff/compat surface;
+  `consoleEntries` carries `{atMs, level, text}` for timeline consumers.
+- **Clock rebasing is additive, not in-place**: `NetworkRequest.atMs` and
+  `UrlTrajectoryStep.atMs` (video-clock ms) sit alongside the original
+  epoch `startTime` / test-start `capturedAtMs` rather than rewriting them.
+- **No `video_start_ms` column** — the EB rebases timings to the video clock
+  before shipping the payload, so persisting the anchor adds nothing.
+- The sync bus is `usePlaybackSync` + `SyncedVideoPlayer`
+  (`src/components/playback-sync.tsx`); for server-rendered share islands,
+  `ReplayPlayer` additionally broadcasts a throttled
+  `lastest:playback-time` document event that `ChapterRail` consumes.
+- The timing ladder helper is `resolveStepSegments`
+  (`src/lib/playback/step-timings.ts`).
+
 ## Out of scope
 
 - No changes to CDP live streaming (`packages/embedded-browser` streaming path) — this is post-run playback only.
