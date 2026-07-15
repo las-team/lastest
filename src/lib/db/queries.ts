@@ -43,3 +43,6 @@ export * from "./queries/playground";
 export * from "./queries/billing";
 export * from "./queries/qa-tasks";
 export * from "./queries/qa-agent-triggers";
+export * from "./queries/explorer";
+export * from "./queries/agent-knowledge";
+export * from "./queries/agent-experience";

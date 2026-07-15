@@ -468,6 +468,9 @@ export async function getAISettings(repositoryId?: string | null) {
     openaiModel: DEFAULT_AI_SETTINGS.openaiModel,
     pwAgentModel: DEFAULT_AI_SETTINGS.pwAgentModel,
     pwAgentTimeout: DEFAULT_AI_SETTINGS.pwAgentTimeout,
+    explorerMaxIterations: DEFAULT_AI_SETTINGS.explorerMaxIterations,
+    explorerStyleRotation: DEFAULT_AI_SETTINGS.explorerStyleRotation,
+    explorerModel: DEFAULT_AI_SETTINGS.explorerModel,
     createdAt: null,
     updatedAt: null,
   };

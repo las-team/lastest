@@ -1762,6 +1762,13 @@ export const aiSettings = pgTable("ai_settings", {
   aiDiffingOllamaModel: text("ai_diffing_ollama_model"),
   pwAgentModel: text("pw_agent_model"),
   pwAgentTimeout: integer("pw_agent_timeout").default(300000),
+  // Explorer agent settings
+  explorerMaxIterations: integer("explorer_max_iterations").default(8),
+  explorerStyleRotation: text("explorer_style_rotation").default(
+    "normal,curious,psycho",
+  ),
+  /** Model override for explorer loop calls (empty = same as test generation). */
+  explorerModel: text("explorer_model"),
   createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 });
@@ -1785,6 +1792,9 @@ export const DEFAULT_AI_SETTINGS = {
   aiDiffingOllamaModel: "",
   pwAgentModel: "",
   pwAgentTimeout: 300000,
+  explorerMaxIterations: 8,
+  explorerStyleRotation: "normal,curious,psycho",
+  explorerModel: "",
 };
 
 // AI Prompt Logging for debugging and auditing
@@ -1806,7 +1816,10 @@ export type AIActionType =
   | "qa_plan"
   | "triage"
   | "generate_var_value"
-  | "suggest_app_fix";
+  | "suggest_app_fix"
+  | "explorer_plan"
+  | "explorer_act"
+  | "explorer_analyze";
 export type AILogStatus = "pending" | "success" | "error";
 
 export const aiPromptLogs = pgTable("ai_prompt_logs", {
@@ -2577,7 +2590,12 @@ export type AgentSessionStatus =
   | "failed"
   | "cancelled";
 
-export type AgentSessionKind = "play" | "quickstart" | "ranger" | "qa";
+export type AgentSessionKind =
+  | "play"
+  | "quickstart"
+  | "ranger"
+  | "qa"
+  | "explorer";
 
 export type AgentStepId =
   | "settings_check"
@@ -2614,7 +2632,19 @@ export type AgentStepId =
   | "qa_generate"
   | "qa_execute"
   | "qa_heal"
-  | "qa_summary";
+  | "qa_summary"
+  // Explorer Agent (explorbot-style autonomous exploratory testing, /explorer page).
+  // research/plan/act/analyze repeat once per loop iteration — the steps array
+  // carries one entry per (step, iteration) pair, disambiguated by
+  // AgentStepState.iteration.
+  | "explorer_setup"
+  | "explorer_login"
+  | "explorer_research"
+  | "explorer_plan"
+  | "explorer_act"
+  | "explorer_analyze"
+  | "explorer_keep"
+  | "explorer_summary";
 
 export type AgentStepStatus =
   | "pending"
@@ -2632,7 +2662,8 @@ export type PwAgentType =
   | "generator"
   | "healer"
   | "quickstart"
-  | "ranger";
+  | "ranger"
+  | "explorer";
 
 export interface AgentSubstep {
   label: string;
@@ -2715,6 +2746,9 @@ export interface AgentStepState {
   richResult?: AgentStepRichResult;
   userAction?: string;
   substeps?: AgentSubstep[];
+  /** Explorer loop index (0-based) for the repeated research/plan/act/analyze
+   *  step entries. Absent on linear (non-loop) steps and other agent kinds. */
+  iteration?: number;
 }
 
 export interface QuickstartAuthClassification {
@@ -3126,6 +3160,81 @@ export interface QaSummaryData {
   prCoverage?: QaPrCoverage;
 }
 
+// ── Explorer Agent (explorbot-style autonomous exploratory testing) ─────────
+
+/** Planning style rotated across loop iterations (explorbot's normal/curious/
+ *  psycho). Each style is a prompt fragment steering the scenario planner. */
+export type ExplorerStyle = "normal" | "curious" | "psycho";
+
+export type ExplorerFindingKind = "defect" | "ux";
+
+export type ExplorerSeverity = "critical" | "high" | "medium" | "low" | "info";
+
+export type ExplorerFindingStatus = "open" | "triaged" | "dismissed" | "kept";
+
+/** One scenario the explorer planner drafted for the current page/iteration. */
+export interface ExplorerScenario {
+  id: string;
+  title: string;
+  style: ExplorerStyle;
+  /** Ordered natural-language steps the tester executes adaptively. */
+  steps: string[];
+  /** Why this scenario matters / what it probes. */
+  rationale: string;
+  /** Expected outcome the tester verifies at the end. */
+  expectedOutcome?: string;
+  /** Planner marked it redundant with existing coverage — not executed. */
+  skipped?: boolean;
+  skipReason?: string;
+}
+
+/** One browser action the tester took while executing a scenario. */
+export interface ExplorerActionStep {
+  /** What the tester was trying to do ("submit the login form"). */
+  intent: string;
+  /** The concrete action taken ("click", "fill", "navigate"...). */
+  action: string;
+  selector?: string;
+  value?: string;
+  result: "ok" | "blocked" | "error";
+  note?: string;
+}
+
+export type ExplorerScenarioOutcome = "passed" | "failed" | "blocked" | "stuck";
+
+/** Execution record of one scenario: the adaptive step log + evidence. */
+export interface ExplorerActionLog {
+  scenarioId: string;
+  status: ExplorerScenarioOutcome;
+  steps: ExplorerActionStep[];
+  /** Console errors observed during execution (evidence). */
+  consoleErrors?: string[];
+  /** Failed same-origin requests observed during execution (evidence). */
+  failedRequests?: Array<{ url: string; status: number; method: string }>;
+  /** Page-state hash where the scenario ended. */
+  finalStateHash?: string;
+  finalUrl?: string;
+  summary?: string;
+}
+
+/** Analyst output: findings clustered by root cause. */
+export interface ExplorerReport {
+  clusters: Array<{
+    rootCause: string;
+    severity: ExplorerSeverity;
+    kind: ExplorerFindingKind;
+    findingIds: string[];
+    summary: string;
+  }>;
+  totalFindings: number;
+  iterationsRun: number;
+  /** Analyst's overall written assessment of the session. */
+  assessment?: string;
+}
+
+/** What started an explorer session (mirrors QaSessionTrigger). */
+export type ExplorerSessionTrigger = "manual" | "schedule" | "mcp";
+
 export interface AgentSessionMetadata {
   buildIds?: string[];
   fixAttempts?: Record<string, number>;
@@ -3228,6 +3337,42 @@ export interface AgentSessionMetadata {
   /** What started this session — powers the run-history provenance chip.
    *  Absent on sessions created before triggers existed = "manual". */
   qaTrigger?: QaSessionTrigger;
+  // Explorer Agent fields (kind = "explorer"). Target-app credentials reuse
+  // quickstartEmail/quickstartPassword above for AES-256-GCM encryption at rest.
+  /** Target app base URL being explored. */
+  explorerTargetUrl?: string;
+  /** Hard budget on research→plan→act→analyze loop iterations. */
+  explorerMaxIterations?: number;
+  /** Current loop index (0-based) — the resume cursor. */
+  explorerIteration?: number;
+  /** Style rotation order; iteration i uses rotation[i % length]. */
+  explorerStyleRotation?: ExplorerStyle[];
+  /** Ordered page-state hashes observed (loop/stuck detection + experience keys). */
+  explorerStateHistory?: string[];
+  /** Unvisited same-origin URLs queued for future iterations (BFS frontier). */
+  explorerFrontier?: string[];
+  /** Normalized URLs already researched (frontier dedup). */
+  explorerVisitedUrls?: string[];
+  /** Latest research output (RangerPageMap shape) feeding the planner. */
+  explorerPageMap?: Record<string, unknown>;
+  /** State hash + URL of the most recent research observation. */
+  explorerCurrentState?: { hash: string; url: string; headings: string[] };
+  /** Planner output for the current iteration. */
+  explorerCurrentPlan?: ExplorerScenario[];
+  /** scenarioId → execution log, accumulated across iterations. */
+  explorerActionLogs?: Record<string, ExplorerActionLog>;
+  /** agent_findings rows created by this session. */
+  explorerFindingIds?: string[];
+  /** Analyst clustering output (summary step). */
+  explorerReport?: ExplorerReport;
+  /** Tests created by the keep step (quarantined drafts). */
+  explorerKeptTestIds?: string[];
+  /** Resolved auth strategy (reuses the QA agent's login resolution). */
+  explorerAuth?: QaAuthState;
+  /** What started this session. Absent = "manual". */
+  explorerTrigger?: ExplorerSessionTrigger;
+  /** True when the stuck-loop heuristic ended the loop early. */
+  explorerStuck?: boolean;
   [key: string]: unknown;
 }
 
@@ -3337,6 +3482,185 @@ export const qaAgentTriggers = pgTable("qa_agent_triggers", {
 
 export type QaAgentTrigger = typeof qaAgentTriggers.$inferSelect;
 export type NewQaAgentTrigger = typeof qaAgentTriggers.$inferInsert;
+
+// ── Explorer Agent tables ────────────────────────────────────────────────────
+
+export type KnowledgeMatchKind = "exact" | "prefix" | "regex";
+
+/** One deterministic pre-step executed when a knowledge note matches a page
+ *  (dismiss a cookie banner, open a menu) before the AI takes over. */
+export interface KnowledgePageAutomationStep {
+  action: "click" | "fill" | "waitForSelector" | "wait";
+  selector?: string;
+  value?: string;
+}
+
+/** Human-provided hints the explorer loads when a page's URL matches
+ *  (explorbot's `knowledge/` directory, DB-backed for repo scoping +
+ *  credential encryption). Body is markdown injected into planner/tester
+ *  prompts verbatim. */
+export const agentKnowledge = pgTable(
+  "agent_knowledge",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    repositoryId: text("repository_id")
+      .references(() => repositories.id, { onDelete: "cascade" })
+      .notNull(),
+    teamId: text("team_id").notNull(),
+    title: text("title").notNull(),
+    /** "/login" (exact), "/admin/*" (prefix), "^/users/\\d+$" (regex), "*" = all. */
+    urlPattern: text("url_pattern").notNull(),
+    matchKind: text("match_kind")
+      .$type<KnowledgeMatchKind>()
+      .notNull()
+      .default("prefix"),
+    /** Markdown hint text (quirks, test data, form rules, navigation notes). */
+    body: text("body").notNull(),
+    /** Optional page-scoped credentials. Password encrypted at rest via the
+     *  agent-knowledge query layer (crypto-fields.ts); email stays plaintext
+     *  (low-sensitivity identifier). */
+    credEmail: text("cred_email"),
+    credPassword: text("cred_password"),
+    pageAutomation:
+      jsonb("page_automation").$type<KnowledgePageAutomationStep[]>(),
+    enabled: boolean("enabled").notNull().default(true),
+    createdById: text("created_by_id"),
+    createdAt: timestamp("created_at").$defaultFn(() => new Date()),
+    updatedAt: timestamp("updated_at").$defaultFn(() => new Date()),
+  },
+  (table) => [index("idx_agent_knowledge_repo").on(table.repositoryId)],
+);
+
+export type AgentKnowledge = typeof agentKnowledge.$inferSelect;
+export type NewAgentKnowledge = typeof agentKnowledge.$inferInsert;
+
+export type ExperienceNoteKind = "resolution" | "failure" | "observation";
+
+export interface ExperienceNote {
+  kind: ExperienceNoteKind;
+  text: string;
+  scenarioStyle?: ExplorerStyle;
+  sessionId?: string;
+  /** ISO timestamp. */
+  at: string;
+}
+
+/** What the explorer learned by doing (explorbot's `experience/` directory):
+ *  failed attempts, working resolutions, observations — keyed by page state
+ *  (normalized URL + h1/h2 headings hash) and reused on later runs. */
+export const agentExperience = pgTable(
+  "agent_experience",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    repositoryId: text("repository_id")
+      .references(() => repositories.id, { onDelete: "cascade" })
+      .notNull(),
+    teamId: text("team_id").notNull(),
+    /** hashState(normalizedUrl, headings) — see src/lib/explorer/state.ts. */
+    stateHash: text("state_hash").notNull(),
+    normalizedUrl: text("normalized_url").notNull(),
+    /** Human-readable h1/h2 digest for the experience viewer. */
+    headingsDigest: text("headings_digest"),
+    notes: jsonb("notes").$type<ExperienceNote[]>().notNull(),
+    timesVisited: integer("times_visited").notNull().default(1),
+    lastSessionId: text("last_session_id"),
+    createdAt: timestamp("created_at").$defaultFn(() => new Date()),
+    updatedAt: timestamp("updated_at").$defaultFn(() => new Date()),
+  },
+  (table) => [
+    uniqueIndex("uq_agent_experience_repo_state").on(
+      table.repositoryId,
+      table.stateHash,
+    ),
+  ],
+);
+
+export type AgentExperience = typeof agentExperience.$inferSelect;
+export type NewAgentExperience = typeof agentExperience.$inferInsert;
+
+export interface AgentFindingEvidence {
+  screenshotPaths?: string[];
+  consoleErrors?: string[];
+  failedRequests?: Array<{ url: string; status: number; method: string }>;
+  /** Action steps that led to the finding (from the scenario's action log). */
+  actionSteps?: ExplorerActionStep[];
+}
+
+/** A defect or UX issue the explorer observed. Clustered by root cause by the
+ *  analyst step; promotable to a bug_report, keepable as a test. Distinct from
+ *  bug_reports (user-scoped, extension-shaped context) by design. */
+export const agentFindings = pgTable(
+  "agent_findings",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    repositoryId: text("repository_id")
+      .references(() => repositories.id, { onDelete: "cascade" })
+      .notNull(),
+    teamId: text("team_id").notNull(),
+    /** agent_sessions.id of the explorer run that produced it. */
+    sessionId: text("session_id").notNull(),
+    kind: text("kind").$type<ExplorerFindingKind>().notNull().default("defect"),
+    severity: text("severity")
+      .$type<ExplorerSeverity>()
+      .notNull()
+      .default("medium"),
+    title: text("title").notNull(),
+    description: text("description").notNull(),
+    /** Set by the analyst step — findings sharing a root cause share a label. */
+    rootCauseCluster: text("root_cause_cluster"),
+    pageStateHash: text("page_state_hash"),
+    url: text("url"),
+    scenario: jsonb("scenario").$type<ExplorerScenario>(),
+    evidence: jsonb("evidence").$type<AgentFindingEvidence>(),
+    status: text("status")
+      .$type<ExplorerFindingStatus>()
+      .notNull()
+      .default("open"),
+    /** bug_reports.id when promoted. */
+    bugReportId: text("bug_report_id"),
+    createdAt: timestamp("created_at").$defaultFn(() => new Date()),
+  },
+  (table) => [
+    index("idx_agent_findings_session").on(table.sessionId),
+    index("idx_agent_findings_repo").on(table.repositoryId),
+  ],
+);
+
+export type AgentFinding = typeof agentFindings.$inferSelect;
+export type NewAgentFinding = typeof agentFindings.$inferInsert;
+
+/** Per-repo automation config for the explorer agent (mirror of
+ *  qa_agent_triggers, cron-only — explorer runs are app-facing, not
+ *  PR-facing). One row per repository. */
+export const explorerTriggers = pgTable("explorer_triggers", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  repositoryId: text("repository_id")
+    .references(() => repositories.id, { onDelete: "cascade" })
+    .notNull()
+    .unique(),
+  teamId: text("team_id").notNull(),
+  scheduleEnabled: boolean("schedule_enabled").notNull().default(false),
+  /** Cron schedule (5-field expression, UTC). */
+  cronExpression: text("cron_expression"),
+  /** Iteration budget for scheduled runs. */
+  maxIterations: integer("max_iterations").notNull().default(4),
+  nextRunAt: timestamp("next_run_at"),
+  lastRunAt: timestamp("last_run_at"),
+  lastSessionId: text("last_session_id"),
+  createdAt: timestamp("created_at").$defaultFn(() => new Date()),
+  updatedAt: timestamp("updated_at").$defaultFn(() => new Date()),
+});
+
+export type ExplorerTrigger = typeof explorerTriggers.$inferSelect;
+export type NewExplorerTrigger = typeof explorerTriggers.$inferInsert;
 
 // ── Bug Reports ──────────────────────────────────────────────────────────────
 
@@ -3813,7 +4137,8 @@ export type ActivitySourceType =
   | "mcp_server"
   | "generate_agent"
   | "heal_agent"
-  | "qa_agent";
+  | "qa_agent"
+  | "explorer_agent";
 
 export type ActivityArtifactType =
   | "test"

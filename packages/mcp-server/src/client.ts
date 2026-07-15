@@ -495,6 +495,73 @@ export class LastestClient {
     return this.del(`/api/v1/ranger/${sessionId}`);
   }
 
+  // --- Explorer (autonomous exploratory-testing agent) ---
+
+  async startExplorer(
+    repoId: string,
+    opts?: {
+      url?: string;
+      maxIterations?: number;
+      email?: string;
+      password?: string;
+    },
+  ): Promise<{ sessionId: string }> {
+    return this.post(`/api/v1/repos/${repoId}/explorer`, {
+      url: opts?.url,
+      maxIterations: opts?.maxIterations,
+      email: opts?.email,
+      password: opts?.password,
+    });
+  }
+
+  async getExplorerStatus(sessionId: string): Promise<{
+    id: string;
+    status: "active" | "completed" | "failed" | "cancelled" | "paused";
+    currentStepId: string | null;
+    steps: Array<{
+      id: string;
+      status: string;
+      label: string;
+      iteration?: number;
+      error?: string;
+    }>;
+    metadata: {
+      targetUrl?: string;
+      iteration: number;
+      maxIterations?: number;
+      streamUrl?: string;
+      queuedForBrowser?: boolean;
+      stuck?: boolean;
+      report?: Record<string, unknown> | null;
+      keptTestIds?: string[];
+    };
+    findingsSummary: { total: number; bySeverity: Record<string, number> };
+  }> {
+    return this.get(`/api/v1/explorer/${sessionId}`);
+  }
+
+  async getExplorerFindings(
+    sessionId: string,
+  ): Promise<{ findings: Array<Record<string, unknown>> }> {
+    return this.get(`/api/v1/explorer/${sessionId}/findings`);
+  }
+
+  async addExplorerKnowledge(
+    repoId: string,
+    input: {
+      title?: string;
+      urlPattern: string;
+      matchKind?: "exact" | "prefix" | "regex";
+      body: string;
+    },
+  ): Promise<{ id: string }> {
+    return this.post(`/api/v1/repos/${repoId}/explorer-knowledge`, input);
+  }
+
+  async cancelExplorer(sessionId: string): Promise<{ success: boolean }> {
+    return this.del(`/api/v1/explorer/${sessionId}`);
+  }
+
   // --- QuickStart agent ---
 
   async startQuickstart(

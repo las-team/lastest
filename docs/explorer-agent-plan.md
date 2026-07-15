@@ -2,6 +2,19 @@
 
 Adding explorbot-style autonomous exploratory testing ([testomatio/explorbot](https://github.com/testomatio/explorbot)) as a new agent kind alongside the existing QA Agent.
 
+> **Status: implemented (all 4 milestones).** Entry points: `/explorer` page,
+> `src/server/actions/explorer-agent.ts`, `src/lib/explorer/`, MCP tools
+> `lastest_explorer*`. Two deviations from the plan below: the **act phase**
+> drives the browser via a host-side AI-in-the-loop action loop
+> (`src/lib/explorer/tester.ts` — observe DOM → model returns one JSON action →
+> Playwright-over-CDP executes) instead of the MCP bridge, which supports every
+> provider and yields an exact action log; and **keep-as-test** renders code
+> deterministically from that action log (`src/lib/explorer/keep.ts`) instead
+> of calling `agentCreateTest` (no AI or request-auth context needed in the
+> detached pipeline). Run `pnpm db:push` after pulling to create the new
+> tables (`agent_knowledge`, `agent_experience`, `agent_findings`,
+> `explorer_triggers`) and `ai_settings` columns.
+
 ## Context
 
 The QA Agent is a **suite builder**: it discovers routes, drafts a plan (with a human review gate), generates test code, executes it, and heals failures. Explorbot represents a different capability: an **exploratory tester** that autonomously drives a live browser in an iterative loop — research the current page, plan scenarios in rotating styles, execute them adaptively step-by-step, record defects/UX findings, learn from experience, and only *then* optionally keep passing flows as real tests. It finds bugs before any test code exists and accumulates memory across runs.
