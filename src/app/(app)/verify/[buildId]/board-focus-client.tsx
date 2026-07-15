@@ -108,6 +108,7 @@ export interface VisualDiffLite {
 export interface TestResultLite {
   id: string;
   testId: string | null;
+  testRunId: string | null;
   status: string | null;
   errorMessage: string | null;
   durationMs: number | null;
@@ -134,6 +135,16 @@ export interface TestResultLite {
   domSnapshot: import("@/lib/db/schema").DomSnapshotData | null;
   // E1: headless API results (null for browser tests).
   apiResult: import("@/lib/db/schema").ApiTestResultData | null;
+  // ── Interactive playback + State tab (specs 27/28) ─────────────────────
+  /** Recording path — RunPane embeds the step-synced player when set. */
+  videoPath: string | null;
+  /** Per-step start/end on the video clock (EB runs). */
+  stepTimings: import("@/lib/db/schema").StepTiming[] | null;
+  /** Timestamped console entries (alongside the flat consoleErrors). */
+  consoleEntries: import("@/lib/db/schema").ConsoleEntry[] | null;
+  /** End-of-run cookies + localStorage snapshot — the State tab diffs this
+   *  against the baseline run's snapshot. */
+  storageStateSnapshot: import("@/lib/db/schema").StorageStateSnapshot | null;
 }
 
 export interface VerifyFilters {
