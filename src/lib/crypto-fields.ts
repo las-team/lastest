@@ -56,21 +56,35 @@ export function decryptAuthConfig(
   return out;
 }
 
-// ── agent_sessions.metadata.quickstartPassword ──────────────────────────────
-// Encrypts only the password sub-field; every other metadata field (including
-// the email) passes through untouched.
+// ── agent_sessions.metadata credential fields ───────────────────────────────
+// Encrypts the password sub-field and the Explore auth-context prose (which
+// routinely contains a password); every other metadata field (including the
+// email) passes through untouched.
 
 export function encryptSessionMetadata<
   T extends AgentSessionMetadata | null | undefined,
 >(meta: T): T {
-  if (!meta || meta.quickstartPassword == null) return meta;
-  if (meta.quickstartPassword.startsWith(ENC_PREFIX)) return meta;
-  return { ...meta, quickstartPassword: encrypt(meta.quickstartPassword) };
+  if (!meta) return meta;
+  let out = meta;
+  if (out.quickstartPassword != null) {
+    out = { ...out, quickstartPassword: encField(out.quickstartPassword) };
+  }
+  if (out.qaAuthContext != null) {
+    out = { ...out, qaAuthContext: encField(out.qaAuthContext) };
+  }
+  return out;
 }
 
 export function decryptSessionMetadata<
   T extends AgentSessionMetadata | null | undefined,
 >(meta: T): T {
-  if (!meta || meta.quickstartPassword == null) return meta;
-  return { ...meta, quickstartPassword: decryptField(meta.quickstartPassword) };
+  if (!meta) return meta;
+  let out = meta;
+  if (out.quickstartPassword != null) {
+    out = { ...out, quickstartPassword: decryptField(out.quickstartPassword) };
+  }
+  if (out.qaAuthContext != null) {
+    out = { ...out, qaAuthContext: decryptField(out.qaAuthContext) };
+  }
+  return out;
 }

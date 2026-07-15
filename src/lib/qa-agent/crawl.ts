@@ -18,6 +18,14 @@ const PAGE_SETTLE_TIMEOUT_MS = 8_000;
 export interface QaCrawlOptions {
   /** Total pages to map, including the root. */
   maxPages?: number;
+  /** Upper clamp applied to maxPages. Defaults to 12 (the planner-discovery
+   *  cap); explore runs raise it to allow deeper maps. */
+  maxPagesHardCap?: number;
+  /** Max link hops from the entry URL (root = depth 0). Unset = unlimited. */
+  maxDepth?: number;
+  /** Epoch-ms wall-clock deadline — the crawl stops cleanly when reached
+   *  (checked beside `signal` between pages). */
+  deadline?: number;
   /** Optional per-page callback for progress reporting. */
   onPage?: (snapshot: QaPageSnapshot, index: number) => void;
   /** Login before crawling: fills the first form containing a password field. */
@@ -32,7 +40,7 @@ export interface QaCrawlOptions {
   signal?: AbortSignal;
 }
 
-async function extractDom(
+export async function extractDom(
   page: Page,
 ): Promise<Omit<QaPageSnapshot, "url" | "apiEndpoints">> {
   return (await page.evaluate(() => {
@@ -141,7 +149,7 @@ function sameOrigin(href: string, base: URL): URL | null {
 }
 
 /** Pick the next unvisited same-origin links, preferring short nav-like paths. */
-function pickNextLinks(
+export function pickNextLinks(
   snapshot: QaPageSnapshot,
   base: URL,
   visited: Set<string>,
@@ -203,12 +211,71 @@ export async function attemptLogin(
   }
 }
 
+/**
+ * Attach console-error + same-origin fetch/XHR observers to a page, keyed
+ * per visited page via `reset()`. Deduped and capped so a chatty page can't
+ * bloat the digest. Shared by the discovery crawl and the explore swarm.
+ */
+export function attachPageObservers(page: Page, baseOrigin: string) {
+  let consoleErrors: string[] = [];
+  let endpoints: QaPageSnapshot["apiEndpoints"] = [];
+
+  page.on("console", (msg) => {
+    if (msg.type() !== "error") return;
+    if (consoleErrors.length >= 15) return;
+    const text = msg.text().replace(/\s+/g, " ").trim().slice(0, 200);
+    if (text && !consoleErrors.includes(text)) {
+      consoleErrors.push(text);
+    }
+  });
+  page.on("pageerror", (err) => {
+    if (consoleErrors.length >= 15) return;
+    const text = `${err.name}: ${err.message}`
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 200);
+    if (text && !consoleErrors.includes(text)) {
+      consoleErrors.push(text);
+    }
+  });
+  page.on("response", (response) => {
+    try {
+      const req = response.request();
+      const type = req.resourceType();
+      if (type !== "fetch" && type !== "xhr") return;
+      const url = new URL(response.url());
+      if (url.origin !== baseOrigin) return;
+      if (endpoints.length >= 40) return;
+      endpoints.push({
+        method: req.method(),
+        path: url.pathname + url.search.slice(0, 60),
+        status: response.status(),
+      });
+    } catch {
+      // Observation is best-effort.
+    }
+  });
+
+  return {
+    /** Clear buffers before navigating to the next page. */
+    reset() {
+      consoleErrors = [];
+      endpoints = [];
+    },
+    consoleErrors: () => [...consoleErrors],
+    endpoints: () => [...endpoints],
+  };
+}
+
 export async function crawlTargetApp(
   cdpUrl: string,
   targetUrl: string,
   options: QaCrawlOptions = {},
 ): Promise<{ pages: QaPageSnapshot[]; loginAttempted: boolean }> {
-  const maxPages = Math.max(1, Math.min(options.maxPages ?? 6, 12));
+  const maxPages = Math.max(
+    1,
+    Math.min(options.maxPages ?? 6, options.maxPagesHardCap ?? 12),
+  );
   const browser = await chromium.connectOverCDP(cdpUrl);
   const pages: QaPageSnapshot[] = [];
   let loginAttempted = false;
@@ -216,48 +283,7 @@ export async function crawlTargetApp(
     const context = browser.contexts()[0] ?? (await browser.newContext());
     const page = context.pages()[0] ?? (await context.newPage());
     const base = new URL(targetUrl);
-
-    // Console errors observed while the current page loads, keyed per page.
-    // Deduped and capped so a chatty page can't bloat the digest.
-    let currentConsoleErrors: string[] = [];
-    page.on("console", (msg) => {
-      if (msg.type() !== "error") return;
-      if (currentConsoleErrors.length >= 15) return;
-      const text = msg.text().replace(/\s+/g, " ").trim().slice(0, 200);
-      if (text && !currentConsoleErrors.includes(text)) {
-        currentConsoleErrors.push(text);
-      }
-    });
-    page.on("pageerror", (err) => {
-      if (currentConsoleErrors.length >= 15) return;
-      const text = `${err.name}: ${err.message}`
-        .replace(/\s+/g, " ")
-        .trim()
-        .slice(0, 200);
-      if (text && !currentConsoleErrors.includes(text)) {
-        currentConsoleErrors.push(text);
-      }
-    });
-
-    // Same-origin fetch/XHR observation, keyed per visited page.
-    let currentEndpoints: QaPageSnapshot["apiEndpoints"] = [];
-    page.on("response", (response) => {
-      try {
-        const req = response.request();
-        const type = req.resourceType();
-        if (type !== "fetch" && type !== "xhr") return;
-        const url = new URL(response.url());
-        if (url.origin !== base.origin) return;
-        if (currentEndpoints.length >= 40) return;
-        currentEndpoints.push({
-          method: req.method(),
-          path: url.pathname + url.search.slice(0, 60),
-          status: response.status(),
-        });
-      } catch {
-        // Observation is best-effort.
-      }
-    });
+    const observers = attachPageObservers(page, base.origin);
 
     // With a known login page, authenticate BEFORE the crawl starts so every
     // mapped page reflects the post-login state.
@@ -277,15 +303,17 @@ export async function crawlTargetApp(
     }
 
     const visited = new Set<string>();
-    const queue: string[] = [new URL(targetUrl).href];
+    const queue: Array<{ url: string; depth: number }> = [
+      { url: new URL(targetUrl).href, depth: 0 },
+    ];
 
     while (queue.length > 0 && pages.length < maxPages) {
       if (options.signal?.aborted) break;
-      const url = queue.shift()!;
+      if (options.deadline && Date.now() >= options.deadline) break;
+      const { url, depth } = queue.shift()!;
       if (visited.has(url)) continue;
       visited.add(url);
-      currentEndpoints = [];
-      currentConsoleErrors = [];
+      observers.reset();
       try {
         await page.goto(url, {
           waitUntil: "domcontentloaded",
@@ -307,21 +335,23 @@ export async function crawlTargetApp(
         const snapshot: QaPageSnapshot = {
           url,
           ...dom,
-          apiEndpoints: [...currentEndpoints],
-          consoleErrors: [...currentConsoleErrors],
+          apiEndpoints: observers.endpoints(),
+          consoleErrors: observers.consoleErrors(),
         };
         pages.push(snapshot);
         options.onPage?.(snapshot, pages.length - 1);
         visited.add(snapshot.finalUrl);
 
-        for (const next of pickNextLinks(
-          snapshot,
-          base,
-          visited,
-          maxPages - pages.length,
-          options.prioritizeAuthLinks,
-        )) {
-          queue.push(next);
+        if (options.maxDepth === undefined || depth < options.maxDepth) {
+          for (const next of pickNextLinks(
+            snapshot,
+            base,
+            visited,
+            maxPages - pages.length,
+            options.prioritizeAuthLinks,
+          )) {
+            queue.push({ url: next, depth: depth + 1 });
+          }
         }
       } catch (err) {
         console.warn(`[QaCrawl] failed to map ${url}:`, err);
