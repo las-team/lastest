@@ -337,6 +337,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     perf: CheckModeT;
     url: CheckModeT;
     api: CheckModeT;
+    storage: CheckModeT;
   };
   const DEFAULT_CHECK_MODES: CheckModeMapT = {
     visual: "enforce",
@@ -349,6 +350,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     perf: "log",
     url: "log",
     api: "enforce",
+    storage: "log",
   };
   const [checkModes, setCheckModes] =
     useState<CheckModeMapT>(DEFAULT_CHECK_MODES);

@@ -26,7 +26,8 @@ export type CheckLayer =
   | "design"
   | "perf"
   | "url"
-  | "api";
+  | "api"
+  | "storage";
 
 export type CheckModeMap = Record<CheckLayer, CheckMode>;
 
@@ -36,6 +37,7 @@ const ALWAYS_CAPTURED: ReadonlySet<CheckLayer> = new Set([
   "visual",
   "url",
   "perf",
+  "storage",
 ]);
 
 const DEFAULTS: CheckModeMap = {
@@ -51,6 +53,10 @@ const DEFAULTS: CheckModeMap = {
   // API request/response assertions (E1). Standalone api-type tests run a
   // headless HTTP request; a failed status/schema/body assertion gates red.
   api: "enforce",
+  // End-of-run storage state diff (cookies + localStorage, State tab).
+  // Sessions rotate and caches churn — log-only by default, and the diff
+  // engine emits 'low' signal so it never gates a verdict either way.
+  storage: "log",
 };
 
 /** Repo / global default to use when nothing is persisted. */
@@ -82,6 +88,7 @@ type LegacySource = Partial<
     | "perfMode"
     | "urlMode"
     | "apiMode"
+    | "storageMode"
   >
 > & {
   textDiffEnabled?: boolean | null;
@@ -164,10 +171,11 @@ export function deriveCheckModes(
     normalizeMode(source.designMode) ??
     (source.enableDesignSystem === true ? "enforce" : DEFAULTS.design);
 
-  // --- perf / url / api ---
+  // --- perf / url / api / storage ---
   out.perf = normalizeMode(source.perfMode) ?? DEFAULTS.perf;
   out.url = normalizeMode(source.urlMode) ?? DEFAULTS.url;
   out.api = normalizeMode(source.apiMode) ?? DEFAULTS.api;
+  out.storage = normalizeMode(source.storageMode) ?? DEFAULTS.storage;
 
   return out;
 }
@@ -190,6 +198,7 @@ export function checkModesToSettingsPatch(modes: Partial<CheckModeMap>): {
   perfMode?: CheckMode;
   urlMode?: CheckMode;
   apiMode?: CheckMode;
+  storageMode?: CheckMode;
   // legacy mirrors
   enableA11y?: boolean;
   enableDesignSystem?: boolean;
@@ -247,6 +256,9 @@ export function checkModesToSettingsPatch(modes: Partial<CheckModeMap>): {
   }
   if (modes.api) {
     patch.apiMode = modes.api;
+  }
+  if (modes.storage) {
+    patch.storageMode = modes.storage;
   }
 
   return patch;
@@ -355,6 +367,7 @@ export function pickTestModeOverrides(
         designMode?: string | null;
         perfMode?: string | null;
         urlMode?: string | null;
+        storageMode?: string | null;
         networkErrorMode?: "fail" | "warn" | "ignore" | null;
         consoleErrorMode?: "fail" | "warn" | "ignore" | null;
       }
@@ -382,6 +395,7 @@ export function pickTestModeOverrides(
     "perf",
     "url",
     "api",
+    "storage",
   ];
   for (const layer of layers) {
     const newKey = `${layer}Mode` as const;
@@ -427,6 +441,7 @@ export function testModeOverridesToOverridesPatch(
   designMode?: CheckMode;
   perfMode?: CheckMode;
   urlMode?: CheckMode;
+  storageMode?: CheckMode;
   networkErrorMode?: "fail" | "warn" | "ignore";
   consoleErrorMode?: "fail" | "warn" | "ignore";
 } {
@@ -439,6 +454,7 @@ export function testModeOverridesToOverridesPatch(
   if (modes.dom) patch.domMode = modes.dom;
   if (modes.perf) patch.perfMode = modes.perf;
   if (modes.url) patch.urlMode = modes.url;
+  if (modes.storage) patch.storageMode = modes.storage;
   if (modes.a11y) patch.a11yMode = modes.a11y;
   if (modes.design) patch.designMode = modes.design;
   if (modes.network) {
