@@ -2,8 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { requireTeamAccess } from "@/lib/auth";
-import { getSelectedRepository } from "@/lib/db/queries";
+import {
+  getSelectedRepository,
+  getLatestTestResultsWithTrajectoryByRepo,
+} from "@/lib/db/queries";
 import { buildAppMap, type AppMapGraph } from "@/lib/app-map/build-map";
+import { deriveFlows, type AppFlow } from "@/lib/app-map/flows";
 import { addQaTask } from "./qa-agent";
 
 export type GetAppMapResult =
@@ -28,6 +32,28 @@ export async function getAppMap(opts?: {
   });
   if (graph.nodes.length === 0) return { ok: false, reason: "no-data" };
   return { ok: true, graph };
+}
+
+export type GetAppFlowsResult =
+  | { ok: true; flows: AppFlow[]; branch: string }
+  | { ok: false; reason: "no-repo" };
+
+/**
+ * Derive the Flows view data (named user journeys from test URL trajectories)
+ * for the caller's currently-selected repository. Lazy-loaded by the client
+ * when the Flows tab first opens — not part of the map payload.
+ */
+export async function getAppFlows(opts?: {
+  branch?: string;
+}): Promise<GetAppFlowsResult> {
+  const { user, team } = await requireTeamAccess();
+  const repo = await getSelectedRepository(user.id, team.id);
+  if (!repo) return { ok: false, reason: "no-repo" };
+
+  const branch =
+    opts?.branch ?? repo.selectedBranch ?? repo.defaultBranch ?? "main";
+  const rows = await getLatestTestResultsWithTrajectoryByRepo(repo.id, branch);
+  return { ok: true, flows: deriveFlows(rows, branch), branch };
 }
 
 /**
