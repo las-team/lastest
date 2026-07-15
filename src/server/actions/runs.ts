@@ -323,6 +323,8 @@ async function runTestsAsync(
         extractedVariables: result.extractedVariables,
         assignedVariables: result.assignedVariables,
         logs: result.logs,
+        stepTimings: result.stepTimings,
+        consoleEntries: result.consoleEntries,
       });
       await updateJobProgress(activeJobId, i + 1, tests.length);
     }
