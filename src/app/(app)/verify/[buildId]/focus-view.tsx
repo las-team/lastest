@@ -90,6 +90,12 @@ import {
 import { useIsMobile } from "@/lib/hooks/use-is-mobile";
 import type { VisualDiffLite, TestResultLite } from "./board-focus-client";
 import { RcaBadge } from "@/components/diff/rca-badge";
+import {
+  VideoPlayer,
+  type PlayerSegment,
+  type VideoPlayerHandle,
+} from "@/components/video-player";
+import { resolveStepSegments } from "@/lib/playback/step-timings";
 
 interface AreaLite {
   id: string;
@@ -569,6 +575,20 @@ export function FocusView(props: FocusViewProps) {
           e.preventDefault();
           goNext();
           break;
+        // Cycle the evidence tabs without reaching for the mouse — mirrors
+        // prev/next-case on ArrowLeft/Right one level down.
+        case "[":
+        case "]": {
+          e.preventDefault();
+          const dir = e.key === "]" ? 1 : -1;
+          setTab((cur) => {
+            const idx = COMPARE_TABS.findIndex((t) => t.id === cur);
+            const next =
+              (idx + dir + COMPARE_TABS.length) % COMPARE_TABS.length;
+            return COMPARE_TABS[next].id;
+          });
+          break;
+        }
         case "Escape":
           if (intentOpen) setIntentOpen(false);
           break;
@@ -1210,6 +1230,10 @@ export function FocusView(props: FocusViewProps) {
           </button>
         </div>
 
+        {/* Per-step action metadata — kind, label, duration + video time
+            range (from persisted stepTimings), verdict, step thumbnail. */}
+        <StepDetailHeader activeCase={activeCase} />
+
         {/* Compare pane */}
         <div
           style={{
@@ -1354,6 +1378,131 @@ export function FocusView(props: FocusViewProps) {
         initial={props.checkModes}
         onSaved={props.onRefresh}
       />
+    </div>
+  );
+}
+
+/** m:ss.d video-clock display (e.g. `0:10.1`). */
+function formatVideoMs(ms: number): string {
+  const total = Math.max(0, ms) / 1000;
+  const m = Math.floor(total / 60);
+  const s = total - m * 60;
+  return `${m}:${s < 10 ? "0" : ""}${s.toFixed(1)}`;
+}
+
+/** The persisted StepTiming for a case's step — matched by the structural
+ *  "Step N" label first (authoritative), then by index. Null for legacy runs
+ *  without stepTimings. */
+function timingForCase(
+  c: CaseRow,
+): import("@/lib/db/schema").StepTiming | null {
+  const timings = c.result?.stepTimings;
+  if (!timings || timings.length === 0) return null;
+  if (c.step.stepLabel) {
+    const byLabel = timings.find((t) => t.label === c.step.stepLabel);
+    if (byLabel) return byLabel;
+  }
+  if (c.step.stepIndex != null) {
+    return timings.find((t) => t.stepIndex === c.step.stepIndex) ?? null;
+  }
+  return null;
+}
+
+/** Compact per-step action metadata strip between the tab strip and the
+ *  compare pane: step number + label, action kind, duration and video time
+ *  range (when the run persisted stepTimings), verdict chip, and the step's
+ *  current screenshot as a thumbnail. Degrades field-by-field for legacy
+ *  runs — renders nothing without an active case. */
+function StepDetailHeader({ activeCase }: { activeCase: CaseRow | null }) {
+  if (!activeCase) return null;
+  const { step, visual, result } = activeCase;
+  const timing = timingForCase(activeCase);
+  const durationMs = timing ? timing.endMs - timing.startMs : null;
+  const thumb = visual?.currentImagePath ?? null;
+  const verdictTone =
+    step.verdict === "red"
+      ? "regression"
+      : step.verdict === "yellow"
+        ? "missed"
+        : "done";
+  return (
+    <div
+      style={{
+        padding: "6px 16px",
+        borderBottom: "1px solid var(--border)",
+        background: "var(--c-white)",
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        minHeight: 40,
+      }}
+    >
+      {thumb && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={thumb}
+          alt=""
+          style={{
+            width: 40,
+            height: 26,
+            objectFit: "cover",
+            objectPosition: "top",
+            borderRadius: 4,
+            border: "1px solid var(--border)",
+            flexShrink: 0,
+          }}
+        />
+      )}
+      <span className="mono" style={{ fontSize: 11, color: "var(--fg-3)" }}>
+        {step.stepIndex != null ? `#${step.stepIndex + 1}` : "—"}
+      </span>
+      <span
+        style={{
+          fontSize: 12,
+          fontWeight: 600,
+          color: "var(--fg-1)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          maxWidth: 320,
+        }}
+        title={step.stepLabel ?? undefined}
+      >
+        {step.stepLabel ?? "Unlabeled step"}
+      </span>
+      {timing?.stepType && (
+        <span className="v-chip" style={{ fontSize: 9 }}>
+          {timing.stepType}
+        </span>
+      )}
+      <span className={`v-chip ${verdictTone}`} style={{ fontSize: 9 }}>
+        <span className="dot" />
+        {step.verdict}
+      </span>
+      <span style={{ flex: 1 }} />
+      {durationMs != null && (
+        <span
+          className="mono"
+          style={{ fontSize: 10, color: "var(--fg-2)" }}
+          title="Step duration"
+        >
+          {(durationMs / 1000).toFixed(1)}s
+        </span>
+      )}
+      {timing && (
+        <span
+          className="mono"
+          style={{ fontSize: 10, color: "var(--fg-3)" }}
+          title="Video time range — the recording plays this step here"
+        >
+          {formatVideoMs(timing.startMs)} → {formatVideoMs(timing.endMs)}
+        </span>
+      )}
+      {!timing && result?.durationMs != null && (
+        <span className="mono" style={{ fontSize: 10, color: "var(--fg-3)" }}>
+          run {(result.durationMs / 1000).toFixed(1)}s
+        </span>
+      )}
     </div>
   );
 }
@@ -1939,6 +2088,7 @@ function ComparePane({
         stepCells={runStepCells}
         activeStepId={activeStepId}
         onSelectStep={onSelectStep}
+        buildId={buildId}
       />
     );
   if (tab === "visual")
@@ -2163,12 +2313,14 @@ function RunPane({
   stepCells,
   activeStepId,
   onSelectStep,
+  buildId,
 }: {
   result: TestResultLite | null;
   failed: boolean;
   stepCells: RunStepCell[];
   activeStepId: string | null;
   onSelectStep: (stepId: string) => void;
+  buildId: string;
 }) {
   if (!result) {
     return (
@@ -2284,6 +2436,19 @@ function RunPane({
           </div>
         )}
       </div>
+
+      {/* Step-synced recording (spec 28). Segment ticks come from persisted
+          stepTimings; clicking a segment seeks AND selects that step in the
+          case rail. "Follow playback" (opt-in) keeps the rail selection on
+          the step currently playing. */}
+      {result.videoPath && (
+        <RunPlaybackCard
+          result={result}
+          stepCells={stepCells}
+          activeStepId={activeStepId}
+          onSelectStep={onSelectStep}
+        />
+      )}
 
       {/* All steps of the test with per-step passage. Cells are buttons so
           reviewers can jump to any step's other layers (visual/network/...)
@@ -2446,6 +2611,262 @@ function RunPane({
           }
         />
       )}
+
+      {/* Execution details + copyable IDs + agent snippets (Info parity). */}
+      <RunInfoCard result={result} buildId={buildId} />
+    </div>
+  );
+}
+
+/** Recording card inside the Run pane: the annotated player wired to the
+ *  case rail. Isolated from RunPane so its hooks sit behind RunPane's
+ *  null-result early return. */
+function RunPlaybackCard({
+  result,
+  stepCells,
+  activeStepId,
+  onSelectStep,
+}: {
+  result: TestResultLite;
+  stepCells: RunStepCell[];
+  activeStepId: string | null;
+  onSelectStep: (stepId: string) => void;
+}) {
+  const [follow, setFollow] = useState(false);
+  const handleRef = useRef<VideoPlayerHandle | null>(null);
+  const activeStepIdRef = useRef(activeStepId);
+  useEffect(() => {
+    activeStepIdRef.current = activeStepId;
+  }, [activeStepId]);
+
+  const segments = useMemo<PlayerSegment[]>(
+    () =>
+      resolveStepSegments({
+        stepTimings: result.stepTimings,
+        durationMs: result.durationMs,
+      }).map((t) => ({
+        index: t.stepIndex,
+        label: t.label,
+        stepType: t.stepType,
+        status: t.status,
+        startMs: t.startMs,
+        endMs: t.endMs,
+      })),
+    [result.stepTimings, result.durationMs],
+  );
+
+  const selectByStepIndex = useCallback(
+    (stepIndex: number) => {
+      const cell = stepCells.find((c) => c.stepIndex === stepIndex);
+      if (cell && cell.stepId !== activeStepIdRef.current) {
+        onSelectStep(cell.stepId);
+      }
+    },
+    [stepCells, onSelectStep],
+  );
+
+  // Opt-in follow: while playing, keep the case rail on the step whose
+  // segment contains the playhead.
+  useEffect(() => {
+    if (!follow || segments.length === 0) return;
+    const el = handleRef.current?.getElement();
+    if (!el) return;
+    const onTime = () => {
+      const ms = el.currentTime * 1000;
+      for (let i = segments.length - 1; i >= 0; i--) {
+        const seg = segments[i];
+        if (ms >= seg.startMs) {
+          selectByStepIndex(seg.index);
+          return;
+        }
+      }
+    };
+    el.addEventListener("timeupdate", onTime);
+    return () => el.removeEventListener("timeupdate", onTime);
+  }, [follow, segments, selectByStepIndex]);
+
+  return (
+    <div
+      className="v-card"
+      style={{
+        padding: 10,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        flexShrink: 0,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span className="label" style={{ fontSize: 10 }}>
+          Recording
+        </span>
+        <span style={{ flex: 1 }} />
+        <label
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 5,
+            fontSize: 10,
+            color: "var(--fg-2)",
+            cursor: "pointer",
+          }}
+          title="While playing, select the step under the playhead in the case rail"
+        >
+          <input
+            type="checkbox"
+            checked={follow}
+            onChange={(e) => setFollow(e.target.checked)}
+            style={{ accentColor: "var(--c-teal)" }}
+          />
+          Follow playback
+        </label>
+      </div>
+      <VideoPlayer
+        src={result.videoPath!}
+        durationMsFallback={result.durationMs}
+        segments={segments.length > 0 ? segments : undefined}
+        onSegmentSeek={(seg) => selectByStepIndex(seg.index)}
+        defaultPlaybackRate={2}
+        preload="metadata"
+        className="aspect-video w-full"
+        ariaLabel="Test run recording"
+        onReady={(h) => {
+          handleRef.current = h;
+        }}
+      />
+    </div>
+  );
+}
+
+/** Copyable execution details for the Run pane — result/run/test/build IDs
+ *  plus ready-to-paste agent snippets (MCP). */
+function RunInfoCard({
+  result,
+  buildId,
+}: {
+  result: TestResultLite;
+  buildId: string;
+}) {
+  const rows: Array<{ label: string; value: string }> = [
+    { label: "Build", value: buildId },
+    ...(result.testRunId
+      ? [{ label: "Test run", value: result.testRunId }]
+      : []),
+    ...(result.testId ? [{ label: "Test", value: result.testId }] : []),
+    { label: "Result", value: result.id },
+  ];
+  const snippets: Array<{ label: string; value: string }> = [
+    {
+      label: "MCP — build review",
+      value: `lastest_build action:"review" buildId:"${buildId}"`,
+    },
+    ...(result.testId
+      ? [
+          {
+            label: "MCP — rerun this test",
+            value: `lastest_run_tests testIds:["${result.testId}"]`,
+          },
+        ]
+      : []),
+  ];
+  const copy = (value: string) => {
+    navigator.clipboard
+      .writeText(value)
+      .then(() => toast.success("Copied"))
+      .catch(() => toast.error("Copy failed"));
+  };
+  return (
+    <div
+      className="v-card"
+      style={{
+        padding: 10,
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        flexShrink: 0,
+      }}
+    >
+      <span className="label" style={{ fontSize: 10 }}>
+        Execution details
+      </span>
+      {rows.map((r) => (
+        <div
+          key={r.label}
+          style={{ display: "flex", alignItems: "center", gap: 8 }}
+        >
+          <span
+            className="label"
+            style={{ fontSize: 9, width: 56, flexShrink: 0 }}
+          >
+            {r.label}
+          </span>
+          <code
+            className="mono"
+            style={{
+              fontSize: 10,
+              color: "var(--fg-2)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              flex: 1,
+            }}
+          >
+            {r.value}
+          </code>
+          <button
+            type="button"
+            className="v-btn"
+            style={{ padding: "2px 6px", fontSize: 9, minHeight: 0 }}
+            onClick={() => copy(r.value)}
+            aria-label={`Copy ${r.label} ID`}
+          >
+            Copy
+          </button>
+        </div>
+      ))}
+      <div
+        style={{
+          borderTop: "1px solid var(--border)",
+          paddingTop: 6,
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
+        }}
+      >
+        {snippets.map((s) => (
+          <div
+            key={s.label}
+            style={{ display: "flex", alignItems: "center", gap: 8 }}
+          >
+            <code
+              className="mono"
+              title={s.label}
+              style={{
+                fontSize: 10,
+                color: "var(--fg-2)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                flex: 1,
+                background: "var(--c-soft-2)",
+                borderRadius: 4,
+                padding: "3px 6px",
+              }}
+            >
+              {s.value}
+            </code>
+            <button
+              type="button"
+              className="v-btn"
+              style={{ padding: "2px 6px", fontSize: 9, minHeight: 0 }}
+              onClick={() => copy(s.value)}
+              aria-label={`Copy snippet: ${s.label}`}
+            >
+              Copy
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
