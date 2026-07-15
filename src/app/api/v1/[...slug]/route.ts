@@ -1299,6 +1299,61 @@ export async function GET(
       });
     }
 
+    // Explorer session: GET /api/v1/explorer/:sessionId
+    // GET /api/v1/explorer/:sessionId/findings returns the full finding rows.
+    if (resource === "explorer" && id) {
+      const sessionRow = await queries.getAgentSession(id);
+      if (!sessionRow || sessionRow.kind !== "explorer") {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      if (subResource === "findings") {
+        const findings = await queries.listFindingsBySession(id);
+        return NextResponse.json({ findings });
+      }
+      const findings = await queries.listFindingsBySession(id).catch(() => []);
+      return NextResponse.json({
+        id: sessionRow.id,
+        kind: sessionRow.kind,
+        repositoryId: sessionRow.repositoryId,
+        status: sessionRow.status,
+        currentStepId: sessionRow.currentStepId,
+        steps: sessionRow.steps.map((s) => ({
+          id: s.id,
+          status: s.status,
+          label: s.label,
+          iteration: s.iteration,
+          startedAt: s.startedAt,
+          completedAt: s.completedAt,
+          error: s.error,
+          result: s.result,
+        })),
+        metadata: {
+          targetUrl: sessionRow.metadata.explorerTargetUrl,
+          iteration: sessionRow.metadata.explorerIteration ?? 0,
+          maxIterations: sessionRow.metadata.explorerMaxIterations,
+          // Live EB screencast — host-routable, secret-free; watch it explore.
+          streamUrl: sessionRow.metadata.streamUrl,
+          queuedForBrowser: sessionRow.metadata.queuedForBrowser,
+          stuck: sessionRow.metadata.explorerStuck ?? false,
+          report: sessionRow.metadata.explorerReport ?? null,
+          keptTestIds: sessionRow.metadata.explorerKeptTestIds ?? [],
+        },
+        findingsSummary: {
+          total: findings.length,
+          bySeverity: findings.reduce<Record<string, number>>((acc, f) => {
+            acc[f.severity] = (acc[f.severity] ?? 0) + 1;
+            return acc;
+          }, {}),
+        },
+        createdAt: sessionRow.createdAt,
+        updatedAt: sessionRow.updatedAt,
+        completedAt: sessionRow.completedAt,
+      });
+    }
+
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   } catch (error) {
     const mapped = mapAuthError(error);
@@ -2475,6 +2530,97 @@ export async function POST(
       }
     }
 
+    // Explorer — autonomous exploratory testing: POST /api/v1/repos/:id/explorer
+    // Body: { url?: string, maxIterations?: number, email?, password? }
+    // Returns { sessionId }; poll GET /api/v1/explorer/:sessionId.
+    if (resource === "repos" && id && subResource === "explorer") {
+      if (!(await verifyRepoOwnership(id, session))) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      const body = (await request.json().catch(() => ({}))) as {
+        url?: string;
+        maxIterations?: number;
+        email?: string;
+        password?: string;
+      };
+      try {
+        let targetUrl = typeof body.url === "string" ? body.url : "";
+        if (!targetUrl) {
+          const repo = await queries.getRepository(id);
+          const branchBaseUrls = (repo?.branchBaseUrls ?? {}) as Record<
+            string,
+            string
+          >;
+          targetUrl =
+            (repo?.defaultBranch
+              ? branchBaseUrls[repo.defaultBranch]
+              : undefined) ??
+            branchBaseUrls.main ??
+            Object.values(branchBaseUrls)[0] ??
+            "";
+        }
+        if (!targetUrl) {
+          return NextResponse.json(
+            { error: "No url provided and the repo has no base URL set" },
+            { status: 400 },
+          );
+        }
+        const { startExplorerAgent } =
+          await import("@/server/actions/explorer-agent");
+        const result = await startExplorerAgent({
+          repositoryId: id,
+          targetUrl,
+          maxIterations: body.maxIterations,
+          email: body.email,
+          password: body.password,
+        });
+        return NextResponse.json(result, { status: 201 });
+      } catch (err) {
+        return NextResponse.json(
+          { error: err instanceof Error ? err.message : "Explorer failed" },
+          { status: 400 },
+        );
+      }
+    }
+
+    // Explorer knowledge (the MCP "learn" tool):
+    // POST /api/v1/repos/:id/explorer-knowledge
+    // Body: { title?, urlPattern, matchKind?, body }
+    if (resource === "repos" && id && subResource === "explorer-knowledge") {
+      if (!(await verifyRepoOwnership(id, session))) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      const body = (await request.json().catch(() => ({}))) as {
+        title?: string;
+        urlPattern?: string;
+        matchKind?: "exact" | "prefix" | "regex";
+        body?: string;
+      };
+      if (!body.urlPattern || !body.body) {
+        return NextResponse.json(
+          { error: "urlPattern and body are required" },
+          { status: 400 },
+        );
+      }
+      try {
+        const { upsertExplorerKnowledge } =
+          await import("@/server/actions/explorer-agent");
+        const result = await upsertExplorerKnowledge({
+          repositoryId: id,
+          title: body.title || `Note for ${body.urlPattern}`,
+          urlPattern: body.urlPattern,
+          matchKind: body.matchKind ?? "prefix",
+          body: body.body,
+        });
+        return NextResponse.json(result, { status: 201 });
+      } catch (err) {
+        return NextResponse.json(
+          { error: err instanceof Error ? err.message : "Learn failed" },
+          { status: 400 },
+        );
+      }
+    }
+
     // Import tests + functional areas: POST /api/v1/repos/:id/import
     if (resource === "repos" && id && subResource === "import") {
       if (!(await verifyRepoOwnership(id, session))) {
@@ -3222,6 +3368,21 @@ export async function DELETE(
       }
       const { cancelRanger } = await import("@/server/actions/ranger-agent");
       const result = await cancelRanger(id);
+      return NextResponse.json(result);
+    }
+
+    // Cancel Explorer session: DELETE /api/v1/explorer/:sessionId
+    if (resource === "explorer" && id) {
+      const sessionRow = await queries.getAgentSession(id);
+      if (!sessionRow || sessionRow.kind !== "explorer") {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      const { cancelExplorerAgent } =
+        await import("@/server/actions/explorer-agent");
+      const result = await cancelExplorerAgent(id);
       return NextResponse.json(result);
     }
 

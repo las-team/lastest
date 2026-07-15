@@ -19,8 +19,8 @@ import {
   GitCommit,
   Wrench,
   Bot,
+  Compass,
   Lock,
-  Waypoints,
 } from "lucide-react";
 import Image from "next/image";
 import {
@@ -73,7 +73,6 @@ const EARLY_ADOPTER_ITEMS = new Set([
 
 const definitionNav = [
   { name: "Tests", href: "/tests", icon: FileCode },
-  { name: "App Map", href: "/app-map", icon: Waypoints },
   { name: "Setup", href: "/setup", icon: Wrench },
   { name: "Compose", href: "/compose", icon: Layers },
 ];
@@ -81,6 +80,7 @@ const definitionNav = [
 const executionNav = [
   { name: "Runs", href: "/run", icon: Play },
   { name: "QA Agent", href: "/qa-agent", icon: Bot },
+  { name: "Explorer", href: "/explorer", icon: Compass },
   { name: "Compare", href: "/compare", icon: GitCompare },
   { name: "URL Diff", href: "/url-diff", icon: SplitSquareHorizontal },
   { name: "Impact", href: "/analytics/impact", icon: TrendingDown },

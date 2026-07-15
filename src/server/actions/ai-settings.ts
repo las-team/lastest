@@ -74,6 +74,9 @@ export async function saveAISettings(data: {
   openaiModel?: string | null;
   pwAgentModel?: string | null;
   pwAgentTimeout?: number;
+  explorerMaxIterations?: number;
+  explorerStyleRotation?: string | null;
+  explorerModel?: string | null;
 }) {
   if (data.repositoryId) await requireRepoAccess(data.repositoryId);
   else await requireTeamAccess();

@@ -215,8 +215,6 @@ function buildFromPrices(prices: Stripe.Price[]): CatalogPlan[] {
         product.metadata?.concurrent_run_limit,
         fallback.concurrentRunLimit,
       ),
-      // Capability gate, not a marketing knob — always the code-defined cap.
-      maxExplorers: fallback.maxExplorers,
       purchasable: true,
       features: features.length ? features : fallback.features,
       live: true,
