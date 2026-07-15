@@ -8,10 +8,10 @@
  * wrinkle is passing the screenshots as `images` (vision input), which
  * generateWithAI now forwards to the provider.
  *
- * TIMING IS APPROXIMATE. We don't persist a real per-step video timestamp, so
- * each cue is placed by evenly splitting the recording's duration_ms across the
- * steps — the same model the step-strip seek already uses on the share page.
- * Good enough to keep narration tracking the right step; not frame-accurate.
+ * TIMING: cues anchor to each screenshot's recorded offset (`atMs`) when the
+ * run captured it — the same clock the chapter rail seeks with, so narration
+ * stays in lockstep with click-to-seek. Legacy rows without anchors fall back
+ * to evenly splitting the recording's duration_ms across the steps.
  */
 
 import { readFile } from "fs/promises";
@@ -26,6 +26,10 @@ export interface CaptionStepInput {
   /** Storage-relative screenshot path (e.g. `/screenshots/<repo>/<file>.png`). */
   path: string;
   label?: string | null;
+  /** The screenshot's offset into the recording (CapturedScreenshot.atMs).
+   *  When present, cues anchor to it instead of the even split — keeping
+   *  narration in lockstep with the chapter rail's seek targets. */
+  atMs?: number | null;
 }
 
 export interface GenerateVideoCaptionsInput {
@@ -95,15 +99,36 @@ function normalizeFocus(
   return { x: clamp01(x), y: clamp01(y), w: clamp01(w), h: clamp01(h) };
 }
 
-// Even-split timing: step i occupies [i/N, (i+1)/N] of the clip. N is the
-// number of steps we actually narrate, so cues always span the whole timeline.
+// Cue timing ladder: anchor to the screenshot's real recording offset
+// (`atMs`, the same clock the chapter rail seeks with) when the run captured
+// it — the cue runs from this step's anchor to the next anchored step's.
+// Legacy rows without anchors fall back to the old even split (step i
+// occupies [i/N, (i+1)/N] of the clip).
 function timingFor(
   stepIndex: number,
-  totalSteps: number,
+  steps: CaptionStepInput[],
   durationMs: number | null,
 ): { startMs: number; endMs: number } {
+  const totalSteps = steps.length;
   const total =
     durationMs && durationMs > 0 ? durationMs : totalSteps * DEFAULT_STEP_MS;
+
+  const at = steps[stepIndex]?.atMs;
+  if (typeof at === "number" && at >= 0) {
+    let endMs: number | null = null;
+    for (let i = stepIndex + 1; i < totalSteps; i++) {
+      const next = steps[i]?.atMs;
+      if (typeof next === "number" && next > at) {
+        endMs = next;
+        break;
+      }
+    }
+    return {
+      startMs: Math.round(at),
+      endMs: Math.round(endMs ?? Math.max(at + 1000, total)),
+    };
+  }
+
   const per = total / Math.max(1, totalSteps);
   return {
     startMs: Math.round(stepIndex * per),
@@ -193,12 +218,11 @@ Write one caption per step. Return the strict JSON described in the system promp
     if (!byStep.has(c.stepIndex)) byStep.set(c.stepIndex, c);
   }
 
-  const totalSteps = steps.length;
   const out: VideoCaption[] = [];
   for (const l of loaded) {
     const c = byStep.get(l.index);
     if (!c) continue;
-    const { startMs, endMs } = timingFor(l.index, totalSteps, input.durationMs);
+    const { startMs, endMs } = timingFor(l.index, steps, input.durationMs);
     const annotation =
       c.annotation === "arrow" ||
       c.annotation === "underline" ||

@@ -18,6 +18,7 @@ import {
 import type { NewTest, NewFunctionalArea } from "@/lib/db/schema";
 import { getCurrentBranchForRepo } from "@/lib/git-utils";
 import { STORAGE_DIRS } from "@/lib/storage/paths";
+import { resolveResultVideoUrl } from "@/lib/share/video-fallback";
 
 /**
  * Fetch all selector_stats rows for a test so the UI can display per-step
@@ -537,9 +538,28 @@ export async function getTestDetailData(
       return false;
     })();
 
+  // Disk fallback for recordings whose best-effort video_path save failed:
+  // the file is usually on disk under the deterministic
+  // <testRunId>-<testId>.webm name. Only probe the newest rows — the
+  // Recordings card shows recent runs and each probe is a stat call.
+  const resultsWithVideo = await Promise.all(
+    results.map(async (r, i) =>
+      r.videoPath || i >= 10
+        ? r
+        : {
+            ...r,
+            videoPath: await resolveResultVideoUrl(
+              repoId,
+              r.testRunId,
+              r.testId,
+            ),
+          },
+    ),
+  );
+
   return {
     test,
-    results,
+    results: resultsWithVideo,
     repositoryId: repoId,
     screenshotGroups,
     plannedScreenshots,

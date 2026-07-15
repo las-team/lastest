@@ -9,6 +9,8 @@ import type {
   UrlTrajectoryStep,
   WebVitalsSample,
   StorageStateSnapshot,
+  StepTiming,
+  ConsoleEntry,
 } from "@/lib/db/schema";
 
 export interface CapturedScreenshot {
@@ -54,6 +56,9 @@ export interface TestRunResult {
   urlTrajectory?: UrlTrajectoryStep[];
   webVitals?: WebVitalsSample[];
   storageStateSnapshot?: StorageStateSnapshot;
+  // ── Interactive playback (spec 28) ─────────────────────────────────────
+  stepTimings?: StepTiming[];
+  consoleEntries?: ConsoleEntry[];
   // ── API tests (E1) — set for testType==='api' results (headless HTTP) ──
   apiResult?: import("@/lib/db/schema").ApiTestResultData;
 }

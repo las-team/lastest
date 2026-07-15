@@ -32,6 +32,8 @@ import type {
   StorageStateSnapshot,
   UrlTrajectoryStep,
   WebVitalsSample,
+  StepTiming,
+  ConsoleEntry,
 } from "@lastest/eb-protocol";
 export type {
   DomSnapshotElement,
@@ -46,6 +48,8 @@ export type {
   StorageStateSnapshot,
   UrlTrajectoryStep,
   WebVitalsSample,
+  StepTiming,
+  ConsoleEntry,
 };
 
 export type TriageClassification =
@@ -71,6 +75,9 @@ export interface NetworkRequest {
   failed?: boolean;
   errorText?: string;
   startTime?: number;
+  /** ms since recording start (video clock). Set by EB runs; lets timeline
+   *  consumers place the request without epoch math. */
+  atMs?: number;
   requestHeaders?: Record<string, string>;
   responseHeaders?: Record<string, string>;
   postData?: string;
@@ -771,6 +778,9 @@ export const testResults = pgTable("test_results", {
   viewport: text("viewport"), // e.g., '1920x1080'
   browser: text("browser").default("chromium"),
   consoleErrors: jsonb("console_errors").$type<string[]>(),
+  // Timestamped console capture (video clock). Additive alongside
+  // consoleErrors — see ConsoleEntry.
+  consoleEntries: jsonb("console_entries").$type<ConsoleEntry[]>(),
   networkRequests: jsonb("network_requests").$type<NetworkRequest[]>(),
   downloads: jsonb("downloads").$type<DownloadRecord[]>(),
   a11yViolations: jsonb("a11y_violations").$type<A11yViolation[]>(),
@@ -826,6 +836,9 @@ export const testResults = pgTable("test_results", {
   storageStateSnapshot: jsonb(
     "storage_state_snapshot",
   ).$type<StorageStateSnapshot>(),
+  // Per-step start/end on the video clock — powers the annotated scrubber and
+  // step-synced evidence panes. Null for legacy/local runs.
+  stepTimings: jsonb("step_timings").$type<StepTiming[]>(),
 });
 
 // Repository provider type

@@ -715,6 +715,7 @@ async function startup(): Promise<void> {
               duration: r.duration,
               resourceType: r.resourceType,
               startTime: r.startTime,
+              atMs: r.atMs,
               failed: r.failed,
               errorText: r.errorText,
               responseSize: r.responseSize,
@@ -767,6 +768,11 @@ async function startup(): Promise<void> {
                 webVitals: result.webVitals,
                 assertionResults: result.assertionResults,
                 storageStateSnapshot: result.storageStateSnapshot,
+                // Video-clock step timings + timestamped console entries —
+                // populate testResults.stepTimings / .consoleEntries (the
+                // annotated-scrubber + playback-sync source, spec 28).
+                stepTimings: result.stepTimings,
+                consoleEntries: result.consoleEntries,
               },
             });
 

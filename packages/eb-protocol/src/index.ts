@@ -141,6 +141,31 @@ export interface UrlTrajectoryStep {
   redirectChain: string[];
   /** Wall-clock ms from test start when this step's URL was sampled. */
   capturedAtMs?: number;
+  /** ms since recording start (video clock). Set by EB runs. */
+  atMs?: number;
+}
+
+/** Per-step execution timing on the video clock (ms since recording start).
+ *  Mirrors `StepTiming` in the app schema — kept local so the protocol package
+ *  stays dependency-free. */
+export interface StepTiming {
+  stepIndex: number;
+  /** "Step N" structural key — matches CapturedScreenshot.label. */
+  label: string;
+  /** Action kind driving scrubber icons: navigate | click | fill | shot | assert | wait | other. */
+  stepType: string;
+  status: "passed" | "failed";
+  /** ms since recording start (test start when the run wasn't recorded). */
+  startMs: number;
+  endMs: number;
+}
+
+/** Console message with a video-clock timestamp. Mirrors `ConsoleEntry` in the
+ *  app schema. `atMs` is null when the run had no recording. */
+export interface ConsoleEntry {
+  atMs: number | null;
+  level: string;
+  text: string;
 }
 
 /** Web Vitals captured per page-state. Sampled at screenshot points and at
@@ -584,6 +609,10 @@ export interface TestResultPayload {
   selectorOutcomes?: SelectorOutcome[];
   /** Redacted cookies/localStorage capture taken after the test body ran. */
   storageStateSnapshot?: StorageStateSnapshot;
+  /** Per-step start/end on the video clock → testResults.stepTimings. */
+  stepTimings?: StepTiming[];
+  /** Timestamped console entries → testResults.consoleEntries. */
+  consoleEntries?: ConsoleEntry[];
 }
 
 export interface TestResultResponse extends BaseMessage {
