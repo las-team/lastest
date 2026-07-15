@@ -22,6 +22,8 @@ import { runTestsCore } from "./runs";
 import { toProxyStreamUrl } from "@/lib/eb/stream-url";
 import { appendStreamToken } from "@/lib/eb/stream-token";
 import { crawlTargetApp } from "@/lib/qa-agent/crawl";
+import { exploreTargetApp } from "@/lib/qa-agent/explore";
+import { poolMax } from "@/lib/eb/provisioner";
 import {
   findAuthLinksOnEb,
   findExistingAuthSetup,
@@ -84,8 +86,10 @@ import type {
   PwAgentType,
   QaAuthState,
   QaDiscovery,
+  QaExploreBlocked,
   QaExploreConfig,
   QaExploreState,
+  QaExplorerState,
   QaGeneratedTest,
   QaPageSnapshot,
   QaPlanItem,
@@ -1068,6 +1072,256 @@ async function runQaLogin(
   }
 }
 
+// ── Explore swarm (mode = "explore", explorers > 1) ──────────────────────────
+
+const SWARM_EXTRA_CLAIM_TIMEOUT_MS = 30_000;
+/** Pool slots always left free for builds/other agents when sizing a swarm. */
+const SWARM_POOL_HEADROOM = 5;
+
+/**
+ * Multi-EB exploration: progressive claim (explorer #1 gets the full claim
+ * timeout and must succeed; #2..K get 30s each — run with however many
+ * arrive), one shared frontier in this process, a single serialized throttled
+ * flush for all metadata writes (mergeMetadata is read-merge-rewrite — it
+ * must never run concurrently), and ALL EBs released in `finally`.
+ * `metadata.streamUrl` stays explorer 0's stream for /qa-agent page compat;
+ * per-explorer streams live on `qaExplore.explorers[i].streamUrl`.
+ */
+async function runQaDiscoverSwarm(args: {
+  sessionId: string;
+  teamId: string;
+  repositoryId: string;
+  targetUrl: string;
+  signal: AbortSignal;
+  initialExplore: QaExploreState;
+  storageStateJson?: string;
+  credentials?: { email: string; password: string };
+  loginUrl?: string;
+  staticRoutes: Array<{ path: string; type: string }>;
+  framework?: string;
+  githubConnected: boolean;
+  onDetail: (detail: string) => void;
+}): Promise<{
+  pages: QaPageSnapshot[];
+  blocked: QaExploreBlocked[];
+  loginAttempted: boolean;
+  finalExplore: QaExploreState;
+}> {
+  const { sessionId, teamId, repositoryId, targetUrl, signal } = args;
+  const config = args.initialExplore.config;
+
+  // Cap the swarm so builds keep pool headroom: min(requested, poolMax − 5).
+  const max = await poolMax().catch(
+    () => config.explorers + SWARM_POOL_HEADROOM,
+  );
+  const want = Math.max(
+    1,
+    Math.min(config.explorers, max - SWARM_POOL_HEADROOM),
+  );
+
+  // Single-writer live state; every metadata write goes through one
+  // serialized, ≥3s-throttled chain.
+  let explore: QaExploreState = {
+    ...args.initialExplore,
+    explorers: args.initialExplore.explorers.map((e) => ({ ...e })),
+  };
+  const livePages: QaPageSnapshot[] = [];
+  let lastFlushAt = 0;
+  let flushChain: Promise<void> = Promise.resolve();
+  const flushState = (force = false) => {
+    const now = Date.now();
+    if (!force && now - lastFlushAt < 3000) return;
+    lastFlushAt = now;
+    const patch: Partial<AgentSessionMetadata> = {
+      qaExplore: explore,
+      qaDiscovery: {
+        targetUrl,
+        crawledPages: [...livePages],
+        staticRoutes:
+          args.staticRoutes.length > 0 ? args.staticRoutes : undefined,
+        framework: args.framework,
+        githubConnected: args.githubConnected,
+      },
+    };
+    flushChain = flushChain
+      .then(() => mergeMetadata(sessionId, patch))
+      .catch((err) => console.warn("[QaAgent] swarm flush failed:", err));
+  };
+  const setExplorer = (index: number, patch: Partial<QaExplorerState>) => {
+    explore = {
+      ...explore,
+      pagesDiscovered: livePages.length,
+      explorers: explore.explorers.map((e) =>
+        e.index === index ? { ...e, ...patch } : e,
+      ),
+    };
+  };
+
+  const ebs: Array<{ cdpUrl: string; streamUrl: string; runnerId: string }> =
+    [];
+  try {
+    // Explorer #1 must succeed — full claim timeout.
+    const first = await claimEmbeddedBrowserForAgent(
+      EB_CLAIM_TIMEOUT_MS,
+      () => {
+        mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+      },
+    );
+    if (!first) throw new Error("No embedded browser available");
+    ebs.push(first);
+
+    // #2..K best-effort, 30s each, in parallel — run with whoever arrives.
+    const extras = await Promise.all(
+      Array.from({ length: want - 1 }, () =>
+        claimEmbeddedBrowserForAgent(SWARM_EXTRA_CLAIM_TIMEOUT_MS).catch(
+          () => undefined,
+        ),
+      ),
+    );
+    for (const eb of extras) if (eb) ebs.push(eb);
+
+    for (const e of explore.explorers) {
+      if (e.index < ebs.length) {
+        setExplorer(e.index, {
+          status: "exploring",
+          streamUrl: proxiedStream(ebs[e.index]!.streamUrl),
+        });
+      } else {
+        setExplorer(e.index, {
+          status: "failed",
+          detail:
+            e.index < want
+              ? "no browser available"
+              : "capped to keep pool headroom for builds",
+        });
+      }
+    }
+    await mergeMetadata(sessionId, {
+      queuedForBrowser: false,
+      streamUrl: proxiedStream(first.streamUrl),
+      qaExplore: explore,
+    });
+    emitActivity(
+      teamId,
+      repositoryId,
+      sessionId,
+      "map:explorer_status",
+      `Explorer swarm: ${ebs.length} of ${config.explorers} browsers claimed`,
+      {
+        stepId: "qa_discover",
+        agentType: "ranger",
+        detail: { claimed: ebs.length, requested: config.explorers },
+      },
+    );
+
+    const result = await exploreTargetApp({
+      ebs: ebs.map((e) => ({ cdpUrl: e.cdpUrl })),
+      targetUrl,
+      strategy: config.strategy,
+      maxDepth: config.depth,
+      pageBudget: config.pageBudget,
+      deadline: new Date(explore.deadlineAt).getTime(),
+      storageStateJson: args.storageStateJson,
+      credentials: args.credentials,
+      loginUrl: args.loginUrl,
+      signal,
+      onPage: (snapshot, explorerIndex, totalMapped) => {
+        livePages.push(snapshot);
+        const prev =
+          explore.explorers.find((e) => e.index === explorerIndex)
+            ?.pagesMapped ?? 0;
+        setExplorer(explorerIndex, {
+          status: "exploring",
+          pagesMapped: prev + 1,
+          currentUrl: snapshot.finalUrl,
+        });
+        flushState();
+        args.onDetail(`${totalMapped} pages mapped — ${snapshot.finalUrl}`);
+        emitActivity(
+          teamId,
+          repositoryId,
+          sessionId,
+          "map:page_discovered",
+          `Discovered ${snapshot.finalUrl}`,
+          {
+            stepId: "qa_discover",
+            agentType: "ranger",
+            detail: {
+              url: snapshot.finalUrl,
+              title: snapshot.title,
+              explorer: explorerIndex,
+            },
+          },
+        );
+      },
+      onExplorerStatus: (index, status, detail) => {
+        setExplorer(index, {
+          status,
+          detail,
+          ...(status === "done" || status === "failed"
+            ? { currentUrl: undefined, streamUrl: undefined }
+            : {}),
+        });
+        flushState();
+        emitActivity(
+          teamId,
+          repositoryId,
+          sessionId,
+          "map:explorer_status",
+          `Explorer ${index + 1} ${status}${detail ? ` — ${detail}` : ""}`,
+          {
+            stepId: "qa_discover",
+            agentType: "ranger",
+            detail: { index, status },
+          },
+        );
+      },
+      onBlocked: (b) => {
+        explore = { ...explore, blocked: [...explore.blocked, b] };
+        flushState();
+        emitActivity(
+          teamId,
+          repositoryId,
+          sessionId,
+          "map:blocked",
+          `Blocked at ${b.url} (${b.reason.replace("_", " ")})`,
+          {
+            stepId: "qa_discover",
+            agentType: "ranger",
+            detail: { url: b.url, reason: b.reason },
+          },
+        );
+      },
+    });
+
+    // Settle in-flight flushes, then finalize every explorer row.
+    await flushChain.catch(() => {});
+    explore = {
+      ...explore,
+      pagesDiscovered: result.pages.length,
+      blocked: result.blocked,
+      explorers: explore.explorers.map((e) => ({
+        ...e,
+        status:
+          e.status === "exploring" || e.status === "blocked"
+            ? "done"
+            : e.status === "claiming"
+              ? "failed"
+              : e.status,
+        currentUrl: undefined,
+        streamUrl: undefined,
+      })),
+    };
+    return { ...result, finalExplore: explore };
+  } finally {
+    await mergeMetadata(sessionId, { streamUrl: undefined }).catch(() => {});
+    // ALL claimed EBs go back — on success, failure, AND cancel.
+    for (const eb of ebs) {
+      await releasePoolEB(eb.runnerId).catch(() => {});
+    }
+  }
+}
+
 // ── Step: qa_discover ────────────────────────────────────────────────────────
 
 async function runQaDiscover(
@@ -1293,160 +1547,214 @@ async function runQaDiscover(
   };
 
   let runnerId: string | undefined;
+  let swarmRan = false;
   let crawled: Awaited<ReturnType<typeof crawlTargetApp>> = {
     pages: [],
     loginAttempted: false,
   };
   try {
-    const eb = await claimEmbeddedBrowserForAgent(EB_CLAIM_TIMEOUT_MS, () => {
-      mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
-    });
-    if (!eb) {
-      substeps[2] = {
-        ...substeps[2],
-        status: "error",
-        detail: "No embedded browser available",
-      };
-      await updateSubsteps(sessionId, "qa_discover", substeps);
-    } else {
-      runnerId = eb.runnerId;
-      if (exploreState) {
-        setExplorerState({
-          status: "exploring",
-          streamUrl: proxiedStream(eb.streamUrl),
-        });
-        emitActivity(
-          teamId,
-          repositoryId,
-          sessionId,
-          "map:explorer_status",
-          "Explorer 1 started",
-          {
-            stepId: "qa_discover",
-            agentType: "ranger",
-            detail: { index: 0, status: "exploring" },
-          },
-        );
-      }
-      await mergeMetadata(sessionId, {
-        queuedForBrowser: false,
-        streamUrl: proxiedStream(eb.streamUrl),
-        ...(exploreState ? { qaExplore: exploreState } : {}),
-      });
-
-      // Start the crawl from the post-login state when qa_login resolved a
-      // storage state; otherwise fall back to the inline first-page login
-      // ("creds tested during discovery"). Unresolved auth also prioritizes
-      // login/signup links so the auth surface itself gets mapped.
+    if (exploreState && exploreState.config.explorers > 1) {
+      // Swarm path — claims and releases its own EBs.
+      swarmRan = true;
       const qaAuth = session.metadata.qaAuth;
-      let preAuthed = false;
+      let storageStateJson: string | undefined;
       if (qaAuth?.storageStateId) {
         const state = await queries
           .getStorageState(qaAuth.storageStateId)
           .catch(() => null);
-        if (state?.storageStateJson) {
-          preAuthed = await injectStorageStateIntoEb(
-            eb.cdpUrl,
-            state.storageStateJson,
-          );
-        }
+        storageStateJson = state?.storageStateJson ?? undefined;
       }
-      const credentials = preAuthed
-        ? undefined
-        : credentialsFrom(session.metadata);
-      crawled = await crawlTargetApp(eb.cdpUrl, targetUrl, {
-        maxPages: exploreState
-          ? exploreState.config.pageBudget
-          : MAX_CRAWL_PAGES,
-        ...(exploreState
-          ? {
-              maxPagesHardCap: 40,
-              maxDepth: exploreState.config.depth,
-              deadline: new Date(exploreState.deadlineAt).getTime(),
-            }
-          : {}),
-        credentials,
-        loginUrl: qaAuth?.loginUrl,
-        // No injected session and no creds to try → make sure the crawl at
-        // least maps the login/signup surface itself.
-        prioritizeAuthLinks: !preAuthed && !credentials,
+      const result = await runQaDiscoverSwarm({
+        sessionId,
+        teamId,
+        repositoryId,
+        targetUrl,
         signal,
-        onPage: (snapshot, index) => {
-          substeps[2] = {
-            ...substeps[2],
-            detail: `${index + 1} pages mapped — ${snapshot.finalUrl}`,
-          };
+        initialExplore: exploreState,
+        storageStateJson,
+        credentials: storageStateJson
+          ? undefined
+          : credentialsFrom(session.metadata),
+        loginUrl: qaAuth?.loginUrl,
+        staticRoutes,
+        framework,
+        githubConnected,
+        onDetail: (detail) => {
+          substeps[2] = { ...substeps[2], detail };
           updateSubsteps(sessionId, "qa_discover", substeps).catch(() => {});
-          if (isExplore) {
-            livePages.push(snapshot);
-            setExplorerState({
-              status: "exploring",
-              pagesMapped: livePages.length,
-              currentUrl: snapshot.finalUrl,
-            });
-            flushLive();
-            emitActivity(
-              teamId,
-              repositoryId,
-              sessionId,
-              "map:page_discovered",
-              `Discovered ${snapshot.finalUrl}`,
-              {
-                stepId: "qa_discover",
-                agentType: "ranger",
-                detail: {
-                  url: snapshot.finalUrl,
-                  title: snapshot.title,
-                  index,
-                },
-              },
-            );
-          }
-          emitActivity(
-            teamId,
-            repositoryId,
-            sessionId,
-            "substep:update",
-            `Mapped ${snapshot.finalUrl}: ${snapshot.links.length} links, ${snapshot.forms.length} forms, ${snapshot.apiEndpoints.length} API calls`,
-            { stepId: "qa_discover", agentType: "ranger" },
-          );
         },
       });
+      crawled = {
+        pages: result.pages,
+        loginAttempted: result.loginAttempted,
+      };
+      exploreState = result.finalExplore;
+      const doneCount = result.finalExplore.explorers.filter(
+        (e) => e.status === "done",
+      ).length;
       substeps[2] = {
         ...substeps[2],
         status: crawled.pages.length > 0 ? "done" : "error",
         detail:
           crawled.pages.length > 0
-            ? `${crawled.pages.length} pages, ${crawled.pages.reduce((n, p) => n + p.apiEndpoints.length, 0)} API calls observed${preAuthed ? ", pre-authenticated" : crawled.loginAttempted ? ", logged in" : ""}`
+            ? `${crawled.pages.length} pages via ${doneCount} explorer${doneCount === 1 ? "" : "s"}${result.blocked.length > 0 ? `, ${result.blocked.length} blocked` : ""}`
             : "No pages could be mapped",
       };
       await updateSubsteps(sessionId, "qa_discover", substeps);
+    } else {
+      const eb = await claimEmbeddedBrowserForAgent(EB_CLAIM_TIMEOUT_MS, () => {
+        mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+      });
+      if (!eb) {
+        substeps[2] = {
+          ...substeps[2],
+          status: "error",
+          detail: "No embedded browser available",
+        };
+        await updateSubsteps(sessionId, "qa_discover", substeps);
+      } else {
+        runnerId = eb.runnerId;
+        if (exploreState) {
+          setExplorerState({
+            status: "exploring",
+            streamUrl: proxiedStream(eb.streamUrl),
+          });
+          emitActivity(
+            teamId,
+            repositoryId,
+            sessionId,
+            "map:explorer_status",
+            "Explorer 1 started",
+            {
+              stepId: "qa_discover",
+              agentType: "ranger",
+              detail: { index: 0, status: "exploring" },
+            },
+          );
+        }
+        await mergeMetadata(sessionId, {
+          queuedForBrowser: false,
+          streamUrl: proxiedStream(eb.streamUrl),
+          ...(exploreState ? { qaExplore: exploreState } : {}),
+        });
 
-      // Post-crawl auth bookkeeping while we still hold the EB: upgrade a
-      // creds_untested resolution whose inline login worked (capture the
-      // session for generation), and settle deferred validation.
-      if (
-        qaAuth &&
-        ((qaAuth.strategy === "creds_untested" && crawled.loginAttempted) ||
-          (preAuthed && !qaAuth.validated))
-      ) {
-        const probe = await probeAndCaptureOnEb(eb.cdpUrl, targetUrl);
-        if (probe.authed) {
-          let upgraded = { ...qaAuth, validated: true };
-          if (qaAuth.strategy === "creds_untested" && probe.storageStateJson) {
-            const persisted = await queries.createStorageState({
-              repositoryId,
-              name: `QA agent login ${utcStamp()}`,
-              storageStateJson: probe.storageStateJson,
-            });
-            upgraded = {
-              ...upgraded,
-              strategy: "user_creds",
-              storageStateId: persisted.id,
-              notes: "Credentials verified during discovery",
-            };
+        // Start the crawl from the post-login state when qa_login resolved a
+        // storage state; otherwise fall back to the inline first-page login
+        // ("creds tested during discovery"). Unresolved auth also prioritizes
+        // login/signup links so the auth surface itself gets mapped.
+        const qaAuth = session.metadata.qaAuth;
+        let preAuthed = false;
+        if (qaAuth?.storageStateId) {
+          const state = await queries
+            .getStorageState(qaAuth.storageStateId)
+            .catch(() => null);
+          if (state?.storageStateJson) {
+            preAuthed = await injectStorageStateIntoEb(
+              eb.cdpUrl,
+              state.storageStateJson,
+            );
           }
-          await mergeMetadata(sessionId, { qaAuth: upgraded });
+        }
+        const credentials = preAuthed
+          ? undefined
+          : credentialsFrom(session.metadata);
+        crawled = await crawlTargetApp(eb.cdpUrl, targetUrl, {
+          maxPages: exploreState
+            ? exploreState.config.pageBudget
+            : MAX_CRAWL_PAGES,
+          ...(exploreState
+            ? {
+                maxPagesHardCap: 40,
+                maxDepth: exploreState.config.depth,
+                deadline: new Date(exploreState.deadlineAt).getTime(),
+              }
+            : {}),
+          credentials,
+          loginUrl: qaAuth?.loginUrl,
+          // No injected session and no creds to try → make sure the crawl at
+          // least maps the login/signup surface itself.
+          prioritizeAuthLinks: !preAuthed && !credentials,
+          signal,
+          onPage: (snapshot, index) => {
+            substeps[2] = {
+              ...substeps[2],
+              detail: `${index + 1} pages mapped — ${snapshot.finalUrl}`,
+            };
+            updateSubsteps(sessionId, "qa_discover", substeps).catch(() => {});
+            if (isExplore) {
+              livePages.push(snapshot);
+              setExplorerState({
+                status: "exploring",
+                pagesMapped: livePages.length,
+                currentUrl: snapshot.finalUrl,
+              });
+              flushLive();
+              emitActivity(
+                teamId,
+                repositoryId,
+                sessionId,
+                "map:page_discovered",
+                `Discovered ${snapshot.finalUrl}`,
+                {
+                  stepId: "qa_discover",
+                  agentType: "ranger",
+                  detail: {
+                    url: snapshot.finalUrl,
+                    title: snapshot.title,
+                    index,
+                  },
+                },
+              );
+            }
+            emitActivity(
+              teamId,
+              repositoryId,
+              sessionId,
+              "substep:update",
+              `Mapped ${snapshot.finalUrl}: ${snapshot.links.length} links, ${snapshot.forms.length} forms, ${snapshot.apiEndpoints.length} API calls`,
+              { stepId: "qa_discover", agentType: "ranger" },
+            );
+          },
+        });
+        substeps[2] = {
+          ...substeps[2],
+          status: crawled.pages.length > 0 ? "done" : "error",
+          detail:
+            crawled.pages.length > 0
+              ? `${crawled.pages.length} pages, ${crawled.pages.reduce((n, p) => n + p.apiEndpoints.length, 0)} API calls observed${preAuthed ? ", pre-authenticated" : crawled.loginAttempted ? ", logged in" : ""}`
+              : "No pages could be mapped",
+        };
+        await updateSubsteps(sessionId, "qa_discover", substeps);
+
+        // Post-crawl auth bookkeeping while we still hold the EB: upgrade a
+        // creds_untested resolution whose inline login worked (capture the
+        // session for generation), and settle deferred validation.
+        if (
+          qaAuth &&
+          ((qaAuth.strategy === "creds_untested" && crawled.loginAttempted) ||
+            (preAuthed && !qaAuth.validated))
+        ) {
+          const probe = await probeAndCaptureOnEb(eb.cdpUrl, targetUrl);
+          if (probe.authed) {
+            let upgraded = { ...qaAuth, validated: true };
+            if (
+              qaAuth.strategy === "creds_untested" &&
+              probe.storageStateJson
+            ) {
+              const persisted = await queries.createStorageState({
+                repositoryId,
+                name: `QA agent login ${utcStamp()}`,
+                storageStateJson: probe.storageStateJson,
+              });
+              upgraded = {
+                ...upgraded,
+                strategy: "user_creds",
+                storageStateId: persisted.id,
+                notes: "Credentials verified during discovery",
+              };
+            }
+            await mergeMetadata(sessionId, { qaAuth: upgraded });
+          }
         }
       }
     }
@@ -1488,9 +1796,10 @@ async function runQaDiscover(
     prChanges,
   };
   // Settle any in-flight incremental flush before the authoritative final
-  // write, then mark the explorer finished.
+  // write, then mark the explorer finished. (The swarm path finalizes its
+  // explorer rows itself — exploreState already holds its final form.)
   await flushChain.catch(() => {});
-  if (exploreState) {
+  if (exploreState && !swarmRan) {
     setExplorerState({
       status:
         exploreState.explorers[0]?.status === "failed" ? "failed" : "done",

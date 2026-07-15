@@ -13,7 +13,7 @@
  */
 
 import type { CapturedScreenshot, UrlTrajectoryStep } from "@/lib/db/schema";
-import { canonicalPath } from "./build-map";
+import { canonicalPath } from "./canonical";
 
 export interface AppFlowStep {
   stepIndex: number;

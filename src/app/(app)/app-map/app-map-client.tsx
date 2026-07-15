@@ -71,6 +71,7 @@ import { ScreensGallery } from "./screens-gallery";
 import { FlowsView } from "./flows-view";
 import { FlowPlayer } from "./flow-player";
 import { ExploreDialog } from "./explore-dialog";
+import { ExploreProgressPanel } from "./explore-progress-panel";
 
 // ── Layout constants ──────────────────────────────────────────────────────────
 // Thumbnail is 16:9 (matches the default 1920×1080 run viewport), so
@@ -545,6 +546,7 @@ export function AppMapClient({
     activeExploration?.explore?.pagesDiscovered ?? 0,
   );
   const [exploreOpen, setExploreOpen] = useState(false);
+  const [panelHidden, setPanelHidden] = useState(false);
 
   useEffect(() => {
     if (!exploringSessionId) return;
@@ -598,6 +600,7 @@ export function AppMapClient({
       try {
         const { sessionId } = await startExploration(input);
         setExploreCount(0);
+        setPanelHidden(false);
         setExploringSessionId(sessionId);
         toast.success("Exploration started", {
           description: "New screens will appear on the map as they're found",
@@ -851,7 +854,16 @@ export function AppMapClient({
           {exploringSessionId ? (
             <div className="flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/5 px-2.5 py-1 text-xs">
               <Radar className="h-3.5 w-3.5 animate-pulse text-primary" />
-              <span className="font-medium text-primary">Exploring…</span>
+              <button
+                type="button"
+                onClick={() => setPanelHidden((h) => !h)}
+                className="font-medium text-primary hover:underline"
+                title={
+                  panelHidden ? "Show progress panel" : "Hide progress panel"
+                }
+              >
+                Exploring…
+              </button>
               <span className="text-muted-foreground">
                 {exploreCount} screen{exploreCount === 1 ? "" : "s"} found
               </span>
@@ -1122,6 +1134,22 @@ export function AppMapClient({
             flows={flows}
             loading={flowsLoading}
             onOpenFlow={openFlow}
+          />
+        )}
+
+        {exploringSessionId && !panelHidden && (
+          <ExploreProgressPanel
+            sessionId={exploringSessionId}
+            repositoryId={repositoryId}
+            onFinished={() => {
+              setExploringSessionId(null);
+              getAppMap({ branch })
+                .then((r) => {
+                  if (r.ok) setGraph(r.graph);
+                })
+                .catch(() => {});
+            }}
+            onClose={() => setPanelHidden(true)}
           />
         )}
 
