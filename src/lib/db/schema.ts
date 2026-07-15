@@ -1804,6 +1804,7 @@ export type AIActionType =
   | "agent_heal"
   | "agent_play"
   | "qa_plan"
+  | "qa_task_triage"
   | "triage"
   | "generate_var_value"
   | "suggest_app_fix";
@@ -3092,6 +3093,15 @@ export interface QaGeneratedTest {
   error?: string;
 }
 
+/** The task dispatcher's routing decision for a Direct-the-agent directive.
+ *  Stored on the session for provenance; `promptLogId` links to the
+ *  ai_prompt_logs row holding the exact triage prompt + response. */
+export interface QaTaskTriage {
+  scope: "targeted" | "explore";
+  reason: string;
+  promptLogId?: string;
+}
+
 /** One cell of the business-area × test-group coverage matrix. */
 export interface QaMatrixCell {
   planned: number;
@@ -3225,6 +3235,12 @@ export interface AgentSessionMetadata {
   qaSummary?: QaSummaryData;
   /** Task from the direction queue this session is working (dispatcher-run). */
   qaTaskId?: string;
+  /** Task-scoped runs: the plan item ids the directive resolved to. When set,
+   *  qa_generate considers ONLY these items — the rest of the stored plan is
+   *  context, not work — so execute/heal/reply stay scoped to the directive. */
+  qaTaskItemIds?: string[];
+  /** How the dispatcher routed the directive (targeted vs explore) + why. */
+  qaTaskTriage?: QaTaskTriage;
   /** What started this session — powers the run-history provenance chip.
    *  Absent on sessions created before triggers existed = "manual". */
   qaTrigger?: QaSessionTrigger;
@@ -3266,6 +3282,15 @@ export type QaTaskStatus =
 
 export type QaTaskSource = "user" | "mcp" | "coverage_gap";
 
+/** A test the task's run touched — rendered as a linked chip on the board
+ *  card when the task settles. `status` is the ledger outcome at settle time
+ *  (passed/healed/failed/generated/covered). */
+export interface QaTaskTestRef {
+  testId: string;
+  name: string;
+  status: QaGeneratedTestStatus;
+}
+
 /** A directive dropped into the QA agent's queue ("test the billing flow",
  *  "increase Dashboard a11y coverage"). The dispatcher picks tasks up oldest
  *  first whenever no QA session is active, runs a task-scoped session, writes
@@ -3292,6 +3317,8 @@ export const qaTasks = pgTable(
     sessionId: text("session_id"),
     /** The agent's reply when it finishes — or why it needs input. */
     agentReply: text("agent_reply"),
+    /** Tests the run generated/healed/matched for this task — board chips. */
+    tests: jsonb("tests").$type<QaTaskTestRef[]>(),
     createdAt: timestamp("created_at").$defaultFn(() => new Date()),
     updatedAt: timestamp("updated_at").$defaultFn(() => new Date()),
     startedAt: timestamp("started_at"),
@@ -3781,6 +3808,7 @@ export type ActivityEventType =
   // QA agent direction queue
   | "task:created"
   | "task:started"
+  | "task:triaged"
   | "task:completed"
   | "task:failed"
   | "mcp:tool_call"
