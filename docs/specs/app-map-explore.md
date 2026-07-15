@@ -1,7 +1,8 @@
 # App Map "Explore" — Spec + Implementation Plan
 
-> Status: planned (spec only — no implementation yet). Targets the App Map work on
-> branch `feat/app-map`; all file/line references below are against that branch.
+> Status: Phases A–C implemented (this branch); Phase D remains stretch/unbuilt.
+> Targets the App Map work from branch `feat/app-map`; file/line references
+> below are against that branch as it stood when the spec was written.
 
 ## Context
 
