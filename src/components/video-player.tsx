@@ -13,18 +13,25 @@ import {
 } from "react";
 import * as SliderPrimitive from "@radix-ui/react-slider";
 import {
+  Camera,
   Captions,
   CaptionsOff,
   Check,
+  CircleCheck,
+  Globe,
+  Keyboard,
   Maximize2,
   Minimize2,
+  MousePointerClick,
   Pause,
   Play,
   SkipBack,
   SkipForward,
+  Timer,
   Volume1,
   Volume2,
   VolumeX,
+  type LucideIcon,
 } from "lucide-react";
 import {
   Popover,
@@ -33,7 +40,7 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
-const RATE_OPTIONS = [0.5, 1, 1.5, 2, 3, 4] as const;
+const RATE_OPTIONS = [0.5, 1, 1.5, 2, 3, 4, 6, 8] as const;
 const VOLUME_KEY = "lastest:videoplayer:volume";
 const MUTED_KEY = "lastest:videoplayer:muted";
 const CAPTIONS_KEY = "lastest:videoplayer:captions";
@@ -43,6 +50,37 @@ export interface VideoTextTrack {
   srclang: string;
   label: string;
 }
+
+/** One test step rendered as a segment on the scrubber (video-clock ms). */
+export interface PlayerSegment {
+  /** 0-based step index; shown 1-based in the UI. */
+  index: number;
+  label: string;
+  /** Action kind → tick icon (navigate/click/fill/shot/assert/wait/...). */
+  stepType?: string;
+  status?: "passed" | "failed";
+  startMs: number;
+  endMs: number;
+}
+
+// Icon per step kind on the segment strip. Anything unmapped falls back to
+// the step number (which is also what narrow segments show).
+const SEGMENT_ICONS: Record<string, LucideIcon> = {
+  navigate: Globe,
+  goto: Globe,
+  click: MousePointerClick,
+  dblclick: MousePointerClick,
+  hover: MousePointerClick,
+  fill: Keyboard,
+  type: Keyboard,
+  press: Keyboard,
+  select: Keyboard,
+  shot: Camera,
+  screenshot: Camera,
+  assert: CircleCheck,
+  expect: CircleCheck,
+  wait: Timer,
+};
 
 export interface VideoPlayerHandle {
   play: () => Promise<void>;
@@ -86,6 +124,15 @@ export interface VideoPlayerProps {
   tracks?: VideoTextTrack[];
   /** Whether captions start visible. Overridden by the user's saved choice. */
   captionsDefaultOn?: boolean;
+  /**
+   * Per-step segments drawn as an annotated strip above the scrubber: one
+   * tick per step with an action icon (or the step number when narrow),
+   * pass/fail coloring, click-to-seek, and active-segment highlight during
+   * playback. Omit for the plain scrubber.
+   */
+  segments?: PlayerSegment[];
+  /** Called when the user seeks via a segment tick (ms on the video clock). */
+  onSegmentSeek?: (segment: PlayerSegment) => void;
 }
 
 function formatTime(s: number): string {
@@ -147,6 +194,8 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       durationMsFallback,
       tracks,
       captionsDefaultOn = false,
+      segments,
+      onSegmentSeek,
     },
     ref,
   ) {
@@ -647,6 +696,31 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       [skip, toggleFullscreen, toggleMute, togglePlay, wakeControls, tracks],
     );
 
+    const sortedSegments = useMemo(
+      () =>
+        segments && segments.length > 0
+          ? [...segments].sort((a, b) => a.startMs - b.startMs)
+          : null,
+      [segments],
+    );
+
+    const seekToSegment = useCallback(
+      (seg: PlayerSegment) => {
+        const v = videoRef.current;
+        if (!v) return;
+        const t = seg.startMs / 1000 + 0.01;
+        v.currentTime = clamp(
+          t,
+          0,
+          Number.isFinite(v.duration) ? v.duration : t,
+        );
+        setCurrentTime(v.currentTime);
+        wakeControls();
+        onSegmentSeek?.(seg);
+      },
+      [onSegmentSeek, wakeControls],
+    );
+
     const VolumeIcon =
       muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
     const showControls = !isPlaying || isScrubbing || controlsVisible;
@@ -745,6 +819,63 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
             "data-[visible=true]:translate-y-0 data-[visible=true]:opacity-100",
           )}
         >
+          {sortedSegments && safeDuration > 0 && (
+            <div
+              role="group"
+              aria-label="Test steps"
+              className="relative h-5 w-full"
+            >
+              {sortedSegments.map((seg, i) => {
+                const durMs = safeDuration * 1000;
+                const leftPct = clamp((seg.startMs / durMs) * 100, 0, 100);
+                const rightPct = clamp((seg.endMs / durMs) * 100, leftPct, 100);
+                const widthPct = Math.max(rightPct - leftPct, 0.4);
+                const pxWidth = (widthPct / 100) * scrubberWidth;
+                const tMs = currentTime * 1000;
+                const isLast = i === sortedSegments.length - 1;
+                const active =
+                  tMs >= seg.startMs &&
+                  (isLast ? tMs <= seg.endMs + 1000 : tMs < seg.endMs);
+                const failed = seg.status === "failed";
+                const Icon = seg.stepType
+                  ? SEGMENT_ICONS[seg.stepType.toLowerCase()]
+                  : undefined;
+                const range = `${formatTime(seg.startMs / 1000)} – ${formatTime(seg.endMs / 1000)}`;
+                return (
+                  <button
+                    key={`${seg.index}-${seg.startMs}`}
+                    type="button"
+                    title={`${seg.index + 1}. ${seg.label} (${range})`}
+                    aria-label={`Seek to step ${seg.index + 1}: ${seg.label}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      seekToSegment(seg);
+                    }}
+                    className={cn(
+                      "absolute inset-y-0 flex items-center justify-center overflow-hidden rounded-sm border-l transition-colors",
+                      failed
+                        ? "border-red-400/80 text-red-200/80 hover:bg-red-500/25 hover:text-red-100"
+                        : "border-white/35 text-white/60 hover:bg-white/15 hover:text-white",
+                      active &&
+                        (failed
+                          ? "bg-red-500/25 text-red-100"
+                          : "bg-white/20 text-white"),
+                    )}
+                    style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                  >
+                    {Icon && pxWidth >= 20 ? (
+                      <Icon className="h-3 w-3" />
+                    ) : pxWidth >= 13 ? (
+                      <span className="font-mono text-[9px] tabular-nums">
+                        {seg.index + 1}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           <div
             ref={scrubberRef}
             className="relative flex h-4 items-center"

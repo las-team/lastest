@@ -858,6 +858,8 @@ async function runBuildAsync(
     urlTrajectory?: import("@/lib/db/schema").UrlTrajectoryStep[];
     webVitals?: import("@/lib/db/schema").WebVitalsSample[];
     storageStateSnapshot?: import("@/lib/db/schema").StorageStateSnapshot;
+    stepTimings?: import("@/lib/db/schema").StepTiming[];
+    consoleEntries?: import("@/lib/db/schema").ConsoleEntry[];
     apiResult?: import("@/lib/db/schema").ApiTestResultData;
   }) => {
     processedCount++;
@@ -896,6 +898,8 @@ async function runBuildAsync(
       urlTrajectory: result.urlTrajectory,
       webVitals: result.webVitals,
       storageStateSnapshot: result.storageStateSnapshot,
+      stepTimings: result.stepTimings,
+      consoleEntries: result.consoleEntries,
     });
 
     // Stamp first build on the test version (idempotent)
@@ -1348,6 +1352,8 @@ async function runBuildAsync(
                 urlTrajectory: result.urlTrajectory,
                 webVitals: result.webVitals,
                 storageStateSnapshot: result.storageStateSnapshot,
+                stepTimings: result.stepTimings,
+                consoleEntries: result.consoleEntries,
                 retryOf: originalResult?.id ?? null,
                 isFlaky: false,
               });

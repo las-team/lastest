@@ -40,6 +40,7 @@ import {
 import { buildXrayElements, buildXrayFromDomDiff } from "@/lib/share/xray";
 import type { XrayElement } from "@/lib/share/xray";
 import { ShareVideoPlayer } from "./share-video-player";
+import { resolveStepSegments } from "@/lib/playback/step-timings";
 import { ShareWcagPanel } from "@/components/share/share-wcag-panel";
 import { AwardBadgeRow } from "@/components/awards/award-badge-row";
 import { MobileDiffGallery } from "@/components/diff/mobile-diff-gallery-client";
@@ -476,7 +477,23 @@ export default async function PublicSharePage({ params }: PageProps) {
                 the page reads as a video watch page (Google's "video is the
                 main content" signal) and the player has an accessible label. */}
             <figure className="m-0 space-y-2">
-              <ShareVideoPlayer clips={clips} tracks={captionTracks} />
+              <ShareVideoPlayer
+                clips={clips}
+                tracks={captionTracks}
+                segments={resolveStepSegments({
+                  stepTimings: primaryResult?.stepTimings,
+                  screenshots: primaryResult?.screenshots,
+                  durationMs:
+                    clips[0]?.durationMs ?? primaryResult?.durationMs ?? null,
+                }).map((t) => ({
+                  index: t.stepIndex,
+                  label: t.label,
+                  stepType: t.stepType,
+                  status: t.status,
+                  startMs: t.startMs,
+                  endMs: t.endMs,
+                }))}
+              />
               <figcaption className="text-sm text-muted-foreground">
                 Recording of the visual regression run on {displayDomain}
                 {test?.name ? ` · ${test.name}` : ""}.

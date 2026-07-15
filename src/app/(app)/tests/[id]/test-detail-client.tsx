@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Textarea } from "@/components/ui/textarea";
 import { ReplayPlayer } from "@/components/replay-player";
+import { resolveStepSegments } from "@/lib/playback/step-timings";
 import { ApiTestDialog } from "@/components/api-tests/api-test-dialog";
 import {
   networkRequestToApiTest,
@@ -183,6 +184,7 @@ interface TestResult {
   totalSteps: number | null;
   extractedVariables: Record<string, string> | null;
   assignedVariables: Record<string, string> | null;
+  stepTimings: import("@/lib/db/schema").StepTiming[] | null;
 }
 
 interface DefaultStepForUI {
@@ -2224,6 +2226,18 @@ export function TestDetailClient({
                                 durationMs: result.durationMs,
                               },
                             ]}
+                            segments={resolveStepSegments({
+                              stepTimings: result.stepTimings,
+                              screenshots: result.screenshots,
+                              durationMs: result.durationMs,
+                            }).map((t) => ({
+                              index: t.stepIndex,
+                              label: t.label,
+                              stepType: t.stepType,
+                              status: t.status,
+                              startMs: t.startMs,
+                              endMs: t.endMs,
+                            }))}
                           />
                         </div>
                       ))}

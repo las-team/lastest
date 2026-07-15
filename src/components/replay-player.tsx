@@ -3,9 +3,16 @@
 import { useEffect, useRef } from "react";
 import {
   VideoPlayer,
+  type PlayerSegment,
   type VideoPlayerHandle,
   type VideoTextTrack,
 } from "@/components/video-player";
+
+/** Document event dispatched (throttled) with the primary clip's playback
+ *  position. Detail: `{ ms: number }`. Lets server-rendered islands (e.g. the
+ *  share page's ChapterRail) follow playback without a shared React context —
+ *  the client-component analogue is `usePlaybackSync`. */
+export const PLAYBACK_TIME_EVENT = "lastest:playback-time";
 
 export interface ReplayClip {
   src: string;
@@ -40,6 +47,11 @@ export interface ReplayPlayerProps {
    * primary test result's run.
    */
   tracks?: VideoTextTrack[];
+  /**
+   * Per-step scrubber segments for the FIRST clip (see PlayerSegment) —
+   * derive via `resolveStepSegments` from the result's stepTimings.
+   */
+  segments?: PlayerSegment[];
 }
 
 /**
@@ -50,7 +62,12 @@ export interface ReplayPlayerProps {
  * single component means scrubber, hover-preview, and step-seek behavior
  * stay aligned across surfaces.
  */
-export function ReplayPlayer({ clips, className, tracks }: ReplayPlayerProps) {
+export function ReplayPlayer({
+  clips,
+  className,
+  tracks,
+  segments,
+}: ReplayPlayerProps) {
   const handlesRef = useRef<(VideoPlayerHandle | null)[]>([]);
 
   useEffect(() => {
@@ -66,6 +83,26 @@ export function ReplayPlayer({ clips, className, tracks }: ReplayPlayerProps) {
     return () => document.removeEventListener("click", onClick, true);
   }, []);
 
+  // Broadcast the primary clip's position so sibling islands (chapter rail,
+  // step strips) can highlight along without a shared React context.
+  useEffect(() => {
+    const el = handlesRef.current[0]?.getElement();
+    if (!el) return;
+    let lastDispatch = 0;
+    const onTimeUpdate = () => {
+      const now = performance.now();
+      if (now - lastDispatch < 250) return;
+      lastDispatch = now;
+      document.dispatchEvent(
+        new CustomEvent(PLAYBACK_TIME_EVENT, {
+          detail: { ms: el.currentTime * 1000 },
+        }),
+      );
+    };
+    el.addEventListener("timeupdate", onTimeUpdate);
+    return () => el.removeEventListener("timeupdate", onTimeUpdate);
+  }, [clips.length]);
+
   return (
     <>
       {clips.map((clip, i) => (
@@ -76,6 +113,7 @@ export function ReplayPlayer({ clips, className, tracks }: ReplayPlayerProps) {
           durationMsFallback={clip.durationMs ?? null}
           tracks={i === 0 ? tracks : undefined}
           captionsDefaultOn={i === 0 && !!tracks && tracks.length > 0}
+          segments={i === 0 ? segments : undefined}
           autoPlay
           loop
           playsInline

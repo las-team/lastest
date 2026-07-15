@@ -384,6 +384,10 @@ export interface TestResultPayload {
    *  ingests these into `selector_stats` so the next run can promote the
    *  winning candidate. Best-effort — failures swallowed on the host. */
   selectorOutcomes?: SelectorOutcome[];
+  /** Per-step start/end on the video clock → testResults.stepTimings. */
+  stepTimings?: import("@/lib/db/schema").StepTiming[];
+  /** Timestamped console entries → testResults.consoleEntries. */
+  consoleEntries?: import("@/lib/db/schema").ConsoleEntry[];
 }
 
 export interface TestResultResponse extends BaseMessage {

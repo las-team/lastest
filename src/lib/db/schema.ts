@@ -37,6 +37,9 @@ export interface NetworkRequest {
   failed?: boolean;
   errorText?: string;
   startTime?: number;
+  /** ms since recording start (video clock). Set by EB runs; lets timeline
+   *  consumers place the request without epoch math. */
+  atMs?: number;
   requestHeaders?: Record<string, string>;
   responseHeaders?: Record<string, string>;
   postData?: string;
@@ -827,6 +830,8 @@ export interface UrlTrajectoryStep {
   redirectChain: string[];
   /** Wall-clock ms from test start when this step's URL was sampled. */
   capturedAtMs?: number;
+  /** ms since recording start (video clock). Set by EB runs. */
+  atMs?: number;
 }
 
 /** Web Vitals captured per page-state. Sampled at screenshot points and at
@@ -875,6 +880,32 @@ export interface StorageStateSnapshot {
   }>;
 }
 
+// Per-step execution timing on the video clock (ms since recording start).
+// Persisted for embedded-browser runs from the executor's step events; legacy
+// rows lack it and consumers fall back to screenshots[].atMs anchors, then an
+// even split across the recording duration (same ladder as collectChapters).
+export interface StepTiming {
+  stepIndex: number;
+  /** "Step N" structural key — matches CapturedScreenshot.label. */
+  label: string;
+  /** Action kind driving scrubber icons: navigate | click | fill | shot | assert | wait | other. */
+  stepType: string;
+  status: "passed" | "failed";
+  /** ms since recording start (test start when the run wasn't recorded). */
+  startMs: number;
+  endMs: number;
+}
+
+// Console message with a video-clock timestamp. `consoleErrors` keeps the
+// plain strings (the console diff layer + triage compare text); this column
+// adds atMs/level so playback-synced consumers can place entries on the
+// timeline. atMs is null when the run had no recording.
+export interface ConsoleEntry {
+  atMs: number | null;
+  level: string;
+  text: string;
+}
+
 export const testResults = pgTable("test_results", {
   id: text("id").primaryKey(),
   testRunId: text("test_run_id").references(() => testRuns.id),
@@ -891,6 +922,9 @@ export const testResults = pgTable("test_results", {
   viewport: text("viewport"), // e.g., '1920x1080'
   browser: text("browser").default("chromium"),
   consoleErrors: jsonb("console_errors").$type<string[]>(),
+  // Timestamped console capture (video clock). Additive alongside
+  // consoleErrors — see ConsoleEntry.
+  consoleEntries: jsonb("console_entries").$type<ConsoleEntry[]>(),
   networkRequests: jsonb("network_requests").$type<NetworkRequest[]>(),
   downloads: jsonb("downloads").$type<DownloadRecord[]>(),
   a11yViolations: jsonb("a11y_violations").$type<A11yViolation[]>(),
@@ -946,6 +980,9 @@ export const testResults = pgTable("test_results", {
   storageStateSnapshot: jsonb(
     "storage_state_snapshot",
   ).$type<StorageStateSnapshot>(),
+  // Per-step start/end on the video clock — powers the annotated scrubber and
+  // step-synced evidence panes. Null for legacy/local runs.
+  stepTimings: jsonb("step_timings").$type<StepTiming[]>(),
 });
 
 // Repository provider type

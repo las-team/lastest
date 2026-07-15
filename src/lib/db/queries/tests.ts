@@ -656,6 +656,7 @@ export async function getTestResultsByTest(testId: string) {
       totalSteps: testResults.totalSteps,
       extractedVariables: testResults.extractedVariables,
       assignedVariables: testResults.assignedVariables,
+      stepTimings: testResults.stepTimings,
       gitBranch: testRuns.gitBranch,
       gitCommit: testRuns.gitCommit,
     })
