@@ -79,6 +79,7 @@ export async function ensureStepComparisonsForBuild(
             urlTrajectory: prevResult.urlTrajectory ?? null,
             webVitals: prevResult.webVitals ?? null,
             extractedVariables: prevResult.extractedVariables ?? null,
+            storageStateSnapshot: prevResult.storageStateSnapshot ?? null,
           }
         : null;
       const currentPayload = {
@@ -88,6 +89,7 @@ export async function ensureStepComparisonsForBuild(
         urlTrajectory: tr.urlTrajectory ?? null,
         webVitals: tr.webVitals ?? null,
         extractedVariables: tr.extractedVariables ?? null,
+        storageStateSnapshot: tr.storageStateSnapshot ?? null,
       };
 
       for (const [stepLabel, groupDiffs] of byStep) {

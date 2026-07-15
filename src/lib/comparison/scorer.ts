@@ -39,6 +39,10 @@ import {
 import { computeA11yDiff, summarizeA11yDiff } from "./a11y-diff";
 import { computeVariableDiff, summarizeVariableDiff } from "./variable-diff";
 import { computePerfDiff, summarizePerfDiff } from "./perf-diff";
+import {
+  computeStorageStateDiff,
+  summarizeStorageStateDiff,
+} from "./storage-state-diff";
 
 export interface MultiLayerVerdict {
   verdict: StepVerdict;
@@ -47,15 +51,18 @@ export interface MultiLayerVerdict {
 }
 
 interface ScoreInputs {
-  baseline: Pick<
-    TestResult,
-    | "consoleErrors"
-    | "networkRequests"
-    | "a11yViolations"
-    | "urlTrajectory"
-    | "webVitals"
-    | "extractedVariables"
-  > | null;
+  baseline:
+    | (Pick<
+        TestResult,
+        | "consoleErrors"
+        | "networkRequests"
+        | "a11yViolations"
+        | "urlTrajectory"
+        | "webVitals"
+        | "extractedVariables"
+      > &
+        Partial<Pick<TestResult, "storageStateSnapshot">>)
+    | null;
   current: Pick<
     TestResult,
     | "consoleErrors"
@@ -64,7 +71,8 @@ interface ScoreInputs {
     | "urlTrajectory"
     | "webVitals"
     | "extractedVariables"
-  >;
+  > &
+    Partial<Pick<TestResult, "storageStateSnapshot">>;
   /** Optional visual-diff record so we can fold visual signal into the verdict.
    *  When omitted we skip the visual layer entirely. */
   visualDiff?: Pick<
@@ -273,6 +281,23 @@ export function scoreMultiLayer({
       layer: "perf",
       signal: newBreach ? "high" : drifted ? "medium" : "low",
       summary: summarizePerfDiff(perfDiff),
+    });
+  }
+
+  // ── Storage state (informational — never gates) ──────────────────────
+  // End-of-run cookies + localStorage vs the baseline run. Sessions rotate
+  // and caches churn, so this stays 'low' signal: it feeds the State tab
+  // and the tab delta, but can't flip a verdict on its own.
+  const storageDiff = computeStorageStateDiff(
+    baseline?.storageStateSnapshot ?? null,
+    current.storageStateSnapshot ?? null,
+  );
+  if (storageDiff) {
+    layers.storageState = storageDiff;
+    evidence.push({
+      layer: "storage",
+      signal: "low",
+      summary: summarizeStorageStateDiff(storageDiff),
     });
   }
 

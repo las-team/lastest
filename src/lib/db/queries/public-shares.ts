@@ -15,6 +15,7 @@ import type {
   PublicShareKind,
   Baseline,
   CapturedScreenshot,
+  StepTiming,
   DomDiffResult,
   StepComparisonEvidence,
   StepVerdict,
@@ -407,6 +408,7 @@ export type ShareTestResult = {
   durationMs: number | null;
   screenshots: CapturedScreenshot[] | null;
   webVitals: WebVitalsSample[] | null;
+  stepTimings: StepTiming[] | null;
 };
 
 // Slim step-comparison projection for share rendering. Drops issue/reviewer
@@ -481,6 +483,7 @@ export async function getShareDataBySlug(
           durationMs: testResults.durationMs,
           screenshots: testResults.screenshots,
           webVitals: testResults.webVitals,
+          stepTimings: testResults.stepTimings,
         })
         .from(testResults)
         .where(

@@ -92,6 +92,13 @@ import {
 import { useIsMobile } from "@/lib/hooks/use-is-mobile";
 import type { VisualDiffLite, TestResultLite } from "./board-focus-client";
 import { RcaBadge } from "@/components/diff/rca-badge";
+import {
+  VideoPlayer,
+  type PlayerSegment,
+  type VideoPlayerHandle,
+} from "@/components/video-player";
+import { resolveStepSegments } from "@/lib/playback/step-timings";
+import { PerfVitalsChart } from "./perf-vitals-chart";
 
 interface AreaLite {
   id: string;
@@ -192,6 +199,7 @@ const COMPARE_TABS: { id: CompareTab; name: string }[] = [
   { id: "design", name: "Design" },
   { id: "perf", name: "Perf" },
   { id: "url", name: "URL" },
+  { id: "storage", name: "State" },
   { id: "variable", name: "Variables" },
   { id: "api", name: "API" },
 ];
@@ -279,6 +287,9 @@ function classifyLayer(
         : "absent";
     case "api":
       return result?.apiResult != null ? "clean" : "absent";
+    case "storage":
+      // Snapshot capture is best-effort but always attempted on EB runs.
+      return result?.storageStateSnapshot != null ? "clean" : "absent";
   }
 }
 
@@ -571,6 +582,20 @@ export function FocusView(props: FocusViewProps) {
           e.preventDefault();
           goNext();
           break;
+        // Cycle the evidence tabs without reaching for the mouse — mirrors
+        // prev/next-case on ArrowLeft/Right one level down.
+        case "[":
+        case "]": {
+          e.preventDefault();
+          const dir = e.key === "]" ? 1 : -1;
+          setTab((cur) => {
+            const idx = COMPARE_TABS.findIndex((t) => t.id === cur);
+            const next =
+              (idx + dir + COMPARE_TABS.length) % COMPARE_TABS.length;
+            return COMPARE_TABS[next].id;
+          });
+          break;
+        }
         case "Escape":
           if (intentOpen) setIntentOpen(false);
           break;
@@ -1212,6 +1237,10 @@ export function FocusView(props: FocusViewProps) {
           </button>
         </div>
 
+        {/* Per-step action metadata — kind, label, duration + video time
+            range (from persisted stepTimings), verdict, step thumbnail. */}
+        <StepDetailHeader activeCase={activeCase} />
+
         {/* Compare pane */}
         <div
           style={{
@@ -1360,6 +1389,131 @@ export function FocusView(props: FocusViewProps) {
   );
 }
 
+/** m:ss.d video-clock display (e.g. `0:10.1`). */
+function formatVideoMs(ms: number): string {
+  const total = Math.max(0, ms) / 1000;
+  const m = Math.floor(total / 60);
+  const s = total - m * 60;
+  return `${m}:${s < 10 ? "0" : ""}${s.toFixed(1)}`;
+}
+
+/** The persisted StepTiming for a case's step — matched by the structural
+ *  "Step N" label first (authoritative), then by index. Null for legacy runs
+ *  without stepTimings. */
+function timingForCase(
+  c: CaseRow,
+): import("@/lib/db/schema").StepTiming | null {
+  const timings = c.result?.stepTimings;
+  if (!timings || timings.length === 0) return null;
+  if (c.step.stepLabel) {
+    const byLabel = timings.find((t) => t.label === c.step.stepLabel);
+    if (byLabel) return byLabel;
+  }
+  if (c.step.stepIndex != null) {
+    return timings.find((t) => t.stepIndex === c.step.stepIndex) ?? null;
+  }
+  return null;
+}
+
+/** Compact per-step action metadata strip between the tab strip and the
+ *  compare pane: step number + label, action kind, duration and video time
+ *  range (when the run persisted stepTimings), verdict chip, and the step's
+ *  current screenshot as a thumbnail. Degrades field-by-field for legacy
+ *  runs — renders nothing without an active case. */
+function StepDetailHeader({ activeCase }: { activeCase: CaseRow | null }) {
+  if (!activeCase) return null;
+  const { step, visual, result } = activeCase;
+  const timing = timingForCase(activeCase);
+  const durationMs = timing ? timing.endMs - timing.startMs : null;
+  const thumb = visual?.currentImagePath ?? null;
+  const verdictTone =
+    step.verdict === "red"
+      ? "regression"
+      : step.verdict === "yellow"
+        ? "missed"
+        : "done";
+  return (
+    <div
+      style={{
+        padding: "6px 16px",
+        borderBottom: "1px solid var(--border)",
+        background: "var(--c-white)",
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        minHeight: 40,
+      }}
+    >
+      {thumb && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={thumb}
+          alt=""
+          style={{
+            width: 40,
+            height: 26,
+            objectFit: "cover",
+            objectPosition: "top",
+            borderRadius: 4,
+            border: "1px solid var(--border)",
+            flexShrink: 0,
+          }}
+        />
+      )}
+      <span className="mono" style={{ fontSize: 11, color: "var(--fg-3)" }}>
+        {step.stepIndex != null ? `#${step.stepIndex + 1}` : "—"}
+      </span>
+      <span
+        style={{
+          fontSize: 12,
+          fontWeight: 600,
+          color: "var(--fg-1)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          maxWidth: 320,
+        }}
+        title={step.stepLabel ?? undefined}
+      >
+        {step.stepLabel ?? "Unlabeled step"}
+      </span>
+      {timing?.stepType && (
+        <span className="v-chip" style={{ fontSize: 9 }}>
+          {timing.stepType}
+        </span>
+      )}
+      <span className={`v-chip ${verdictTone}`} style={{ fontSize: 9 }}>
+        <span className="dot" />
+        {step.verdict}
+      </span>
+      <span style={{ flex: 1 }} />
+      {durationMs != null && (
+        <span
+          className="mono"
+          style={{ fontSize: 10, color: "var(--fg-2)" }}
+          title="Step duration"
+        >
+          {(durationMs / 1000).toFixed(1)}s
+        </span>
+      )}
+      {timing && (
+        <span
+          className="mono"
+          style={{ fontSize: 10, color: "var(--fg-3)" }}
+          title="Video time range — the recording plays this step here"
+        >
+          {formatVideoMs(timing.startMs)} → {formatVideoMs(timing.endMs)}
+        </span>
+      )}
+      {!timing && result?.durationMs != null && (
+        <span className="mono" style={{ fontSize: 10, color: "var(--fg-3)" }}>
+          run {(result.durationMs / 1000).toFixed(1)}s
+        </span>
+      )}
+    </div>
+  );
+}
+
 function layerDelta(step: StepComparison, layer: CompareTab): string | null {
   if (layer === "text") return null;
   const layers = step.layers;
@@ -1405,6 +1559,15 @@ function layerDelta(step: StepComparison, layer: CompareTab): string | null {
       const v = layers?.variable;
       if (!v) return null;
       return `Δ ${v.changes.length}`;
+    }
+    case "storage": {
+      const s = layers?.storageState;
+      if (!s) return null;
+      const parts: string[] = [];
+      if (s.addedCount) parts.push(`+${s.addedCount}`);
+      if (s.removedCount) parts.push(`−${s.removedCount}`);
+      if (s.changedCount) parts.push(`~${s.changedCount}`);
+      return parts.join(" ") || null;
     }
   }
   return null;
@@ -1941,6 +2104,7 @@ function ComparePane({
         stepCells={runStepCells}
         activeStepId={activeStepId}
         onSelectStep={onSelectStep}
+        buildId={buildId}
       />
     );
   if (tab === "visual")
@@ -2014,7 +2178,237 @@ function ComparePane({
     );
   if (tab === "api")
     return <ApiPane result={result} clean={layerState === "clean"} />;
+  if (tab === "storage")
+    return (
+      <StatePane step={step} result={result} clean={layerState === "clean"} />
+    );
   return null;
+}
+
+/** State tab (spec 27): the web analogue of a "files touched" pane. Renders
+ *  the storage diff computed post-run into step.layers.storageState
+ *  (current run vs baseline run — consistent with every other layer), plus
+ *  the current end-of-run snapshot for browsing. Values are hashed at
+ *  capture, so entries show keys + change kinds, never contents. */
+function StatePane({
+  step,
+  result,
+  clean,
+}: {
+  step: StepComparison;
+  result: TestResultLite | null;
+  clean: boolean;
+}) {
+  const diff = step.layers?.storageState ?? null;
+  const snapshot = result?.storageStateSnapshot ?? null;
+  const areas: Array<{
+    name: string;
+    entries: import("@/lib/db/schema").StorageStateDiffEntry[];
+  }> = diff
+    ? [
+        { name: "Cookies", entries: diff.cookies },
+        { name: "localStorage", entries: diff.localStorage },
+      ]
+    : [];
+  const changeTone: Record<string, string> = {
+    added: "done",
+    removed: "regression",
+    changed: "missed",
+  };
+  const changeLabel: Record<string, string> = {
+    added: "ADD",
+    removed: "REMOVE",
+    changed: "CHANGE",
+  };
+  return (
+    <div
+      style={{
+        flex: 1,
+        padding: 14,
+        background: "var(--c-soft-2)",
+        overflowY: "auto",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      {clean && !diff && (
+        <CleanBanner message="No storage changes in range — end-of-run cookies and localStorage match the baseline run" />
+      )}
+      {!diff && snapshot && (
+        <div className="label" style={{ fontSize: 10, padding: "0 2px" }}>
+          {`Diff vs baseline unavailable${
+            clean ? "" : " — the baseline run has no storage snapshot"
+          }. Current snapshot below.`}
+        </div>
+      )}
+      {areas.map(
+        (area) =>
+          area.entries.length > 0 && (
+            <div
+              key={area.name}
+              className="v-card"
+              style={{ padding: 0, overflow: "hidden" }}
+            >
+              <div
+                style={{
+                  padding: "8px 12px",
+                  borderBottom: "1px solid var(--border)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <span className="label" style={{ fontSize: 10 }}>
+                  {area.name}
+                </span>
+                <span
+                  className="v-chip"
+                  style={{ fontSize: 9, padding: "1px 6px" }}
+                >
+                  +{area.entries.length}
+                </span>
+              </div>
+              {area.entries.map((e, i) => (
+                <div
+                  key={`${e.key}-${i}`}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "6px 12px",
+                    borderBottom:
+                      i < area.entries.length - 1
+                        ? "1px solid var(--border)"
+                        : undefined,
+                  }}
+                >
+                  <span
+                    className={`v-chip ${changeTone[e.change]}`}
+                    style={{ fontSize: 9, padding: "1px 6px", width: 62 }}
+                  >
+                    {changeLabel[e.change]}
+                  </span>
+                  <code
+                    className="mono"
+                    style={{
+                      fontSize: 10.5,
+                      color: "var(--fg-1)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      flex: 1,
+                    }}
+                    title={e.key}
+                  >
+                    {e.key}
+                  </code>
+                  {e.detail && (
+                    <span className="label" style={{ fontSize: 9 }}>
+                      {e.detail}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          ),
+      )}
+      {snapshot && (
+        <div className="v-card" style={{ padding: 12 }}>
+          <div className="label" style={{ fontSize: 10, marginBottom: 6 }}>
+            End-of-run snapshot · {snapshot.cookies?.length ?? 0} cookie
+            {(snapshot.cookies?.length ?? 0) === 1 ? "" : "s"} ·{" "}
+            {snapshot.localStorage?.length ?? 0} localStorage key
+            {(snapshot.localStorage?.length ?? 0) === 1 ? "" : "s"}
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+              gap: 6,
+            }}
+          >
+            {(snapshot.cookies ?? []).map((c, i) => (
+              <div
+                key={`c-${i}`}
+                style={{
+                  background: "var(--c-soft)",
+                  borderRadius: 6,
+                  padding: "6px 8px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+                title={`${c.domain}${c.path}`}
+              >
+                <span className="label" style={{ fontSize: 8 }}>
+                  cookie
+                </span>
+                <code
+                  className="mono"
+                  style={{
+                    fontSize: 10,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {c.name}
+                </code>
+                {c.redacted && (
+                  <span className="label" style={{ fontSize: 8 }}>
+                    redacted
+                  </span>
+                )}
+              </div>
+            ))}
+            {(snapshot.localStorage ?? []).map((l, i) => (
+              <div
+                key={`l-${i}`}
+                style={{
+                  background: "var(--c-soft)",
+                  borderRadius: 6,
+                  padding: "6px 8px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+                title={l.origin}
+              >
+                <span className="label" style={{ fontSize: 8 }}>
+                  local
+                </span>
+                <code
+                  className="mono"
+                  style={{
+                    fontSize: 10,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {l.name}
+                </code>
+                {l.redacted && (
+                  <span className="label" style={{ fontSize: 8 }}>
+                    redacted
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {!snapshot && !diff && (
+        <div
+          className="v-card"
+          style={{ padding: 24, textAlign: "center", color: "var(--fg-3)" }}
+        >
+          <span className="label">No storage state captured</span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface AbsentHint {
@@ -2144,6 +2538,11 @@ function absentHint(
         settingsHref: testId ? `/tests/${testId}` : undefined,
         settingsLabel: testId ? "Open test" : undefined,
       };
+    case "storage":
+      return {
+        message:
+          "No storage state snapshot on this run. Snapshots (cookies + localStorage) are captured at end-of-test on embedded-browser runs — legacy or failed runs may lack one.",
+      };
   }
 }
 
@@ -2165,12 +2564,14 @@ function RunPane({
   stepCells,
   activeStepId,
   onSelectStep,
+  buildId,
 }: {
   result: TestResultLite | null;
   failed: boolean;
   stepCells: RunStepCell[];
   activeStepId: string | null;
   onSelectStep: (stepId: string) => void;
+  buildId: string;
 }) {
   if (!result) {
     return (
@@ -2286,6 +2687,19 @@ function RunPane({
           </div>
         )}
       </div>
+
+      {/* Step-synced recording (spec 28). Segment ticks come from persisted
+          stepTimings; clicking a segment seeks AND selects that step in the
+          case rail. "Follow playback" (opt-in) keeps the rail selection on
+          the step currently playing. */}
+      {result.videoPath && (
+        <RunPlaybackCard
+          result={result}
+          stepCells={stepCells}
+          activeStepId={activeStepId}
+          onSelectStep={onSelectStep}
+        />
+      )}
 
       {/* All steps of the test with per-step passage. Cells are buttons so
           reviewers can jump to any step's other layers (visual/network/...)
@@ -2448,6 +2862,262 @@ function RunPane({
           }
         />
       )}
+
+      {/* Execution details + copyable IDs + agent snippets (Info parity). */}
+      <RunInfoCard result={result} buildId={buildId} />
+    </div>
+  );
+}
+
+/** Recording card inside the Run pane: the annotated player wired to the
+ *  case rail. Isolated from RunPane so its hooks sit behind RunPane's
+ *  null-result early return. */
+function RunPlaybackCard({
+  result,
+  stepCells,
+  activeStepId,
+  onSelectStep,
+}: {
+  result: TestResultLite;
+  stepCells: RunStepCell[];
+  activeStepId: string | null;
+  onSelectStep: (stepId: string) => void;
+}) {
+  const [follow, setFollow] = useState(false);
+  const handleRef = useRef<VideoPlayerHandle | null>(null);
+  const activeStepIdRef = useRef(activeStepId);
+  useEffect(() => {
+    activeStepIdRef.current = activeStepId;
+  }, [activeStepId]);
+
+  const segments = useMemo<PlayerSegment[]>(
+    () =>
+      resolveStepSegments({
+        stepTimings: result.stepTimings,
+        durationMs: result.durationMs,
+      }).map((t) => ({
+        index: t.stepIndex,
+        label: t.label,
+        stepType: t.stepType,
+        status: t.status,
+        startMs: t.startMs,
+        endMs: t.endMs,
+      })),
+    [result.stepTimings, result.durationMs],
+  );
+
+  const selectByStepIndex = useCallback(
+    (stepIndex: number) => {
+      const cell = stepCells.find((c) => c.stepIndex === stepIndex);
+      if (cell && cell.stepId !== activeStepIdRef.current) {
+        onSelectStep(cell.stepId);
+      }
+    },
+    [stepCells, onSelectStep],
+  );
+
+  // Opt-in follow: while playing, keep the case rail on the step whose
+  // segment contains the playhead.
+  useEffect(() => {
+    if (!follow || segments.length === 0) return;
+    const el = handleRef.current?.getElement();
+    if (!el) return;
+    const onTime = () => {
+      const ms = el.currentTime * 1000;
+      for (let i = segments.length - 1; i >= 0; i--) {
+        const seg = segments[i];
+        if (ms >= seg.startMs) {
+          selectByStepIndex(seg.index);
+          return;
+        }
+      }
+    };
+    el.addEventListener("timeupdate", onTime);
+    return () => el.removeEventListener("timeupdate", onTime);
+  }, [follow, segments, selectByStepIndex]);
+
+  return (
+    <div
+      className="v-card"
+      style={{
+        padding: 10,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        flexShrink: 0,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span className="label" style={{ fontSize: 10 }}>
+          Recording
+        </span>
+        <span style={{ flex: 1 }} />
+        <label
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 5,
+            fontSize: 10,
+            color: "var(--fg-2)",
+            cursor: "pointer",
+          }}
+          title="While playing, select the step under the playhead in the case rail"
+        >
+          <input
+            type="checkbox"
+            checked={follow}
+            onChange={(e) => setFollow(e.target.checked)}
+            style={{ accentColor: "var(--c-teal)" }}
+          />
+          Follow playback
+        </label>
+      </div>
+      <VideoPlayer
+        src={result.videoPath!}
+        durationMsFallback={result.durationMs}
+        segments={segments.length > 0 ? segments : undefined}
+        onSegmentSeek={(seg) => selectByStepIndex(seg.index)}
+        defaultPlaybackRate={2}
+        preload="metadata"
+        className="aspect-video w-full"
+        ariaLabel="Test run recording"
+        onReady={(h) => {
+          handleRef.current = h;
+        }}
+      />
+    </div>
+  );
+}
+
+/** Copyable execution details for the Run pane — result/run/test/build IDs
+ *  plus ready-to-paste agent snippets (MCP). */
+function RunInfoCard({
+  result,
+  buildId,
+}: {
+  result: TestResultLite;
+  buildId: string;
+}) {
+  const rows: Array<{ label: string; value: string }> = [
+    { label: "Build", value: buildId },
+    ...(result.testRunId
+      ? [{ label: "Test run", value: result.testRunId }]
+      : []),
+    ...(result.testId ? [{ label: "Test", value: result.testId }] : []),
+    { label: "Result", value: result.id },
+  ];
+  const snippets: Array<{ label: string; value: string }> = [
+    {
+      label: "MCP — build review",
+      value: `lastest_build action:"review" buildId:"${buildId}"`,
+    },
+    ...(result.testId
+      ? [
+          {
+            label: "MCP — rerun this test",
+            value: `lastest_run_tests testIds:["${result.testId}"]`,
+          },
+        ]
+      : []),
+  ];
+  const copy = (value: string) => {
+    navigator.clipboard
+      .writeText(value)
+      .then(() => toast.success("Copied"))
+      .catch(() => toast.error("Copy failed"));
+  };
+  return (
+    <div
+      className="v-card"
+      style={{
+        padding: 10,
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        flexShrink: 0,
+      }}
+    >
+      <span className="label" style={{ fontSize: 10 }}>
+        Execution details
+      </span>
+      {rows.map((r) => (
+        <div
+          key={r.label}
+          style={{ display: "flex", alignItems: "center", gap: 8 }}
+        >
+          <span
+            className="label"
+            style={{ fontSize: 9, width: 56, flexShrink: 0 }}
+          >
+            {r.label}
+          </span>
+          <code
+            className="mono"
+            style={{
+              fontSize: 10,
+              color: "var(--fg-2)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              flex: 1,
+            }}
+          >
+            {r.value}
+          </code>
+          <button
+            type="button"
+            className="v-btn"
+            style={{ padding: "2px 6px", fontSize: 9, minHeight: 0 }}
+            onClick={() => copy(r.value)}
+            aria-label={`Copy ${r.label} ID`}
+          >
+            Copy
+          </button>
+        </div>
+      ))}
+      <div
+        style={{
+          borderTop: "1px solid var(--border)",
+          paddingTop: 6,
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
+        }}
+      >
+        {snippets.map((s) => (
+          <div
+            key={s.label}
+            style={{ display: "flex", alignItems: "center", gap: 8 }}
+          >
+            <code
+              className="mono"
+              title={s.label}
+              style={{
+                fontSize: 10,
+                color: "var(--fg-2)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                flex: 1,
+                background: "var(--c-soft-2)",
+                borderRadius: 4,
+                padding: "3px 6px",
+              }}
+            >
+              {s.value}
+            </code>
+            <button
+              type="button"
+              className="v-btn"
+              style={{ padding: "2px 6px", fontSize: 9, minHeight: 0 }}
+              onClick={() => copy(s.value)}
+              aria-label={`Copy snippet: ${s.label}`}
+            >
+              Copy
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -3985,6 +4655,11 @@ function NetworkPane({
   );
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  // Column sort — "order" keeps capture order (the default devtools view).
+  const [sortKey, setSortKey] = useState<
+    "order" | "method" | "url" | "status" | "type" | "duration" | "size"
+  >("order");
+  const [sortDir, setSortDir] = useState<1 | -1>(1);
 
   // Per-group counts for the filter chips — always show the underlying total
   // so the user can see what's available to filter on.
@@ -4031,6 +4706,74 @@ function NetworkPane({
         return true;
       });
   }, [requests, search, methodFilter, statusFilter, typeFilter]);
+
+  const sorted = useMemo(() => {
+    if (sortKey === "order")
+      return sortDir === 1 ? filtered : [...filtered].reverse();
+    const val = (r: import("@/lib/db/schema").NetworkRequest) => {
+      switch (sortKey) {
+        case "method":
+          return r.method;
+        case "url":
+          return r.url;
+        case "status":
+          return r.status;
+        case "type":
+          return r.resourceType || "other";
+        case "duration":
+          return r.duration ?? -1;
+        case "size":
+          return r.responseSize ?? -1;
+      }
+    };
+    return [...filtered].sort((a, b) => {
+      const av = val(a.r);
+      const bv = val(b.r);
+      const cmp =
+        typeof av === "string"
+          ? av.localeCompare(String(bv))
+          : (av as number) - (bv as number);
+      return cmp * sortDir;
+    });
+  }, [filtered, sortKey, sortDir]);
+
+  const onSort = (key: typeof sortKey) => {
+    if (key === sortKey) setSortDir((d) => (d === 1 ? -1 : 1));
+    else {
+      setSortKey(key);
+      setSortDir(1);
+    }
+  };
+
+  // Request-density mini-timeline over the run: bucket the requests by their
+  // video-clock offset (atMs; legacy fallback = epoch startTime rebased to
+  // the first request). Hidden when the run has no usable timestamps.
+  const density = useMemo(() => {
+    let offsets = requests
+      .map((r) => (typeof r.atMs === "number" ? r.atMs : null))
+      .filter((v): v is number => v != null);
+    if (offsets.length < 2) {
+      const starts = requests
+        .map((r) => (typeof r.startTime === "number" ? r.startTime : null))
+        .filter((v): v is number => v != null);
+      if (starts.length < 2) return null;
+      const min = Math.min(...starts);
+      offsets = starts.map((s) => s - min);
+    }
+    const max = Math.max(...offsets);
+    if (max <= 0) return null;
+    const BUCKETS = 48;
+    const counts = new Array<number>(BUCKETS).fill(0);
+    for (const o of offsets) {
+      counts[Math.min(BUCKETS - 1, Math.floor((o / max) * BUCKETS))] += 1;
+    }
+    return { counts, maxCount: Math.max(...counts), spanMs: max };
+  }, [requests]);
+
+  const totalBytes = useMemo(
+    () => filtered.reduce((sum, { r }) => sum + (r.responseSize ?? 0), 0),
+    [filtered],
+  );
 
   const toggle = <T,>(set: Set<T>, val: T): Set<T> => {
     const next = new Set(set);
@@ -4345,11 +5088,50 @@ function NetworkPane({
               )}
             </div>
           </div>
+          {/* Request-density mini-timeline: where in the run the traffic
+              happened. Buckets over the video clock (atMs; legacy rows use
+              epoch startTime rebased to the first request). */}
+          {density && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-end",
+                gap: 1,
+                height: 24,
+                padding: "4px 12px 2px",
+                borderBottom: "1px solid var(--border)",
+              }}
+              aria-label="Request density over the run"
+            >
+              {density.counts.map((n, i) => {
+                const bucketStartMs =
+                  (i / density.counts.length) * density.spanMs;
+                return (
+                  <div
+                    key={i}
+                    title={`${n} request${n === 1 ? "" : "s"} @ ${formatVideoMs(bucketStartMs)}`}
+                    style={{
+                      flex: 1,
+                      height:
+                        n > 0
+                          ? `${Math.max(15, (n / density.maxCount) * 100)}%`
+                          : 1,
+                      background:
+                        n > 0
+                          ? "color-mix(in oklab, var(--c-teal) 55%, white)"
+                          : "var(--border)",
+                      borderRadius: 1,
+                    }}
+                  />
+                );
+              })}
+            </div>
+          )}
           {/* Header + rows share one horizontal scroll container so the
               7-column grid stays aligned (and usable) on narrow viewports
               instead of crushing every track to a few px. */}
           <div style={{ overflowX: "auto" }}>
-            {/* Column header */}
+            {/* Column header — click to sort, click again to flip. */}
             <div
               style={{
                 display: "grid",
@@ -4362,24 +5144,36 @@ function NetworkPane({
               }}
             >
               <span />
-              <span className="label" style={{ fontSize: 9 }}>
-                Method
-              </span>
-              <span className="label" style={{ fontSize: 9 }}>
-                URL
-              </span>
-              <span className="label" style={{ fontSize: 9 }}>
-                Status
-              </span>
-              <span className="label" style={{ fontSize: 9 }}>
-                Type
-              </span>
-              <span className="label" style={{ fontSize: 9 }}>
-                Dur
-              </span>
-              <span className="label" style={{ fontSize: 9 }}>
-                Size
-              </span>
+              {(
+                [
+                  ["method", "Method"],
+                  ["url", "URL"],
+                  ["status", "Status"],
+                  ["type", "Type"],
+                  ["duration", "Dur"],
+                  ["size", "Size"],
+                ] as const
+              ).map(([key, name]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => onSort(key)}
+                  className="label"
+                  title={`Sort by ${name.toLowerCase()}`}
+                  style={{
+                    fontSize: 9,
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    cursor: "pointer",
+                    textAlign: "left",
+                    color: sortKey === key ? "var(--fg-1)" : undefined,
+                  }}
+                >
+                  {name}
+                  {sortKey === key ? (sortDir === 1 ? " ▲" : " ▼") : ""}
+                </button>
+              ))}
             </div>
             <div style={{ maxHeight: 480, overflowY: "auto", minWidth: 560 }}>
               {filtered.length === 0 && (
@@ -4390,7 +5184,7 @@ function NetworkPane({
                   No requests match the current filters
                 </div>
               )}
-              {filtered.slice(0, 500).map(({ r, i }) => (
+              {sorted.slice(0, 500).map(({ r, i }) => (
                 <NetworkRequestRow
                   key={i}
                   req={r}
@@ -4403,15 +5197,36 @@ function NetworkPane({
                   }
                 />
               ))}
-              {filtered.length > 500 && (
+              {sorted.length > 500 && (
                 <div
                   className="label"
                   style={{ padding: 8, textAlign: "center", fontSize: 10 }}
                 >
-                  +{filtered.length - 500} more not shown
+                  +{sorted.length - 500} more not shown
                 </div>
               )}
             </div>
+          </div>
+          {/* Totals footer — counts + transferred bytes for the current
+              filter set (responseSize is capture-time content-length). */}
+          <div
+            style={{
+              padding: "6px 12px",
+              borderTop: "1px solid var(--border)",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <span className="label" style={{ fontSize: 9 }}>
+              {filtered.length} request{filtered.length === 1 ? "" : "s"}
+              {filtered.length !== requests.length
+                ? ` (of ${requests.length})`
+                : ""}
+              {totalBytes > 0
+                ? ` · ${formatBytes(totalBytes)} transferred`
+                : ""}
+            </span>
           </div>
         </div>
       )}
@@ -4696,10 +5511,41 @@ function BodyBlock({ title, body }: { title: string; body: string }) {
     return body;
   })();
   const truncated = pretty.length > 8000;
+  const download = () => {
+    const isJson =
+      pretty.trimStart().startsWith("{") || pretty.trimStart().startsWith("[");
+    const blob = new Blob([body], {
+      type: isJson ? "application/json" : "text/plain",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${title.toLowerCase().replace(/\s+/g, "-")}.${isJson ? "json" : "txt"}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
   return (
     <div>
-      <div className="label" style={{ fontSize: 9, marginBottom: 4 }}>
+      <div
+        className="label"
+        style={{
+          fontSize: 9,
+          marginBottom: 4,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+        }}
+      >
         {title} · {body.length} chars{truncated ? " (truncated to 8k)" : ""}
+        <button
+          type="button"
+          onClick={download}
+          className="v-btn"
+          style={{ padding: "0 5px", fontSize: 9, minHeight: 0 }}
+          title="Download the full captured body"
+        >
+          Download
+        </button>
       </div>
       <pre
         className="mono"
@@ -5311,6 +6157,10 @@ function PerfPane({
           message={`No perf drift — ${samples.length} sample${samples.length === 1 ? "" : "s"} captured, all within budget`}
         />
       )}
+      {/* Per-step time series (spec 27): solid = current run; dashed = the
+          baseline-run value from the perf diff summary. Falls back to the
+          mean tiles below when there are too few samples to chart. */}
+      <PerfVitalsChart samples={samples} deltas={p?.deltas ?? null} />
       {p && p.deltas.length > 0 && (
         <div
           style={{

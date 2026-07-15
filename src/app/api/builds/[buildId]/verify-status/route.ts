@@ -128,6 +128,7 @@ export async function GET(
   const slimResults = runningTestRows.map((r) => ({
     id: r.id,
     testId: r.testId,
+    testRunId: r.testRunId,
     status: r.status,
     errorMessage: r.errorMessage,
     durationMs: r.durationMs,
@@ -149,6 +150,10 @@ export async function GET(
     assignedVariables: r.assignedVariables,
     domSnapshot: r.domSnapshot,
     apiResult: r.apiResult,
+    videoPath: r.videoPath,
+    stepTimings: r.stepTimings,
+    consoleEntries: r.consoleEntries,
+    storageStateSnapshot: r.storageStateSnapshot,
   }));
 
   // "running tests" = test_results in 'running' status without an end timestamp.

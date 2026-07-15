@@ -87,6 +87,8 @@ export interface EmbeddedNetworkRequest {
   failed?: boolean;
   errorText?: string;
   startTime?: number;
+  /** ms since recording start (video clock). Unset when not recording. */
+  atMs?: number;
   requestHeaders?: Record<string, string>;
   responseHeaders?: Record<string, string>;
   postData?: string;
@@ -105,6 +107,26 @@ function titleFromScreenshotPath(path?: string): string | undefined {
   if (!m) return undefined;
   const words = m[1].replace(/[-_]+/g, " ").trim();
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : undefined;
+}
+
+/** Per-step start/end on the video clock (ms since recording start; test
+ *  start when the run isn't recorded). Mirrors the host's StepTiming type
+ *  (src/lib/db/schema.ts) — the EB package duplicates host types. */
+export interface EmbeddedStepTiming {
+  stepIndex: number;
+  label: string;
+  stepType: string;
+  status: "passed" | "failed";
+  startMs: number;
+  endMs: number;
+}
+
+/** Console message with a video-clock timestamp (mirrors host ConsoleEntry).
+ *  atMs is null when the run wasn't recorded. */
+export interface EmbeddedConsoleEntry {
+  atMs: number | null;
+  level: string;
+  text: string;
 }
 
 export interface EmbeddedTestResult {
@@ -131,6 +153,8 @@ export interface EmbeddedTestResult {
    *  can pair them by replacing the extension. */
   texts?: Array<{ filename: string; data: string }>;
   consoleErrors?: string[];
+  /** Timestamped console capture (video clock), alongside consoleErrors. */
+  consoleEntries?: EmbeddedConsoleEntry[];
   networkRequests?: EmbeddedNetworkRequest[];
   softErrors?: string[];
   /** One entry per `expect(...)` call wrapped by `instrumentAssertionTracking`.
@@ -211,6 +235,8 @@ export interface EmbeddedTestResult {
   webVitals?: WebVitalsSample[];
   /** End-of-test cookie + localStorage snapshot. Token-shaped names redacted. */
   storageStateSnapshot?: StorageStateSnapshot;
+  /** Per-step start/end on the video clock — powers the annotated scrubber. */
+  stepTimings?: EmbeddedStepTiming[];
 }
 
 export interface EmbeddedSetupResult {
@@ -525,6 +551,8 @@ export class EmbeddedTestExecutor {
     > = [];
     const selectorOutcomes: SelectorOutcome[] = [];
     const consoleErrors: string[] = [];
+    const consoleEntries: EmbeddedConsoleEntry[] = [];
+    const stepTimings: EmbeddedStepTiming[] = [];
     let allNetworkRequests: EmbeddedNetworkRequest[] = [];
     const testTimeout = Math.max(command.timeout || 120000, 30000);
 
@@ -1113,6 +1141,14 @@ export class EmbeddedTestExecutor {
             return;
           }
           consoleErrors.push(text);
+          consoleEntries.push({
+            atMs:
+              videoStartMs != null
+                ? Math.max(0, Date.now() - videoStartMs)
+                : null,
+            level: "error",
+            text,
+          });
           logFn("warn", `Console error: ${text}`);
         }
       });
@@ -1123,13 +1159,16 @@ export class EmbeddedTestExecutor {
       // Network request capture (all requests, not just failures)
       const captureNetworkBodies = command.enableNetworkInterception ?? false;
       page.on("request", (req) => {
+        const now = Date.now();
         allNetworkRequests.push({
           url: req.url(),
           method: req.method(),
           status: 0,
           duration: 0,
           resourceType: req.resourceType(),
-          startTime: Date.now(),
+          startTime: now,
+          atMs:
+            videoStartMs != null ? Math.max(0, now - videoStartMs) : undefined,
           failed: false,
           ...(captureNetworkBodies
             ? {
@@ -1680,6 +1719,21 @@ export class EmbeddedTestExecutor {
       ) => {
         if (currentStepIdx < 0) return;
         const desc = stepDescriptors[currentStepIdx];
+        // Persist one timing row per step, on the video clock (test start
+        // when unrecorded). Steps advance monotonically, so a repeat call for
+        // the same index (e.g. the outer catch firing after the final step
+        // already finished as passed) is skipped — first finish wins.
+        if (stepTimings[stepTimings.length - 1]?.stepIndex !== currentStepIdx) {
+          const anchor = videoStartMs ?? startTime;
+          stepTimings.push({
+            stepIndex: currentStepIdx,
+            label: desc?.label ?? `Step ${currentStepIdx + 1}`,
+            stepType: desc?.type ?? "other",
+            status,
+            startMs: Math.max(0, currentStepStart - anchor),
+            endMs: Math.max(0, Date.now() - anchor),
+          });
+        }
         emitStep({
           stepIndex: currentStepIdx,
           totalSteps: totalStepsForEvents,
@@ -1711,6 +1765,9 @@ export class EmbeddedTestExecutor {
                   currentStepIdx,
                   stepDescriptors[currentStepIdx]?.label,
                   Date.now() - startTime,
+                  videoStartMs != null
+                    ? Math.max(0, Date.now() - videoStartMs)
+                    : undefined,
                 ),
               );
             } catch {
@@ -2896,6 +2953,9 @@ export class EmbeddedTestExecutor {
               currentStepIdx,
               stepDescriptors[currentStepIdx]?.label,
               Date.now() - startTime,
+              videoStartMs != null
+                ? Math.max(0, Date.now() - videoStartMs)
+                : undefined,
             ),
           );
         } catch {
@@ -2957,6 +3017,8 @@ export class EmbeddedTestExecutor {
         urlTrajectory: urlTrajectory.length > 0 ? urlTrajectory : undefined,
         webVitals: webVitals.length > 0 ? webVitals : undefined,
         storageStateSnapshot,
+        stepTimings: stepTimings.length > 0 ? stepTimings : undefined,
+        consoleEntries: consoleEntries.length > 0 ? consoleEntries : undefined,
       };
     } catch (error) {
       const durationMs = Date.now() - startTime;
@@ -2995,6 +3057,9 @@ export class EmbeddedTestExecutor {
             selectorOutcomes.length > 0 ? selectorOutcomes : undefined,
           urlTrajectory: urlTrajectory.length > 0 ? urlTrajectory : undefined,
           webVitals: webVitals.length > 0 ? webVitals : undefined,
+          stepTimings: stepTimings.length > 0 ? stepTimings : undefined,
+          consoleEntries:
+            consoleEntries.length > 0 ? consoleEntries : undefined,
         };
       } else {
         const isTimeout = errorMessage.includes("timed out");
@@ -3029,6 +3094,9 @@ export class EmbeddedTestExecutor {
                 outerCurrentStepIdx,
                 outerStepDescriptors[outerCurrentStepIdx]?.label,
                 Date.now() - startTime,
+                videoStartMs != null
+                  ? Math.max(0, Date.now() - videoStartMs)
+                  : undefined,
               ),
             );
           } catch {
@@ -3084,6 +3152,9 @@ export class EmbeddedTestExecutor {
           urlTrajectory: urlTrajectory.length > 0 ? urlTrajectory : undefined,
           webVitals: webVitals.length > 0 ? webVitals : undefined,
           storageStateSnapshot,
+          stepTimings: stepTimings.length > 0 ? stepTimings : undefined,
+          consoleEntries:
+            consoleEntries.length > 0 ? consoleEntries : undefined,
         };
       }
     } finally {

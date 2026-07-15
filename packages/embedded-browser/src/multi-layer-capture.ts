@@ -20,6 +20,8 @@ export interface UrlTrajectoryStep {
   finalUrl: string;
   redirectChain: string[];
   capturedAtMs?: number;
+  /** ms since recording start (video clock). Unset when not recording. */
+  atMs?: number;
 }
 
 export interface WebVitalsSample {
@@ -87,6 +89,7 @@ export class UrlTrajectoryRecorder {
     stepIndex: number,
     stepLabel: string | undefined,
     capturedAtMs: number,
+    atMs?: number,
   ): UrlTrajectoryStep {
     const newSlice = this.currentChain.slice(this.lastSampledLength);
     this.lastSampledLength = this.currentChain.length;
@@ -102,6 +105,7 @@ export class UrlTrajectoryRecorder {
       finalUrl,
       redirectChain: newSlice,
       capturedAtMs,
+      atMs,
     };
   }
 }

@@ -28,6 +28,7 @@ describe("check-modes — derivation", () => {
       perf: "log",
       url: "log",
       api: "enforce",
+      storage: "log",
     } satisfies CheckModeMap);
   });
 

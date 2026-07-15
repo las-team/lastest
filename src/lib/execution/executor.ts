@@ -1285,13 +1285,16 @@ async function executeViaRunner(
         );
       }
 
-      // Save video file if present in the result
+      // Save video file if present in the result. Not best-effort: a lost
+      // recording silently kills every playback surface, so retry once and
+      // surface a final failure in the persisted result logs.
       let videoPath: string | undefined;
+      let videoSaveError: string | undefined;
       if (payload.videoPath) {
         // Video already saved to disk by the runner route handler
         videoPath = payload.videoPath as string;
       } else if (payload.videoData && payload.videoFilename) {
-        try {
+        const writeVideo = async () => {
           const videoDir = path.join(
             STORAGE_DIRS.videos,
             options.repositoryId || "default",
@@ -1305,9 +1308,24 @@ async function executeViaRunner(
             videoDest,
             Buffer.from(payload.videoData as string, "base64"),
           );
-          videoPath = toRelativePath(videoDest);
-        } catch {
-          // Video save is best-effort
+          return toRelativePath(videoDest);
+        };
+        try {
+          videoPath = await writeVideo();
+        } catch (err) {
+          console.warn(
+            `[Executor] Video save failed for ${payload.videoFilename}, retrying once:`,
+            err,
+          );
+          try {
+            videoPath = await writeVideo();
+          } catch (retryErr) {
+            videoSaveError =
+              retryErr instanceof Error ? retryErr.message : String(retryErr);
+            console.error(
+              `[Executor] Video save failed after retry for ${payload.videoFilename}: ${videoSaveError}`,
+            );
+          }
         }
       }
 
@@ -1407,14 +1425,24 @@ async function executeViaRunner(
         // alongside extractedVariables so the Vars-tab "Last run" column has
         // data for both modes (especially with random/increment row picks).
         assignedVariables: info.assignedVariables,
-        logs:
-          Array.isArray(payload.logs) && payload.logs.length > 0
-            ? (payload.logs as Array<{
-                timestamp: number;
-                level: string;
-                message: string;
-              }>)
-            : undefined,
+        logs: (() => {
+          const base =
+            Array.isArray(payload.logs) && payload.logs.length > 0
+              ? (payload.logs as Array<{
+                  timestamp: number;
+                  level: string;
+                  message: string;
+                }>)
+              : [];
+          if (videoSaveError) {
+            base.push({
+              timestamp: Date.now(),
+              level: "error",
+              message: `Video save failed after retry — recording lost: ${videoSaveError}`,
+            });
+          }
+          return base.length > 0 ? base : undefined;
+        })(),
         // EB ships a11yViolations / a11yPassesCount on the response payload
         // when `enableA11y` was set on the command. Forward them onto the
         // TestRunResult so `createTestResult` persists them; otherwise the
@@ -1455,6 +1483,15 @@ async function executeViaRunner(
           payload.storageStateSnapshot &&
           typeof payload.storageStateSnapshot === "object"
             ? (payload.storageStateSnapshot as import("@/lib/db/schema").StorageStateSnapshot)
+            : undefined,
+        stepTimings:
+          Array.isArray(payload.stepTimings) && payload.stepTimings.length > 0
+            ? (payload.stepTimings as import("@/lib/db/schema").StepTiming[])
+            : undefined,
+        consoleEntries:
+          Array.isArray(payload.consoleEntries) &&
+          payload.consoleEntries.length > 0
+            ? (payload.consoleEntries as import("@/lib/db/schema").ConsoleEntry[])
             : undefined,
       };
 
