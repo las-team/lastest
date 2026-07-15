@@ -23,7 +23,6 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import * as queries from "@/lib/db/queries";
-import { getCurrentSession } from "@/lib/auth";
 import { extractSourceIp } from "@/lib/url-diff/ssrf";
 import {
   assertCanVote,
@@ -42,7 +41,13 @@ import {
   ensureUpcomingCohort,
   lockCohortNow,
 } from "@/lib/launch/cohort-engine";
-import { scopeIncludes } from "@/lib/launch/oauth-config";
+import {
+  resolveActor,
+  hasScope,
+  isAdmin,
+  err,
+  fail,
+} from "@/lib/launch/api-shared";
 import { DuplicateVoteError, normalizeDomain } from "@/lib/db/queries/launch";
 import { check as rateLimitCheck } from "@/lib/rate-limit/limiter";
 import { hashIp, hashUa, isBot } from "@/lib/launch/analytics";
@@ -68,76 +73,8 @@ const COHORT_STATES: LaunchCohortState[] = [
   "closed",
 ];
 
-interface Actor {
-  userId: string;
-  emailVerified: boolean;
-  role: string;
-  scope: string | null; // null = cookie/api token (staff); set = launch token
-}
-
-/**
- * Resolve the caller. Bearer token first (so we can read its scope), then a
- * cookie session (staff using the app directly). Returns null if neither.
- */
-async function resolveActor(request: NextRequest): Promise<Actor | null> {
-  const authz = request.headers.get("authorization");
-  if (authz?.startsWith("Bearer ")) {
-    const row = await queries.getSessionWithUser(authz.slice(7));
-    if (!row || row.session.expiresAt < new Date()) return null;
-    return {
-      userId: row.user.id,
-      emailVerified: Boolean(row.user.emailVerified),
-      role: row.user.role,
-      scope: row.session.scope ?? null,
-    };
-  }
-  const session = await getCurrentSession();
-  if (session) {
-    return {
-      userId: session.user.id,
-      emailVerified: Boolean(session.user.emailVerified),
-      role: session.user.role,
-      scope: null,
-    };
-  }
-  return null;
-}
-
-// A launch-scoped token must carry the required scope; a null-scope token
-// (cookie session or api token used by staff/tests) is allowed through.
-function hasScope(actor: Actor, required: string): boolean {
-  if (actor.scope === null) return true;
-  return scopeIncludes(actor.scope, required);
-}
-
-function isAdmin(actor: Actor): boolean {
-  return actor.role === "admin" || actor.role === "owner";
-}
-
-function err(
-  status: number,
-  error: string,
-  extra?: Record<string, unknown>,
-  headers?: HeadersInit,
-) {
-  return NextResponse.json({ error, ...extra }, { status, headers });
-}
-
-// Machine-readable failure: the frontend switches on `code` (snake_case) and
-// falls back to `error` for the message. Keep both in sync.
-// Codes the launch frontend understands: already_voted, account_too_new,
-// email_unverified, velocity_exceeded, voting_closed (+ dup_domain, insufficient_scope).
-function fail(
-  status: number,
-  code: string,
-  extra?: Record<string, unknown>,
-  headers?: HeadersInit,
-) {
-  return NextResponse.json(
-    { code, error: code, ...extra },
-    { status, headers },
-  );
-}
+// Actor resolution + err/fail response helpers live in
+// src/lib/launch/api-shared.ts (shared with /api/v1/playground).
 
 // Detail payload: nested { cohort, profiles } — used by /cohorts/current and
 // /cohorts/:id, which the live client (fetchCurrentCohort) expects nested.
