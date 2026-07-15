@@ -1,6 +1,6 @@
 import { db } from "../index";
 import { qaTasks } from "../schema";
-import type { NewQaTask, QaTask, QaTaskStatus } from "../schema";
+import type { NewQaTask, QaTask, QaTaskStatus, QaTaskTestRef } from "../schema";
 import { eq, desc, and, asc, inArray } from "drizzle-orm";
 
 /**
@@ -85,6 +85,7 @@ export async function updateQaTask(
     status: QaTaskStatus;
     sessionId: string | null;
     agentReply: string | null;
+    tests: QaTaskTestRef[] | null;
     startedAt: Date | null;
     completedAt: Date | null;
   }>,

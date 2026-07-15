@@ -18,6 +18,7 @@ import {
   type GitHubIssueDetail,
 } from "@/lib/integrations/github-issues";
 import { buildVerifyCaseBody } from "@/lib/integrations/github-issue-body";
+import { githubNotConnected } from "@/lib/verify/github-connection";
 import { decideLayer } from "./layer-feedback";
 
 interface CreateIssueInput {
@@ -47,6 +48,7 @@ interface IssueResult {
   issueNumber?: number;
   state?: StepIssueState;
   error?: string;
+  code?: string;
 }
 
 /**
@@ -78,8 +80,7 @@ export async function createIssueForCase(
   const account = repo.teamId
     ? await queries.getGithubAccountByTeam(repo.teamId)
     : null;
-  if (!account?.accessToken)
-    return { ok: false, error: "GitHub not connected for this team" };
+  if (!account?.accessToken) return githubNotConnected;
 
   const test = await queries.getTest(step.testId);
   const functionalArea = test?.functionalAreaId
@@ -280,8 +281,7 @@ export async function closeIssueForCase(
   const account = repo.teamId
     ? await queries.getGithubAccountByTeam(repo.teamId)
     : null;
-  if (!account?.accessToken)
-    return { ok: false, error: "GitHub not connected for this team" };
+  if (!account?.accessToken) return githubNotConnected;
 
   try {
     const response = await fetch(
@@ -336,7 +336,12 @@ export async function searchIssuesForCase(
   stepComparisonId: string,
   query?: string,
   state: "open" | "closed" | "all" = "open",
-): Promise<{ ok: boolean; issues?: GitHubIssueListItem[]; error?: string }> {
+): Promise<{
+  ok: boolean;
+  issues?: GitHubIssueListItem[];
+  error?: string;
+  code?: string;
+}> {
   const step = await getStep(stepComparisonId);
   if (!step) return { ok: false, error: "Step not found" };
   const build = await queries.getBuild(step.buildId);
@@ -352,8 +357,7 @@ export async function searchIssuesForCase(
   const account = repo.teamId
     ? await queries.getGithubAccountByTeam(repo.teamId)
     : null;
-  if (!account?.accessToken)
-    return { ok: false, error: "GitHub not connected for this team" };
+  if (!account?.accessToken) return githubNotConnected;
   const result = await searchGitHubIssues(
     account.accessToken,
     repo.owner,
@@ -373,7 +377,12 @@ export async function searchIssuesForCase(
  */
 export async function fetchLinkedIssueForCase(
   stepComparisonId: string,
-): Promise<{ ok: boolean; issue?: GitHubIssueDetail | null; error?: string }> {
+): Promise<{
+  ok: boolean;
+  issue?: GitHubIssueDetail | null;
+  error?: string;
+  code?: string;
+}> {
   const step = await getStep(stepComparisonId);
   if (!step) return { ok: false, error: "Step not found" };
   if (!step.githubIssueNumber) return { ok: true, issue: null };
@@ -390,8 +399,7 @@ export async function fetchLinkedIssueForCase(
   const account = repo.teamId
     ? await queries.getGithubAccountByTeam(repo.teamId)
     : null;
-  if (!account?.accessToken)
-    return { ok: false, error: "GitHub not connected for this team" };
+  if (!account?.accessToken) return githubNotConnected;
   const result = await getGitHubIssueDetail(
     account.accessToken,
     repo.owner,
@@ -427,6 +435,11 @@ export interface ConfirmCaseResult {
   /** True if an issue was filed/closed as part of this confirmation. */
   ticketChanged: boolean;
   error?: string;
+  /** Why the auto-file failed, when the confirmation itself still landed. The
+   *  board warns on this instead of silently moving the card to `regression`
+   *  with no ticket behind it. */
+  ticketError?: string;
+  ticketErrorCode?: string;
 }
 
 const KIND_TO_ISSUE: Record<ConfirmKind, StepIssueKind | null> = {
@@ -510,6 +523,8 @@ export async function confirmCase(
   let issueNumber: number | undefined;
   let issueState: StepIssueState | undefined;
   let issueKind: StepIssueKind | undefined;
+  let ticketError: string | undefined;
+  let ticketErrorCode: string | undefined;
 
   const targetKind = KIND_TO_ISSUE[kind];
   const shouldAutoFile = kind === "regression";
@@ -527,9 +542,13 @@ export async function confirmCase(
       issueNumber = result.issueNumber;
       issueState = result.state;
       issueKind = targetKind;
+    } else {
+      // The confirmation itself still landed, so this is a warning rather than
+      // a failure — but it must reach the reviewer. Silently dropping it left
+      // the card sitting in `regression` with no ticket and no way to tell.
+      ticketError = result.error;
+      ticketErrorCode = result.code;
     }
-    // Silent on failure — the confirmation itself still landed. The board
-    // can surface the GH error via a follow-up "File ticket" affordance.
   } else if (targetKind && step.githubIssueNumber) {
     // Already linked — just retag the kind so the row is queryable.
     await db
@@ -566,6 +585,8 @@ export async function confirmCase(
     issueNumber,
     issueState,
     issueKind,
+    ticketError,
+    ticketErrorCode,
   };
 }
 
