@@ -30,6 +30,7 @@ const LAYER_LABELS: Record<EvidenceLayer, string> = {
   perf: "Performance",
   variable: "Variables",
   api: "API",
+  storage: "Storage State",
 };
 
 function VerdictPill({ verdict }: { verdict: StepVerdict }) {

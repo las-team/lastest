@@ -1860,6 +1860,8 @@ function wasLayerCaptured(
       );
     case "api":
       return result?.apiResult != null;
+    case "storage":
+      return result?.storageStateSnapshot != null;
   }
 }
 
