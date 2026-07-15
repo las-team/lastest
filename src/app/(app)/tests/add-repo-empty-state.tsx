@@ -79,7 +79,7 @@ export function AddRepoEmptyState({ hasRepos }: AddRepoEmptyStateProps) {
         </div>
 
         <Link
-          href="/settings#github"
+          href="/settings?highlight=github,gitlab"
           className="inline-flex w-full items-center justify-center gap-2 rounded-md border bg-background px-3 py-2 text-sm font-medium hover:bg-accent"
         >
           <Github className="h-4 w-4" />

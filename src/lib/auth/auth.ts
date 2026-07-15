@@ -158,6 +158,23 @@ export const auth = betterAuth({
     additionalFields: {
       tokenExpiresAt: { type: "number", required: false },
     },
+    accountLinking: {
+      // Connecting GitHub goes through `linkSocial` (see
+      // components/settings/connect-github-button.tsx), which binds the
+      // provider account to whoever is already signed in. Demanding that the
+      // GitHub email equal the app email would then block the ordinary case of
+      // a work login plus a personal GitHub. better-auth still refuses to bind
+      // a GitHub identity that is already attached to a different user
+      // ("account_already_linked_to_different_user"), which is the check that
+      // actually matters here.
+      //
+      // Deliberately NOT setting `requireLocalEmailVerified: false`: that gate
+      // guards the sign-IN path, where an attacker who pre-registers a victim's
+      // address (sign-up does not prove control of it — see the user-create
+      // hook below) would otherwise be handed the account when the victim later
+      // signs in with GitHub. The link path doesn't consult it.
+      allowDifferentEmails: true,
+    },
   },
 
   emailAndPassword: {
