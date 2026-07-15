@@ -92,6 +92,32 @@ All additive:
 | `src/server/actions/layer-feedback.ts`               | `decideLayer` (line 69) — unchanged, verify only     |
 | `src/lib/verify/case-status.ts`                      | picks up the new layer via generic machinery         |
 
+## Implementation notes (v1, shipped)
+
+Deviations from the sections above, chosen during implementation:
+
+- **Tab counts**: the strip's existing per-layer delta text (`+2 −1`,
+  `3 new`, …) already carries the change magnitude, so no separate `(N)`
+  badge was added; the State layer got a matching delta. Keyboard cycling
+  shipped as `[` / `]`.
+- **Network pane**: the pane was already a single filterable table with a
+  Δ-vs-baseline summary (not two columns) — kept. Added sortable columns,
+  totals footer, density mini-timeline, and body download. A PREVIEW tab
+  for images was dropped: the EB only captures bodies for fetch/xhr/
+  document requests (16 KB cap), so there is nothing to preview.
+- **Step detail header** shows the step screenshot as the thumbnail; target
+  selector + click coordinates were dropped — step logs don't reliably
+  carry them today.
+- **State tab** covers Cookies + localStorage (what
+  `storageStateSnapshot` captures); sessionStorage/IndexedDB would need
+  capture-side work first. The storage layer emits `low` signal and can
+  never flip a verdict — it is informational by design, mode default `log`
+  with a `storage_mode` settings column + per-test override.
+- **Perf chart** overlays the baseline as dashed per-metric reference lines
+  from `step_comparisons.layers.perf.deltas` (metric-level, not per-step —
+  per-step baseline samples aren't in the verify payload). CLS renders as
+  its own mini-chart rather than a second y-axis.
+
 ## Out of scope / gotchas
 
 - **No changes to `decideLayer` semantics** or the Verified/Missed/Broken triage model — this is presentation + one new layer, not a new review flow.
