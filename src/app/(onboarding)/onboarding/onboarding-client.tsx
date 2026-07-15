@@ -26,7 +26,7 @@ import {
   X,
   Gitlab,
 } from "lucide-react";
-import { authClient } from "@/lib/auth/auth-client";
+import { connectGithub } from "@/components/settings/connect-github-button";
 import { toast } from "sonner";
 import { DiscordIcon } from "@/components/icons/discord-icon";
 import { McpConnect } from "@/components/mcp/mcp-connect";
@@ -658,10 +658,7 @@ function Step2Repo({
             if (githubAccount) {
               onSyncGithub();
             } else {
-              authClient.signIn.social({
-                provider: "github",
-                callbackURL: "/onboarding?step=2",
-              });
+              connectGithub("/onboarding?step=2");
             }
           }}
           pending={pending}

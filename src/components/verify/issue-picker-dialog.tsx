@@ -16,6 +16,8 @@ import {
   searchIssuesForCase,
 } from "@/server/actions/verify-issues";
 import type { GitHubIssueListItem } from "@/lib/integrations/github-issues";
+import { GITHUB_NOT_CONNECTED } from "@/lib/verify/github-connection";
+import { ConnectGithubInline } from "@/components/verify/connect-github-inline";
 import "../../app/(app)/verify/verify-design.css";
 
 interface IssuePickerDialogProps {
@@ -50,6 +52,7 @@ export function IssuePickerDialog({
   const [issues, setIssues] = useState<GitHubIssueListItem[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [createTitle, setCreateTitle] = useState(defaultTitle ?? caseTitle);
   const [createBody, setCreateBody] = useState(defaultBody ?? "");
@@ -63,6 +66,7 @@ export function IssuePickerDialog({
     const timer = setTimeout(async () => {
       setSearching(true);
       setSearchError(null);
+      setErrorCode(null);
       const res = await searchIssuesForCase(
         stepComparisonId,
         query.trim() || undefined,
@@ -70,6 +74,7 @@ export function IssuePickerDialog({
       setSearching(false);
       if (!res.ok) {
         setSearchError(res.error ?? "Failed to load issues");
+        setErrorCode(res.code ?? null);
         setIssues([]);
         return;
       }
@@ -90,6 +95,7 @@ export function IssuePickerDialog({
         router.refresh();
       } else {
         setSearchError(res.error ?? "Failed to link issue");
+        setErrorCode(res.code ?? null);
       }
     });
   };
@@ -107,6 +113,7 @@ export function IssuePickerDialog({
         router.refresh();
       } else {
         setSearchError(res.error ?? "Failed to create issue");
+        setErrorCode(res.code ?? null);
       }
     });
   };
@@ -147,6 +154,7 @@ export function IssuePickerDialog({
             issues={issues}
             searching={searching}
             error={searchError}
+            errorCode={errorCode}
             onLink={handleLink}
             disabled={pending}
           />
@@ -158,6 +166,7 @@ export function IssuePickerDialog({
             onBodyChange={setCreateBody}
             onCreate={handleCreate}
             error={searchError}
+            errorCode={errorCode}
             pending={pending}
           />
         )}
@@ -172,6 +181,7 @@ function BrowseTab({
   issues,
   searching,
   error,
+  errorCode,
   onLink,
   disabled,
 }: {
@@ -180,6 +190,7 @@ function BrowseTab({
   issues: GitHubIssueListItem[];
   searching: boolean;
   error: string | null;
+  errorCode: string | null;
   onLink: (i: GitHubIssueListItem) => void;
   disabled: boolean;
 }) {
@@ -213,8 +224,11 @@ function BrowseTab({
         />
       </div>
       {error && (
-        <div className="v-chip regression" style={{ alignSelf: "flex-start" }}>
-          {error}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div className="v-chip regression">{error}</div>
+          {errorCode === GITHUB_NOT_CONNECTED && (
+            <ConnectGithubInline className="v-btn" />
+          )}
         </div>
       )}
       <div
@@ -328,6 +342,7 @@ function CreateTab({
   onBodyChange,
   onCreate,
   error,
+  errorCode,
   pending,
 }: {
   title: string;
@@ -336,6 +351,7 @@ function CreateTab({
   onBodyChange: (v: string) => void;
   onCreate: () => void;
   error: string | null;
+  errorCode: string | null;
   pending: boolean;
 }) {
   return (
@@ -383,8 +399,11 @@ function CreateTab({
         your text.
       </div>
       {error && (
-        <div className="v-chip regression" style={{ alignSelf: "flex-start" }}>
-          {error}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div className="v-chip regression">{error}</div>
+          {errorCode === GITHUB_NOT_CONNECTED && (
+            <ConnectGithubInline className="v-btn" />
+          )}
         </div>
       )}
       <div
