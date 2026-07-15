@@ -111,7 +111,7 @@ const UUID_RE =
  * @param restrictOrigins if set, drop absolute URLs whose origin is not a known
  *                        app origin (used to filter external links out of edges)
  */
-function canonicalPath(
+export function canonicalPath(
   raw: string,
   base: string,
   restrictOrigins: Set<string> | null,
