@@ -1805,6 +1805,7 @@ export type AIActionType =
   | "agent_play"
   | "qa_plan"
   | "qa_task_triage"
+  | "qa_auth_extract"
   | "triage"
   | "generate_var_value"
   | "suggest_app_fix";
@@ -3057,8 +3058,56 @@ export interface QaDiscovery {
 /** How a QA session runs. `full` is the complete pipeline; `refresh_spec`
  *  re-discovers the app and re-plans against existing coverage (no
  *  generation); `fill_gaps` takes the latest plan and generates only the
- *  items not already covered by a live test. */
-export type QaRunMode = "full" | "refresh_spec" | "fill_gaps";
+ *  items not already covered by a live test; `explore` maps the app for the
+ *  App Map (setup → login → discover only — no plan/generation). */
+export type QaRunMode = "full" | "refresh_spec" | "fill_gaps" | "explore";
+
+// ── App Map Explore (mode = "explore") ───────────────────────────────────────
+
+/** How the explore frontier orders undiscovered pages. */
+export type ExploreStrategy = "breadth" | "depth" | "balanced";
+
+/** User-chosen parameters from the App Map "Explore app" dialog. All jsonb —
+ *  no migration needed. */
+export interface QaExploreConfig {
+  /** Requested explorer (EB) count. Capped by the plan's `maxExplorers`. */
+  explorers: number;
+  /** Crawl depth 1–6 (link hops from the entry URL). */
+  depth: number;
+  strategy: ExploreStrategy;
+  /** Wall-clock budget in minutes. */
+  maxMinutes: number;
+  /** Page budget derived from depth (`6 + depth*5`, capped at 40). */
+  pageBudget: number;
+}
+
+/** Live status of one explorer in the swarm (progress-panel card). */
+export interface QaExplorerState {
+  index: number;
+  status: "claiming" | "exploring" | "blocked" | "done" | "failed";
+  pagesMapped: number;
+  currentUrl?: string;
+  /** Proxied EB screencast URL while this explorer holds an EB. */
+  streamUrl?: string;
+  detail?: string;
+}
+
+/** A frontier entry the exploration could not get past. */
+export interface QaExploreBlocked {
+  url: string;
+  reason: "auth_wall" | "dead_end";
+}
+
+/** Aggregate live explore state (metadata.qaExplore) — written throttled
+ *  during the run, polled by the App Map progress UI. */
+export interface QaExploreState {
+  config: QaExploreConfig;
+  explorers: QaExplorerState[];
+  pagesDiscovered: number;
+  blocked: QaExploreBlocked[];
+  startedAt: string;
+  deadlineAt: string;
+}
 
 /** What started a QA session. `schedule`/`pr`/`mcp` are reserved for the
  *  trigger phases (cron, PR webhook, MCP control). */
@@ -3244,6 +3293,14 @@ export interface AgentSessionMetadata {
   /** What started this session — powers the run-history provenance chip.
    *  Absent on sessions created before triggers existed = "manual". */
   qaTrigger?: QaSessionTrigger;
+  /** Live App Map exploration state (mode = "explore"). */
+  qaExplore?: QaExploreState;
+  /** Free-text sign-in instructions from the Explore dialog ("Log in with
+   *  demo@acme.com / hunter2, then tap Continue"). qa_login AI-extracts
+   *  structured creds/loginUrl from it and feeds the existing cascade.
+   *  Encrypted at rest (AES-256-GCM) via the agent-session query layer —
+   *  the prose routinely contains a password. */
+  qaAuthContext?: string;
   [key: string]: unknown;
 }
 
@@ -3816,6 +3873,10 @@ export type ActivityEventType =
   | "mcp:tool_error"
   | "artifact:created"
   | "artifact:updated"
+  // App Map exploration (QA agent mode = "explore")
+  | "map:page_discovered"
+  | "map:explorer_status"
+  | "map:blocked"
   // Gamification
   | "score:awarded"
   | "score:penalty"

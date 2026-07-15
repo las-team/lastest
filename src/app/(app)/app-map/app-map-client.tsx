@@ -42,14 +42,20 @@ import {
   Plus,
   RotateCcw,
   PanelLeft,
+  Radar,
+  Square,
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   getAppMap,
   getAppFlows,
   requestCoverage,
+  startExploration,
   type GetAppMapResult,
+  type ActiveExploration,
+  type StartExplorationInput,
 } from "@/server/actions/app-map";
+import { cancelQaAgent } from "@/server/actions/qa-agent";
 import type {
   AppMapGraph,
   AppMapNode,
@@ -64,6 +70,7 @@ import { TreeOutline } from "./tree-outline";
 import { ScreensGallery } from "./screens-gallery";
 import { FlowsView } from "./flows-view";
 import { FlowPlayer } from "./flow-player";
+import { ExploreDialog } from "./explore-dialog";
 
 // ── Layout constants ──────────────────────────────────────────────────────────
 // Thumbnail is 16:9 (matches the default 1920×1080 run viewport), so
@@ -293,6 +300,10 @@ interface AppMapClientProps {
   repositoryId: string;
   branch: string;
   qaAgentEnabled: boolean;
+  /** Plan cap for the Explore dialog's explorers slider. */
+  maxExplorers: number;
+  /** In-flight exploration (reload-resume) — null when none is running. */
+  activeExploration: ActiveExploration | null;
 }
 
 export function AppMapClient({
@@ -301,6 +312,8 @@ export function AppMapClient({
   repositoryId,
   branch,
   qaAgentEnabled,
+  maxExplorers,
+  activeExploration,
 }: AppMapClientProps) {
   const [graph, setGraph] = useState<AppMapGraph | null>(initialGraph);
   const [selected, setSelected] = useState<AppMapNode | null>(null);
@@ -520,6 +533,97 @@ export function AppMapClient({
   useEffect(() => {
     if (view === "flows" || selected) ensureFlows();
   }, [view, selected, ensureFlows]);
+
+  // ── Exploration (QA agent mode = "explore") ──
+  // While a run is live, an SSE subscription to the activity feed bumps the
+  // screens-found counter on every map:page_discovered event and debounces a
+  // getAppMap refetch (4s) so the canvas grows as the explorers crawl.
+  const [exploringSessionId, setExploringSessionId] = useState<string | null>(
+    activeExploration?.sessionId ?? null,
+  );
+  const [exploreCount, setExploreCount] = useState(
+    activeExploration?.explore?.pagesDiscovered ?? 0,
+  );
+  const [exploreOpen, setExploreOpen] = useState(false);
+
+  useEffect(() => {
+    if (!exploringSessionId) return;
+    const es = new EventSource(
+      `/api/activity-feed?repo=${encodeURIComponent(repositoryId)}`,
+    );
+    let refetchTimer: ReturnType<typeof setTimeout> | null = null;
+    let closed = false;
+    const scheduleRefetch = () => {
+      if (refetchTimer) return;
+      refetchTimer = setTimeout(async () => {
+        refetchTimer = null;
+        try {
+          const result = await getAppMap({ branch });
+          if (!closed && result.ok) setGraph(result.graph);
+        } catch {
+          // transient — the next event retries
+        }
+      }, 4000);
+    };
+    es.onmessage = (e) => {
+      try {
+        const evt = JSON.parse(e.data) as {
+          sessionId?: string | null;
+          eventType?: string;
+        };
+        if (evt.sessionId !== exploringSessionId) return;
+        if (evt.eventType === "map:page_discovered") {
+          setExploreCount((n) => n + 1);
+          scheduleRefetch();
+        } else if (
+          evt.eventType === "session:complete" ||
+          evt.eventType === "session:error"
+        ) {
+          setExploringSessionId(null);
+          scheduleRefetch();
+        }
+      } catch {
+        // non-JSON keepalives
+      }
+    };
+    return () => {
+      closed = true;
+      es.close();
+      if (refetchTimer) clearTimeout(refetchTimer);
+    };
+  }, [exploringSessionId, repositoryId, branch]);
+
+  const launchExploration = useCallback(
+    async (input: StartExplorationInput) => {
+      try {
+        const { sessionId } = await startExploration(input);
+        setExploreCount(0);
+        setExploringSessionId(sessionId);
+        toast.success("Exploration started", {
+          description: "New screens will appear on the map as they're found",
+        });
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Could not start exploring",
+        );
+        throw err;
+      }
+    },
+    [],
+  );
+
+  const stopExploration = useCallback(async () => {
+    if (!exploringSessionId) return;
+    try {
+      await cancelQaAgent(exploringSessionId);
+      setExploringSessionId(null);
+      toast.message("Exploration stopped");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Could not stop the exploration",
+      );
+    }
+  }, [exploringSessionId]);
 
   // Step-by-step flow player (covers the whole container while open).
   const [playing, setPlaying] = useState<{
@@ -743,6 +847,34 @@ export function AppMapClient({
         <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
           {graph.branch}
         </span>
+        <div className="ml-auto flex items-center gap-2">
+          {exploringSessionId ? (
+            <div className="flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/5 px-2.5 py-1 text-xs">
+              <Radar className="h-3.5 w-3.5 animate-pulse text-primary" />
+              <span className="font-medium text-primary">Exploring…</span>
+              <span className="text-muted-foreground">
+                {exploreCount} screen{exploreCount === 1 ? "" : "s"} found
+              </span>
+              <button
+                type="button"
+                onClick={stopExploration}
+                className="flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-medium hover:bg-muted"
+                title="Stop the exploration"
+              >
+                <Square className="h-3 w-3" /> Stop
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setExploreOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              <Radar className="h-3.5 w-3.5" /> Explore app
+              {!qaAgentEnabled && <Lock className="h-3 w-3 opacity-70" />}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* View content */}
@@ -1017,6 +1149,14 @@ export function AppMapClient({
           onClose={() => setPlaying(null)}
         />
       )}
+
+      <ExploreDialog
+        open={exploreOpen}
+        onOpenChange={setExploreOpen}
+        maxExplorers={maxExplorers}
+        qaAgentEnabled={qaAgentEnabled}
+        onLaunch={launchExploration}
+      />
     </div>
   );
 }

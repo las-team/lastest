@@ -84,7 +84,10 @@ import type {
   PwAgentType,
   QaAuthState,
   QaDiscovery,
+  QaExploreConfig,
+  QaExploreState,
   QaGeneratedTest,
+  QaPageSnapshot,
   QaPlanItem,
   QaRunMode,
   QaSessionTrigger,
@@ -503,6 +506,64 @@ async function upsertQaLoginSetupTest(
   }
 }
 
+interface ExtractedAuthContext {
+  email?: string;
+  password?: string;
+  loginUrl?: string;
+}
+
+function isExtractedAuthContext(v: unknown): v is ExtractedAuthContext {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  return ["email", "password", "loginUrl"].every(
+    (k) => o[k] == null || typeof o[k] === "string",
+  );
+}
+
+/**
+ * AI-extract structured {email, password, loginUrl} from Explore's free-text
+ * sign-in instructions ("Log in with demo@acme.com / hunter2, then tap
+ * Continue"). Extraction only — values must be literally present in the
+ * prose; interactive prose-following (SSO buttons, OTP) is a documented
+ * non-goal for v1. Best-effort: null when nothing extractable.
+ */
+async function extractCredsFromAuthContext(
+  repositoryId: string,
+  authContext: string,
+): Promise<ExtractedAuthContext | null> {
+  try {
+    const settings = await queries.getAISettings(repositoryId);
+    const config = getAIConfig(settings);
+    const raw = await generateWithAI(
+      config,
+      `Extract sign-in details from these instructions:\n\n${authContext.slice(0, 4000)}\n\nReturn a JSON object: {"email": string|null, "password": string|null, "loginUrl": string|null}. "email" may also be a username. Use null for anything not literally present — NEVER invent values.`,
+      "You extract structured login credentials from user-provided sign-in instructions for an automated browser. Respond with a single JSON object and nothing else.",
+      {
+        repositoryId,
+        actionType: "qa_auth_extract",
+        responseFormat: "json_object",
+        signal: AbortSignal.timeout(60_000),
+      },
+    );
+    const parsed = parseAiJson(raw, isExtractedAuthContext);
+    if (!parsed) return null;
+    const clean = (s: unknown): string | undefined =>
+      typeof s === "string" && s.trim() ? s.trim() : undefined;
+    const out: ExtractedAuthContext = {
+      email: clean(parsed.email),
+      password: clean(parsed.password),
+      loginUrl: clean(parsed.loginUrl),
+    };
+    if (out.loginUrl && !/^https?:\/\//i.test(out.loginUrl)) {
+      out.loginUrl = undefined;
+    }
+    return out.email || out.password || out.loginUrl ? out : null;
+  } catch (err) {
+    console.warn("[QaAgent] auth-context extraction failed:", err);
+    return null;
+  }
+}
+
 /**
  * Resolve how this run authenticates, cheapest-and-safest option first:
  *   1. existing repo setup (default setup steps / storage states), validated
@@ -524,8 +585,31 @@ async function runQaLogin(
   const session = await queries.getAgentSession(sessionId);
   if (!session?.metadata.qaTargetUrl) return false;
   const targetUrl = session.metadata.qaTargetUrl;
-  const credentials = credentialsFrom(session.metadata);
-  const allowRegistration = session.metadata.qaAllowRegistration !== false;
+
+  // Explore auth context: AI-extract structured creds/login URL from the
+  // user's sign-in prose, then feed the existing cascade below exactly as if
+  // the creds had been typed into the form (creds_untested path included).
+  let metadata = session.metadata;
+  let extractedLoginUrl: string | undefined;
+  if (metadata.qaAuthContext && !credentialsFrom(metadata)) {
+    const extracted = await extractCredsFromAuthContext(
+      repositoryId,
+      metadata.qaAuthContext,
+    );
+    extractedLoginUrl = extracted?.loginUrl;
+    if (extracted?.email && extracted.password) {
+      const patch: Partial<AgentSessionMetadata> = {
+        quickstartEmail: extracted.email,
+        quickstartPassword: extracted.password,
+        credsProvided: true,
+      };
+      await mergeMetadata(sessionId, patch);
+      metadata = { ...metadata, ...patch };
+    }
+  }
+
+  const credentials = credentialsFrom(metadata);
+  const allowRegistration = metadata.qaAllowRegistration !== false;
 
   const SUB_EXISTING = 0;
   const SUB_SETUP_RUN = 1;
@@ -558,7 +642,11 @@ async function runQaLogin(
   );
 
   let auth: QaAuthState | null = null;
-  let authLinks: { loginUrl?: string; signupUrl?: string } = {};
+  // A login URL named in the auth-context prose is authoritative over the
+  // DOM-discovered one.
+  let authLinks: { loginUrl?: string; signupUrl?: string } = {
+    loginUrl: extractedLoginUrl,
+  };
   let runnerId: string | undefined;
 
   try {
@@ -766,7 +854,11 @@ async function runQaLogin(
       cdpUrl &&
       (credentials || (allowRegistration && !defaultSetupCoversAuth))
     ) {
-      authLinks = await findAuthLinksOnEb(cdpUrl, targetUrl);
+      const domLinks = await findAuthLinksOnEb(cdpUrl, targetUrl);
+      authLinks = {
+        ...domLinks,
+        loginUrl: extractedLoginUrl ?? domLinks.loginUrl,
+      };
     }
 
     // 2) User-provided credentials — verify with a real login and capture the
@@ -1158,6 +1250,48 @@ async function runQaDiscover(
   substeps[2] = { ...substeps[2], status: "running" };
   await updateSubsteps(sessionId, "qa_discover", substeps);
 
+  // Explore runs get depth/budget/deadline from the dialog config and flush
+  // crawled pages incrementally (throttled ≥3s) so buildAppMap — computed on
+  // read from qaDiscovery — picks up new nodes while the crawl is running.
+  // This flush is what makes the map grow live.
+  const isExplore = session.metadata.qaMode === "explore";
+  let exploreState = isExplore ? session.metadata.qaExplore : undefined;
+  const livePages: QaPageSnapshot[] = [];
+  let lastFlushAt = 0;
+  let flushChain: Promise<void> = Promise.resolve();
+  const flushLive = () => {
+    const now = Date.now();
+    if (now - lastFlushAt < 3000) return;
+    lastFlushAt = now;
+    const patch: Partial<AgentSessionMetadata> = {
+      qaDiscovery: {
+        targetUrl,
+        crawledPages: [...livePages],
+        staticRoutes: staticRoutes.length > 0 ? staticRoutes : undefined,
+        framework,
+        githubConnected,
+      },
+      ...(exploreState ? { qaExplore: exploreState } : {}),
+    };
+    // Serialized: mergeMetadata is read-merge-rewrite — concurrent flushes
+    // would clobber each other.
+    flushChain = flushChain
+      .then(() => mergeMetadata(sessionId, patch))
+      .catch((err) => console.warn("[QaAgent] explore flush failed:", err));
+  };
+  const setExplorerState = (
+    patch: Partial<QaExploreState["explorers"][number]>,
+  ) => {
+    if (!exploreState) return;
+    exploreState = {
+      ...exploreState,
+      pagesDiscovered: livePages.length,
+      explorers: exploreState.explorers.map((e, i) =>
+        i === 0 ? { ...e, ...patch } : e,
+      ),
+    };
+  };
+
   let runnerId: string | undefined;
   let crawled: Awaited<ReturnType<typeof crawlTargetApp>> = {
     pages: [],
@@ -1176,9 +1310,28 @@ async function runQaDiscover(
       await updateSubsteps(sessionId, "qa_discover", substeps);
     } else {
       runnerId = eb.runnerId;
+      if (exploreState) {
+        setExplorerState({
+          status: "exploring",
+          streamUrl: proxiedStream(eb.streamUrl),
+        });
+        emitActivity(
+          teamId,
+          repositoryId,
+          sessionId,
+          "map:explorer_status",
+          "Explorer 1 started",
+          {
+            stepId: "qa_discover",
+            agentType: "ranger",
+            detail: { index: 0, status: "exploring" },
+          },
+        );
+      }
       await mergeMetadata(sessionId, {
         queuedForBrowser: false,
         streamUrl: proxiedStream(eb.streamUrl),
+        ...(exploreState ? { qaExplore: exploreState } : {}),
       });
 
       // Start the crawl from the post-login state when qa_login resolved a
@@ -1202,7 +1355,16 @@ async function runQaDiscover(
         ? undefined
         : credentialsFrom(session.metadata);
       crawled = await crawlTargetApp(eb.cdpUrl, targetUrl, {
-        maxPages: MAX_CRAWL_PAGES,
+        maxPages: exploreState
+          ? exploreState.config.pageBudget
+          : MAX_CRAWL_PAGES,
+        ...(exploreState
+          ? {
+              maxPagesHardCap: 40,
+              maxDepth: exploreState.config.depth,
+              deadline: new Date(exploreState.deadlineAt).getTime(),
+            }
+          : {}),
         credentials,
         loginUrl: qaAuth?.loginUrl,
         // No injected session and no creds to try → make sure the crawl at
@@ -1215,6 +1377,31 @@ async function runQaDiscover(
             detail: `${index + 1} pages mapped — ${snapshot.finalUrl}`,
           };
           updateSubsteps(sessionId, "qa_discover", substeps).catch(() => {});
+          if (isExplore) {
+            livePages.push(snapshot);
+            setExplorerState({
+              status: "exploring",
+              pagesMapped: livePages.length,
+              currentUrl: snapshot.finalUrl,
+            });
+            flushLive();
+            emitActivity(
+              teamId,
+              repositoryId,
+              sessionId,
+              "map:page_discovered",
+              `Discovered ${snapshot.finalUrl}`,
+              {
+                stepId: "qa_discover",
+                agentType: "ranger",
+                detail: {
+                  url: snapshot.finalUrl,
+                  title: snapshot.title,
+                  index,
+                },
+              },
+            );
+          }
           emitActivity(
             teamId,
             repositoryId,
@@ -1270,6 +1457,12 @@ async function runQaDiscover(
       detail: err instanceof Error ? err.message : "crawl failed",
     };
     await updateSubsteps(sessionId, "qa_discover", substeps);
+    if (exploreState) {
+      setExplorerState({
+        status: "failed",
+        detail: err instanceof Error ? err.message : "crawl failed",
+      });
+    }
   } finally {
     await mergeMetadata(sessionId, { streamUrl: undefined }).catch(() => {});
     if (runnerId) await releasePoolEB(runnerId).catch(() => {});
@@ -1294,7 +1487,37 @@ async function runQaDiscover(
     codeCheck,
     prChanges,
   };
-  await mergeMetadata(sessionId, { qaDiscovery: discovery });
+  // Settle any in-flight incremental flush before the authoritative final
+  // write, then mark the explorer finished.
+  await flushChain.catch(() => {});
+  if (exploreState) {
+    setExplorerState({
+      status:
+        exploreState.explorers[0]?.status === "failed" ? "failed" : "done",
+      currentUrl: undefined,
+      streamUrl: undefined,
+    });
+    exploreState = {
+      ...exploreState,
+      pagesDiscovered: crawled.pages.length,
+    };
+    emitActivity(
+      teamId,
+      repositoryId,
+      sessionId,
+      "map:explorer_status",
+      `Explorer 1 finished — ${crawled.pages.length} pages mapped`,
+      {
+        stepId: "qa_discover",
+        agentType: "ranger",
+        detail: { index: 0, status: "done", pages: crawled.pages.length },
+      },
+    );
+  }
+  await mergeMetadata(sessionId, {
+    qaDiscovery: discovery,
+    ...(exploreState ? { qaExplore: exploreState } : {}),
+  });
   await setStepCompleted(sessionId, "qa_discover", {
     pagesCrawled: crawled.pages.length,
     staticRoutes: staticRoutes.length,
@@ -2325,6 +2548,11 @@ const MODE_PIPELINES: Record<QaRunMode, AgentStepId[]> = {
     "qa_heal",
     "qa_summary",
   ],
+  // App Map exploration: map the app, nothing else. No plan, no generation —
+  // the map is computed-on-read from qaDiscovery, which discover flushes
+  // incrementally so the map grows live. Finalized at the end of
+  // executeQaPipeline (no qa_summary step to mark the session completed).
+  explore: ["qa_setup", "qa_login", "qa_discover"],
 };
 
 function buildStepsForMode(mode: QaRunMode): AgentStepState[] {
@@ -2390,6 +2618,30 @@ async function executeQaPipeline(
       }
       if (!ok) return;
     }
+
+    // Explore pipelines end at qa_discover — no summary step marks the
+    // session terminal, so finalize here once every step succeeded.
+    const finished = await queries.getAgentSession(sessionId);
+    if (
+      finished?.metadata.qaMode === "explore" &&
+      finished.status === "active"
+    ) {
+      await queries.updateAgentSession(sessionId, {
+        status: "completed",
+        completedAt: new Date(),
+      });
+      const discovered =
+        finished.metadata.qaExplore?.pagesDiscovered ??
+        finished.metadata.qaDiscovery?.crawledPages.length ??
+        0;
+      emitActivity(
+        teamId,
+        repositoryId,
+        sessionId,
+        "session:complete",
+        `Exploration complete: ${discovered} screens mapped`,
+      );
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[QaAgent] pipeline error:", err);
@@ -2430,6 +2682,17 @@ export interface StartQaAgentInput {
   /** Allow the qa_login step to self-register a throwaway account when no
    *  creds/setup exist and a signup link is found in the DOM. Default true. */
   allowRegistration?: boolean;
+  /** Explore-mode parameters (mode = "explore" only). */
+  explore?: Omit<QaExploreConfig, "pageBudget">;
+  /** Free-text sign-in instructions for explore runs — qa_login AI-extracts
+   *  structured creds/loginUrl from the prose. Encrypted at rest. */
+  authContext?: string;
+}
+
+/** Page budget an explore run gets for its chosen depth (spec: 6 + depth*5,
+ *  capped at 40 pages). */
+function explorePageBudget(depth: number): number {
+  return Math.min(6 + depth * 5, 40);
 }
 
 export async function startQaAgent(
@@ -2467,6 +2730,47 @@ export async function startQaAgent(
   const mode: QaRunMode = input.mode ?? "full";
   const credsProvided = Boolean(input.email?.trim() && input.password);
   const steps = buildStepsForMode(mode);
+
+  // Explore runs carry their swarm config + live progress skeleton so the App
+  // Map progress UI has state to poll from the first second.
+  let exploreSeed: Partial<AgentSessionMetadata> = {};
+  if (mode === "explore") {
+    const requested = input.explore ?? {
+      explorers: 1,
+      depth: 2,
+      strategy: "balanced" as const,
+      maxMinutes: 5,
+    };
+    const depth = Math.max(1, Math.min(Math.floor(requested.depth), 6));
+    const config: QaExploreConfig = {
+      explorers: Math.max(1, Math.min(Math.floor(requested.explorers), 10)),
+      depth,
+      strategy: requested.strategy,
+      maxMinutes: Math.max(1, Math.min(requested.maxMinutes, 20)),
+      pageBudget: explorePageBudget(depth),
+    };
+    const startedAt = new Date();
+    const exploreState: QaExploreState = {
+      config,
+      explorers: Array.from({ length: config.explorers }, (_, index) => ({
+        index,
+        status: "claiming",
+        pagesMapped: 0,
+      })),
+      pagesDiscovered: 0,
+      blocked: [],
+      startedAt: startedAt.toISOString(),
+      deadlineAt: new Date(
+        startedAt.getTime() + config.maxMinutes * 60_000,
+      ).toISOString(),
+    };
+    exploreSeed = {
+      qaExplore: exploreState,
+      ...(input.authContext?.trim()
+        ? { qaAuthContext: input.authContext.trim().slice(0, 4000) }
+        : {}),
+    };
+  }
 
   // Decode uploaded product docs into the planner's documentation digest.
   // Only the digest + per-file summaries persist — never the raw upload.
@@ -2519,6 +2823,7 @@ export async function startQaAgent(
       authMode: credsProvided ? "login" : "public_only",
       ...planSeed,
       ...docsSeed,
+      ...exploreSeed,
       ...(credsProvided
         ? {
             quickstartEmail: input.email!.trim(),
