@@ -96,6 +96,7 @@ import {
   type VideoPlayerHandle,
 } from "@/components/video-player";
 import { resolveStepSegments } from "@/lib/playback/step-timings";
+import { PerfVitalsChart } from "./perf-vitals-chart";
 
 interface AreaLite {
   id: string;
@@ -4404,6 +4405,11 @@ function NetworkPane({
   );
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  // Column sort — "order" keeps capture order (the default devtools view).
+  const [sortKey, setSortKey] = useState<
+    "order" | "method" | "url" | "status" | "type" | "duration" | "size"
+  >("order");
+  const [sortDir, setSortDir] = useState<1 | -1>(1);
 
   // Per-group counts for the filter chips — always show the underlying total
   // so the user can see what's available to filter on.
@@ -4450,6 +4456,74 @@ function NetworkPane({
         return true;
       });
   }, [requests, search, methodFilter, statusFilter, typeFilter]);
+
+  const sorted = useMemo(() => {
+    if (sortKey === "order")
+      return sortDir === 1 ? filtered : [...filtered].reverse();
+    const val = (r: import("@/lib/db/schema").NetworkRequest) => {
+      switch (sortKey) {
+        case "method":
+          return r.method;
+        case "url":
+          return r.url;
+        case "status":
+          return r.status;
+        case "type":
+          return r.resourceType || "other";
+        case "duration":
+          return r.duration ?? -1;
+        case "size":
+          return r.responseSize ?? -1;
+      }
+    };
+    return [...filtered].sort((a, b) => {
+      const av = val(a.r);
+      const bv = val(b.r);
+      const cmp =
+        typeof av === "string"
+          ? av.localeCompare(String(bv))
+          : (av as number) - (bv as number);
+      return cmp * sortDir;
+    });
+  }, [filtered, sortKey, sortDir]);
+
+  const onSort = (key: typeof sortKey) => {
+    if (key === sortKey) setSortDir((d) => (d === 1 ? -1 : 1));
+    else {
+      setSortKey(key);
+      setSortDir(1);
+    }
+  };
+
+  // Request-density mini-timeline over the run: bucket the requests by their
+  // video-clock offset (atMs; legacy fallback = epoch startTime rebased to
+  // the first request). Hidden when the run has no usable timestamps.
+  const density = useMemo(() => {
+    let offsets = requests
+      .map((r) => (typeof r.atMs === "number" ? r.atMs : null))
+      .filter((v): v is number => v != null);
+    if (offsets.length < 2) {
+      const starts = requests
+        .map((r) => (typeof r.startTime === "number" ? r.startTime : null))
+        .filter((v): v is number => v != null);
+      if (starts.length < 2) return null;
+      const min = Math.min(...starts);
+      offsets = starts.map((s) => s - min);
+    }
+    const max = Math.max(...offsets);
+    if (max <= 0) return null;
+    const BUCKETS = 48;
+    const counts = new Array<number>(BUCKETS).fill(0);
+    for (const o of offsets) {
+      counts[Math.min(BUCKETS - 1, Math.floor((o / max) * BUCKETS))] += 1;
+    }
+    return { counts, maxCount: Math.max(...counts), spanMs: max };
+  }, [requests]);
+
+  const totalBytes = useMemo(
+    () => filtered.reduce((sum, { r }) => sum + (r.responseSize ?? 0), 0),
+    [filtered],
+  );
 
   const toggle = <T,>(set: Set<T>, val: T): Set<T> => {
     const next = new Set(set);
@@ -4764,11 +4838,50 @@ function NetworkPane({
               )}
             </div>
           </div>
+          {/* Request-density mini-timeline: where in the run the traffic
+              happened. Buckets over the video clock (atMs; legacy rows use
+              epoch startTime rebased to the first request). */}
+          {density && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-end",
+                gap: 1,
+                height: 24,
+                padding: "4px 12px 2px",
+                borderBottom: "1px solid var(--border)",
+              }}
+              aria-label="Request density over the run"
+            >
+              {density.counts.map((n, i) => {
+                const bucketStartMs =
+                  (i / density.counts.length) * density.spanMs;
+                return (
+                  <div
+                    key={i}
+                    title={`${n} request${n === 1 ? "" : "s"} @ ${formatVideoMs(bucketStartMs)}`}
+                    style={{
+                      flex: 1,
+                      height:
+                        n > 0
+                          ? `${Math.max(15, (n / density.maxCount) * 100)}%`
+                          : 1,
+                      background:
+                        n > 0
+                          ? "color-mix(in oklab, var(--c-teal) 55%, white)"
+                          : "var(--border)",
+                      borderRadius: 1,
+                    }}
+                  />
+                );
+              })}
+            </div>
+          )}
           {/* Header + rows share one horizontal scroll container so the
               7-column grid stays aligned (and usable) on narrow viewports
               instead of crushing every track to a few px. */}
           <div style={{ overflowX: "auto" }}>
-            {/* Column header */}
+            {/* Column header — click to sort, click again to flip. */}
             <div
               style={{
                 display: "grid",
@@ -4781,24 +4894,36 @@ function NetworkPane({
               }}
             >
               <span />
-              <span className="label" style={{ fontSize: 9 }}>
-                Method
-              </span>
-              <span className="label" style={{ fontSize: 9 }}>
-                URL
-              </span>
-              <span className="label" style={{ fontSize: 9 }}>
-                Status
-              </span>
-              <span className="label" style={{ fontSize: 9 }}>
-                Type
-              </span>
-              <span className="label" style={{ fontSize: 9 }}>
-                Dur
-              </span>
-              <span className="label" style={{ fontSize: 9 }}>
-                Size
-              </span>
+              {(
+                [
+                  ["method", "Method"],
+                  ["url", "URL"],
+                  ["status", "Status"],
+                  ["type", "Type"],
+                  ["duration", "Dur"],
+                  ["size", "Size"],
+                ] as const
+              ).map(([key, name]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => onSort(key)}
+                  className="label"
+                  title={`Sort by ${name.toLowerCase()}`}
+                  style={{
+                    fontSize: 9,
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    cursor: "pointer",
+                    textAlign: "left",
+                    color: sortKey === key ? "var(--fg-1)" : undefined,
+                  }}
+                >
+                  {name}
+                  {sortKey === key ? (sortDir === 1 ? " ▲" : " ▼") : ""}
+                </button>
+              ))}
             </div>
             <div style={{ maxHeight: 480, overflowY: "auto", minWidth: 560 }}>
               {filtered.length === 0 && (
@@ -4809,7 +4934,7 @@ function NetworkPane({
                   No requests match the current filters
                 </div>
               )}
-              {filtered.slice(0, 500).map(({ r, i }) => (
+              {sorted.slice(0, 500).map(({ r, i }) => (
                 <NetworkRequestRow
                   key={i}
                   req={r}
@@ -4822,15 +4947,36 @@ function NetworkPane({
                   }
                 />
               ))}
-              {filtered.length > 500 && (
+              {sorted.length > 500 && (
                 <div
                   className="label"
                   style={{ padding: 8, textAlign: "center", fontSize: 10 }}
                 >
-                  +{filtered.length - 500} more not shown
+                  +{sorted.length - 500} more not shown
                 </div>
               )}
             </div>
+          </div>
+          {/* Totals footer — counts + transferred bytes for the current
+              filter set (responseSize is capture-time content-length). */}
+          <div
+            style={{
+              padding: "6px 12px",
+              borderTop: "1px solid var(--border)",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <span className="label" style={{ fontSize: 9 }}>
+              {filtered.length} request{filtered.length === 1 ? "" : "s"}
+              {filtered.length !== requests.length
+                ? ` (of ${requests.length})`
+                : ""}
+              {totalBytes > 0
+                ? ` · ${formatBytes(totalBytes)} transferred`
+                : ""}
+            </span>
           </div>
         </div>
       )}
@@ -5115,10 +5261,41 @@ function BodyBlock({ title, body }: { title: string; body: string }) {
     return body;
   })();
   const truncated = pretty.length > 8000;
+  const download = () => {
+    const isJson =
+      pretty.trimStart().startsWith("{") || pretty.trimStart().startsWith("[");
+    const blob = new Blob([body], {
+      type: isJson ? "application/json" : "text/plain",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${title.toLowerCase().replace(/\s+/g, "-")}.${isJson ? "json" : "txt"}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
   return (
     <div>
-      <div className="label" style={{ fontSize: 9, marginBottom: 4 }}>
+      <div
+        className="label"
+        style={{
+          fontSize: 9,
+          marginBottom: 4,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+        }}
+      >
         {title} · {body.length} chars{truncated ? " (truncated to 8k)" : ""}
+        <button
+          type="button"
+          onClick={download}
+          className="v-btn"
+          style={{ padding: "0 5px", fontSize: 9, minHeight: 0 }}
+          title="Download the full captured body"
+        >
+          Download
+        </button>
       </div>
       <pre
         className="mono"
@@ -5730,6 +5907,10 @@ function PerfPane({
           message={`No perf drift — ${samples.length} sample${samples.length === 1 ? "" : "s"} captured, all within budget`}
         />
       )}
+      {/* Per-step time series (spec 27): solid = current run; dashed = the
+          baseline-run value from the perf diff summary. Falls back to the
+          mean tiles below when there are too few samples to chart. */}
+      <PerfVitalsChart samples={samples} deltas={p?.deltas ?? null} />
       {p && p.deltas.length > 0 && (
         <div
           style={{
