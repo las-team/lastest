@@ -197,6 +197,7 @@ const COMPARE_TABS: { id: CompareTab; name: string }[] = [
   { id: "design", name: "Design" },
   { id: "perf", name: "Perf" },
   { id: "url", name: "URL" },
+  { id: "storage", name: "State" },
   { id: "variable", name: "Variables" },
   { id: "api", name: "API" },
 ];
@@ -284,6 +285,9 @@ function classifyLayer(
         : "absent";
     case "api":
       return result?.apiResult != null ? "clean" : "absent";
+    case "storage":
+      // Snapshot capture is best-effort but always attempted on EB runs.
+      return result?.storageStateSnapshot != null ? "clean" : "absent";
   }
 }
 
@@ -1554,6 +1558,15 @@ function layerDelta(step: StepComparison, layer: CompareTab): string | null {
       if (!v) return null;
       return `Δ ${v.changes.length}`;
     }
+    case "storage": {
+      const s = layers?.storageState;
+      if (!s) return null;
+      const parts: string[] = [];
+      if (s.addedCount) parts.push(`+${s.addedCount}`);
+      if (s.removedCount) parts.push(`−${s.removedCount}`);
+      if (s.changedCount) parts.push(`~${s.changedCount}`);
+      return parts.join(" ") || null;
+    }
   }
   return null;
 }
@@ -2163,7 +2176,237 @@ function ComparePane({
     );
   if (tab === "api")
     return <ApiPane result={result} clean={layerState === "clean"} />;
+  if (tab === "storage")
+    return (
+      <StatePane step={step} result={result} clean={layerState === "clean"} />
+    );
   return null;
+}
+
+/** State tab (spec 27): the web analogue of a "files touched" pane. Renders
+ *  the storage diff computed post-run into step.layers.storageState
+ *  (current run vs baseline run — consistent with every other layer), plus
+ *  the current end-of-run snapshot for browsing. Values are hashed at
+ *  capture, so entries show keys + change kinds, never contents. */
+function StatePane({
+  step,
+  result,
+  clean,
+}: {
+  step: StepComparison;
+  result: TestResultLite | null;
+  clean: boolean;
+}) {
+  const diff = step.layers?.storageState ?? null;
+  const snapshot = result?.storageStateSnapshot ?? null;
+  const areas: Array<{
+    name: string;
+    entries: import("@/lib/db/schema").StorageStateDiffEntry[];
+  }> = diff
+    ? [
+        { name: "Cookies", entries: diff.cookies },
+        { name: "localStorage", entries: diff.localStorage },
+      ]
+    : [];
+  const changeTone: Record<string, string> = {
+    added: "done",
+    removed: "regression",
+    changed: "missed",
+  };
+  const changeLabel: Record<string, string> = {
+    added: "ADD",
+    removed: "REMOVE",
+    changed: "CHANGE",
+  };
+  return (
+    <div
+      style={{
+        flex: 1,
+        padding: 14,
+        background: "var(--c-soft-2)",
+        overflowY: "auto",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      {clean && !diff && (
+        <CleanBanner message="No storage changes in range — end-of-run cookies and localStorage match the baseline run" />
+      )}
+      {!diff && snapshot && (
+        <div className="label" style={{ fontSize: 10, padding: "0 2px" }}>
+          {`Diff vs baseline unavailable${
+            clean ? "" : " — the baseline run has no storage snapshot"
+          }. Current snapshot below.`}
+        </div>
+      )}
+      {areas.map(
+        (area) =>
+          area.entries.length > 0 && (
+            <div
+              key={area.name}
+              className="v-card"
+              style={{ padding: 0, overflow: "hidden" }}
+            >
+              <div
+                style={{
+                  padding: "8px 12px",
+                  borderBottom: "1px solid var(--border)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <span className="label" style={{ fontSize: 10 }}>
+                  {area.name}
+                </span>
+                <span
+                  className="v-chip"
+                  style={{ fontSize: 9, padding: "1px 6px" }}
+                >
+                  +{area.entries.length}
+                </span>
+              </div>
+              {area.entries.map((e, i) => (
+                <div
+                  key={`${e.key}-${i}`}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "6px 12px",
+                    borderBottom:
+                      i < area.entries.length - 1
+                        ? "1px solid var(--border)"
+                        : undefined,
+                  }}
+                >
+                  <span
+                    className={`v-chip ${changeTone[e.change]}`}
+                    style={{ fontSize: 9, padding: "1px 6px", width: 62 }}
+                  >
+                    {changeLabel[e.change]}
+                  </span>
+                  <code
+                    className="mono"
+                    style={{
+                      fontSize: 10.5,
+                      color: "var(--fg-1)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      flex: 1,
+                    }}
+                    title={e.key}
+                  >
+                    {e.key}
+                  </code>
+                  {e.detail && (
+                    <span className="label" style={{ fontSize: 9 }}>
+                      {e.detail}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          ),
+      )}
+      {snapshot && (
+        <div className="v-card" style={{ padding: 12 }}>
+          <div className="label" style={{ fontSize: 10, marginBottom: 6 }}>
+            End-of-run snapshot · {snapshot.cookies?.length ?? 0} cookie
+            {(snapshot.cookies?.length ?? 0) === 1 ? "" : "s"} ·{" "}
+            {snapshot.localStorage?.length ?? 0} localStorage key
+            {(snapshot.localStorage?.length ?? 0) === 1 ? "" : "s"}
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+              gap: 6,
+            }}
+          >
+            {(snapshot.cookies ?? []).map((c, i) => (
+              <div
+                key={`c-${i}`}
+                style={{
+                  background: "var(--c-soft)",
+                  borderRadius: 6,
+                  padding: "6px 8px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+                title={`${c.domain}${c.path}`}
+              >
+                <span className="label" style={{ fontSize: 8 }}>
+                  cookie
+                </span>
+                <code
+                  className="mono"
+                  style={{
+                    fontSize: 10,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {c.name}
+                </code>
+                {c.redacted && (
+                  <span className="label" style={{ fontSize: 8 }}>
+                    redacted
+                  </span>
+                )}
+              </div>
+            ))}
+            {(snapshot.localStorage ?? []).map((l, i) => (
+              <div
+                key={`l-${i}`}
+                style={{
+                  background: "var(--c-soft)",
+                  borderRadius: 6,
+                  padding: "6px 8px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+                title={l.origin}
+              >
+                <span className="label" style={{ fontSize: 8 }}>
+                  local
+                </span>
+                <code
+                  className="mono"
+                  style={{
+                    fontSize: 10,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {l.name}
+                </code>
+                {l.redacted && (
+                  <span className="label" style={{ fontSize: 8 }}>
+                    redacted
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {!snapshot && !diff && (
+        <div
+          className="v-card"
+          style={{ padding: 24, textAlign: "center", color: "var(--fg-3)" }}
+        >
+          <span className="label">No storage state captured</span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface AbsentHint {
@@ -2292,6 +2535,11 @@ function absentHint(
           "No API result for this case. The API layer runs only on API-type tests (a headless HTTP request + assertions). Convert or create an API test to populate this tab.",
         settingsHref: testId ? `/tests/${testId}` : undefined,
         settingsLabel: testId ? "Open test" : undefined,
+      };
+    case "storage":
+      return {
+        message:
+          "No storage state snapshot on this run. Snapshots (cookies + localStorage) are captured at end-of-test on embedded-browser runs — legacy or failed runs may lack one.",
       };
   }
 }

@@ -310,6 +310,7 @@ export interface TestPlaywrightOverrides {
   perfMode?: "enforce" | "log" | "disable";
   urlMode?: "enforce" | "log" | "disable";
   apiMode?: "enforce" | "log" | "disable";
+  storageMode?: "enforce" | "log" | "disable";
   acceptAnyCertificate?: boolean;
   maxParallelTests?: number;
   baseUrl?: string;
@@ -1588,6 +1589,7 @@ export const playwrightSettings = pgTable("playwright_settings", {
   perfMode: text("perf_mode"), // web vitals capture
   urlMode: text("url_mode"), // URL trajectory comparison
   apiMode: text("api_mode"), // API-test request/response assertions (E1)
+  storageMode: text("storage_mode"), // end-of-run storage state diff (cookies + localStorage)
   createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 });
@@ -4216,7 +4218,8 @@ export type EvidenceLayer =
   | "url"
   | "perf"
   | "variable"
-  | "api";
+  | "api"
+  | "storage";
 
 export interface EvidenceItem {
   layer: EvidenceLayer;
@@ -4345,6 +4348,25 @@ export interface VariableDiffSummary {
   }>;
 }
 
+/** One changed entry in the end-of-run storage state diff (State tab).
+ *  `key` is "domain path name" for cookies, "origin name" for localStorage.
+ *  Values are never included — snapshots carry hashes, not raw values. */
+export interface StorageStateDiffEntry {
+  key: string;
+  change: "added" | "removed" | "changed";
+  detail?: string;
+}
+
+/** Current run's end-of-run cookies + localStorage diffed against the
+ *  baseline run's snapshot (web analogue of a "files touched" pane). */
+export interface StorageStateDiffSummary {
+  cookies: StorageStateDiffEntry[];
+  localStorage: StorageStateDiffEntry[];
+  addedCount: number;
+  removedCount: number;
+  changedCount: number;
+}
+
 export interface StepComparisonEvidence {
   visual?: {
     pixelDifference: number;
@@ -4359,6 +4381,7 @@ export interface StepComparisonEvidence {
   url?: UrlTrajectoryDiffSummary;
   perf?: PerfDiffSummary;
   variable?: VariableDiffSummary;
+  storageState?: StorageStateDiffSummary;
 }
 
 export type StepIssueState = "open" | "auto" | "linked" | "closed";

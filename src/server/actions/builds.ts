@@ -1063,6 +1063,7 @@ async function runBuildAsync(
             urlTrajectory: prevResult.urlTrajectory ?? null,
             webVitals: prevResult.webVitals ?? null,
             extractedVariables: prevResult.extractedVariables ?? null,
+            storageStateSnapshot: prevResult.storageStateSnapshot ?? null,
           }
         : null;
       const currentPayload = {
@@ -1072,6 +1073,7 @@ async function runBuildAsync(
         urlTrajectory: result.urlTrajectory ?? null,
         webVitals: result.webVitals ?? null,
         extractedVariables: result.extractedVariables ?? null,
+        storageStateSnapshot: result.storageStateSnapshot ?? null,
       };
 
       for (const [stepLabel, groupDiffs] of byStep) {
