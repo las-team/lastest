@@ -239,12 +239,25 @@ export interface RunScenarioInput {
   onStep?: (step: ExplorerActionStep, index: number) => void;
 }
 
-export async function runScenario(
+/** Scenarios in an iteration are independent, and each tester turn is a
+ *  blocking AI call — the dominant cost is model latency, not browser CPU. So
+ *  we run several scenarios at once, each in its own browser context on the
+ *  SAME Embedded Browser, to parallelize those round-trips. */
+export const SCENARIO_CONCURRENCY = 3;
+
+/** Stop a scenario early once the app has refused this many actions in a row —
+ *  the tester is thrashing against a control that won't budge, and further
+ *  turns just burn AI calls. */
+const MAX_CONSECUTIVE_FAILURES = 4;
+
+/** The core adaptive loop, run against an already-navigated-capable page.
+ *  Browser/context lifecycle is owned by the caller so scenarios can share one
+ *  CDP connection and run concurrently. */
+async function runScenarioOnPage(
   config: AIProviderConfig,
-  cdpUrl: string,
+  page: Page,
   input: RunScenarioInput,
 ): Promise<ExplorerActionLog> {
-  const browser = await chromium.connectOverCDP(cdpUrl);
   const steps: ExplorerActionStep[] = [];
   const consoleErrors: string[] = [];
   const failedRequests: ExplorerActionLog["failedRequests"] = [];
@@ -252,10 +265,9 @@ export async function runScenario(
   let summary: string | undefined;
   let finalUrl: string | undefined;
   let finalStateHash: string | undefined;
+  let consecutiveFailures = 0;
 
   try {
-    const context = browser.contexts()[0] ?? (await browser.newContext());
-    const page = context.pages()[0] ?? (await context.newPage());
     const baseOrigin = new URL(input.targetUrl).origin;
 
     page.on("console", (msg) => {
@@ -371,6 +383,14 @@ export async function runScenario(
         summary = "tester repeated the same action without progress";
         break;
       }
+
+      consecutiveFailures =
+        outcome.result === "ok" ? 0 : consecutiveFailures + 1;
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        status = "stuck";
+        summary = `app refused ${consecutiveFailures} actions in a row`;
+        break;
+      }
     }
 
     if (status === "blocked" && steps.length >= MAX_ACTIONS_PER_SCENARIO) {
@@ -388,8 +408,9 @@ export async function runScenario(
       )
       .catch(() => [] as Array<{ level: number; text: string }>);
     finalStateHash = hashState(finalUrl, headings);
-  } finally {
-    await browser.close().catch(() => {});
+  } catch (err) {
+    status = "blocked";
+    summary = err instanceof Error ? err.message.slice(0, 200) : String(err);
   }
 
   return {
@@ -402,4 +423,98 @@ export async function runScenario(
     finalUrl,
     summary,
   };
+}
+
+/** Run one scenario end-to-end on its own CDP connection + default context.
+ *  Kept for single-scenario callers and back-compat. */
+export async function runScenario(
+  config: AIProviderConfig,
+  cdpUrl: string,
+  input: RunScenarioInput,
+): Promise<ExplorerActionLog> {
+  const browser = await chromium.connectOverCDP(cdpUrl);
+  try {
+    const context = browser.contexts()[0] ?? (await browser.newContext());
+    const page = context.pages()[0] ?? (await context.newPage());
+    return await runScenarioOnPage(config, page, input);
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
+
+/**
+ * Run a batch of scenarios against one Embedded Browser with bounded
+ * concurrency. Scenario 0 runs on the EB's default (screencast) context so the
+ * live view stays watchable; the rest run in isolated contexts seeded from the
+ * default context's storage state, so authentication carries over. `onComplete`
+ * fires as each scenario finishes (completion order) for live UI updates; the
+ * returned array is in input order.
+ */
+export async function runScenariosConcurrent(
+  config: AIProviderConfig,
+  cdpUrl: string,
+  inputs: RunScenarioInput[],
+  opts: {
+    concurrency?: number;
+    signal?: AbortSignal;
+    onComplete?: (
+      log: ExplorerActionLog,
+      index: number,
+    ) => void | Promise<void>;
+  } = {},
+): Promise<ExplorerActionLog[]> {
+  const results: ExplorerActionLog[] = new Array(inputs.length);
+  if (inputs.length === 0) return results;
+
+  const browser = await chromium.connectOverCDP(cdpUrl);
+  try {
+    const defaultCtx = browser.contexts()[0] ?? (await browser.newContext());
+    const defaultPage = defaultCtx.pages()[0] ?? (await defaultCtx.newPage());
+    // Snapshot the authed session so isolated contexts start logged-in too.
+    const storageState = await defaultCtx.storageState().catch(() => undefined);
+
+    let next = 0;
+    const worker = async () => {
+      for (;;) {
+        if (opts.signal?.aborted) return;
+        const i = next++;
+        if (i >= inputs.length) return;
+        let isolatedCtx: Awaited<ReturnType<typeof browser.newContext>> | null =
+          null;
+        let page: Page;
+        if (i === 0) {
+          page = defaultPage;
+        } else {
+          isolatedCtx = await browser.newContext(
+            storageState ? { storageState } : {},
+          );
+          page = await isolatedCtx.newPage();
+        }
+        let log: ExplorerActionLog;
+        try {
+          log = await runScenarioOnPage(config, page, inputs[i]);
+        } catch (err) {
+          log = {
+            scenarioId: inputs[i].scenario.id,
+            status: "blocked",
+            steps: [],
+            summary: err instanceof Error ? err.message : String(err),
+          };
+        } finally {
+          if (isolatedCtx) await isolatedCtx.close().catch(() => {});
+        }
+        results[i] = log;
+        await opts.onComplete?.(log, i);
+      }
+    };
+
+    const poolSize = Math.min(
+      opts.concurrency ?? SCENARIO_CONCURRENCY,
+      inputs.length,
+    );
+    await Promise.all(Array.from({ length: poolSize }, () => worker()));
+  } finally {
+    await browser.close().catch(() => {});
+  }
+  return results;
 }

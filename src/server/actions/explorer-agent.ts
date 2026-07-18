@@ -26,7 +26,10 @@ import {
   type ResearchResult,
 } from "@/lib/explorer/research";
 import { planScenarios } from "@/lib/explorer/planner";
-import { runScenario } from "@/lib/explorer/tester";
+import {
+  runScenariosConcurrent,
+  SCENARIO_CONCURRENCY,
+} from "@/lib/explorer/tester";
 import { clusterFindings } from "@/lib/explorer/analyst";
 import { buildCoverageDigest } from "@/lib/explorer/coverage";
 import { renderKeptTestCode, isKeepable } from "@/lib/explorer/keep";
@@ -72,6 +75,9 @@ import type {
  *   explorer_research   explorer      map the frontier page (live DOM via EB)
  *   explorer_plan       planner       scenarios in the rotating style
  *   explorer_act        explorer      AI-in-the-loop scenario execution
+ *                                     (scenarios run concurrently — isolated
+ *                                     authed contexts on one EB — since each
+ *                                     tester turn is a blocking model call)
  *   explorer_analyze    explorer      findings + experience write-back
  *   ──────────────────────────────────────────────────────────────────────
  *   explorer_keep       generator     passing flows → quarantined tests
@@ -798,153 +804,160 @@ async function runExplorerAct(
   const pageAutomation: KnowledgePageAutomationStep[] =
     collectPageAutomation(knowledge);
 
-  const substeps: NonNullable<AgentStepState["substeps"]> = scenarios.map(
-    (s) => ({ label: s.title, status: "pending", agent: "explorer" }),
-  );
+  const capped = scenarios.slice(0, MAX_SCENARIOS_PER_ITERATION);
+  if (await isStopped(sessionId, signal)) return false;
+
+  // All capped scenarios run in one concurrent batch — show them all active.
+  const substeps: NonNullable<AgentStepState["substeps"]> = capped.map((s) => ({
+    label: s.title,
+    status: "running",
+    agent: "explorer",
+  }));
   await updateStepAt(sessionId, stepIndex, { substeps: [...substeps] });
 
   const logs: Record<string, ExplorerActionLog> = {
     ...(meta.explorerActionLogs ?? {}),
   };
   const newFindingIds: string[] = [...(meta.explorerFindingIds ?? [])];
+  const startedAt = Date.now();
   let passed = 0;
   let failed = 0;
 
-  for (
-    let i = 0;
-    i < Math.min(scenarios.length, MAX_SCENARIOS_PER_ITERATION);
-    i++
-  ) {
-    if (await isStopped(sessionId, signal)) return false;
-    const scenario = scenarios[i];
-    substeps[i] = { ...substeps[i], status: "running" };
-    await updateStepAt(sessionId, stepIndex, { substeps: [...substeps] });
+  // Scenario execution runs concurrently (the AI round-trips are the cost);
+  // the per-scenario bookkeeping below is serialized on one chain so the
+  // shared substeps array + session-metadata read-modify-write never race.
+  let writeChain: Promise<void> = Promise.resolve();
 
-    const startedAt = Date.now();
-    let log: ExplorerActionLog;
-    try {
-      log = await runScenario(config, eb.cdpUrl, {
-        scenario,
-        targetUrl: state.url,
-        repositoryId,
-        knowledgeBlock,
-        pageAutomation,
-        signal,
-      });
-    } catch (err) {
-      log = {
-        scenarioId: scenario.id,
-        status: "blocked",
-        steps: [],
-        summary: err instanceof Error ? err.message : String(err),
-      };
-    }
-    logs[scenario.id] = log;
+  await runScenariosConcurrent(
+    config,
+    eb.cdpUrl,
+    capped.map((scenario) => ({
+      scenario,
+      targetUrl: state.url,
+      repositoryId,
+      knowledgeBlock,
+      pageAutomation,
+      signal,
+    })),
+    {
+      concurrency: SCENARIO_CONCURRENCY,
+      signal,
+      onComplete: (log, i) => {
+        writeChain = writeChain.then(async () => {
+          const scenario = capped[i];
+          logs[scenario.id] = log;
 
-    // Findings: failed scenarios are defects; console/network anomalies on a
-    // passing scenario are logged as low-severity observations.
-    if (log.status === "failed") {
-      failed++;
-      const finding = await queries
-        .createAgentFinding({
-          repositoryId,
-          teamId,
-          sessionId,
-          kind: "defect",
-          severity: scenario.style === "psycho" ? "medium" : "high",
-          title: `${scenario.title} — ${log.summary?.slice(0, 100) ?? "failed"}`,
-          description: [
-            `Scenario (${scenario.style}): ${scenario.title}`,
-            scenario.expectedOutcome
-              ? `Expected: ${scenario.expectedOutcome}`
-              : null,
-            `Observed: ${log.summary ?? "the flow failed"}`,
-            `Final URL: ${log.finalUrl ?? state.url}`,
-          ]
-            .filter(Boolean)
-            .join("\n"),
-          pageStateHash: log.finalStateHash ?? state.hash,
-          url: log.finalUrl ?? state.url,
-          scenario,
-          evidence: {
-            consoleErrors: log.consoleErrors,
-            failedRequests: log.failedRequests,
-            actionSteps: log.steps.slice(-8),
-          },
-          status: "open",
-        })
-        .catch(() => null);
-      if (finding) {
-        newFindingIds.push(finding.id);
-        emitActivity(
-          teamId,
-          repositoryId,
-          sessionId,
-          "substep:update",
-          `Finding: ${finding.title}`,
-          { stepId: "explorer_act", detail: { findingId: finding.id } },
-        );
-      }
-    } else if (
-      log.status === "passed" &&
-      ((log.consoleErrors?.length ?? 0) > 0 ||
-        (log.failedRequests?.length ?? 0) > 0)
-    ) {
-      passed++;
-      const finding = await queries
-        .createAgentFinding({
-          repositoryId,
-          teamId,
-          sessionId,
-          kind: "defect",
-          severity: "low",
-          title: `Console/network errors during "${scenario.title}"`,
-          description: [
-            `The scenario passed, but the app surfaced errors while it ran.`,
-            log.consoleErrors?.length
-              ? `Console: ${log.consoleErrors.slice(0, 5).join(" | ")}`
-              : null,
-            log.failedRequests?.length
-              ? `Failed requests: ${log.failedRequests
-                  .slice(0, 5)
-                  .map((r) => `${r.method} ${r.url} → ${r.status}`)
-                  .join(" | ")}`
-              : null,
-          ]
-            .filter(Boolean)
-            .join("\n"),
-          pageStateHash: log.finalStateHash ?? state.hash,
-          url: log.finalUrl ?? state.url,
-          scenario,
-          evidence: {
-            consoleErrors: log.consoleErrors,
-            failedRequests: log.failedRequests,
-          },
-          status: "open",
-        })
-        .catch(() => null);
-      if (finding) newFindingIds.push(finding.id);
-    } else if (log.status === "passed") {
-      passed++;
-    }
+          // Findings: failed scenarios are defects; console/network anomalies
+          // on a passing scenario are low-severity observations.
+          if (log.status === "failed") {
+            failed++;
+            const finding = await queries
+              .createAgentFinding({
+                repositoryId,
+                teamId,
+                sessionId,
+                kind: "defect",
+                severity: scenario.style === "psycho" ? "medium" : "high",
+                title: `${scenario.title} — ${log.summary?.slice(0, 100) ?? "failed"}`,
+                description: [
+                  `Scenario (${scenario.style}): ${scenario.title}`,
+                  scenario.expectedOutcome
+                    ? `Expected: ${scenario.expectedOutcome}`
+                    : null,
+                  `Observed: ${log.summary ?? "the flow failed"}`,
+                  `Final URL: ${log.finalUrl ?? state.url}`,
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
+                pageStateHash: log.finalStateHash ?? state.hash,
+                url: log.finalUrl ?? state.url,
+                scenario,
+                evidence: {
+                  consoleErrors: log.consoleErrors,
+                  failedRequests: log.failedRequests,
+                  actionSteps: log.steps.slice(-8),
+                },
+                status: "open",
+              })
+              .catch(() => null);
+            if (finding) {
+              newFindingIds.push(finding.id);
+              emitActivity(
+                teamId,
+                repositoryId,
+                sessionId,
+                "substep:update",
+                `Finding: ${finding.title}`,
+                { stepId: "explorer_act", detail: { findingId: finding.id } },
+              );
+            }
+          } else if (
+            log.status === "passed" &&
+            ((log.consoleErrors?.length ?? 0) > 0 ||
+              (log.failedRequests?.length ?? 0) > 0)
+          ) {
+            passed++;
+            const finding = await queries
+              .createAgentFinding({
+                repositoryId,
+                teamId,
+                sessionId,
+                kind: "defect",
+                severity: "low",
+                title: `Console/network errors during "${scenario.title}"`,
+                description: [
+                  `The scenario passed, but the app surfaced errors while it ran.`,
+                  log.consoleErrors?.length
+                    ? `Console: ${log.consoleErrors.slice(0, 5).join(" | ")}`
+                    : null,
+                  log.failedRequests?.length
+                    ? `Failed requests: ${log.failedRequests
+                        .slice(0, 5)
+                        .map((r) => `${r.method} ${r.url} → ${r.status}`)
+                        .join(" | ")}`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
+                pageStateHash: log.finalStateHash ?? state.hash,
+                url: log.finalUrl ?? state.url,
+                scenario,
+                evidence: {
+                  consoleErrors: log.consoleErrors,
+                  failedRequests: log.failedRequests,
+                },
+                status: "open",
+              })
+              .catch(() => null);
+            if (finding) newFindingIds.push(finding.id);
+          } else if (log.status === "passed") {
+            passed++;
+          }
 
-    substeps[i] = {
-      ...substeps[i],
-      status: log.status === "passed" ? "done" : "error",
-      detail: `${log.status}${log.summary ? ` — ${log.summary.slice(0, 120)}` : ""}`,
-      durationMs: Date.now() - startedAt,
-    };
-    await updateStepAt(sessionId, stepIndex, { substeps: [...substeps] });
-    await mergeMetadata(sessionId, {
-      explorerActionLogs: logs,
-      explorerFindingIds: newFindingIds,
-    });
-  }
+          substeps[i] = {
+            ...substeps[i],
+            status: log.status === "passed" ? "done" : "error",
+            detail: `${log.status}${log.summary ? ` — ${log.summary.slice(0, 120)}` : ""}`,
+          };
+          await updateStepAt(sessionId, stepIndex, {
+            substeps: [...substeps],
+          });
+          await mergeMetadata(sessionId, {
+            explorerActionLogs: logs,
+            explorerFindingIds: newFindingIds,
+          });
+        });
+        return writeChain;
+      },
+    },
+  );
 
   await setStepCompletedAt(sessionId, stepIndex, {
-    executed: Math.min(scenarios.length, MAX_SCENARIOS_PER_ITERATION),
+    executed: capped.length,
     passed,
     failed,
+    durationMs: Date.now() - startedAt,
+    concurrency: Math.min(SCENARIO_CONCURRENCY, capped.length),
   });
   emitActivity(
     teamId,
