@@ -30,7 +30,8 @@ import type {
 
 function proxiedStream(raw: string | null | undefined): string | undefined {
   if (!raw) return undefined;
-  const proxied = toProxyStreamUrl(raw) ?? raw;
+  const proxied = toProxyStreamUrl(raw);
+  if (!proxied) return undefined;
   return appendStreamToken(proxied, process.env.STREAM_AUTH_TOKEN) || undefined;
 }
 

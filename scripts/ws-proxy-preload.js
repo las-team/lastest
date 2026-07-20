@@ -20,8 +20,8 @@
 
 const http = require("http");
 const net = require("net");
+const crypto = require("crypto");
 
-const defaultStreamPort = parseInt(process.env.STREAM_PORT || "9223", 10);
 const activityFeedPort = parseInt(
   process.env.ACTIVITY_FEED_WS_PORT || "9400",
   10,
@@ -31,26 +31,86 @@ const dlog = DEBUG
   ? (label, ...a) => console.log(`[WS-PROXY:${label}]`, ...a)
   : () => {};
 
+/**
+ * Signed-grant verification. This MIRRORS src/lib/eb/stream-grant.ts — see that
+ * file for the format and rationale. It is duplicated rather than imported
+ * because this preload runs before any bundler or TS loader exists. Keep the
+ * two byte-compatible.
+ */
+const GRANT_KEY_INFO = "eb-stream-grant-v1";
+const ENCRYPTION_KEY_RE = /^[0-9a-f]{64}$/i;
+
+function streamGrantKey() {
+  const hex = (process.env.ENCRYPTION_KEY || "").trim();
+  if (!hex || !ENCRYPTION_KEY_RE.test(hex)) return null;
+  return crypto
+    .createHmac("sha256", Buffer.from(hex, "hex"))
+    .update(GRANT_KEY_INFO)
+    .digest();
+}
+
+function verifyStreamGrant(grant) {
+  if (!grant) return null;
+  const key = streamGrantKey();
+  if (!key) return null;
+
+  const dot = grant.indexOf(".");
+  if (dot <= 0 || dot === grant.length - 1) return null;
+  const encoded = grant.slice(0, dot);
+  const sig = grant.slice(dot + 1);
+
+  const expected = crypto
+    .createHmac("sha256", key)
+    .update(encoded)
+    .digest("base64url");
+  if (sig.length !== expected.length) return null;
+  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
+    return null;
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (!payload || typeof payload.h !== "string" || !payload.h) return null;
+  if (!Number.isInteger(payload.p) || payload.p < 1 || payload.p > 65535) {
+    return null;
+  }
+  if (typeof payload.e !== "number" || Date.now() > payload.e) return null;
+  return payload;
+}
+
 function parseTarget(url) {
   if (url.startsWith("/api/embedded/stream/ws")) {
     const qi = url.indexOf("?");
     const sp = new URLSearchParams(qi >= 0 ? url.slice(qi + 1) : "");
-    const target = sp.get("target");
-    let host = "127.0.0.1";
-    let port = defaultStreamPort;
-    if (target) {
-      const [h, p] = target.split(":");
-      host = h || host;
-      if (p) port = parseInt(p, 10);
+
+    // The upstream address comes ONLY from the signed grant.
+    const payload = verifyStreamGrant(sp.get("g"));
+    if (!payload) {
+      dlog("embedded-stream", "rejected: missing/invalid grant");
+      return {
+        reject: {
+          code: 403,
+          text: "Forbidden",
+          body: streamGrantKey()
+            ? "ws-proxy: missing, invalid or expired stream grant"
+            : "ws-proxy: no usable grant signing key (ENCRYPTION_KEY unset or malformed)",
+        },
+      };
     }
-    sp.delete("target");
+
+    sp.delete("g");
     const qs = sp.toString();
     return {
-      host,
-      port,
+      host: payload.h,
+      port: payload.p,
       path: "/" + (qs ? "?" + qs : ""),
       label: "embedded-stream",
       forwardCookie: false,
+      sessionId: payload.s || "",
     };
   }
   if (url.startsWith("/api/activity-feed/ws")) {
@@ -327,9 +387,35 @@ function forwardUpgrade(server, req, socket, head, cfg) {
   socket.once("close", () => clearTimeout(handshakeTimer));
 }
 
+/**
+ * Refuse an upgrade we own but will not proxy. Written directly to the socket
+ * because we never opened an upstream — the client gets a real status code
+ * instead of a bare "WebSocket connection failed".
+ */
+function rejectUpgrade(socket, reject) {
+  const body = Buffer.from(reject.body + "\n");
+  try {
+    socket.write(
+      `HTTP/1.1 ${reject.code} ${reject.text}\r\n` +
+        `Content-Type: text/plain; charset=utf-8\r\n` +
+        `Content-Length: ${body.length}\r\n` +
+        `Connection: close\r\n\r\n`,
+    );
+    socket.write(body);
+    socket.end();
+  } catch {
+    try {
+      socket.destroy();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 function topLevelUpgrade(server, req, socket, head) {
   const cfg = parseTarget(req.url || "");
   if (!cfg) return; // not ours — let any other listener handle it
+  if (cfg.reject) return rejectUpgrade(socket, cfg.reject);
   try {
     forwardUpgrade(server, req, socket, head, cfg);
   } catch (err) {
@@ -347,3 +433,5 @@ http.Server.prototype.listen = function (...args) {
   this.prependListener("upgrade", topLevelUpgrade.bind(null, this));
   return originalListen.apply(this, args);
 };
+
+module.exports = { verifyStreamGrant, parseTarget };

@@ -17,6 +17,7 @@ import {
   itemPlaywrightOverrides,
   matchPlanToExistingTests,
   mergeRefinedJourneys,
+  dedupePlanIds,
   normalizeQaGroups,
   sanitizeQaPlan,
   MAX_PLAN_ITEMS,
@@ -591,6 +592,103 @@ describe("mergeRefinedJourneys", () => {
     expect(newItem.journeyId).toBe(newJourney.id);
     // journey-linked item is forced to carry the "journey" group.
     expect(itemGroups(newItem)).toContain("journey");
+  });
+
+  it("mints ids that clear existing non-contiguous U-ids plan-wide", () => {
+    // Existing plan whose ids are U-prefixed but non-contiguous (as left by
+    // prior dedup/trim). Length-based seeding would remint `U2` for the new
+    // journey — a duplicate React key. Ids must clear the highest existing id
+    // across BOTH journeys and items.
+    const plan: QaTestPlan = {
+      appProfile: validPlan().appProfile,
+      journeys: [
+        {
+          id: "U2",
+          title: "Existing journey",
+          priority: "P1",
+          steps: ["x"],
+          businessOutcome: "o",
+          endStateVerification: "v",
+        },
+      ],
+      items: [
+        {
+          id: "U5",
+          group: "smoke",
+          title: "Existing item",
+          priority: "P2",
+          scenario: "s",
+        },
+      ],
+    };
+    const { plan: merged } = mergeRefinedJourneys(plan, refined(), [
+      "journey",
+      "ui",
+    ]);
+    const allIds = [
+      ...merged.journeys.map((j) => j.id),
+      ...merged.items.map((i) => i.id),
+    ];
+    // Every id (journeys + items) is unique — no duplicate React keys.
+    expect(new Set(allIds).size).toBe(allIds.length);
+    // The new journey clears the highest existing numeric id (U5).
+    const newJourney = merged.journeys[merged.journeys.length - 1];
+    expect(Number(newJourney.id.slice(1))).toBeGreaterThan(5);
+  });
+
+  it("dedupePlanIds repairs colliding legacy ids without dropping entries", () => {
+    // Two DIFFERENT journeys share `U6` (the legacy collision) and an item also
+    // reuses `U6`. All three entries must survive with unique ids; the first
+    // occurrence keeps its id so its coverage/links stay valid.
+    const corrupt: QaTestPlan = {
+      appProfile: validPlan().appProfile,
+      journeys: [
+        {
+          id: "U6",
+          title: "First journey",
+          priority: "P1",
+          steps: ["a"],
+          businessOutcome: "o1",
+          endStateVerification: "v1",
+        },
+        {
+          id: "U6",
+          title: "Second journey",
+          priority: "P2",
+          steps: ["b"],
+          businessOutcome: "o2",
+          endStateVerification: "v2",
+        },
+      ],
+      items: [
+        {
+          id: "U6",
+          group: "smoke",
+          title: "Reused item id",
+          priority: "P2",
+          scenario: "s",
+        },
+      ],
+    };
+    const repaired = dedupePlanIds(corrupt);
+    const allIds = [
+      ...repaired.journeys.map((j) => j.id),
+      ...repaired.items.map((i) => i.id),
+    ];
+    expect(new Set(allIds).size).toBe(allIds.length); // all unique
+    expect(repaired.journeys).toHaveLength(2); // nothing dropped
+    expect(repaired.items).toHaveLength(1);
+    // First occurrence keeps its id; titles are preserved on every entry.
+    expect(repaired.journeys[0].id).toBe("U6");
+    expect(repaired.journeys.map((j) => j.title)).toEqual([
+      "First journey",
+      "Second journey",
+    ]);
+  });
+
+  it("dedupePlanIds returns an already-unique plan unchanged", () => {
+    const plan = validPlan();
+    expect(dedupePlanIds(plan)).toBe(plan);
   });
 
   it("strips groups the user did not select", () => {

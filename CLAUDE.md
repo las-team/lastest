@@ -55,6 +55,7 @@ The dev architecture is: **`pnpm dev` on the host**, postgres on the host (docke
   - `SYSTEM_EB_TOKEN=<random hex>` (single token, or comma-list with the EB-facing token first)
   - `DATABASE_URL=postgresql://lastest:lastest@localhost:5432/lastest`
 - All built images + cluster containers carry `com.docker.compose.project=lastest` so Docker Desktop groups them as one stack.
+- **EB stream proxy auth:** `/api/embedded/stream/ws` is handled by `scripts/ws-proxy-preload.js`, which runs as a `--require` preload and therefore never sees Next's auth guards. It authorizes upgrades with an HMAC-signed grant carrying the upstream pod address (`src/lib/eb/stream-grant.ts`), minted by `toProxyStreamUrl()` behind `requireAuth()`. Never key it on `SYSTEM_EB_TOKEN`: the provisioner inlines that into every Job spec. The verifier is duplicated in the preload (it predates any TS loader) — change both together; `src/lib/eb/stream-grant.test.ts` cross-checks them in a child process.
 
 ## Architecture
 
