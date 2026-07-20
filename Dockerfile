@@ -181,7 +181,7 @@ RUN ln -sf .pnpm/tesseract.js@7.0.0/node_modules/tesseract.js ./node_modules/tes
 RUN npm install -g @anthropic-ai/claude-code@latest 2>/dev/null || \
     ln -s /app/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude /usr/local/bin/claude
 
-# Copy ws (used by activity-feed-server + embedded-browser)
+# Copy ws (used by the bundled embedded-browser dist)
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/ws@8.21.0/node_modules/ws ./node_modules/.pnpm/ws@8.21.0/node_modules/ws
 RUN ln -sf .pnpm/ws@8.21.0/node_modules/ws ./node_modules/ws
 

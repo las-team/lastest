@@ -3,8 +3,8 @@
  * WebSocket upgrade proxy — loaded via `node --require ./ws-proxy-preload.js`.
  *
  * Intercepts the http.Server 'upgrade' event BEFORE Next.js's own upgrade
- * handler runs, and forwards /api/embedded/stream/ws + /api/activity-feed/ws
- * to their respective upstream TCP endpoints.
+ * handler runs, and forwards /api/embedded/stream/ws to its upstream TCP
+ * endpoint (the EB pod named in the signed grant).
  *
  * Next's fallback upgrade handler fires synchronously after ours and can
  * schedule socket.destroy/end via microtasks. Two guards keep those from
@@ -22,10 +22,6 @@ const http = require("http");
 const net = require("net");
 const crypto = require("crypto");
 
-const activityFeedPort = parseInt(
-  process.env.ACTIVITY_FEED_WS_PORT || "9400",
-  10,
-);
 const DEBUG = process.env.WS_PROXY_DEBUG === "1";
 const dlog = DEBUG
   ? (label, ...a) => console.log(`[WS-PROXY:${label}]`, ...a)
@@ -109,18 +105,7 @@ function parseTarget(url) {
       port: payload.p,
       path: "/" + (qs ? "?" + qs : ""),
       label: "embedded-stream",
-      forwardCookie: false,
       sessionId: payload.s || "",
-    };
-  }
-  if (url.startsWith("/api/activity-feed/ws")) {
-    const qi = url.indexOf("?");
-    return {
-      host: "127.0.0.1",
-      port: activityFeedPort,
-      path: "/" + (qi >= 0 ? url.slice(qi) : ""),
-      label: "activity-feed",
-      forwardCookie: true,
     };
   }
   return null;
@@ -307,9 +292,6 @@ function forwardUpgrade(server, req, socket, head, cfg) {
       lines.push(
         "Sec-WebSocket-Extensions: " + req.headers["sec-websocket-extensions"],
       );
-    }
-    if (cfg.forwardCookie && req.headers.cookie) {
-      lines.push("Cookie: " + req.headers.cookie);
     }
     upstream.write(lines.join("\r\n") + "\r\n\r\n");
     if (head && head.length) upstream.write(head);
