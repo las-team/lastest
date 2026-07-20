@@ -1,4 +1,5 @@
 import net from "node:net";
+import { signStreamGrant } from "@/lib/eb/stream-grant";
 
 /**
  * Convert a direct ws:// streamUrl to a proxy path so the browser connects
@@ -6,14 +7,28 @@ import net from "node:net";
  * to the container IP — which is unreachable from the browser on both HTTPS
  * (blocked by mixed-content) and in k3s local dev (pod IPs aren't routable
  * from the host).
+ *
+ * The upstream address is carried in a SIGNED grant, never as a plain query
+ * param the client could edit — see @/lib/eb/stream-grant. Every caller of
+ * this function sits behind requireAuth(), so minting a grant here is what
+ * ties "authenticated request" to "may open this specific stream".
+ *
+ * Returns null when the grant cannot be signed (no secret configured). That
+ * reads to the UI as "no stream available", which is correct: the proxy would
+ * refuse an unsigned connection anyway.
  */
-export function toProxyStreamUrl(streamUrl: string | null): string | null {
+export function toProxyStreamUrl(
+  streamUrl: string | null,
+  sessionId = "",
+): string | null {
   if (!streamUrl) return null;
   try {
     const url = new URL(streamUrl);
     if (url.protocol === "ws:" || url.protocol === "wss:") {
-      const target = `${url.hostname}:${url.port || "9223"}`;
-      return `/api/embedded/stream/ws?target=${encodeURIComponent(target)}`;
+      const port = parseInt(url.port || "9223", 10);
+      const grant = signStreamGrant(url.hostname, port, sessionId);
+      if (!grant) return null;
+      return `/api/embedded/stream/ws?g=${encodeURIComponent(grant)}`;
     }
   } catch {
     // not a valid URL — return as-is

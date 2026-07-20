@@ -72,7 +72,7 @@ export async function GET() {
           runnerId: s.runnerId,
           status: s.status,
           streamUrl:
-            isLive && probedAlive ? toProxyStreamUrl(s.streamUrl) : null,
+            isLive && probedAlive ? toProxyStreamUrl(s.streamUrl, s.id) : null,
           viewport: s.viewport,
           currentUrl: s.currentUrl,
           userId: s.userId,

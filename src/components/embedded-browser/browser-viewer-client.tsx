@@ -329,17 +329,7 @@ export const BrowserViewer = forwardRef<
 
     const connect = (attempt: number) => {
       let wsUrl = streamUrl;
-      if (streamUrl.startsWith("ws://") || streamUrl.startsWith("wss://")) {
-        if (window.location.protocol === "https:") {
-          // On HTTPS pages, direct ws:// is blocked by mixed-content policy.
-          // Route through the ws-proxy-preload.js proxy via the origin.
-          const url = new URL(streamUrl);
-          wsUrl = `wss://${window.location.host}/api/embedded/stream/ws?target=${url.hostname}:${url.port}`;
-        } else {
-          // HTTP (local dev) — connect directly
-          wsUrl = streamUrl;
-        }
-      } else if (streamUrl.startsWith("/")) {
+      if (streamUrl.startsWith("/")) {
         // Relative path — construct full WebSocket URL from page origin
         const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
         wsUrl = `${proto}//${window.location.host}${streamUrl}`;

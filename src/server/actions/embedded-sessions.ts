@@ -402,7 +402,7 @@ export async function getStreamUrlForRunner(runnerId: string): Promise<{
 
   const streamAuthToken = process.env.STREAM_AUTH_TOKEN || null;
   return {
-    streamUrl: toProxyStreamUrl(session.streamUrl),
+    streamUrl: toProxyStreamUrl(session.streamUrl, session.id),
     sessionId: session.id,
     streamAuthToken,
   };
