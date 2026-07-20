@@ -32,7 +32,11 @@ import {
   ebIdleTTLMs,
 } from "@/lib/eb/provisioner";
 import { ensureGlobalPlaywrightSettings } from "@/lib/db/queries/settings";
-import { cleanupOldCommands, timeoutStaleCommands } from "@/lib/db/queries";
+import {
+  cleanupOldCommands,
+  timeoutStaleCommands,
+  reapOrphanedTestRuns,
+} from "@/lib/db/queries";
 import { cleanupExpiredUrlDiffs } from "@/lib/url-diff/cleanup";
 
 export const SESSION_TIMEOUT_MS = 60_000;
@@ -146,6 +150,21 @@ export function startCleanupLoop(): void {
       await timeoutStaleCommands(30 * 60 * 1000, 30 * 60 * 1000);
     } catch (error) {
       console.error("[GC] Failed to timeout stale commands:", error);
+    }
+
+    try {
+      // Runs whose dispatcher died (app-pod OOM/evict/deploy mid-build) have no
+      // one left to write a terminal status. 60m = 2× the 30m max command budget
+      // above, so this only ever fires after `timeoutStaleCommands` has already
+      // drained any command a live dispatcher could still be waiting on.
+      const reaped = await reapOrphanedTestRuns(60 * 60 * 1000);
+      if (reaped > 0) {
+        console.log(
+          `[GC] Failed ${reaped} orphaned test run(s) (no dispatcher)`,
+        );
+      }
+    } catch (error) {
+      console.error("[GC] Failed to reap orphaned test runs:", error);
     }
 
     try {
