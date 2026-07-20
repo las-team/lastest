@@ -197,7 +197,7 @@ RUN mkdir -p /app/embedded-browser/node_modules && \
 COPY --chown=nextjs:nodejs scripts/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 COPY --chown=nextjs:nodejs scripts/migrate.js /app/migrate.js
-COPY --chown=nextjs:nodejs scripts/ws-proxy-preload.js /app/ws-proxy-preload.js
+COPY --chown=nextjs:nodejs scripts/front-proxy.js /app/front-proxy.js
 
 # Create storage directories
 RUN mkdir -p /app/storage/screenshots /app/storage/baselines /app/storage/diffs /app/storage/traces /app/storage/videos /app/storage/planned /app/storage/bug-reports && \
@@ -230,4 +230,6 @@ USER nextjs
 VOLUME ["/app/storage"]
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["node", "--require", "./ws-proxy-preload.js", "server.js"]
+# front-proxy owns :3000 and spawns Next's standalone server on 127.0.0.1:3001
+# (PORT/HOSTNAME are overridden for the child by front-proxy itself).
+CMD ["node", "front-proxy.js", "--", "node", "server.js"]

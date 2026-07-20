@@ -4,10 +4,10 @@
   "private": true,
   "license": "FSL-1.1-ALv2",
   "scripts": {
-    "dev": "NODE_OPTIONS='--require ./scripts/ws-proxy-preload.js' next dev -H 0.0.0.0 -p 3000",
+    "dev": "node scripts/front-proxy.js -- next dev -H 127.0.0.1",
     "prepare": "node .husky/install.mjs || true",
     "build": "pnpm --filter @lastest/mcp-server build && next build",
-    "start": "next start",
+    "start": "node scripts/front-proxy.js -- next start -H 127.0.0.1",
     "lint": "eslint",
     "types": "NODE_OPTIONS=--max-old-space-size=8192 tsc --noEmit",
     "format": "prettier --write .",
