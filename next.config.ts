@@ -30,7 +30,6 @@ const nextConfig: NextConfig = {
     "playwright",
     "playwright-core",
     "@anthropic-ai/claude-agent-sdk",
-    "ws",
   ],
   experimental: {
     serverActions: {
