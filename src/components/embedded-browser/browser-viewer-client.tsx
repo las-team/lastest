@@ -221,27 +221,22 @@ export const BrowserViewer = forwardRef<
   const onActionProgressRef = useRef(onActionProgress);
   onActionProgressRef.current = onActionProgress;
 
-  // Render a frame onto the canvas. CDP's metadata width/height can drift
-  // from the encoded JPEG's natural dimensions (DPR, scrollbar, device-metrics
-  // rounding) — drawing the image unscaled into a metadata-sized buffer would
-  // misalign content with the box. Use the image's actual pixel size instead.
-  const renderFrame = useCallback((base64Data: string) => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (!canvas || !ctx) return;
+  // Draw a decoded frame onto the canvas. CDP's metadata width/height can
+  // drift from the encoded JPEG's natural dimensions (DPR, scrollbar,
+  // device-metrics rounding) — drawing the image unscaled into a
+  // metadata-sized buffer would misalign content with the box. Use the
+  // decoded frame's actual pixel size instead.
+  const drawFrame = useCallback(
+    (source: CanvasImageSource, w: number, h: number) => {
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext("2d");
+      if (!canvas || !ctx) return;
 
-    if (!imageRef.current) {
-      imageRef.current = new Image();
-    }
-    const img = imageRef.current;
-    img.onload = () => {
-      const w = img.naturalWidth;
-      const h = img.naturalHeight;
       if (canvas.width !== w || canvas.height !== h) {
         canvas.width = w;
         canvas.height = h;
       }
-      ctx.drawImage(img, 0, 0);
+      ctx.drawImage(source, 0, 0);
 
       // Sync display aspect with the real frame size when it changes
       const last = lastFrameSizeRef.current;
@@ -250,9 +245,48 @@ export const BrowserViewer = forwardRef<
         setViewport({ width: w, height: h });
         onViewportChangeRef.current?.({ width: w, height: h });
       }
-    };
-    img.src = `data:image/jpeg;base64,${base64Data}`;
-  }, []);
+    },
+    [],
+  );
+
+  // Legacy path: base64 frame from a JSON envelope (older EB images that
+  // don't honor the `bin=1` opt-in). Decodes via a data-URL <img>.
+  const renderFrame = useCallback(
+    (base64Data: string) => {
+      if (!imageRef.current) {
+        imageRef.current = new Image();
+      }
+      const img = imageRef.current;
+      img.onload = () => {
+        drawFrame(img, img.naturalWidth, img.naturalHeight);
+      };
+      img.src = `data:image/jpeg;base64,${base64Data}`;
+    },
+    [drawFrame],
+  );
+
+  // Binary path: 1-byte tag + raw JPEG. createImageBitmap decodes off the
+  // main thread; the sequence guard drops any frame whose decode resolves
+  // after a newer frame's (out-of-order draws would make playback jitter
+  // backwards under load).
+  const frameSeqRef = useRef(0);
+  const renderBinaryFrame = useCallback(
+    (buf: ArrayBuffer) => {
+      const seq = ++frameSeqRef.current;
+      const jpeg = new Blob([new Uint8Array(buf, 1)], { type: "image/jpeg" });
+      createImageBitmap(jpeg)
+        .then((bitmap) => {
+          if (seq === frameSeqRef.current) {
+            drawFrame(bitmap, bitmap.width, bitmap.height);
+          }
+          bitmap.close();
+        })
+        .catch(() => {
+          // Truncated/corrupt frame — skip it, the next one repaints.
+        });
+    },
+    [drawFrame],
+  );
 
   // Recompute edge-shadow flags whenever the scroll-container or canvas
   // resize (viewport change, container reflow, frame size drift). Only
@@ -334,7 +368,11 @@ export const BrowserViewer = forwardRef<
         const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
         wsUrl = `${proto}//${window.location.host}${streamUrl}`;
       }
+      // Opt into binary frame transport (tag + raw JPEG). Older EB images
+      // ignore the param and keep sending JSON frames — both are handled.
+      wsUrl += (wsUrl.includes("?") ? "&" : "?") + "bin=1";
       const ws = new WebSocket(wsUrl);
+      ws.binaryType = "arraybuffer";
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -386,7 +424,32 @@ export const BrowserViewer = forwardRef<
         }
       };
 
+      // Frame bookkeeping shared by the binary and legacy JSON paths:
+      // stall-timer reset + FPS counter.
+      const noteFrame = () => {
+        lastFrameTimeRef.current = Date.now();
+        lastRealFrameRef.current = Date.now();
+        frameCountRef.current++;
+        const now = Date.now();
+        if (now - lastFpsUpdateRef.current >= 1000) {
+          setFps(frameCountRef.current);
+          frameCountRef.current = 0;
+          lastFpsUpdateRef.current = now;
+        }
+      };
+
       ws.onmessage = (event) => {
+        // Binary message — a screencast frame (1-byte tag + raw JPEG).
+        // Control messages stay JSON text frames and fall through below.
+        if (typeof event.data !== "string") {
+          const buf = event.data as ArrayBuffer;
+          if (buf.byteLength > 1 && new Uint8Array(buf, 0, 1)[0] === 0x01) {
+            renderBinaryFrame(buf);
+            noteFrame();
+          }
+          return;
+        }
+
         try {
           const message = JSON.parse(event.data);
 
@@ -394,19 +457,7 @@ export const BrowserViewer = forwardRef<
             case "stream:frame": {
               const { data } = message.payload;
               renderFrame(data);
-
-              // Reset stall timer on every frame
-              lastFrameTimeRef.current = Date.now();
-              lastRealFrameRef.current = Date.now();
-
-              // Update FPS
-              frameCountRef.current++;
-              const now = Date.now();
-              if (now - lastFpsUpdateRef.current >= 1000) {
-                setFps(frameCountRef.current);
-                frameCountRef.current = 0;
-                lastFpsUpdateRef.current = now;
-              }
+              noteFrame();
               break;
             }
 
