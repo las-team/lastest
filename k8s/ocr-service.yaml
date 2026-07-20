@@ -1,0 +1,86 @@
+# OCR service — standalone Tesseract container (packages/ocr-service).
+#
+# Optional offload of OCR work (recording-time `ocr-text` selectors +
+# text-region-aware diffing) out of the app process. The app opts in by
+# setting OCR_SERVICE_URL=http://lastest-ocr:8891 (in-namespace DNS); when
+# the env var is unset the app runs Tesseract in-process and this Deployment
+# can simply not be applied.
+#
+# Sizing rationale (be considerate of homeserver clusters like Olares):
+#   - requests are tiny (50m / 128Mi) — the service sleeps to near-zero when
+#     idle: Tesseract workers are terminated after OCR_IDLE_TIMEOUT_MS and
+#     re-spawned on demand (the app sends /warmup on recording start and
+#     before diff batches).
+#   - the memory limit covers OCR_MAX_WORKERS warm WASM workers (~300Mi each
+#     worst-case) with headroom.
+#   - ClusterIP only — never exposed through ingress/envoy; auth is optional
+#     (OCR_SERVICE_TOKEN) since only in-namespace pods can reach it.
+#
+# Image name matches the k3d dev import (`lastest-ocr-service:latest`);
+# scripts/deploy.sh rewrites image + namespace when applying to Olares.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lastest-ocr
+  namespace: lastest
+  labels:
+    app: lastest-ocr
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lastest-ocr
+  template:
+    metadata:
+      labels:
+        app: lastest-ocr
+    spec:
+      containers:
+        - name: ocr-service
+          image: lastest-ocr-service:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: OCR_MAX_WORKERS
+              value: "2"
+            - name: OCR_IDLE_TIMEOUT_MS
+              value: "120000"
+          ports:
+            - containerPort: 8891
+              name: http
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8891
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8891
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lastest-ocr
+  namespace: lastest
+  labels:
+    app: lastest-ocr
+spec:
+  type: ClusterIP
+  selector:
+    app: lastest-ocr
+  ports:
+    - name: http
+      port: 8891
+      targetPort: 8891

@@ -1,60 +1,48 @@
-import Tesseract from "tesseract.js";
+/**
+ * Recording-time OCR helpers.
+ *
+ * Thin wrapper around the unified OCR facade (`src/lib/ocr`): work runs in the
+ * standalone OCR container when `OCR_SERVICE_URL` is set, in-process Tesseract
+ * otherwise. The historical API (warmup / extract / terminate) is preserved
+ * for recording start / capture / stop.
+ */
 
-let worker: Tesseract.Worker | null = null;
-let workerPromise: Promise<Tesseract.Worker> | null = null;
-
-async function getWorker(): Promise<Tesseract.Worker> {
-  if (worker) return worker;
-
-  // Deduplicate concurrent worker creation requests
-  if (!workerPromise) {
-    console.log("[OCR] Creating Tesseract worker...");
-    workerPromise = Tesseract.createWorker("eng").then((w) => {
-      worker = w;
-      workerPromise = null;
-      console.log("[OCR] Tesseract worker ready");
-      return w;
-    });
-  }
-  return workerPromise;
-}
+import { ocrRecognize, ocrSleep, ocrWarmup } from "@/lib/ocr";
 
 /**
- * Eagerly initialize the Tesseract worker so it's ready when first OCR request arrives.
- * Call this at recording start when OCR is enabled.
+ * Eagerly wake the OCR backend so it's ready when the first OCR request
+ * arrives. Call this at recording start when OCR is enabled.
  */
 export function warmupWorker(): void {
-  getWorker().catch(() => {});
+  ocrWarmup();
 }
 
 /**
  * Extract text from an image buffer using Tesseract OCR.
  * Returns null if confidence is below 60% or timeout (8s) is exceeded.
- * The timeout covers both worker init (if not warmed up) and recognition.
+ * The timeout covers backend wake-up (if not warmed up) and recognition.
  */
 export async function extractText(imageBuffer: Buffer): Promise<string | null> {
   const timeoutMs = 8000;
 
   try {
     const result = await Promise.race([
-      (async () => {
-        const w = await getWorker();
-        return w.recognize(imageBuffer);
-      })(),
+      ocrRecognize(imageBuffer),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("OCR timeout")), timeoutMs),
       ),
     ]);
 
-    const { data } = result as Tesseract.RecognizeResult;
-    const text = data.text.trim();
+    if (!result) return null;
+
+    const text = result.text.trim();
     console.log(
-      `[OCR] Recognition result: confidence=${data.confidence.toFixed(1)}%, text="${text.slice(0, 50)}"`,
+      `[OCR] Recognition result: confidence=${result.confidence.toFixed(1)}%, text="${text.slice(0, 50)}"`,
     );
 
-    if (data.confidence < 60) {
+    if (result.confidence < 60) {
       console.warn(
-        `[OCR] Rejected: confidence ${data.confidence.toFixed(1)}% < 60% threshold`,
+        `[OCR] Rejected: confidence ${result.confidence.toFixed(1)}% < 60% threshold`,
       );
       return null;
     }
@@ -72,42 +60,10 @@ export async function extractText(imageBuffer: Buffer): Promise<string | null> {
 }
 
 /**
- * Terminate the Tesseract worker (call on recording stop).
- * Has a 3s safety timeout to prevent hanging.
+ * Put the OCR backend to sleep (call on recording stop). Terminates the
+ * in-process worker or sends a sleep hint to the OCR container; both backends
+ * also auto-sleep after idle, so this is best-effort.
  */
 export async function terminateWorker(): Promise<void> {
-  const cleanup = async () => {
-    if (workerPromise) {
-      try {
-        const w = await workerPromise;
-        await w.terminate();
-      } catch {
-        /* ignore */
-      }
-      workerPromise = null;
-    }
-    if (worker) {
-      await worker.terminate();
-      worker = null;
-    }
-  };
-
-  try {
-    await Promise.race([
-      cleanup(),
-      new Promise<void>((resolve) =>
-        setTimeout(() => {
-          console.warn(
-            "[OCR] terminateWorker timed out after 3s, forcing cleanup",
-          );
-          worker = null;
-          workerPromise = null;
-          resolve();
-        }, 3000),
-      ),
-    ]);
-  } catch {
-    worker = null;
-    workerPromise = null;
-  }
+  await ocrSleep();
 }

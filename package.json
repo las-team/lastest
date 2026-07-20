@@ -23,6 +23,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:ui": "vitest --ui",
+    "ocr:up": "pnpm --filter @lastest/ocr-service build && docker compose --profile ocr up -d --build ocr",
+    "ocr:down": "docker compose --profile ocr rm -sf ocr",
     "deploy:zima": "bash scripts/deploy.sh zima",
     "deploy:olares": "bash scripts/deploy.sh olares",
     "deploy:npm": "bash scripts/deploy.sh npm",

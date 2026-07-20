@@ -8,6 +8,7 @@
 
 import { PNG } from "pngjs";
 import type { DiffEngineType } from "../db/schema";
+import { ocrDetectRegions, ocrWarmup } from "@/lib/ocr";
 import { runDiffEngine } from "./engines";
 import type { Rectangle } from "./generator";
 
@@ -141,123 +142,27 @@ export async function detectTextRegions(
 ): Promise<TextRegionResult> {
   const start = performance.now();
 
-  // Dynamically import Tesseract.js
-  let Tesseract: typeof import("tesseract.js");
-  try {
-    Tesseract = await Promise.race([
-      import("tesseract.js"),
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error("Tesseract.js import timeout")),
-          10_000,
-        ),
-      ),
-    ]);
-  } catch {
-    // Fallback: no text regions detected
-    return {
-      regions: [],
-      mask: new Uint8Array(width * height),
-      ocrDurationMs: performance.now() - start,
-      totalTextPixels: 0,
-    };
-  }
-
-  // Convert RGBA buffer to PNG buffer for Tesseract
+  // Convert RGBA buffer to PNG buffer for OCR
   const png = new PNG({ width, height });
   Buffer.from(imageData).copy(png.data as Buffer);
   const pngBuffer = PNG.sync.write(png);
 
-  let result;
-  try {
-    // Suppress uncaughtException from tesseract worker threads (e.g. broken module
-    // resolution in Docker standalone builds). Without this, the worker's require('..')
-    // failure propagates as an uncaughtException that kills the executor's event loop.
-    let workerCrashed = false;
-    const suppressTesseractCrash = (err: Error) => {
-      const stack = err.stack || "";
-      const isTesseract =
-        stack.includes("tesseract") ||
-        stack.includes("worker-script") ||
-        stack.includes("createWorker");
-      if (isTesseract) {
-        workerCrashed = true;
-        return; // Swallow — handled below
-      }
-      throw err; // Re-throw non-tesseract errors
-    };
-    process.on("uncaughtException", suppressTesseractCrash);
-
-    try {
-      const worker = await Tesseract.createWorker("eng");
-      if (workerCrashed)
-        throw new Error("Tesseract worker crashed during init");
-      result = await worker.recognize(pngBuffer);
-      await worker.terminate();
-    } finally {
-      process.removeListener("uncaughtException", suppressTesseractCrash);
-    }
-  } catch {
-    // Tesseract worker failed (e.g. broken module resolution in Docker)
+  // OCR via the unified facade: remote container when OCR_SERVICE_URL is set,
+  // in-process shared Tesseract worker otherwise. Null means OCR failed —
+  // fall back to "no text regions" (standard single-pass diff), same as the
+  // historical behavior when the in-process worker crashed.
+  const rawRegions = await ocrDetectRegions(
+    pngBuffer,
+    granularity,
+    minConfidence,
+  );
+  if (rawRegions === null) {
     return {
       regions: [],
       mask: new Uint8Array(width * height),
       ocrDurationMs: performance.now() - start,
       totalTextPixels: 0,
     };
-  }
-
-  // Extract regions at the desired granularity
-  const rawRegions: Rectangle[] = [];
-
-  if (result.data.blocks) {
-    for (const block of result.data.blocks) {
-      if (granularity === "block") {
-        if (block.confidence >= minConfidence) {
-          rawRegions.push({
-            x: block.bbox.x0,
-            y: block.bbox.y0,
-            width: block.bbox.x1 - block.bbox.x0,
-            height: block.bbox.y1 - block.bbox.y0,
-          });
-        }
-        continue;
-      }
-
-      if (block.paragraphs) {
-        for (const para of block.paragraphs) {
-          if (para.lines) {
-            for (const line of para.lines) {
-              if (granularity === "line") {
-                if (line.confidence >= minConfidence) {
-                  rawRegions.push({
-                    x: line.bbox.x0,
-                    y: line.bbox.y0,
-                    width: line.bbox.x1 - line.bbox.x0,
-                    height: line.bbox.y1 - line.bbox.y0,
-                  });
-                }
-                continue;
-              }
-
-              // Word granularity
-              if (line.words) {
-                for (const word of line.words) {
-                  if (word.confidence >= minConfidence) {
-                    rawRegions.push({
-                      x: word.bbox.x0,
-                      y: word.bbox.y0,
-                      width: word.bbox.x1 - word.bbox.x0,
-                      height: word.bbox.y1 - word.bbox.y0,
-                    });
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
   }
 
   const regions = mergeOverlappingRectangles(rawRegions);
@@ -317,6 +222,10 @@ export async function generateTextAwareDiff(
   ocrDurationMs: number;
 }> {
   const engine = options.diffEngine || "pixelmatch";
+
+  // Wake the OCR backend for the baseline+current pair (fire-and-forget;
+  // no-op when already warm)
+  ocrWarmup(2);
 
   // Detect text regions from both images in parallel
   const [baselineOcr, currentOcr] = await Promise.all([

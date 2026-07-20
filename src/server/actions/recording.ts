@@ -14,6 +14,7 @@ import {
   getDefaultSetupSteps,
 } from "@/lib/db/queries";
 import { requireCapability, requireRepoCapability } from "@/lib/auth";
+import { ocrSleep, ocrWarmup } from "@/lib/ocr";
 import {
   safeOutboundFetch,
   SsrfBlockedError,
@@ -268,6 +269,13 @@ export async function startRecording(
     `[Recording] Setup chain: ${stepsToResolve.length} step(s) declared, ${resolvedSetupSteps?.length ?? 0} resolved with code ${traceTag}`,
   );
 
+  const ocrEnabled =
+    selectorPriority.find((s) => s.type === "ocr-text")?.enabled ?? false;
+  // Wake the OCR backend now so the first ocr-text capture during the
+  // recording doesn't pay Tesseract init latency (fire-and-forget; the
+  // backend auto-sleeps on idle if the recording never uses it).
+  if (ocrEnabled) ocrWarmup();
+
   // Queue start_recording command to the runner
   const command = createMessage<StartRecordingCommand>(
     "command:start_recording",
@@ -281,8 +289,7 @@ export async function startRecording(
       browser:
         (settings.browser as "chromium" | "firefox" | "webkit") ?? "chromium",
       selectorPriority,
-      ocrEnabled:
-        selectorPriority.find((s) => s.type === "ocr-text")?.enabled ?? false,
+      ocrEnabled,
       pointerGestures: settings.pointerGestures ?? false,
       cursorFPS: settings.cursorFPS ?? 30,
       setupSteps: resolvedSetupSteps,
@@ -473,6 +480,10 @@ export async function stopRecording(repositoryId?: string | null) {
 
     // Release the EB back to the pool
     await releasePoolEB(remoteSession.runnerId);
+
+    // Recording done — let the OCR backend sleep (fire-and-forget; both
+    // backends also auto-sleep after their idle timeout).
+    void ocrSleep().catch(() => {});
 
     return {
       id: remoteSession.sessionId,

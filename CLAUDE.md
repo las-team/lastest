@@ -23,6 +23,10 @@ pnpm db:studio                  # Drizzle Studio
 # Host postgres (persists in `lastest-pgdata` named volume; defined in ./docker-compose.yml)
 docker compose up -d
 
+# Optional OCR offload container (compose profile "ocr"; see packages/ocr-service)
+pnpm ocr:up                     # build + start; then set OCR_SERVICE_URL=http://localhost:8891
+pnpm ocr:down
+
 # k3d cluster — hosts dynamically-provisioned EB Job pods only (no app, no db)
 pnpm stack                      # create k3d cluster + build/import EB image
 pnpm stack:refresh              # rebuild EB image + import (alias of stack:refresh:eb)
@@ -113,6 +117,7 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 - `packages/runner/` — remote runner CLI (npm package via tsup)
 - `packages/mcp-server/` — MCP server for AI agent integration (`@lastest/mcp-server`)
 - `packages/embedded-browser/` — containerized browser with CDP live streaming
+- `packages/ocr-service/` — optional Tesseract OCR container; app-side facade in `src/lib/ocr/` (remote when `OCR_SERVICE_URL` set, in-process otherwise; both backends wake on demand and auto-sleep after idle)
 - `packages/vscode-extension/` — VS Code extension (esbuild)
 
 ## Billing (Stripe)
@@ -153,4 +158,5 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 
 - `VisualDiffWithTestStatus` type must stay in sync with `getVisualDiffsWithTestStatus` query select
 - Test code signature: `export async function test(page, baseUrl, screenshotPath, stepLogger)` — runner strips TS annotations
+- OCR always goes through the `src/lib/ocr` facade — never call tesseract.js directly. tesseract.js v6+ only returns `text` by default; bbox data needs the explicit `{ blocks: true }` output option. The region walk in `src/lib/ocr/regions.ts` is duplicated in `packages/ocr-service/src/index.ts` — change both together.
 - Docker entrypoint runs `drizzle-kit push --force` on startup
