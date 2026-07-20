@@ -625,6 +625,54 @@ export function buildExistingPlanDigest(plan: QaTestPlan): string {
 
 const PRIORITY_RANK: Record<QaPriority, number> = { P1: 0, P2: 1, P3: 2 };
 
+/** Highest N among `U<N>`-shaped ids (0 when none match). Used to seed fresh-id
+ *  minting so new ids clear every existing id regardless of gaps. */
+function maxNumericUId(ids: string[]): number {
+  return ids.reduce((max, id) => {
+    const m = /^U(\d+)$/.exec(id);
+    return m ? Math.max(max, Number(m[1])) : max;
+  }, 0);
+}
+
+/** Repair a plan whose ids collide — legacy data minted by a since-fixed bug
+ *  that seeded id counters off array length and so re-minted existing ids like
+ *  `U6`. Journeys and items share the `U<N>` id space, so uniqueness is enforced
+ *  across BOTH lists at once: the first occurrence of each id keeps it, every
+ *  later collision is reassigned a fresh id past the highest existing one. No
+ *  entry is ever dropped, and links to a kept (first) journey stay valid. A plan
+ *  whose ids are already unique is returned structurally unchanged. */
+export function dedupePlanIds(plan: QaTestPlan): QaTestPlan {
+  const seen = new Set<string>();
+  let seq = Math.max(
+    maxNumericUId(plan.journeys.map((j) => j.id)),
+    maxNumericUId(plan.items.map((i) => i.id)),
+  );
+  const claim = (id: string): string => {
+    if (!seen.has(id)) {
+      seen.add(id);
+      return id;
+    }
+    let fresh = `U${++seq}`;
+    while (seen.has(fresh)) fresh = `U${++seq}`;
+    seen.add(fresh);
+    return fresh;
+  };
+  let changed = false;
+  const journeys = plan.journeys.map((j) => {
+    const id = claim(j.id);
+    if (id === j.id) return j;
+    changed = true;
+    return { ...j, id };
+  });
+  const items = plan.items.map((i) => {
+    const id = claim(i.id);
+    if (id === i.id) return i;
+    changed = true;
+    return { ...i, id };
+  });
+  return changed ? { ...plan, journeys, items } : plan;
+}
+
 /**
  * Merge AI-refined journeys/items into an existing plan WITHOUT disturbing the
  * existing items or the reviewer's enable/disable choices. Deduplicates against
@@ -660,7 +708,16 @@ export function mergeRefinedJourneys(
   // MAX_PLAN_JOURNEYS new ones on top of the existing set.
   const idMap = new Map<string, string>();
   const newJourneys: QaPlanJourney[] = [];
-  let jn = plan.journeys.length;
+  // Fresh ids must clear the highest existing numeric U-id across BOTH journeys
+  // and items — they share the "U" prefix and items reference journeyId, so a
+  // single monotonic counter keeps every id unique plan-wide. Seeding off array
+  // length instead (the old bug) re-minted existing ids like `U6` whenever the
+  // id space was non-contiguous from prior dedup/trim, producing React key
+  // collisions in the journey list.
+  let seq = Math.max(
+    maxNumericUId(plan.journeys.map((j) => j.id)),
+    maxNumericUId(plan.items.map((i) => i.id)),
+  );
   for (const rj of refined.journeys) {
     const dupId = existingJourneyByTitle.get(normalizeTitle(rj.title));
     if (dupId) {
@@ -668,7 +725,7 @@ export function mergeRefinedJourneys(
       continue;
     }
     if (newJourneys.length >= MAX_PLAN_JOURNEYS) continue;
-    const newId = `U${++jn}`;
+    const newId = `U${++seq}`;
     idMap.set(rj.id, newId);
     newJourneys.push({ ...rj, id: newId });
   }
@@ -680,7 +737,6 @@ export function mergeRefinedJourneys(
   // Items: strip disallowed groups, dedup by title, remap ids + journeyId,
   // ensure journey-linked items carry the "journey" group.
   const candidates: QaPlanItem[] = [];
-  let tn = plan.items.length;
   for (const ri of refined.items) {
     let kept = itemGroups(ri).filter((g) => allowed.has(g));
     if (kept.length === 0) continue;
@@ -695,7 +751,7 @@ export function mergeRefinedJourneys(
     }
     candidates.push({
       ...ri,
-      id: `U${++tn}`,
+      id: `U${++seq}`,
       group: kept[0],
       groups: kept,
       journeyId,
@@ -725,12 +781,17 @@ export function mergeRefinedJourneys(
     linkedJourneyIds.has(j.id),
   );
 
+  // Repair any pre-existing id collisions the input plan carried in from legacy
+  // data — freshly minted ids already clear every existing id, so this only
+  // touches the corrupt duplicates and leaves addedItemIds accurate.
+  const merged = dedupePlanIds({
+    ...plan,
+    journeys: [...plan.journeys, ...admittedJourneys],
+    items: [...plan.items, ...newItems],
+  });
+
   return {
-    plan: {
-      ...plan,
-      journeys: [...plan.journeys, ...admittedJourneys],
-      items: [...plan.items, ...newItems],
-    },
+    plan: merged,
     addedJourneys: admittedJourneys.length,
     addedItems: newItems.length,
     addedItemIds: newItems.map((i) => i.id),
