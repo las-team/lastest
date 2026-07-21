@@ -1817,7 +1817,7 @@ async function executeViaPoolWorkers(
     prewarmForBuild,
     ensureWarmPool,
   } = await import("@lastest/pool-service/client");
-  const { isKubernetesMode } = await import("@lastest/pool-service/common");
+  const { isDynamicPoolMode } = await import("@lastest/pool-service/common");
 
   // A1 (watchdog liveness keepalive). getRunnerById exposes the EB's DB
   // heartbeat (last_seen, updated cross-pod on each EB poll); SESSION_TIMEOUT_MS
@@ -1840,7 +1840,7 @@ async function executeViaPoolWorkers(
   // setup, when configured) so the first batch of tests doesn't pay the
   // sequential cold-start cost. Throttled by awaitLaunchSlot internally.
   // See docs/eb-and-setup-plan.md B3.
-  if (isKubernetesMode()) {
+  if (isDynamicPoolMode()) {
     const prewarmTarget =
       Math.min(maxParallelEBs, tests.length) + (options.setupInfo ? 1 : 0);
     prewarmForBuild(prewarmTarget).catch((err) => {

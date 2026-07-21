@@ -15,7 +15,7 @@ import { requireTeamAccess, requireTeamAdmin } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { emitRunnerStatusChange } from "@/lib/ws/runner-events";
 import {
-  isKubernetesMode,
+  isDynamicPoolMode,
   jobNameForRunnerName,
 } from "@lastest/pool-service/common";
 import {
@@ -457,7 +457,7 @@ export async function isPoolBusy(): Promise<boolean> {
   // cluster cap. Otherwise let the caller proceed; claimOrProvisionPoolEB will
   // spin up a fresh EB. Pool-service unreachable reads as busy (conservative:
   // queue rather than dispatch into a claim that cannot provision).
-  if (!isKubernetesMode()) return true;
+  if (!isDynamicPoolMode()) return true;
   const status = await getPoolStatus();
   if (!status) return true;
   return status.size >= status.max;
@@ -605,7 +605,7 @@ export async function releasePoolEB(runnerId: string): Promise<void> {
   // claimOrProvisionPoolEB launches fresh EBs on demand, and warm-pool
   // refill is handled by ensureWarmPool, so we don't need to recycle here.
   const isPoolEB =
-    isKubernetesMode() &&
+    isDynamicPoolMode() &&
     runner.isSystem === true &&
     runner.type === "embedded";
   if (isPoolEB) {
@@ -834,7 +834,7 @@ export async function claimOrProvisionPoolEB(
   const claimed = await claimPoolEB();
   if (claimed) return claimed;
 
-  if (!isKubernetesMode()) return null;
+  if (!isDynamicPoolMode()) return null;
 
   // Ask the pool service for a fresh Job. Cap enforcement (global cap +
   // build/interactive reservation), the in-flight provision counter and the
@@ -1015,7 +1015,7 @@ export async function reconcileOrphanedPoolEBs(): Promise<number> {
   // runner and start_debug commands pile up in `runner_commands` with nothing
   // to consume them — symptom: UI stuck on "Launching browser..." forever.
   let phantoms = 0;
-  if (isKubernetesMode()) {
+  if (isDynamicPoolMode()) {
     try {
       const liveJobs = await listEBJobNames();
       if (liveJobs === null) {

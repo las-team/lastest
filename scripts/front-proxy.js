@@ -33,12 +33,50 @@
  *   FRONT_PROXY_HOST      public bind address          (default 0.0.0.0)
  *   UPSTREAM_PORT         Next's loopback port         (default 3001)
  *   FRONT_PROXY_DEBUG=1   verbose logging (WS_PROXY_DEBUG also honored)
+ *   ENCRYPTION_KEY        grant verification key — filled from .env.local at
+ *                         startup when not already in the environment
  */
 
 const http = require("http");
 const net = require("net");
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 const { spawn } = require("child_process");
+
+/**
+ * Dev convenience, mirroring packages/pool-service/src/env.ts: Next loads
+ * .env.local itself, but this is a standalone dependency-free process — grant
+ * verification needs ENCRYPTION_KEY in ITS env, or every EB stream upgrade
+ * 403s while the app happily mints grants. Values never override variables
+ * already present (docker/k8s-injected env always wins); silently no-ops when
+ * the file doesn't exist (production containers). Called from main() only, so
+ * require()-ing this file as a module (tests) stays side-effect free.
+ */
+function loadDotenvLocal() {
+  const candidates = [
+    path.resolve(__dirname, "..", ".env.local"),
+    path.resolve(process.cwd(), ".env.local"),
+  ];
+  const file = candidates.find((p) => fs.existsSync(p));
+  if (!file) return;
+  for (const rawLine of fs.readFileSync(file, "utf8").split("\n")) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    if (process.env[key] !== undefined) continue;
+    let value = line.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    process.env[key] = value;
+  }
+}
 
 const PUBLIC_PORT = parseInt(process.env.PORT || "3000", 10);
 const PUBLIC_HOST = process.env.FRONT_PROXY_HOST || "0.0.0.0";
@@ -476,6 +514,12 @@ function proxyRequest(req, res) {
 }
 
 function main() {
+  loadDotenvLocal();
+  if (!streamGrantKey()) {
+    console.warn(
+      "[front-proxy] ENCRYPTION_KEY is unset or not 64 hex chars in this process — every EB stream upgrade will be rejected with 403",
+    );
+  }
   const server = http.createServer(proxyRequest);
   server.on("upgrade", (req, socket, head) => {
     const cfg = parseTarget(req.url || "");

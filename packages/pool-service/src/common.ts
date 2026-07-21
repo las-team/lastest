@@ -8,15 +8,73 @@
  */
 
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+
+export type EBProvisionerMode = "kubernetes" | "process" | "none";
+
+// Cached: the answer can't change within a process lifetime.
+let _devCheckoutEBDir: string | null | undefined;
 
 /**
- * Whether dynamic EB provisioning is enabled for this deployment
- * (EB_PROVISIONER=kubernetes). Purely an env check — holding this flag does
- * NOT imply the current process has cluster credentials; only the pool
- * service talks to the Kubernetes API.
+ * Locate `packages/embedded-browser`.
+ *
+ * Null in production app containers, which ship only a bundled EB dist; those
+ * deployments must opt into process mode explicitly (EB_PROVISIONER=process).
+ */
+export function devCheckoutEBDir(): string | null {
+  if (_devCheckoutEBDir !== undefined) return _devCheckoutEBDir;
+  const candidates = [
+    path.resolve(process.cwd(), "packages/embedded-browser"),
+    path.resolve(process.cwd(), "../embedded-browser"),
+  ];
+  _devCheckoutEBDir =
+    candidates.find((dir) =>
+      fs.existsSync(path.join(dir, "src", "index.ts")),
+    ) ?? null;
+  return _devCheckoutEBDir;
+}
+
+/**
+ * How dynamic EB capacity is provisioned:
+ *   'kubernetes' — EB_PROVISIONER=kubernetes: one k8s Job per EB (k3d in dev,
+ *                  real cluster in prod).
+ *   'process'    — one local child process per EB, spawned by the pool
+ *                  service. The zero-config local-dev default: when
+ *                  EB_PROVISIONER is unset (or 'none'/'process') AND the repo
+ *                  checkout contains packages/embedded-browser sources, this
+ *                  mode is active — no cluster, no Docker needed.
+ *   'none'       — no dynamic provisioning (static EB fleets only). Reached by
+ *                  EB_PROVISIONER=disabled, or by default outside a dev
+ *                  checkout (e.g. the Zima app container, where compose
+ *                  replicas ARE the fleet).
+ *
+ * Purely env + checkout-layout; holding a mode does NOT imply this process has
+ * infra credentials — only the pool service provisions.
+ */
+export function provisionerMode(): EBProvisionerMode {
+  const raw = (process.env.EB_PROVISIONER || "").trim().toLowerCase();
+  if (raw === "kubernetes") return "kubernetes";
+  if (raw === "disabled" || raw === "off") return "none";
+  if (raw === "process") return "process";
+  // unset / 'none' / anything else: process mode when the EB sources are
+  // present (dev checkout), otherwise no provisioning.
+  return devCheckoutEBDir() ? "process" : "none";
+}
+
+/** True when this deployment can provision EB capacity on demand (kubernetes
+ *  or process mode) — the general "is there a dynamic pool" predicate. Use
+ *  `isKubernetesMode()` only for genuinely k8s-specific behavior. */
+export function isDynamicPoolMode(): boolean {
+  return provisionerMode() !== "none";
+}
+
+/**
+ * Whether EBs are provisioned as Kubernetes Jobs (EB_PROVISIONER=kubernetes).
+ * Prefer `isDynamicPoolMode()` for "can we provision at all" checks.
  */
 export function isKubernetesMode(): boolean {
-  return (process.env.EB_PROVISIONER || "none").toLowerCase() === "kubernetes";
+  return provisionerMode() === "kubernetes";
 }
 
 /**

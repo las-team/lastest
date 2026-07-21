@@ -24,7 +24,7 @@ import {
   runnerCommandResults,
 } from "@lastest/db/schema";
 import { and, eq } from "drizzle-orm";
-import { isKubernetesMode, jobNameForRunnerName } from "./common";
+import { isDynamicPoolMode, jobNameForRunnerName } from "./common";
 import {
   currentPoolSize,
   ensureWarmPool,
@@ -85,7 +85,7 @@ export async function reapStalePoolEBs(
  * configured warm-pool minimum alive.
  */
 export async function reapIdleEBJobs(idleTtlMs: number): Promise<number> {
-  if (!isKubernetesMode()) return 0;
+  if (!isDynamicPoolMode()) return 0;
 
   // currentPoolSize excludes offline rows; they count as already-dead slots.
   // Offline reaping is always safe (we aren't burning capacity by tearing them down).

@@ -1,10 +1,15 @@
 /**
  * Embedded Browser Provisioner — runs INSIDE THE POOL SERVICE process only.
  *
- * On-demand Kubernetes Job provisioning for system EB pods. This module is
- * the only code in the repo that talks to the Kubernetes API; the app reaches
- * it through the HTTP surface in `packages/pool-service/src/main.ts` via
- * `@lastest/pool-service/client`, and holds no cluster credentials itself.
+ * On-demand EB provisioning behind two interchangeable backends:
+ *   - kubernetes: one k8s Job per EB (this file's k8s client). The only code
+ *     in the repo that talks to the Kubernetes API; the app reaches it through
+ *     the HTTP surface in `packages/pool-service/src/main.ts` via
+ *     `@lastest/pool-service/client`, and holds no cluster credentials itself.
+ *   - process: one local child process per EB (`./process-provisioner.ts`) —
+ *     the zero-config default in a dev checkout. Same pool caps, throttle,
+ *     reapers and per-session bootstrap tokens; "Job" in the exported API
+ *     names just means "one provisioned EB" there.
  *
  * The in-memory state here (in-flight provision counter, launch throttle
  * chain, build-dispatch flag) is correct because the pool service is a
@@ -20,7 +25,9 @@
  *     deleted (subject to a small idle-TTL to absorb back-to-back tests).
  *
  * Controlled via env (deployment topology / infra):
- *   EB_PROVISIONER     = 'kubernetes' | 'none'    (default: 'none')
+ *   EB_PROVISIONER     = 'kubernetes' | 'process' | 'disabled'
+ *                        (default: 'process' in a dev checkout, else disabled —
+ *                        see provisionerMode() in ./common.ts)
  *   EB_NAMESPACE       = k8s namespace (default: 'lastest')
  *   EB_IMAGE           = container image for the EB
  *   EB_WARM_POOL_MIN   = min EBs to keep alive while idle (default: 2)
@@ -37,8 +44,11 @@
  * Controlled via the global `playwright_settings` row (cluster-wide, DB):
  *   ebPoolMax          = hard cap on concurrent EBs (schema default: 30)
  *   ebIdleTTLSeconds   = idle timeout before a released EB Job is torn down
+ *                        (process mode caps the effective max at
+ *                        EB_PROCESS_POOL_MAX, default 4 — local Chromiums are
+ *                        expensive)
  *
- * The provisioner is a no-op unless EB_PROVISIONER === 'kubernetes'.
+ * The provisioner is a no-op when provisioning is disabled (mode 'none').
  */
 
 import { execFileSync } from "child_process";
@@ -47,7 +57,18 @@ import https from "https";
 import { db } from "@lastest/db";
 import { runners } from "@lastest/db/schema";
 import { and, eq, ne } from "drizzle-orm";
-import { isKubernetesMode, mintBootstrapToken } from "./common";
+import {
+  isDynamicPoolMode,
+  isKubernetesMode,
+  mintBootstrapToken,
+  provisionerMode,
+} from "./common";
+import {
+  getEBProcessInfo,
+  launchEBProcess,
+  listEBProcessNames,
+  terminateEBProcess,
+} from "./process-provisioner";
 
 const SA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount";
 
@@ -78,7 +99,13 @@ async function readPoolLimits(): Promise<{
 }
 
 export async function poolMax(): Promise<number> {
-  return (await readPoolLimits()).ebPoolMax;
+  const dbMax = (await readPoolLimits()).ebPoolMax;
+  if (provisionerMode() !== "process") return dbMax;
+  // Every process-mode EB is a full local Chromium; the cluster-sized DB cap
+  // (default 30) would let one build melt a laptop.
+  const n = parseInt(process.env.EB_PROCESS_POOL_MAX || "4", 10);
+  const processMax = Number.isFinite(n) && n > 0 ? n : 4;
+  return Math.min(dbMax, processMax);
 }
 
 export async function ebIdleTTLMs(): Promise<number> {
@@ -86,8 +113,12 @@ export async function ebIdleTTLMs(): Promise<number> {
 }
 
 export function warmPoolMin(): number {
-  const n = parseInt(process.env.EB_WARM_POOL_MIN || "2", 10);
-  return Number.isFinite(n) && n >= 0 ? n : 2;
+  // Process mode defaults to a cold pool: idle warm EBs are whole Chromium
+  // processes on the dev machine, and local spawn latency (~2-5s) is cheap
+  // enough to pay per test. Opt back in with EB_WARM_POOL_MIN.
+  const fallback = provisionerMode() === "process" ? 0 : 2;
+  const n = parseInt(process.env.EB_WARM_POOL_MIN || String(fallback), 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
 // Pool slots held back from build dispatch so interactive callers
@@ -477,8 +508,9 @@ export async function launchEBJob(): Promise<{
   jobName: string;
   instanceId: string;
 }> {
-  if (!isKubernetesMode()) {
-    throw new Error('launchEBJob called but EB_PROVISIONER !== "kubernetes"');
+  const mode = provisionerMode();
+  if (mode === "none") {
+    throw new Error("launchEBJob called but EB provisioning is disabled");
   }
 
   const poolSize = await currentPoolSize();
@@ -491,6 +523,15 @@ export async function launchEBJob(): Promise<{
 
   const instanceId = generateInstanceId();
   const jobName = instanceId; // instanceId is short enough to use as job name
+
+  if (mode === "process") {
+    await launchEBProcess(instanceId);
+    console.log(
+      `[EB Provisioner] Spawned local EB ${jobName} (pool size ${poolSize + 1}/${cap})`,
+    );
+    return { jobName, instanceId };
+  }
+
   const creds = loadClusterCreds();
   const spec = jobSpec(jobName, instanceId);
 
@@ -516,6 +557,10 @@ export async function launchEBJob(): Promise<{
  * Background propagation so the call returns immediately; kubelet cleans up.
  */
 export async function terminateEBJob(jobName: string): Promise<void> {
+  if (provisionerMode() === "process") {
+    await terminateEBProcess(jobName);
+    return;
+  }
   if (!isKubernetesMode()) return;
   const creds = loadClusterCreds();
   const { status } = await k8sRequest(
@@ -556,6 +601,9 @@ export async function getEBPodInfo(
   jobName: string,
   tailLines = 80,
 ): Promise<EBPodInfo | null> {
+  if (provisionerMode() === "process") {
+    return getEBProcessInfo(jobName, tailLines);
+  }
   if (!isKubernetesMode()) return null;
   try {
     const creds = loadClusterCreds();
@@ -641,6 +689,7 @@ export async function getEBPodInfo(
  * no reaper was running) so we don't hand them out to claimers.
  */
 export async function listEBJobNames(): Promise<Set<string>> {
+  if (provisionerMode() === "process") return listEBProcessNames();
   if (!isKubernetesMode()) return new Set();
   const creds = loadClusterCreds();
   const { status, data } = await k8sRequest(
@@ -688,7 +737,7 @@ export function inBuildDispatch(): number {
  * refill that races with on-demand provisioning just wastes pods.
  */
 export async function ensureWarmPool(): Promise<number> {
-  if (!isKubernetesMode()) return 0;
+  if (!isDynamicPoolMode()) return 0;
   if (_buildDispatchInFlight > 0) return 0;
   const want = warmPoolMin();
   if (want <= 0) return 0;
@@ -755,7 +804,7 @@ export async function ensureWarmPool(): Promise<number> {
  * near cap or any launch throws).
  */
 export async function prewarmForBuild(targetCount: number): Promise<number> {
-  if (!isKubernetesMode()) return 0;
+  if (!isDynamicPoolMode()) return 0;
   if (targetCount <= 0) return 0;
 
   // Builds must respect the interactive reservation here too —

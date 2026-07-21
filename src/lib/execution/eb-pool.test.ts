@@ -182,6 +182,7 @@ vi.mock("@/lib/auth", () => ({
 // into the k8s branch) and never hit the pool-service HTTP surface.
 vi.mock("@lastest/pool-service/common", () => ({
   isKubernetesMode: vi.fn(() => false),
+  isDynamicPoolMode: vi.fn(() => false),
   jobNameForRunnerName: vi.fn(() => null),
 }));
 vi.mock("@lastest/pool-service/client", () => ({

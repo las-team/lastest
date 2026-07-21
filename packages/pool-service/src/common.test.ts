@@ -4,6 +4,10 @@ import {
   verifyBootstrapToken,
   getBootstrapTokenKey,
   jobNameForRunnerName,
+  provisionerMode,
+  isDynamicPoolMode,
+  isKubernetesMode,
+  devCheckoutEBDir,
 } from "./common";
 
 const TEST_KEY = "a".repeat(64);
@@ -68,6 +72,45 @@ describe("bootstrap tokens", () => {
     expect(verifyBootstrapToken("no-dot")).toBeNull();
     expect(verifyBootstrapToken(".")).toBeNull();
     expect(verifyBootstrapToken("a.b")).toBeNull();
+  });
+});
+
+describe("provisionerMode", () => {
+  let savedMode: string | undefined;
+  beforeEach(() => {
+    savedMode = process.env.EB_PROVISIONER;
+  });
+  afterEach(() => {
+    if (savedMode === undefined) delete process.env.EB_PROVISIONER;
+    else process.env.EB_PROVISIONER = savedMode;
+  });
+
+  // These tests run from the repo checkout, so the dev-checkout probe holds.
+  it("detects the dev checkout's embedded-browser package", () => {
+    expect(devCheckoutEBDir()).toMatch(/packages[/\\]embedded-browser$/);
+  });
+
+  it("defaults to process mode in a dev checkout (unset and 'none')", () => {
+    delete process.env.EB_PROVISIONER;
+    expect(provisionerMode()).toBe("process");
+    process.env.EB_PROVISIONER = "none";
+    expect(provisionerMode()).toBe("process");
+    expect(isDynamicPoolMode()).toBe(true);
+    expect(isKubernetesMode()).toBe(false);
+  });
+
+  it("honors explicit kubernetes / process / disabled", () => {
+    process.env.EB_PROVISIONER = "kubernetes";
+    expect(provisionerMode()).toBe("kubernetes");
+    expect(isKubernetesMode()).toBe(true);
+    expect(isDynamicPoolMode()).toBe(true);
+
+    process.env.EB_PROVISIONER = "process";
+    expect(provisionerMode()).toBe("process");
+
+    process.env.EB_PROVISIONER = "disabled";
+    expect(provisionerMode()).toBe("none");
+    expect(isDynamicPoolMode()).toBe(false);
   });
 });
 

@@ -44,7 +44,8 @@ import crypto from "node:crypto";
 import { db, sql } from "@lastest/db";
 import { runners } from "@lastest/db/schema";
 import { and, eq } from "drizzle-orm";
-import { isKubernetesMode } from "./common";
+import { isDynamicPoolMode, isKubernetesMode, provisionerMode } from "./common";
+import { terminateAllEBProcesses } from "./process-provisioner";
 import {
   currentPoolSize,
   decBuildDispatch,
@@ -120,10 +121,13 @@ async function handleProvision(
   | { status: 201; body: { jobName: string; instanceId: string } }
   | { status: 409 | 500; body: { error: string; size?: number; cap?: number } }
 > {
-  if (!isKubernetesMode()) {
+  if (!isDynamicPoolMode()) {
     return {
       status: 409,
-      body: { error: "EB_PROVISIONER is not 'kubernetes'" },
+      body: {
+        error:
+          "EB provisioning is disabled (EB_PROVISIONER=disabled, or not a dev checkout — set EB_PROVISIONER=kubernetes or =process)",
+      },
     };
   }
 
@@ -214,7 +218,12 @@ async function route(
   const path = url.pathname;
 
   if (req.method === "GET" && path === "/health") {
-    return json(res, 200, { ok: true, kubernetesMode: isKubernetesMode() });
+    return json(res, 200, {
+      ok: true,
+      mode: provisionerMode(),
+      // kept for older clients that only know the boolean
+      kubernetesMode: isKubernetesMode(),
+    });
   }
 
   if (!path.startsWith("/v1/")) return json(res, 404, { error: "not found" });
@@ -284,7 +293,7 @@ async function main(): Promise<void> {
 
   server.listen(PORT, HOST, () => {
     console.log(
-      `[PoolService] listening on http://${HOST}:${PORT} (mode=${isKubernetesMode() ? "kubernetes" : "none"}, auth=${TOKEN ? "bearer" : "loopback"})`,
+      `[PoolService] listening on http://${HOST}:${PORT} (mode=${provisionerMode()}, auth=${TOKEN ? "bearer" : "loopback"})`,
     );
   });
 
@@ -294,7 +303,7 @@ async function main(): Promise<void> {
     const { ensureGlobalPlaywrightSettings } =
       await import("@lastest/db/settings");
     await ensureGlobalPlaywrightSettings();
-    if (isKubernetesMode()) {
+    if (isDynamicPoolMode()) {
       const launched = await ensureWarmPool();
       if (launched > 0)
         console.log(`[PoolService] Warm pool topped up (+${launched}) at boot`);
@@ -309,6 +318,9 @@ async function main(): Promise<void> {
     process.on(sig, () => {
       console.log(`[PoolService] ${sig} — shutting down`);
       stopPoolLoop();
+      // Process-mode EBs are children of this process — take them down with
+      // us (SIGTERM here; the exit hook SIGKILLs any survivor).
+      terminateAllEBProcesses();
       server.close(() => {
         sql.end({ timeout: 5 }).finally(() => process.exit(0));
       });
