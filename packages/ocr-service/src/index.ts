@@ -289,6 +289,25 @@ function extractRegions(
   return regions;
 }
 
+/** Flatten the blocks tree into word texts + confidences (keep in sync with
+ *  extractWordsFromBlocks in src/lib/ocr/regions.ts). */
+function extractWords(
+  blocks: RecognizeResult["data"]["blocks"] | null,
+): Array<{ text: string; confidence: number }> {
+  const words: Array<{ text: string; confidence: number }> = [];
+  for (const block of blocks ?? []) {
+    for (const para of block.paragraphs ?? []) {
+      for (const line of para.lines ?? []) {
+        for (const word of line.words ?? []) {
+          const text = (word.text ?? "").trim();
+          if (text) words.push({ text, confidence: word.confidence ?? 0 });
+        }
+      }
+    }
+  }
+  return words;
+}
+
 // ---------------------------------------------------------------------------
 // HTTP server
 // ---------------------------------------------------------------------------
@@ -391,12 +410,17 @@ const server = http.createServer(async (req, res) => {
         json(res, 400, { error: "empty body" });
         return;
       }
+      // blocks:true so per-word confidences ride along — callers use them to
+      // drop icon-glyph junk words instead of gating on the whole-image
+      // average (which one bad glyph next to a clean label drags below any
+      // sane threshold).
       const result = await withWorker((w) =>
-        w.recognize(image, {}, { text: true }),
+        w.recognize(image, {}, { text: true, blocks: true }),
       );
       json(res, 200, {
         text: result.data.text ?? "",
         confidence: result.data.confidence ?? 0,
+        words: extractWords(result.data.blocks ?? null),
       });
       return;
     }

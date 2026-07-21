@@ -35,6 +35,39 @@ export async function extractText(imageBuffer: Buffer): Promise<string | null> {
 
     if (!result) return null;
 
+    // Prefer the per-word breakdown: an icon glyph next to a clean label OCRs
+    // as one junk word (e.g. "&" at ~5%) and drags the whole-image average
+    // below any sane gate even though the label itself read fine. Keep words
+    // that are confident AND contain at least one letter/digit, then gate on
+    // the confidence of what's left.
+    if (result.words && result.words.length > 0) {
+      const kept = result.words.filter(
+        (w) => w.confidence >= 40 && /[\p{L}\p{N}]/u.test(w.text),
+      );
+      if (kept.length === 0) {
+        console.warn(
+          `[OCR] Rejected: no confident words (raw text="${result.text.trim().slice(0, 50)}")`,
+        );
+        return null;
+      }
+      const text = kept
+        .map((w) => w.text)
+        .join(" ")
+        .trim();
+      const confidence =
+        kept.reduce((sum, w) => sum + w.confidence, 0) / kept.length;
+      console.log(
+        `[OCR] Recognition result: confidence=${confidence.toFixed(1)}% (${kept.length}/${result.words.length} words), text="${text.slice(0, 50)}"`,
+      );
+      if (confidence < 60) {
+        console.warn(
+          `[OCR] Rejected: word confidence ${confidence.toFixed(1)}% < 60% threshold`,
+        );
+        return null;
+      }
+      return text.length > 0 ? text : null;
+    }
+
     const text = result.text.trim();
     console.log(
       `[OCR] Recognition result: confidence=${result.confidence.toFixed(1)}%, text="${text.slice(0, 50)}"`,

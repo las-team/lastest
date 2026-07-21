@@ -16,7 +16,10 @@ import {
   terminateLocalWorker,
   warmupLocalWorker,
 } from "@/lib/ocr/local";
-import { extractRegionsFromBlocks } from "@/lib/ocr/regions";
+import {
+  extractRegionsFromBlocks,
+  extractWordsFromBlocks,
+} from "@/lib/ocr/regions";
 import {
   remoteDetectRegions,
   remoteRecognize,
@@ -42,8 +45,16 @@ export async function ocrRecognize(
   if (isRemoteOCR()) {
     return remoteRecognize(image);
   }
-  const result = await recognizeLocal(image);
-  return result ? { text: result.text, confidence: result.confidence } : null;
+  // blocks:true so per-word confidences ride along (same contract as the
+  // remote /recognize) — callers use them to drop icon-glyph junk words.
+  const result = await recognizeLocal(image, { blocks: true });
+  return result
+    ? {
+        text: result.text,
+        confidence: result.confidence,
+        words: result.blocks ? extractWordsFromBlocks(result.blocks) : null,
+      }
+    : null;
 }
 
 /**

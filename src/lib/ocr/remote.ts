@@ -63,8 +63,23 @@ export async function remoteRecognize(
   const res = await post("/recognize", image, timeoutMs);
   if (!res) return null;
   try {
-    const data = (await res.json()) as { text?: string; confidence?: number };
-    return { text: data.text ?? "", confidence: data.confidence ?? 0 };
+    const data = (await res.json()) as {
+      text?: string;
+      confidence?: number;
+      words?: Array<{ text?: string; confidence?: number }> | null;
+    };
+    const words = Array.isArray(data.words)
+      ? data.words
+          .filter((w) => typeof w?.text === "string" && w.text.trim())
+          .map((w) => ({ text: w.text!.trim(), confidence: w.confidence ?? 0 }))
+      : null;
+    return {
+      text: data.text ?? "",
+      confidence: data.confidence ?? 0,
+      // Omitted (not null) when the service predates the words field — keeps
+      // older callers' deep-equality expectations intact.
+      ...(words ? { words } : {}),
+    };
   } catch {
     return null;
   }

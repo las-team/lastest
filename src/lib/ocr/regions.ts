@@ -1,4 +1,4 @@
-import type { OcrGranularity, OcrRegion } from "@/lib/ocr/types";
+import type { OcrGranularity, OcrRegion, OcrWord } from "@/lib/ocr/types";
 
 /**
  * Walk Tesseract's blocks → paragraphs → lines → words tree and collect
@@ -19,6 +19,7 @@ interface OcrBBox {
 interface OcrWordNode {
   confidence: number;
   bbox: OcrBBox;
+  text?: string | null;
 }
 
 interface OcrLineNode {
@@ -70,4 +71,24 @@ export function extractRegionsFromBlocks(
     }
   }
   return regions;
+}
+
+/**
+ * Flatten the blocks tree into word texts + confidences. Keep in sync with
+ * `extractWords` in `packages/ocr-service/src/index.ts` — the remote service
+ * applies the same walk server-side.
+ */
+export function extractWordsFromBlocks(blocks: OcrBlockNode[]): OcrWord[] {
+  const words: OcrWord[] = [];
+  for (const block of blocks) {
+    for (const para of block.paragraphs ?? []) {
+      for (const line of para.lines ?? []) {
+        for (const word of line.words ?? []) {
+          const text = (word.text ?? "").trim();
+          if (text) words.push({ text, confidence: word.confidence });
+        }
+      }
+    }
+  }
+  return words;
 }
