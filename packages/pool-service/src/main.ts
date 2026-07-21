@@ -36,6 +36,9 @@
  *   (+ all EB_* provisioning knobs read by provisioner.ts, DATABASE_URL)
  */
 
+// MUST be first: fills process.env from .env.local before @lastest/db
+// captures DATABASE_URL at module-init time.
+import "./env";
 import http from "node:http";
 import crypto from "node:crypto";
 import { db, sql } from "@lastest/db";

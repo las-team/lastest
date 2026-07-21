@@ -731,11 +731,12 @@ export class EmbeddedTestExecutor {
     }
 
     // Self-test bypass: when the EB pod is running Lastest's own e2e suite
-    // against its own host, inject SYSTEM_EB_TOKEN as a Bearer header so
-    // login POSTs skip the per-IP rate limit. Strict origin guard prevents
-    // the token leaking into customer apps the EB renders. Uses the first
-    // comma-separated token (provisioner-style) per the SYSTEM_EB_TOKEN
-    // split convention.
+    // against its own host, inject this pod's credential as a Bearer header
+    // so login POSTs skip the per-IP rate limit. Dynamic pool EBs hold a
+    // per-session EB_BOOTSTRAP_TOKEN (accepted by the host's rate-limit
+    // classifier via HMAC verify); static-fleet EBs fall back to the first
+    // comma-separated SYSTEM_EB_TOKEN entry. Strict origin guard prevents
+    // the token leaking into customer apps the EB renders.
     //
     // Eligible target origins: LASTEST_URL (internal cluster DNS used for
     // EB→host coordination) plus LASTEST_PUBLIC_URL if set (external URL
@@ -743,7 +744,9 @@ export class EmbeddedTestExecutor {
     // these differ — the internal DNS doesn't match what the test browser
     // navigates to — so both must be allowlisted.
     {
-      const systemTokenRaw = process.env.SYSTEM_EB_TOKEN?.split(",")[0]?.trim();
+      const selfTestToken =
+        process.env.EB_BOOTSTRAP_TOKEN?.trim() ||
+        process.env.SYSTEM_EB_TOKEN?.split(",")[0]?.trim();
       const allowedOrigins = new Set<string>();
       for (const raw of [
         process.env.LASTEST_URL,
@@ -756,16 +759,16 @@ export class EmbeddedTestExecutor {
           /* skip malformed */
         }
       }
-      if (systemTokenRaw && allowedOrigins.size > 0) {
+      if (selfTestToken && allowedOrigins.size > 0) {
         try {
           const testOrigin = new URL(command.targetUrl).origin;
           if (allowedOrigins.has(testOrigin)) {
             await testContext.setExtraHTTPHeaders({
-              Authorization: `Bearer ${systemTokenRaw}`,
+              Authorization: `Bearer ${selfTestToken}`,
             });
             logFn(
               "info",
-              `Self-test bypass: injected SYSTEM_EB_TOKEN for ${testOrigin}`,
+              `Self-test bypass: injected pod credential for ${testOrigin}`,
             );
           }
         } catch {

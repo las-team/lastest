@@ -31,7 +31,8 @@
  *   EB_ACTIVE_DEADLINE_SECONDS (default: 1800)
  *   EB_TTL_SECONDS_AFTER_FINISHED (default: 60)
  *   LASTEST_URL        = URL the EB calls back to (default: in-cluster service DNS)
- *   SYSTEM_EB_TOKEN    = shared secret passed to spawned EB
+ *   ENCRYPTION_KEY     = signs the per-Job EB_BOOTSTRAP_TOKEN (required in
+ *                        kubernetes mode; must match the app's key)
  *
  * Controlled via the global `playwright_settings` row (cluster-wide, DB):
  *   ebPoolMax          = hard cap on concurrent EBs (schema default: 30)
@@ -46,7 +47,7 @@ import https from "https";
 import { db } from "@lastest/db";
 import { runners } from "@lastest/db/schema";
 import { and, eq, ne } from "drizzle-orm";
-import { isKubernetesMode } from "./common";
+import { isKubernetesMode, mintBootstrapToken } from "./common";
 
 const SA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount";
 
@@ -325,11 +326,6 @@ function jobSpec(name: string, instanceId: string): Record<string, unknown> {
   // (Olares: internal cluster DNS vs. external envoy hostname). Optional;
   // when unset the bypass falls back to LASTEST_URL only.
   const lastestPublicUrl = process.env.LASTEST_PUBLIC_URL || "";
-  // `SYSTEM_EB_TOKEN` may hold a comma-separated rotation list on the app side
-  // (auto-register validates by splitting on `,`). Each EB sends the env var
-  // verbatim as its Bearer token, so it must be a SINGLE token or the app 401s
-  // every register attempt. Take the first entry — the one the app prefers.
-  const systemToken = (process.env.SYSTEM_EB_TOKEN || "").split(",")[0].trim();
   const cpuRequest = process.env.EB_CPU_REQUEST || "1000m";
   const cpuLimit = process.env.EB_CPU_LIMIT || "2000m";
   const memRequest = process.env.EB_MEM_REQUEST || "2Gi";
@@ -349,6 +345,20 @@ function jobSpec(name: string, instanceId: string): Record<string, unknown> {
     process.env.EB_TTL_SECONDS_AFTER_FINISHED || "600",
     10,
   );
+
+  // Per-session bootstrap token — the ONLY credential the pod receives.
+  // TTL = the Job's own deadline + grace, so the token cannot outlive the EB.
+  // See the primitive in ./common.ts. Fail closed: without a signing key the
+  // pod could never register, so refuse to create a Job at all.
+  const bootstrapToken = mintBootstrapToken(
+    instanceId,
+    activeDeadline * 1000 + 300_000,
+  );
+  if (!bootstrapToken) {
+    throw new Error(
+      "Cannot mint EB_BOOTSTRAP_TOKEN — ENCRYPTION_KEY is unset or not 64 hex chars in the pool service env. It must match the app's ENCRYPTION_KEY.",
+    );
+  }
 
   return {
     apiVersion: "batch/v1",
@@ -389,7 +399,7 @@ function jobSpec(name: string, instanceId: string): Record<string, unknown> {
                 ...(lastestPublicUrl
                   ? [{ name: "LASTEST_PUBLIC_URL", value: lastestPublicUrl }]
                   : []),
-                { name: "SYSTEM_EB_TOKEN", value: systemToken },
+                { name: "EB_BOOTSTRAP_TOKEN", value: bootstrapToken },
                 { name: "INSTANCE_ID", value: instanceId },
                 { name: "STREAM_PORT", value: "9223" },
                 { name: "CDP_PORT", value: "9222" },

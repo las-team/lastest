@@ -38,8 +38,11 @@ export interface EmbeddedRunnerOptions {
   pollInterval?: number;
   /** CDP port for Playwright MCP integration */
   cdpPort?: number;
-  /** System EB shared token — if set, uses /api/embedded/auto-register instead */
+  /** Static-fleet shared token — if set, uses /api/embedded/auto-register */
   systemToken?: string;
+  /** Per-session bootstrap token minted by the pool service — preferred over
+   *  systemToken when both are set; also uses /api/embedded/auto-register */
+  bootstrapToken?: string;
   /** Container instance ID (os.hostname()) for system registration */
   instanceId?: string;
 }
@@ -59,6 +62,7 @@ export class EmbeddedRunnerClient {
   private wakeHeartbeat: (() => void) | null = null;
   private cdpPort?: number;
   private systemToken?: string;
+  private bootstrapToken?: string;
   private instanceId?: string;
   // Track in-flight sendMessage promises so shutdown() can drain them before
   // the pod exits. Without this the k8s DELETE can race a result/network_bodies
@@ -92,6 +96,7 @@ export class EmbeddedRunnerClient {
     this.pollInterval = options.pollInterval ?? 1000;
     this.cdpPort = options.cdpPort;
     this.systemToken = options.systemToken;
+    this.bootstrapToken = options.bootstrapToken;
     this.instanceId = options.instanceId;
   }
 
@@ -187,7 +192,8 @@ export class EmbeddedRunnerClient {
   }
 
   /**
-   * Register as a system EB via shared SYSTEM_EB_TOKEN.
+   * Register as a system EB. Auth is the per-session EB_BOOTSTRAP_TOKEN when
+   * present (dynamic pool), else the shared SYSTEM_EB_TOKEN (static fleet).
    * The server creates/updates a system runner and returns a per-runner token.
    */
   async registerAsSystem(): Promise<boolean> {
@@ -205,7 +211,7 @@ export class EmbeddedRunnerClient {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${this.systemToken}`,
+            Authorization: `Bearer ${this.bootstrapToken || this.systemToken}`,
           },
           body: JSON.stringify({
             streamUrl,
@@ -249,7 +255,7 @@ export class EmbeddedRunnerClient {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       let registered = false;
 
-      if (this.systemToken) {
+      if (this.bootstrapToken || this.systemToken) {
         registered = await this.registerAsSystem();
       } else {
         registered = await this.register();

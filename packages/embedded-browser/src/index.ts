@@ -35,6 +35,9 @@ const config = {
   serverUrl: process.env.LASTEST_URL ?? "http://localhost:3000",
   token: process.env.LASTEST_TOKEN ?? "",
   systemToken: process.env.SYSTEM_EB_TOKEN ?? "",
+  // Per-session credential minted by the pool service (dynamic k8s pool).
+  // Static-fleet deployments keep using the shared SYSTEM_EB_TOKEN instead.
+  bootstrapToken: process.env.EB_BOOTSTRAP_TOKEN ?? "",
   streamPort,
   streamHost: process.env.STREAM_HOST ?? "", // Empty = auto-detect container IP
   pollInterval: parseInt(process.env.POLL_INTERVAL ?? "1000", 10),
@@ -48,8 +51,10 @@ const config = {
   cdpPort: parseInt(process.env.CDP_PORT ?? String(streamPort + 2), 10),
 };
 
-if (!config.token && !config.systemToken) {
-  console.error("Either LASTEST_TOKEN or SYSTEM_EB_TOKEN is required");
+if (!config.token && !config.systemToken && !config.bootstrapToken) {
+  console.error(
+    "One of LASTEST_TOKEN, SYSTEM_EB_TOKEN or EB_BOOTSTRAP_TOKEN is required",
+  );
   process.exit(1);
 }
 
@@ -415,6 +420,7 @@ async function startup(): Promise<void> {
     // raw Chromium CDP socket is 127.0.0.1-only (see TCP proxy above).
     cdpPort: config.cdpPort + 10,
     systemToken: config.systemToken || undefined,
+    bootstrapToken: config.bootstrapToken || undefined,
     instanceId: config.instanceId,
   });
 
