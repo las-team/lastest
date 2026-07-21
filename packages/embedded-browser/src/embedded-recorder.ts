@@ -11,6 +11,8 @@
  */
 
 import type { Browser, Page, BrowserContext } from "playwright";
+import { decode as decodeJpeg, encode as encodeJpeg } from "jpeg-js";
+import { PNG } from "pngjs";
 
 /**
  * Callback for looking up a retained setup BrowserContext by setupId.
@@ -126,6 +128,9 @@ export class EmbeddedRecorder {
   // have costs the page nothing.
   private latestFrame: { data: string; width: number; height: number } | null =
     null;
+  // Crop requests that arrived before the first screencast frame (see
+  // waitForLatestFrame) — flushed by setLatestFrame.
+  private frameWaiters = new Set<() => void>();
 
   /**
    * Start recording on a fresh context/page.
@@ -663,6 +668,8 @@ export class EmbeddedRecorder {
    *  from the live stream rather than captured separately. */
   setLatestFrame(data: string, width: number, height: number): void {
     this.latestFrame = { data, width, height };
+    for (const waiter of this.frameWaiters) waiter();
+    this.frameWaiters.clear();
   }
 
   private async captureElementThumbnail(
@@ -707,6 +714,34 @@ export class EmbeddedRecorder {
     }
   }
 
+  /** Resolve once a screencast frame exists (or the timeout lapses). A click
+   *  in the first instant of a recording can land before the first frame —
+   *  waiting briefly beats silently dropping the crop. */
+  private waitForLatestFrame(
+    timeoutMs: number,
+  ): Promise<{ data: string; width: number; height: number } | null> {
+    if (this.latestFrame) return Promise.resolve(this.latestFrame);
+    return new Promise((resolve) => {
+      const waiter = () => {
+        clearTimeout(timer);
+        resolve(this.latestFrame);
+      };
+      const timer = setTimeout(() => {
+        this.frameWaiters.delete(waiter);
+        resolve(this.latestFrame);
+      }, timeoutMs);
+      this.frameWaiters.add(waiter);
+    });
+  }
+
+  /**
+   * Crop a region of the latest screencast frame, entirely in the EB's Node
+   * process (jpeg-js decode → pixel copy → pngjs/jpeg-js encode). Never
+   * touches the page: page.screenshot would glitch the live screencast, and
+   * the previous in-page OffscreenCanvas evaluate died whenever the click
+   * navigated (execution context destroyed) — which is exactly when
+   * coordinate-only clicks need their OCR crop most.
+   */
   private async cropFrameRegion(
     boundingBox: { x: number; y: number; width: number; height: number },
     opts: {
@@ -716,85 +751,60 @@ export class EmbeddedRecorder {
       quality?: number;
     },
   ): Promise<string | null> {
-    if (!this.page) return null;
-    const frame = this.latestFrame;
-    if (!frame) return null; // no screencast frame yet — skip rather than capture
+    const frame = await this.waitForLatestFrame(1500);
+    if (!frame) return null;
     try {
       const { padding, maxSide } = opts;
-      const viewport = this.page.viewportSize() ?? { width: 1280, height: 720 };
+      let viewport = { width: 1280, height: 720 };
+      try {
+        viewport = this.page?.viewportSize() ?? viewport;
+      } catch {
+        // page already closed — keep the default; scale is best-effort.
+      }
+      const decoded = decodeJpeg(Buffer.from(frame.data, "base64"), {
+        maxMemoryUsageInMB: 128,
+        formatAsRGBA: true,
+      });
       // boundingBox is viewport-relative CSS px; the frame is device px. Map
       // CSS → frame px so the crop lines up regardless of devicePixelRatio.
-      const scaleX = frame.width / viewport.width;
-      const scaleY = frame.height / viewport.height;
+      const scaleX = decoded.width / viewport.width;
+      const scaleY = decoded.height / viewport.height;
       const sx = Math.max(0, Math.round((boundingBox.x - padding) * scaleX));
       const sy = Math.max(0, Math.round((boundingBox.y - padding) * scaleY));
       const sw = Math.round(
         Math.min(
           (boundingBox.width + padding * 2) * scaleX,
           maxSide != null ? maxSide * scaleX : Infinity,
-          frame.width - sx,
+          decoded.width - sx,
         ),
       );
       const sh = Math.round(
         Math.min(
           (boundingBox.height + padding * 2) * scaleY,
           maxSide != null ? maxSide * scaleY : Infinity,
-          frame.height - sy,
+          decoded.height - sy,
         ),
       );
       if (sw < 1 || sh < 1) return null;
 
-      // Crop the already-streamed frame INSIDE the page using OffscreenCanvas.
-      // This is pure off-thread computation — no DOM, no layout, no compositor
-      // surface read — so it cannot glitch the live screencast (unlike
-      // page.screenshot / Page.captureScreenshot, which do). Decode from a Blob
-      // (not fetch()) to dodge any page CSP on data: URLs.
-      return await this.page.evaluate(
-        async (a: {
-          frameData: string;
-          sx: number;
-          sy: number;
-          sw: number;
-          sh: number;
-          type: string;
-          quality?: number;
-        }) => {
-          try {
-            const bin = atob(a.frameData);
-            const bytes = new Uint8Array(bin.length);
-            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-            const blob = new Blob([bytes], { type: "image/jpeg" });
-            const bmp = await createImageBitmap(blob, a.sx, a.sy, a.sw, a.sh);
-            const canvas = new OffscreenCanvas(a.sw, a.sh);
-            const ctx = canvas.getContext("2d");
-            if (!ctx) return null;
-            ctx.drawImage(bmp, 0, 0);
-            bmp.close();
-            const out = await canvas.convertToBlob({
-              type: a.type,
-              quality: a.quality,
-            });
-            const arr = new Uint8Array(await out.arrayBuffer());
-            let s = "";
-            for (let i = 0; i < arr.length; i++)
-              s += String.fromCharCode(arr[i]);
-            return btoa(s);
-          } catch {
-            return null;
-          }
-        },
-        {
-          frameData: frame.data,
-          sx,
-          sy,
-          sw,
-          sh,
-          type: opts.type,
-          quality: opts.quality,
-        },
-      );
+      const out = Buffer.alloc(sw * sh * 4);
+      for (let y = 0; y < sh; y++) {
+        const srcStart = ((sy + y) * decoded.width + sx) * 4;
+        decoded.data.copy(out, y * sw * 4, srcStart, srcStart + sw * 4);
+      }
+
+      if (opts.type === "image/png") {
+        const png = new PNG({ width: sw, height: sh });
+        png.data = out;
+        return PNG.sync.write(png).toString("base64");
+      }
+      const quality = Math.round((opts.quality ?? 0.7) * 100);
+      return encodeJpeg(
+        { data: out, width: sw, height: sh },
+        quality,
+      ).data.toString("base64");
     } catch {
-      // best-effort: element gone, navigation in flight, or evaluate detached.
+      // best-effort: malformed frame or bbox outside the frame.
       return null;
     }
   }
@@ -860,6 +870,8 @@ export class EmbeddedRecorder {
     // borrowed setup-contexts belong to TestExecutor's setupContexts map
     // and stay alive for the sweeper / future test runs.
     this.latestFrame = null;
+    for (const waiter of this.frameWaiters) waiter();
+    this.frameWaiters.clear();
     const closedPage = closePage && !!this.page;
     if (closedPage) await this.page!.close().catch(() => {});
     if (this.context && this.ownsContext)
@@ -971,6 +983,8 @@ export class EmbeddedRecorder {
     this.pendingEvents = [];
     this.onEvent = null;
     this.latestFrame = null;
+    for (const waiter of this.frameWaiters) waiter();
+    this.frameWaiters.clear();
     if (this.page) await this.page.close().catch(() => {});
     // Only close borrowed contexts; setup-contexts are owned by TestExecutor.
     if (this.context && this.ownsContext)

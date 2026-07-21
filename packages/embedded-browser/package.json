@@ -13,13 +13,16 @@
   "dependencies": {
     "@axe-core/playwright": "^4.11.0",
     "@lastest/shared": "workspace:*",
+    "jpeg-js": "^0.4.4",
     "playwright": "1.57.0",
+    "pngjs": "^7.0.0",
     "sucrase": "^3.35.0",
     "tldts": "^7.4.5",
     "ws": "^8.20.1"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
+    "@types/pngjs": "^6.0.5",
     "@types/ws": "^8.5.10",
     "tsup": "^8.0.0",
     "tsx": "^4.7.0",

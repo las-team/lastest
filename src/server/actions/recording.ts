@@ -472,8 +472,15 @@ export async function stopRecording(repositoryId?: string | null) {
     // The EB attaches a screencast-frame crop of each clicked element when
     // ocr-text is enabled; extract the text here (in-process Tesseract or the
     // OCR_SERVICE_URL container) and turn it into ocr-text fallback selectors
-    // before codegen. The EB never talks to the OCR backend itself.
-    await applyOcrTextSelectors(allEvents, remoteSession.selectorPriority);
+    // before codegen. The EB never talks to the OCR backend itself. Touched
+    // events are written back so the DB rows match what codegen used (selector
+    // added, crop stripped) — the timeline UI and any cross-pod reader would
+    // otherwise still show these clicks as coords-only.
+    const ocrTouched = await applyOcrTextSelectors(
+      allEvents,
+      remoteSession.selectorPriority,
+    );
+    await persistOcrEventUpdates(remoteSession.sessionId, ocrTouched);
     const recordingSettings = await getPlaywrightSettings(repositoryId);
     const generatedCode = generateCodeFromRemoteEvents(
       allEvents,
@@ -1018,21 +1025,24 @@ export async function getOrCreateFunctionalArea(name: string) {
  * always stripped, extraction is best-effort, and events without a crop are
  * untouched — so coordinate-only clicks gain a text fallback when possible
  * and nothing regresses when OCR fails or is disabled.
+ *
+ * Returns the events whose `data` was mutated (crop stripped and/or selector
+ * added) so the caller can write them back to the DB.
  */
 async function applyOcrTextSelectors(
   events: RemoteRecordingEvent[],
   selectorPriority: Array<{ type: string; enabled: boolean; priority: number }>,
-): Promise<void> {
+): Promise<RemoteRecordingEvent[]> {
   const ocrEnabled =
     selectorPriority.find((s) => s.type === "ocr-text")?.enabled ?? false;
   const targets = events.filter(
     (e) => typeof e.data?.ocrCrop === "string" && e.data.ocrCrop,
   );
-  if (targets.length === 0) return;
+  if (targets.length === 0) return [];
   if (!ocrEnabled) {
     // Setting flipped mid-recording — drop the crops, don't OCR them.
     for (const event of targets) delete event.data.ocrCrop;
-    return;
+    return targets;
   }
   const { extractText } = await import("@/lib/playwright/ocr");
   await Promise.allSettled(
@@ -1041,8 +1051,14 @@ async function applyOcrTextSelectors(
       delete event.data.ocrCrop;
       const raw = await extractText(Buffer.from(crop, "base64"));
       // Playwright's getByText normalizes whitespace, so collapse runs — a
-      // wrapped button label OCRs with a newline that would never match.
-      const text = raw?.replace(/\s+/g, " ").trim();
+      // wrapped button label OCRs with a newline that would never match. Also
+      // strip leading/trailing symbol junk: icons next to labels OCR as
+      // stray glyphs ('© Verify' for an icon+text nav item), and getByText
+      // needs the whole string present in the DOM to match.
+      const text = raw
+        ?.replace(/\s+/g, " ")
+        .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "")
+        .trim();
       if (!text) return;
       const selectors = Array.isArray(event.data.selectors)
         ? (event.data.selectors as Array<{ type: string; value: string }>)
@@ -1050,6 +1066,41 @@ async function applyOcrTextSelectors(
       selectors.push({ type: "ocr-text", value: `ocr-text="${text}"` });
     }),
   );
+  return targets;
+}
+
+/**
+ * Write OCR-touched events back to `remote_recording_events` so the persisted
+ * rows carry the appended ocr-text selectors (and lose the crop payload).
+ * Best-effort: codegen already ran on the in-memory copies.
+ */
+async function persistOcrEventUpdates(
+  sessionId: string,
+  events: RemoteRecordingEvent[],
+): Promise<void> {
+  if (events.length === 0) return;
+  try {
+    const { db } = await import("@/lib/db");
+    const { remoteRecordingEvents } = await import("@/lib/db/schema");
+    const { and, eq } = await import("drizzle-orm");
+    await Promise.all(
+      events.map((event) =>
+        db
+          .update(remoteRecordingEvents)
+          .set({ data: event.data as Record<string, unknown> })
+          .where(
+            and(
+              eq(remoteRecordingEvents.sessionId, sessionId),
+              eq(remoteRecordingEvents.sequence, event.sequence),
+            ),
+          ),
+      ),
+    );
+  } catch (err) {
+    console.warn(
+      `[Recording] Failed to persist OCR selector updates for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
 // ============================================
