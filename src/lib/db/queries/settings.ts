@@ -212,37 +212,13 @@ export async function deletePlaywrightSettings(id: string) {
   await db.delete(playwrightSettings).where(eq(playwrightSettings.id, id));
 }
 
-// Cluster-wide EB pool limits — read from the global (repositoryId IS NULL) row.
-// Per-repo overrides are ignored on purpose: the pool is a shared cluster resource.
-export async function getGlobalPoolLimits(): Promise<{
-  ebPoolMax: number;
-  ebIdleTTLSeconds: number;
-} | null> {
-  const [row] = await db
-    .select({
-      ebPoolMax: playwrightSettings.ebPoolMax,
-      ebIdleTTLSeconds: playwrightSettings.ebIdleTTLSeconds,
-    })
-    .from(playwrightSettings)
-    .where(isNull(playwrightSettings.repositoryId));
-  if (!row) return null;
-  return {
-    ebPoolMax: row.ebPoolMax ?? 30,
-    ebIdleTTLSeconds: row.ebIdleTTLSeconds ?? 90,
-  };
-}
-
-// Idempotent seeder — inserts the global playwright_settings row with schema
-// defaults if missing. Callers (app boot) rely on this so poolMax() / ebIdleTTLMs()
-// always find a row and never have to fall back to env vars.
-export async function ensureGlobalPlaywrightSettings(): Promise<void> {
-  const [existing] = await db
-    .select({ id: playwrightSettings.id })
-    .from(playwrightSettings)
-    .where(isNull(playwrightSettings.repositoryId));
-  if (existing) return;
-  await createPlaywrightSettings({ repositoryId: null });
-}
+// Global pool-limit helpers moved to @lastest/db (`packages/db/src/settings.ts`)
+// — the pool service needs them too. Re-exported so app callers keep importing
+// from this module.
+export {
+  getGlobalPoolLimits,
+  ensureGlobalPlaywrightSettings,
+} from "@lastest/db/settings";
 
 // Environment Configs
 export async function getEnvironmentConfig(repositoryId?: string | null) {

@@ -1,0 +1,26 @@
+{
+  "name": "@lastest/db",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Drizzle schema + Postgres client shared by the Lastest app and the EB pool service. Consumed as TypeScript source (transpilePackages / bundled), no build step.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema.ts",
+    "./settings": "./src/settings.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lastest/eb-protocol": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "postgres": "^3.4.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0"
+  },
+  "license": "FSL-1.1-ALv2"
+}

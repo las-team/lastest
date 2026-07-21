@@ -1540,8 +1540,10 @@ async function executeViaRunner(
         let podDiagnostics = "";
         if (runnerRow?.name) {
           try {
-            const { getEBPodInfo, jobNameForRunnerName } =
-              await import("@/lib/eb/provisioner");
+            const { getEBPodInfo } =
+              await import("@lastest/pool-service/client");
+            const { jobNameForRunnerName } =
+              await import("@lastest/pool-service/common");
             const jobName = jobNameForRunnerName(runnerRow.name);
             if (jobName) {
               const info = await getEBPodInfo(jobName, 80);
@@ -1678,7 +1680,7 @@ async function executeViaRunner(
  * Each test then claims a fresh EB, applies the broadcast storageState cold,
  * runs the test, and releases the EB. Concurrency is bounded by
  * `maxParallelEBs`; provisioning scales to meet demand (see
- * `src/lib/eb/provisioner.ts`). Per-test retry is limited to one extra EB
+ * `packages/pool-service/src/provisioner.ts`). Per-test retry is limited to one extra EB
  * attempt for genuinely dead EB infra.
  *
  * Returns the collected results, or `null` if no EB could be claimed at all
@@ -1814,8 +1816,8 @@ async function executeViaPoolWorkers(
     decBuildDispatch,
     prewarmForBuild,
     ensureWarmPool,
-    isKubernetesMode,
-  } = await import("@/lib/eb/provisioner");
+  } = await import("@lastest/pool-service/client");
+  const { isKubernetesMode } = await import("@lastest/pool-service/common");
 
   // A1 (watchdog liveness keepalive). getRunnerById exposes the EB's DB
   // heartbeat (last_seen, updated cross-pod on each EB poll); SESSION_TIMEOUT_MS

@@ -44,7 +44,8 @@ pnpm deploy:all                 # zima + olares + npm
 The dev architecture is: **`pnpm dev` on the host**, postgres on the host (docker), and **EB pods provisioned dynamically into a local k3d cluster**.
 
 - Manifests in `k8s/` (`namespace.yaml`, `embedded-browser-rbac.yaml`, `embedded-browser-job.yaml` reference). Scripts in `scripts/k3d-*.sh`.
-- The EB provisioner (`src/lib/eb/provisioner.ts:127-168`) detects host mode: when `KUBERNETES_SERVICE_HOST` is unset, it shells out to `kubectl config view --raw --minify -o json` and uses the current kubeconfig context (`k3d-lastest`) to talk to the cluster. No in-pod ServiceAccount required.
+- **EB pool service** (`packages/pool-service/`): a standalone singleton process owning the browser-capacity plane — k8s Job provisioning, pool caps/warm pool/launch throttle, idle+stale EB reapers. It is the only process that talks to the Kubernetes API; the app calls it over HTTP via `@lastest/pool-service/client` (defaults `http://127.0.0.1:9500`, optional `EB_POOL_SERVICE_TOKEN` bearer auth). **In dev, run `pnpm pool` in a second terminal alongside `pnpm dev`** — without it, provisioning-dependent flows degrade to "no browser available". In Docker the entrypoint starts it automatically (`EB_POOL_SERVICE_DISABLED=1` to opt out when running it as its own k8s Deployment).
+- The provisioner (`packages/pool-service/src/provisioner.ts`) detects host mode: when `KUBERNETES_SERVICE_HOST` is unset, it shells out to `kubectl config view --raw --minify -o json` and uses the current kubeconfig context (`k3d-lastest`) to talk to the cluster. No in-pod ServiceAccount required.
 - EB pods reach the host app via `host.k3d.internal:3000` — `k3d-up.sh` installs a CoreDNS override that pins the name to the Docker bridge gateway, so the resolution works on Linux without Docker Desktop.
 - The provisioner inlines `SYSTEM_EB_TOKEN` / `LASTEST_URL` / `EB_IMAGE` into each Job spec from the host process env, so no in-cluster Secret is needed for EB lifecycle.
 - Required `.env.local` keys for the host dev flow:
@@ -65,7 +66,7 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 
 **Key paths:**
 
-- `src/lib/db/schema.ts` — all tables (~3700 lines)
+- `packages/db/src/schema.ts` — all tables (~3700 lines; `@/lib/db/schema` re-exports)
 - `src/lib/db/queries.ts` — barrel re-export of all query modules
 - `src/lib/db/queries/` — domain-focused query modules:
   - `tests.ts` — tests, test runs, results, versions, assertions
@@ -110,6 +111,8 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 - `src/lib/scheduling/` — cron parser + scheduler for automated test runs
 - `src/server/actions/` — server actions for all domain ops
 - `src/lib/ws/` — runner-channel server plumbing (registry, event fan-out, step state)
+- `packages/db/` — drizzle schema + Postgres client (`@lastest/db`), shared by app and pool service; `src/lib/db/{index,schema}.ts` are re-export shims
+- `packages/pool-service/` — EB pool service (separate process, `pnpm pool`): k8s provisioning, pool caps, warm pool, EB reapers; app consumes `@lastest/pool-service/client`
 - `packages/eb-protocol/` — canonical wire protocol app ↔ runners (`@lastest/eb-protocol`): command/response messages, stream messages, persisted jsonb payload shapes (schema.ts re-exports these)
 - `packages/runner/` — remote runner CLI (npm package via tsup)
 - `packages/mcp-server/` — MCP server for AI agent integration (`@lastest/mcp-server`)
@@ -128,7 +131,7 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 
 ## Schema Changes
 
-1. Edit `src/lib/db/schema.ts`
+1. Edit `packages/db/src/schema.ts` (`src/lib/db/schema.ts` is a re-export shim)
 2. Update `DEFAULT_*` constants at top of schema for new settings fields
 3. Run `pnpm db:push`
 4. Update queries in the relevant `src/lib/db/queries/*.ts` module (barrel re-exported from `queries.ts`)

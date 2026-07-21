@@ -1,6 +1,6 @@
 # Reference template for a single on-demand Embedded Browser Job.
 #
-# The app's provisioner (src/lib/eb/provisioner.ts) constructs the spec
+# The pool service provisioner (packages/pool-service/src/provisioner.ts) constructs the spec
 # programmatically via the Kubernetes REST API, but this file documents the
 # exact shape and is usable for manual `kubectl apply` during bring-up / debug.
 #

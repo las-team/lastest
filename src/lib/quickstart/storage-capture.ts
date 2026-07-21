@@ -17,7 +17,7 @@ import {
   claimOrProvisionPoolEB,
   releasePoolEB,
 } from "@/server/actions/embedded-sessions";
-import { isKubernetesMode } from "@/lib/eb/provisioner";
+import { isKubernetesMode } from "@lastest/pool-service/common";
 
 export interface CaptureStorageStateInput {
   repositoryId: string;

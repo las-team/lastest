@@ -1,7 +1,16 @@
 /**
- * Embedded Browser Provisioner
+ * Embedded Browser Provisioner — runs INSIDE THE POOL SERVICE process only.
  *
- * On-demand Kubernetes Job provisioning for system EB pods.
+ * On-demand Kubernetes Job provisioning for system EB pods. This module is
+ * the only code in the repo that talks to the Kubernetes API; the app reaches
+ * it through the HTTP surface in `packages/pool-service/src/main.ts` via
+ * `@lastest/pool-service/client`, and holds no cluster credentials itself.
+ *
+ * The in-memory state here (in-flight provision counter, launch throttle
+ * chain, build-dispatch flag) is correct because the pool service is a
+ * singleton by design — do NOT import this from app code, where multiple
+ * replicas would each get their own copies (the bug that motivated the
+ * extraction).
  *
  * Model:
  *   - One Job = one browser = one test (1 test per EB).
@@ -34,23 +43,12 @@
 import { execFileSync } from "child_process";
 import { readFileSync } from "fs";
 import https from "https";
-import { db } from "@/lib/db";
-import { runners } from "@/lib/db/schema";
+import { db } from "@lastest/db";
+import { runners } from "@lastest/db/schema";
 import { and, eq, ne } from "drizzle-orm";
+import { isKubernetesMode } from "./common";
 
 const SA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount";
-
-type Mode = "kubernetes" | "none";
-
-function provisionerMode(): Mode {
-  const m = (process.env.EB_PROVISIONER || "none").toLowerCase();
-  if (m === "kubernetes") return m;
-  return "none";
-}
-
-export function isKubernetesMode(): boolean {
-  return provisionerMode() === "kubernetes";
-}
 
 // Cluster-wide EB pool limits live in the global `playwright_settings` row.
 // Short in-process cache so hot paths (isPoolBusy, claimOrProvisionPoolEB) don't
@@ -67,7 +65,7 @@ async function readPoolLimits(): Promise<{
 }> {
   if (_limitsCache && Date.now() < _limitsCache.expiresAt)
     return _limitsCache.value;
-  const { getGlobalPoolLimits } = await import("@/lib/db/queries/settings");
+  const { getGlobalPoolLimits } = await import("@lastest/db/settings");
   const row = await getGlobalPoolLimits();
   if (!row) {
     throw new Error(
@@ -627,17 +625,6 @@ export async function getEBPodInfo(
 }
 
 /**
- * Derive the Job name for a runner row. Only matches runners created by
- * `generateInstanceId()` — `eb-<base36-ts>-<6-char-rand>` — so static
- * sidecar EBs (`eb1`, `eb2`, ...) are NOT misidentified as dynamic Jobs
- * and reaped by `reapIdleEBJobs`.
- */
-export function jobNameForRunnerName(runnerName: string): string | null {
-  const m = runnerName.match(/^System EB-(eb-[a-z0-9]+-[a-z0-9]+)$/);
-  return m ? m[1]! : null;
-}
-
-/**
  * List the names of currently-existing EB Jobs in the cluster.
  * Used by boot-time reconciliation to detect "phantom" runner rows whose
  * backing Job has been deleted (e.g. TTL expiry during an app restart when
@@ -697,8 +684,8 @@ export async function ensureWarmPool(): Promise<number> {
   if (want <= 0) return 0;
 
   // Count EBs currently online and idle (ready for immediate claim)
-  const { db } = await import("@/lib/db");
-  const { runners, embeddedSessions } = await import("@/lib/db/schema");
+  const { db } = await import("@lastest/db");
+  const { runners, embeddedSessions } = await import("@lastest/db/schema");
   const { and, eq } = await import("drizzle-orm");
 
   const idle = await db
