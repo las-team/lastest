@@ -7,6 +7,16 @@
  */
 
 import os from "os";
+import type {
+  AgentResponse,
+  EmbeddedAutoRegisterResponse,
+  EmbeddedRegisterResponse,
+  HeartbeatMessage,
+  HeartbeatPayload,
+  RunnerConnectResponse,
+  RunnerHeartbeatResponse,
+  ServerCommand,
+} from "@lastest/eb-protocol";
 
 function getContainerIP(): string | null {
   const interfaces = os.networkInterfaces();
@@ -18,42 +28,6 @@ function getContainerIP(): string | null {
     }
   }
   return null;
-}
-
-// Re-define minimal protocol types to avoid cross-package imports
-interface BaseMessage {
-  id: string;
-  type: string;
-  timestamp: number;
-  payload: unknown;
-}
-
-interface HeartbeatPayload {
-  status: "idle" | "busy" | "recording";
-  currentTask?: string;
-  systemInfo: {
-    platform: string;
-    memory: { used: number; total: number };
-    uptime: number;
-  };
-  disconnect?: boolean;
-}
-
-interface ConnectResponse {
-  runnerId: string;
-  teamId: string;
-  capabilities?: string[];
-  commands?: BaseMessage[];
-  sessionId: string;
-}
-
-interface HeartbeatResponse {
-  commands?: BaseMessage[];
-}
-
-interface RegisterResponse {
-  sessionId: string;
-  runnerId: string;
 }
 
 export interface EmbeddedRunnerOptions {
@@ -98,11 +72,11 @@ export class EmbeddedRunnerClient {
   private commandChain: Promise<void> = Promise.resolve();
 
   /** Called when the main app sends a command (test/recording) */
-  onCommand?: (command: BaseMessage) => Promise<void>;
+  onCommand?: (command: ServerCommand) => Promise<void>;
 
   /** Public so locally-synthesized commands (e.g. the recording inactivity
    *  watchdog's stop_recording) go through the same ordering chain. */
-  enqueueCommand(cmd: BaseMessage): void {
+  enqueueCommand(cmd: ServerCommand): void {
     this.commandChain = this.commandChain
       .then(() => this.onCommand?.(cmd))
       .catch((err) => {
@@ -156,7 +130,7 @@ export class EmbeddedRunnerClient {
         return false;
       }
 
-      const data = (await response.json()) as RegisterResponse;
+      const data = (await response.json()) as EmbeddedRegisterResponse;
       this.embeddedSessionId = data.sessionId;
       this.runnerId = data.runnerId;
 
@@ -190,7 +164,7 @@ export class EmbeddedRunnerClient {
         return false;
       }
 
-      const data = (await response.json()) as ConnectResponse;
+      const data = (await response.json()) as RunnerConnectResponse;
       this.sessionId = data.sessionId;
       this.runnerId = data.runnerId;
 
@@ -251,11 +225,7 @@ export class EmbeddedRunnerClient {
         return false;
       }
 
-      const data = (await response.json()) as {
-        runnerId: string;
-        token: string;
-        sessionId: string;
-      };
+      const data = (await response.json()) as EmbeddedAutoRegisterResponse;
       this.runnerId = data.runnerId;
       this.embeddedSessionId = data.sessionId;
       // Replace token with the per-runner token for heartbeats
@@ -353,7 +323,7 @@ export class EmbeddedRunnerClient {
   }
 
   private async sendHeartbeat(disconnect: boolean): Promise<void> {
-    const heartbeat: BaseMessage = {
+    const heartbeat: HeartbeatMessage = {
       id: crypto.randomUUID(),
       type: "status:heartbeat",
       timestamp: Date.now(),
@@ -385,7 +355,7 @@ export class EmbeddedRunnerClient {
       });
 
       if (response.ok) {
-        const data = (await response.json()) as HeartbeatResponse;
+        const data = (await response.json()) as RunnerHeartbeatResponse;
         if (data.commands && data.commands.length > 0) {
           for (const cmd of data.commands) {
             this.enqueueCommand(cmd);
@@ -398,7 +368,7 @@ export class EmbeddedRunnerClient {
   }
 
   async sendMessage(
-    message: BaseMessage,
+    message: AgentResponse,
     opts: { timeoutMs?: number } = {},
   ): Promise<boolean> {
     const promise = this.doSend(message, opts.timeoutMs ?? 30_000);
@@ -410,7 +380,7 @@ export class EmbeddedRunnerClient {
   }
 
   private async doSend(
-    message: BaseMessage,
+    message: AgentResponse,
     timeoutMs: number,
   ): Promise<boolean> {
     const controller = new AbortController();

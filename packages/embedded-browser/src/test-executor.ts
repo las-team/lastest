@@ -20,6 +20,7 @@
 
 import type { Browser, BrowserContext, CDPSession, Page } from "playwright";
 import type { StabilizationPayload } from "./protocol.js";
+import type { LogEntry } from "@lastest/eb-protocol";
 import {
   setupFreezeScripts,
   applyPreScreenshotStabilization,
@@ -111,7 +112,7 @@ export interface EmbeddedTestResult {
   status: "passed" | "failed" | "error" | "timeout" | "cancelled";
   durationMs: number;
   error?: { message: string; stack?: string; screenshot?: string };
-  logs: Array<{ timestamp: number; level: string; message: string }>;
+  logs: LogEntry[];
   screenshots: Array<{
     filename: string;
     data: string;
@@ -224,7 +225,7 @@ export interface EmbeddedSetupResult {
   variables?: Record<string, unknown>;
   durationMs: number;
   error?: string;
-  logs: Array<{ timestamp: number; level: string; message: string }>;
+  logs: LogEntry[];
 }
 
 export interface RunSetupPayload {
@@ -499,8 +500,7 @@ export class EmbeddedTestExecutor {
     this.abortController = abortCtrl;
 
     const startTime = Date.now();
-    const logs: Array<{ timestamp: number; level: string; message: string }> =
-      [];
+    const logs: LogEntry[] = [];
     const screenshots: Array<{
       filename: string;
       data: string;
@@ -528,7 +528,7 @@ export class EmbeddedTestExecutor {
     let allNetworkRequests: EmbeddedNetworkRequest[] = [];
     const testTimeout = Math.max(command.timeout || 120000, 30000);
 
-    const logFn = (level: string, message: string) => {
+    const logFn = (level: LogEntry["level"], message: string) => {
       logs.push({ timestamp: Date.now(), level, message });
       console.log(
         `  [${level.toUpperCase()}] [embedded:${command.testId}] ${message}`,
@@ -3139,11 +3139,10 @@ export class EmbeddedTestExecutor {
     },
   ): Promise<EmbeddedSetupResult> {
     const startTime = Date.now();
-    const logs: Array<{ timestamp: number; level: string; message: string }> =
-      [];
+    const logs: LogEntry[] = [];
     const setupTimeout = Math.max(command.timeout || 120000, 30000);
 
-    const logFn = (level: string, message: string) => {
+    const logFn = (level: LogEntry["level"], message: string) => {
       logs.push({ timestamp: Date.now(), level, message });
       console.log(
         `  [${level.toUpperCase()}] [setup:${command.setupId}] ${message}`,

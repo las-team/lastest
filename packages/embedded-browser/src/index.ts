@@ -456,24 +456,7 @@ async function startup(): Promise<void> {
     switch (command.type) {
       case "command:run_test": {
         if (!browser || !testExecutor || !runnerClient) break;
-        const payload = command.payload as {
-          testId: string;
-          testRunId: string;
-          code: string;
-          codeHash: string;
-          targetUrl: string;
-          timeout?: number;
-          repositoryId?: string;
-          viewport?: { width: number; height: number };
-          storageState?: string;
-          setupVariables?: Record<string, unknown>;
-          cursorPlaybackSpeed?: number;
-          stabilization?: import("./protocol.js").StabilizationPayload;
-          headed?: boolean;
-          forceVideoRecording?: boolean;
-          selectorStats?: import("./test-executor.js").RunTestPayload["selectorStats"];
-          textCaptureEnabled?: boolean;
-        };
+        const payload = command.payload;
 
         // Dedup: skip if already running (mirrors standard runner activeTestIds)
         if (activeTestIds.has(payload.testId)) {
@@ -788,7 +771,7 @@ async function startup(): Promise<void> {
               try {
                 await capturedClient.sendMessage({
                   id: crypto.randomUUID(),
-                  type: "response:network_bodies" as "response:test_result",
+                  type: "response:network_bodies",
                   timestamp: Date.now(),
                   payload: {
                     correlationId: capturedCommand.id,
@@ -858,7 +841,7 @@ async function startup(): Promise<void> {
 
       case "command:start_recording": {
         if (!browser || !runnerClient || !recorder) break;
-        const startRecPayload = command.payload as { sessionId: string };
+        const startRecPayload = command.payload;
         // Redispatch guard: the same session arriving again (lost ack /
         // reaped command row) must not tear down and restart a live recording.
         if (
@@ -874,19 +857,7 @@ async function startup(): Promise<void> {
         if (streamServer) {
           streamServer.inspectMode = false;
         }
-        const payload = command.payload as {
-          sessionId: string;
-          targetUrl: string;
-          viewport?: { width: number; height: number };
-          selectorPriority?: Array<{
-            type: string;
-            enabled: boolean;
-            priority: number;
-          }>;
-          pointerGestures?: boolean;
-          cursorFPS?: number;
-          setupSteps?: Array<{ code: string; codeHash: string }>;
-        };
+        const payload = command.payload;
 
         runnerClient.setStatus("busy", payload.sessionId);
 
@@ -1095,7 +1066,7 @@ async function startup(): Promise<void> {
 
       case "command:stop_recording": {
         if (!runnerClient || !page) break;
-        const payload = command.payload as { sessionId: string };
+        const payload = command.payload;
 
         // Reset inspect mode when stopping recording
         if (streamServer) streamServer.inspectMode = false;
@@ -1219,10 +1190,7 @@ async function startup(): Promise<void> {
 
       case "command:create_assertion": {
         if (!recorder?.isActive() || !runnerClient) break;
-        const assertPayload = command.payload as {
-          sessionId: string;
-          assertionType: string;
-        };
+        const assertPayload = command.payload;
         recorder.createAssertion(assertPayload.assertionType);
         console.log(
           `[Command] Created assertion: ${assertPayload.assertionType}`,
@@ -1232,15 +1200,7 @@ async function startup(): Promise<void> {
 
       case "command:create_wait": {
         if (!recorder?.isActive() || !runnerClient) break;
-        const waitPayload = command.payload as {
-          sessionId: string;
-          waitType: "duration" | "selector";
-          durationMs?: number;
-          selector?: string;
-          selectors?: Array<{ type: string; value: string }>;
-          condition?: "visible" | "hidden";
-          timeoutMs?: number;
-        };
+        const waitPayload = command.payload;
         recorder.createWait({
           waitType: waitPayload.waitType,
           durationMs: waitPayload.durationMs,
@@ -1275,11 +1235,7 @@ async function startup(): Promise<void> {
 
       case "command:promote_selector": {
         if (!recorder?.isActive()) break;
-        const promotePayload = command.payload as {
-          sessionId: string;
-          actionId: string;
-          selectorValue: string;
-        };
+        const promotePayload = command.payload;
         recorder.promoteSelector(
           promotePayload.actionId,
           promotePayload.selectorValue,
@@ -1292,7 +1248,7 @@ async function startup(): Promise<void> {
 
       case "command:start_debug": {
         if (!browser || !runnerClient) break;
-        const startDbgPayload = command.payload as { sessionId: string };
+        const startDbgPayload = command.payload;
         // Redispatch guard: don't rebuild a live debug session from scratch
         // when the server redelivers the same start command.
         if (
@@ -1330,25 +1286,7 @@ async function startup(): Promise<void> {
         if (streamServer) {
           streamServer.inspectMode = false;
         }
-        const payload = command.payload as {
-          sessionId: string;
-          testId: string;
-          code: string;
-          cleanBody: string;
-          steps: import("./debug-executor.js").DebugStep[];
-          targetUrl: string;
-          viewport?: { width: number; height: number };
-          storageState?: string;
-          setupVariables?: Record<string, unknown>;
-          stabilization?: import("./protocol.js").StabilizationPayload;
-          selectorPriority?: Array<{
-            type: string;
-            enabled: boolean;
-            priority: number;
-          }>;
-          pointerGestures?: boolean;
-          cursorFPS?: number;
-        };
+        const payload = command.payload;
 
         runnerClient.setStatus("busy", payload.sessionId);
 
@@ -1454,22 +1392,7 @@ async function startup(): Promise<void> {
 
       case "command:debug_action": {
         if (!debugExecutor || !runnerClient) break;
-        const payload = command.payload as {
-          sessionId: string;
-          action:
-            | "step_forward"
-            | "step_back"
-            | "run_to_end"
-            | "run_to_step"
-            | "update_code"
-            | "start_recording"
-            | "stop_recording";
-          stepIndex?: number;
-          code?: string;
-          cleanBody?: string;
-          steps?: import("./debug-executor.js").DebugStep[];
-          spliceMode?: "replace" | "insert";
-        };
+        const payload = command.payload;
 
         // Replays replace the BrowserContext + page (step_back, run_to_step
         // going backward, or any action re-running stale code after an edit).
@@ -1576,17 +1499,7 @@ async function startup(): Promise<void> {
 
       case "command:run_setup": {
         if (!browser || !testExecutor || !runnerClient) break;
-        const payload = command.payload as {
-          setupId: string;
-          code: string;
-          codeHash: string;
-          targetUrl: string;
-          timeout?: number;
-          viewport?: { width: number; height: number };
-          stabilization?: import("./protocol.js").StabilizationPayload;
-          browser?: string;
-          headed?: boolean;
-        };
+        const payload = command.payload;
 
         // Fire-and-forget async (same activeTasks bookkeeping as run_test)
         const capturedClient = runnerClient;
@@ -1740,16 +1653,18 @@ async function startup(): Promise<void> {
         // maybeTerminateReleasedEB before the k8s Job is DELETEd).
         // Detach the command loop and enter shutdown(); shutdown() will
         // drain any in-flight sendMessage promises before process.exit.
-        const reason =
-          (command.payload as { reason?: string } | undefined)?.reason ??
-          "server-requested";
+        const reason = command.payload?.reason ?? "server-requested";
         console.log(`[Command] Shutdown requested: ${reason}`);
         void shutdown();
         break;
       }
 
       default:
-        console.warn(`[Command] Unknown command type: ${command.type}`);
+        // Exhaustive over ServerCommand — only reachable when the app sends a
+        // type this EB build doesn't know (version skew), so log the raw value.
+        console.warn(
+          `[Command] Unknown command type: ${(command as { type: string }).type}`,
+        );
     }
   };
 

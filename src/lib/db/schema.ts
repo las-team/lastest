@@ -14,6 +14,40 @@ import {
 
 // Type definitions for JSON columns
 
+// Wire-format shapes produced by the runners (embedded browser / remote
+// runner) and persisted verbatim into jsonb columns. Defined in
+// @lastest/eb-protocol — the single source of truth for the runner wire
+// protocol — and re-exported here so app code keeps importing them alongside
+// the row types they are stored in.
+import type {
+  DomSnapshotElement,
+  DomSnapshotData,
+  A11yViolationSampleNode,
+  A11yViolation,
+  DesignTokenCategory,
+  DesignToken,
+  DesignSystemViolation,
+  DesignSystemTokenUsage,
+  AssertionResult,
+  StorageStateSnapshot,
+  UrlTrajectoryStep,
+  WebVitalsSample,
+} from "@lastest/eb-protocol";
+export type {
+  DomSnapshotElement,
+  DomSnapshotData,
+  A11yViolationSampleNode,
+  A11yViolation,
+  DesignTokenCategory,
+  DesignToken,
+  DesignSystemViolation,
+  DesignSystemTokenUsage,
+  AssertionResult,
+  StorageStateSnapshot,
+  UrlTrajectoryStep,
+  WebVitalsSample,
+};
+
 export type TriageClassification =
   | "real_regression"
   | "flaky_test"
@@ -112,26 +146,6 @@ export interface AIDiffAnalysis {
   confidence: number; // 0-1
   categories?: string[];
   analyzedAt: string;
-}
-
-// DOM snapshot element captured during recording or test execution
-export interface DomSnapshotElement {
-  tag: string;
-  id?: string;
-  textContent?: string;
-  boundingBox: { x: number; y: number; width: number; height: number };
-  selectors: Array<{ type: string; value: string }>;
-  // Curated computed styles (color, padding, font, …), captured by the
-  // embedded browser only when style capture is enabled. Drives RCA CSS-delta
-  // drill-down; absent on snapshots predating the feature.
-  styles?: Record<string, string>;
-}
-
-// Full DOM snapshot with page context
-export interface DomSnapshotData {
-  elements: DomSnapshotElement[];
-  url: string;
-  timestamp: number;
 }
 
 // DOM diff result for comparing two snapshots
@@ -548,29 +562,6 @@ export interface CapturedScreenshot {
   domSnapshot?: DomSnapshotData;
 }
 
-// Accessibility violation from axe-core.
-// `nodes` is a count (preserved for back-compat with the wcag-score severity ×
-// min(nodes, 3) formula). `sampleNodes` carries up to a handful of the actual
-// offending nodes from axe so the build/test drill-in UI can surface a real
-// selector + failureSummary alongside each rule — the previous shape stored
-// only the count and lost the per-node context.
-export interface A11yViolationSampleNode {
-  target: string[];
-  failureSummary?: string;
-  html?: string;
-}
-export interface A11yViolation {
-  id: string;
-  impact: "critical" | "serious" | "moderate" | "minor";
-  description: string;
-  help: string;
-  helpUrl: string;
-  nodes: number;
-  tags?: string[];
-  wcagLevel?: "A" | "AA" | "AAA";
-  sampleNodes?: A11yViolationSampleNode[];
-}
-
 // ── Design System tokens / violations ────────────────────────────────────
 // A test/repo can declare a "design system" — a closed set of allowed
 // values for color, border-radius, font-family, font-size, and spacing
@@ -580,13 +571,6 @@ export interface A11yViolation {
 // violation. Same flow as a11y: per-test_result violations roll up into a
 // build-level design_system_score (0-100), drill-in shows occurrence count
 // and a sample selector for each off-token value.
-export type DesignTokenCategory =
-  | "color" // any color computed property (color, background-color, border-color, fill, stroke)
-  | "border-radius" // border-*-radius
-  | "font-family" // font-family (first family in stack)
-  | "font-size" // font-size (px)
-  | "spacing"; // margin-*, padding-*, gap (px)
-
 export interface DesignSystemConfig {
   /** When false, the layer is opt-out for this test even if the repo
    *  toggle is on. Repo-level config has no `enabled` (the toggle on
@@ -610,15 +594,6 @@ export interface DesignSystemConfig {
   /** Bundle metadata captured at upload time. Used by the preview to
    *  show the bundle title, source files, and asset filenames. */
   meta?: DesignSystemMeta;
-}
-
-export interface DesignToken {
-  /** Display name — typically the CSS custom property (`--c-red`) or a
-   *  human label ("Brand Red"). Used in violation messages. */
-  name: string;
-  /** Resolved value — normalized: hex for colors ("#e03e36"), int+"px"
-   *  for radii/sizes/spacing, lowercase family name for font. */
-  value: string;
 }
 
 /** A token with a display role and the value it resolves to (after
@@ -664,32 +639,6 @@ export interface DesignSystemMeta {
   hasFontFiles?: boolean;
 }
 
-export interface DesignSystemViolation {
-  /** Stable id used for rule grouping in the violations card.
-   *  Format: `${category}:${normalizedValue}` so the same rogue value
-   *  on N elements collapses into one row. */
-  id: string;
-  category: DesignTokenCategory;
-  /** CSS property the value was sampled from (e.g. "background-color",
-   *  "border-radius", "padding-left"). */
-  property: string;
-  /** Normalized off-token value the comparator saw on the page. */
-  actual: string;
-  /** Nearest allowed value, when the comparator can suggest one.
-   *  For colors this is the closest token in ΔE; for sizes/spacing the
-   *  closest absolute value. */
-  expected?: string;
-  /** Display label for `expected` (the token name). */
-  expectedName?: string;
-  /** "critical" used by the score formula for color/font-family (brand
-   *  identity); "moderate" for radii; "minor" for spacing. */
-  impact: "critical" | "serious" | "moderate" | "minor";
-  /** Count of DOM nodes that hit this rule on this screenshot. */
-  nodes: number;
-  /** Up to N sample selectors + the offending element snippets. */
-  sampleNodes?: A11yViolationSampleNode[];
-}
-
 export interface DesignSystemScoreSummary {
   score: number;
   totalRules: number;
@@ -702,14 +651,6 @@ export interface DesignSystemScoreSummary {
     minor: number;
   };
 }
-
-/** Per-category, per-value usage counter — `usage.color['#e03e36'] = 12`
- *  means twelve elements rendered with that color across the captured DOM.
- *  Used by the verify Design review panel to light up tokens that were
- *  actually used and dim tokens the page never rendered. */
-export type DesignSystemTokenUsage = Partial<
-  Record<DesignTokenCategory, Record<string, number>>
->;
 
 // Success criteria / assertion tracking
 export interface TestAssertion {
@@ -729,14 +670,6 @@ export interface TestAssertion {
    *  assertion failure actually fails the test is decided by the per-assertion
    *  rule on the Criteria tab (see `StepCriterion` / `assertion_failed`). */
   isSoft?: boolean;
-}
-
-export interface AssertionResult {
-  assertionId: string;
-  status: "passed" | "failed" | "skipped";
-  actualValue?: string;
-  errorMessage?: string;
-  durationMs?: number;
 }
 
 // Test variables — named values bound to page fields.
@@ -819,62 +752,9 @@ export interface WcagScoreSummary {
 /** Per-step URL trajectory entry. Captured by the EB executor at each
  *  __stepReached boundary so we can detect routing/auth divergence between
  *  baseline and feature runs (the classic "session expired → /login" case). */
-export interface UrlTrajectoryStep {
-  stepIndex: number;
-  stepLabel?: string;
-  finalUrl: string;
-  /** Each redirect target in order. Empty for non-navigating steps. */
-  redirectChain: string[];
-  /** Wall-clock ms from test start when this step's URL was sampled. */
-  capturedAtMs?: number;
-}
-
-/** Web Vitals captured per page-state. Sampled at screenshot points and at
- *  end-of-test. Values mirror the standard web-vitals library names. */
-export interface WebVitalsSample {
-  stepIndex?: number;
-  stepLabel?: string;
-  url: string;
-  /** Largest Contentful Paint (ms) */
-  lcp?: number;
-  /** Cumulative Layout Shift (unitless score) */
-  cls?: number;
-  /** Interaction to Next Paint (ms) */
-  inp?: number;
-  /** First Contentful Paint (ms) */
-  fcp?: number;
-  /** Total Blocking Time (ms) */
-  tbt?: number;
-  /** Time to First Byte (ms) */
-  ttfb?: number;
-}
-
 /** Storage state snapshot — minimal cookie + localStorage capture for diff.
  *  Mirrors a subset of Playwright's storageState() output. Token-shaped
  *  values are redacted at capture time; we keep presence + a hash for diff. */
-export interface StorageStateSnapshot {
-  cookies: Array<{
-    name: string;
-    domain: string;
-    path: string;
-    httpOnly: boolean;
-    secure: boolean;
-    sameSite?: "Strict" | "Lax" | "None";
-    /** SHA-256 hash of the value (truncated to 16 hex chars). Never the raw value. */
-    valueHash?: string;
-    /** True if this cookie name matched a token denylist (token/sid/csrf/etc.) */
-    redacted?: boolean;
-  }>;
-  localStorage: Array<{
-    origin: string;
-    name: string;
-    /** Either a parsed JSON value (for diff-engine consumption) or a hash for opaque values. */
-    value?: unknown;
-    valueHash?: string;
-    redacted?: boolean;
-  }>;
-}
-
 export const testResults = pgTable("test_results", {
   id: text("id").primaryKey(),
   testRunId: text("test_run_id").references(() => testRuns.id),

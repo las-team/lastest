@@ -109,7 +109,8 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 - `src/lib/a11y/` — WCAG 2.2 AA compliance scoring (wcag-score.ts)
 - `src/lib/scheduling/` — cron parser + scheduler for automated test runs
 - `src/server/actions/` — server actions for all domain ops
-- `src/lib/ws/` — WebSocket protocol for remote runners
+- `src/lib/ws/` — runner-channel server plumbing (registry, event fan-out, step state)
+- `packages/eb-protocol/` — canonical wire protocol app ↔ runners (`@lastest/eb-protocol`): command/response messages, stream messages, persisted jsonb payload shapes (schema.ts re-exports these)
 - `packages/runner/` — remote runner CLI (npm package via tsup)
 - `packages/mcp-server/` — MCP server for AI agent integration (`@lastest/mcp-server`)
 - `packages/embedded-browser/` — containerized browser with CDP live streaming

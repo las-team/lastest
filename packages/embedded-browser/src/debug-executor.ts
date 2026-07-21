@@ -43,7 +43,7 @@ export type RecordingAnchorReason =
   | "fallback_cursor";
 
 // Mirrors the inline event shape on RecordingEventPayload.events in
-// src/lib/ws/protocol.ts / EmbeddedRecorder's RecordingEventData — kept as a
+// @lastest/eb-protocol / EmbeddedRecorder's RecordingEventData — kept as a
 // separate declaration here since packages/embedded-browser has no
 // dependency on app-side or ws-protocol code.
 export interface RecordingEventData {
@@ -123,7 +123,7 @@ export interface DebugActionPayload {
     | "start_recording"
     | "stop_recording"
     // Floating recording-control equivalents — see DebugActionCommandPayload
-    // in src/lib/ws/protocol.ts. Act on the attached `this.recorder` during an
+    // in @lastest/eb-protocol. Act on the attached `this.recorder` during an
     // active "record from here" session.
     | "recording_screenshot"
     | "recording_assertion"

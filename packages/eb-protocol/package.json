@@ -1,0 +1,22 @@
+{
+  "name": "@lastest/eb-protocol",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Wire protocol shared by the Lastest app and its browser runners (embedded browser + remote runner): command/response messages, stream messages, and the JSON payload shapes both sides persist.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lastest/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0"
+  },
+  "license": "FSL-1.1-ALv2"
+}

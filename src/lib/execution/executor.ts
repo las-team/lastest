@@ -24,8 +24,8 @@ import type {
   RunTestCommand,
   RunSetupCommand,
   StabilizationPayload,
-} from "@/lib/ws/protocol";
-import { createMessage } from "@/lib/ws/protocol";
+} from "@lastest/eb-protocol";
+import { createMessage } from "@lastest/eb-protocol";
 import {
   queueCommandToDB,
   queueCancelCommandToDB,
