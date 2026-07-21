@@ -56,11 +56,15 @@ export async function GET(request: NextRequest) {
 
   const session = await getCurrentSession();
   if (!session) {
-    // Bounce through login, then return to this exact authorize URL.
+    // Bounce through login, then return to this exact authorize URL. Use a
+    // relative Location: behind the reverse proxy nextUrl.origin resolves to
+    // the pod bind address (0.0.0.0:3000), not the public host.
     const returnTo = request.nextUrl.pathname + request.nextUrl.search;
-    const loginUrl = new URL("/login", request.nextUrl.origin);
-    loginUrl.searchParams.set("returnTo", returnTo);
-    return NextResponse.redirect(loginUrl);
+    const location = `/login?returnTo=${encodeURIComponent(returnTo)}`;
+    return new NextResponse(null, {
+      status: 307,
+      headers: { Location: location },
+    });
   }
 
   // Grant only scopes the client is registered for (intersect requested).
