@@ -483,14 +483,17 @@ export class EmbeddedRecorder {
         }
 
         // OCR fallback selector: ship a crop of the clicked element so the
-        // server can extract its visible text (elements too small to hold
-        // text aren't worth an OCR round-trip).
+        // server can extract its visible text. Too small can't hold text;
+        // too large is a container (list, panel, whole page) whose OCR is a
+        // garbage wall of text no getByText will ever match.
         if (
           actionId &&
           boundingBox &&
           this.ocrEnabled &&
           boundingBox.width > 10 &&
-          boundingBox.height > 10
+          boundingBox.height > 10 &&
+          boundingBox.width <= 600 &&
+          boundingBox.height <= 160
         ) {
           void this.captureOcrCrop(actionId, boundingBox);
         }

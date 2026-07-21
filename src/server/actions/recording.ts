@@ -1060,6 +1060,10 @@ async function applyOcrTextSelectors(
         .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "")
         .trim();
       if (!text) return;
+      // A label longer than this isn't a label — it's a container crop that
+      // slipped through (getByText needs the whole string in one element, so
+      // an over-long value can only ever fail at replay).
+      if (text.length > 80) return;
       const selectors = Array.isArray(event.data.selectors)
         ? (event.data.selectors as Array<{ type: string; value: string }>)
         : (event.data.selectors = []);

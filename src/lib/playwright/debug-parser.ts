@@ -522,6 +522,25 @@ export function parseSteps(body: string): DebugStep[] {
   let inLineComment = false;
   let inBlockComment = false;
   let escaped = false;
+  // Regex-literal state. Without it, a regex containing `//` (e.g. the
+  // generated buildUrl helper's /^https?:\/\//) reads as a line comment and
+  // swallows the closing parens — depth never returns to 0 and every
+  // remaining statement collapses into one.
+  let inRegex = false;
+  let inRegexClass = false;
+  // Last significant (non-whitespace, non-comment) char appended — used to
+  // decide whether a `/` starts a regex (expression position) or is division.
+  let lastSig = "";
+
+  const regexCanStart = () => {
+    if (lastSig === "") return true;
+    if ("(,=:[!&|?{};+-*%<>~^".includes(lastSig)) return true;
+    // `return /x/` etc. — a keyword right before the slash is expression
+    // position even though it ends in a letter.
+    return /(?:^|[^\w$])(return|typeof|case|instanceof|in|of|new|delete|void|do|else|yield|await)\s*$/.test(
+      current,
+    );
+  };
 
   for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
     const line = lines[lineIdx];
@@ -547,7 +566,10 @@ export function parseSteps(body: string): DebugStep[] {
         continue;
       }
 
-      if (ch === "\\" && (inSingleQuote || inDoubleQuote || inTemplate)) {
+      if (
+        ch === "\\" &&
+        (inSingleQuote || inDoubleQuote || inTemplate || inRegex)
+      ) {
         current += ch;
         escaped = true;
         continue;
@@ -568,6 +590,17 @@ export function parseSteps(body: string): DebugStep[] {
         continue;
       }
 
+      // Inside a regex literal nothing else applies — `//`, quotes, and
+      // brackets are all plain regex syntax (brackets inside a [...] class
+      // don't even close the literal).
+      if (inRegex) {
+        current += ch;
+        if (ch === "[") inRegexClass = true;
+        else if (ch === "]") inRegexClass = false;
+        else if (ch === "/" && !inRegexClass) inRegex = false;
+        continue;
+      }
+
       if (!inSingleQuote && !inDoubleQuote && !inTemplate) {
         if (ch === "/" && next === "/") {
           inLineComment = true;
@@ -579,22 +612,31 @@ export function parseSteps(body: string): DebugStep[] {
           current += ch;
           continue;
         }
+        if (ch === "/" && regexCanStart()) {
+          inRegex = true;
+          inRegexClass = false;
+          current += ch;
+          continue;
+        }
       }
 
       // Track string state
       if (ch === "'" && !inDoubleQuote && !inTemplate) {
         inSingleQuote = !inSingleQuote;
         current += ch;
+        lastSig = ch;
         continue;
       }
       if (ch === '"' && !inSingleQuote && !inTemplate) {
         inDoubleQuote = !inDoubleQuote;
         current += ch;
+        lastSig = ch;
         continue;
       }
       if (ch === "`" && !inSingleQuote && !inDoubleQuote) {
         inTemplate = !inTemplate;
         current += ch;
+        lastSig = ch;
         continue;
       }
 
@@ -607,17 +649,20 @@ export function parseSteps(body: string): DebugStep[] {
       if (ch === "(" || ch === "[" || ch === "{") {
         depth++;
         current += ch;
+        lastSig = ch;
         continue;
       }
       if (ch === ")" || ch === "]" || ch === "}") {
         depth--;
         current += ch;
+        lastSig = ch;
         continue;
       }
 
       // Semicolons at depth 0 are statement boundaries
       if (ch === ";" && depth === 0) {
         current += ch;
+        lastSig = ch;
         const code = current.trim();
         if (code && code !== ";") {
           statements.push({
@@ -632,10 +677,15 @@ export function parseSteps(body: string): DebugStep[] {
       }
 
       current += ch;
+      if (!/\s/.test(ch)) lastSig = ch;
     }
 
     // End of line
     inLineComment = false;
+    // Regex literals can't span lines — a misdetected division must not
+    // poison the rest of the scan.
+    inRegex = false;
+    inRegexClass = false;
 
     // Check if current statement is complete at depth 0
     // New line with a statement-starting keyword means new statement
