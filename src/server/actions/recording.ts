@@ -469,6 +469,11 @@ export async function stopRecording(repositoryId?: string | null) {
 
     // Generate code from the stored events (merged in-memory + DB-forwarded)
     const allEvents = await getRemoteRecordingEvents(repositoryId);
+    // The EB attaches a screencast-frame crop of each clicked element when
+    // ocr-text is enabled; extract the text here (in-process Tesseract or the
+    // OCR_SERVICE_URL container) and turn it into ocr-text fallback selectors
+    // before codegen. The EB never talks to the OCR backend itself.
+    await applyOcrTextSelectors(allEvents, remoteSession.selectorPriority);
     const recordingSettings = await getPlaywrightSettings(repositoryId);
     const generatedCode = generateCodeFromRemoteEvents(
       allEvents,
@@ -1004,6 +1009,47 @@ export async function getOrCreateFunctionalArea(name: string) {
   }
 
   return createFunctionalArea({ name });
+}
+
+/**
+ * Recording-time OCR: convert each event's `data.ocrCrop` (base64 PNG of the
+ * clicked element, cropped by the EB from the live screencast frame) into an
+ * `ocr-text="…"` fallback selector appended to `data.selectors`. Crops are
+ * always stripped, extraction is best-effort, and events without a crop are
+ * untouched — so coordinate-only clicks gain a text fallback when possible
+ * and nothing regresses when OCR fails or is disabled.
+ */
+async function applyOcrTextSelectors(
+  events: RemoteRecordingEvent[],
+  selectorPriority: Array<{ type: string; enabled: boolean; priority: number }>,
+): Promise<void> {
+  const ocrEnabled =
+    selectorPriority.find((s) => s.type === "ocr-text")?.enabled ?? false;
+  const targets = events.filter(
+    (e) => typeof e.data?.ocrCrop === "string" && e.data.ocrCrop,
+  );
+  if (targets.length === 0) return;
+  if (!ocrEnabled) {
+    // Setting flipped mid-recording — drop the crops, don't OCR them.
+    for (const event of targets) delete event.data.ocrCrop;
+    return;
+  }
+  const { extractText } = await import("@/lib/playwright/ocr");
+  await Promise.allSettled(
+    targets.map(async (event) => {
+      const crop = event.data.ocrCrop as string;
+      delete event.data.ocrCrop;
+      const raw = await extractText(Buffer.from(crop, "base64"));
+      // Playwright's getByText normalizes whitespace, so collapse runs — a
+      // wrapped button label OCRs with a newline that would never match.
+      const text = raw?.replace(/\s+/g, " ").trim();
+      if (!text) return;
+      const selectors = Array.isArray(event.data.selectors)
+        ? (event.data.selectors as Array<{ type: string; value: string }>)
+        : (event.data.selectors = []);
+      selectors.push({ type: "ocr-text", value: `ocr-text="${text}"` });
+    }),
+  );
 }
 
 // ============================================

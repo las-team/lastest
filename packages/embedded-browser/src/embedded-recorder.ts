@@ -40,6 +40,7 @@ interface StartRecordingPayload {
   }>;
   pointerGestures?: boolean;
   cursorFPS?: number;
+  ocrEnabled?: boolean;
   setupSteps?: Array<{ code: string; codeHash: string }>;
   // setupContextId identifies a LIVE BrowserContext retained by TestExecutor
   // after a successful setup run. The recorder reuses it (creates a fresh
@@ -88,6 +89,11 @@ export interface AttachToPageOptions {
   // Debug-mode recordings don't render thumbnails anywhere in the UI —
   // skip the crop work and the base64 payload bloat for that path.
   captureThumbnails?: boolean;
+  // When on, each click/fill also ships a lossless crop of the clicked
+  // element (data.ocrCrop) so the server can extract an ocr-text fallback
+  // selector. The EB never runs OCR itself — the server owns the Tesseract
+  // backend (in-process or OCR_SERVICE_URL container).
+  ocrEnabled?: boolean;
 }
 
 export class EmbeddedRecorder {
@@ -105,6 +111,7 @@ export class EmbeddedRecorder {
   private onEvent: ((events: RecordingEventData[]) => void) | null = null;
   private nextClickIsDownload = false;
   private captureThumbnails = true;
+  private ocrEnabled = false;
   // Tracks which Page has already had __recordAction etc. exposed onto it —
   // Playwright throws if exposeFunction is called twice for the same name on
   // the same Page. Recording-from-here can attach to the same live debug
@@ -295,6 +302,7 @@ export class EmbeddedRecorder {
     this.sequenceCounter = 0;
     this.pendingEvents = [];
     this.captureThumbnails = options.captureThumbnails ?? true;
+    this.ocrEnabled = options.ocrEnabled ?? false;
 
     // Detect page crash/close to prevent using a dead page
     page.on("crash", () => {
@@ -467,6 +475,19 @@ export class EmbeddedRecorder {
         // grow the payload.
         if (actionId && boundingBox && this.captureThumbnails) {
           void this.captureElementThumbnail(actionId, boundingBox);
+        }
+
+        // OCR fallback selector: ship a crop of the clicked element so the
+        // server can extract its visible text (elements too small to hold
+        // text aren't worth an OCR round-trip).
+        if (
+          actionId &&
+          boundingBox &&
+          this.ocrEnabled &&
+          boundingBox.width > 10 &&
+          boundingBox.height > 10
+        ) {
+          void this.captureOcrCrop(actionId, boundingBox);
         }
       },
     );
@@ -648,12 +669,58 @@ export class EmbeddedRecorder {
     actionId: string,
     boundingBox: { x: number; y: number; width: number; height: number },
   ): Promise<void> {
-    if (!this.page) return;
+    const cropped = await this.cropFrameRegion(boundingBox, {
+      padding: 8,
+      maxSide: 240,
+      type: "image/jpeg",
+      quality: 0.7,
+    });
+    if (!cropped) return;
+    const event = this.events.find((e) => e.data.actionId === actionId);
+    if (!event) return;
+    event.data.thumbnailPath = `data:image/jpeg;base64,${cropped}`;
+    if (!this.pendingEvents.includes(event)) {
+      this.pendingEvents.push(event);
+    }
+  }
+
+  /**
+   * Best-effort crop of the clicked element for server-side OCR. Lossless PNG
+   * and uncapped bbox size (vs the 240px JPEG thumbnail) — Tesseract needs
+   * clean glyph edges. Attached as raw base64 on the action event; the server
+   * extracts text at stop-time and replaces it with an `ocr-text` selector.
+   */
+  private async captureOcrCrop(
+    actionId: string,
+    boundingBox: { x: number; y: number; width: number; height: number },
+  ): Promise<void> {
+    const cropped = await this.cropFrameRegion(boundingBox, {
+      padding: 6,
+      type: "image/png",
+    });
+    if (!cropped) return;
+    const event = this.events.find((e) => e.data.actionId === actionId);
+    if (!event) return;
+    event.data.ocrCrop = cropped;
+    if (!this.pendingEvents.includes(event)) {
+      this.pendingEvents.push(event);
+    }
+  }
+
+  private async cropFrameRegion(
+    boundingBox: { x: number; y: number; width: number; height: number },
+    opts: {
+      padding: number;
+      maxSide?: number;
+      type: "image/jpeg" | "image/png";
+      quality?: number;
+    },
+  ): Promise<string | null> {
+    if (!this.page) return null;
     const frame = this.latestFrame;
-    if (!frame) return; // no screencast frame yet — skip rather than capture
+    if (!frame) return null; // no screencast frame yet — skip rather than capture
     try {
-      const padding = 8;
-      const maxSide = 240;
+      const { padding, maxSide } = opts;
       const viewport = this.page.viewportSize() ?? { width: 1280, height: 720 };
       // boundingBox is viewport-relative CSS px; the frame is device px. Map
       // CSS → frame px so the crop lines up regardless of devicePixelRatio.
@@ -664,31 +731,33 @@ export class EmbeddedRecorder {
       const sw = Math.round(
         Math.min(
           (boundingBox.width + padding * 2) * scaleX,
-          maxSide * scaleX,
+          maxSide != null ? maxSide * scaleX : Infinity,
           frame.width - sx,
         ),
       );
       const sh = Math.round(
         Math.min(
           (boundingBox.height + padding * 2) * scaleY,
-          maxSide * scaleY,
+          maxSide != null ? maxSide * scaleY : Infinity,
           frame.height - sy,
         ),
       );
-      if (sw < 1 || sh < 1) return;
+      if (sw < 1 || sh < 1) return null;
 
       // Crop the already-streamed frame INSIDE the page using OffscreenCanvas.
       // This is pure off-thread computation — no DOM, no layout, no compositor
       // surface read — so it cannot glitch the live screencast (unlike
       // page.screenshot / Page.captureScreenshot, which do). Decode from a Blob
       // (not fetch()) to dodge any page CSP on data: URLs.
-      const cropped = await this.page.evaluate(
+      return await this.page.evaluate(
         async (a: {
           frameData: string;
           sx: number;
           sy: number;
           sw: number;
           sh: number;
+          type: string;
+          quality?: number;
         }) => {
           try {
             const bin = atob(a.frameData);
@@ -702,8 +771,8 @@ export class EmbeddedRecorder {
             ctx.drawImage(bmp, 0, 0);
             bmp.close();
             const out = await canvas.convertToBlob({
-              type: "image/jpeg",
-              quality: 0.7,
+              type: a.type,
+              quality: a.quality,
             });
             const arr = new Uint8Array(await out.arrayBuffer());
             let s = "";
@@ -714,18 +783,19 @@ export class EmbeddedRecorder {
             return null;
           }
         },
-        { frameData: frame.data, sx, sy, sw, sh },
+        {
+          frameData: frame.data,
+          sx,
+          sy,
+          sw,
+          sh,
+          type: opts.type,
+          quality: opts.quality,
+        },
       );
-
-      if (!cropped) return;
-      const event = this.events.find((e) => e.data.actionId === actionId);
-      if (!event) return;
-      event.data.thumbnailPath = `data:image/jpeg;base64,${cropped}`;
-      if (!this.pendingEvents.includes(event)) {
-        this.pendingEvents.push(event);
-      }
     } catch {
       // best-effort: element gone, navigation in flight, or evaluate detached.
+      return null;
     }
   }
 

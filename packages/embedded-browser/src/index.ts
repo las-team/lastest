@@ -885,6 +885,7 @@ async function startup(): Promise<void> {
           }>;
           pointerGestures?: boolean;
           cursorFPS?: number;
+          ocrEnabled?: boolean;
           setupSteps?: Array<{ code: string; codeHash: string }>;
         };
 
