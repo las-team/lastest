@@ -1,18 +1,18 @@
 /**
- * OCR backend selection.
+ * OCR service configuration.
  *
- * When `OCR_SERVICE_URL` is set, all OCR work (recording-time text extraction
- * and text-region-aware diffing) is sent to the standalone OCR container
- * (`packages/ocr-service`). When unset, Tesseract runs in-process — the
- * container is fully optional so existing deployments (ZimaOS compose, Olares)
- * keep working unchanged until the operator opts in.
+ * All OCR work (recording-time text extraction and text-region-aware
+ * diffing) runs in the standalone OCR container (`packages/ocr-service`);
+ * `OCR_SERVICE_URL` is REQUIRED for OCR features. There is no in-process
+ * Tesseract backend — when the env var is unset, OCR features are disabled
+ * (graceful degradation with a one-time warning; see `src/lib/ocr/index.ts`).
  *
  * Env:
  *   OCR_SERVICE_URL        e.g. http://lastest-ocr:8891 (in-cluster) or
- *                          http://localhost:8891 (host dev + compose profile)
+ *                          http://localhost:8891 (host dev; the container is
+ *                          part of ./docker-compose.yml)
  *   OCR_SERVICE_TOKEN      optional bearer token, must match the service's
  *   OCR_REQUEST_TIMEOUT_MS per-request timeout for remote calls (default 15000)
- *   OCR_IDLE_TIMEOUT_MS    in-process worker idle auto-sleep (default 60000)
  */
 
 export function ocrServiceUrl(): string | null {
@@ -33,9 +33,4 @@ export function ocrServiceToken(): string | null {
 export function ocrRequestTimeoutMs(): number {
   const n = parseInt(process.env.OCR_REQUEST_TIMEOUT_MS || "", 10);
   return Number.isFinite(n) && n > 0 ? n : 15_000;
-}
-
-export function ocrIdleTimeoutMs(): number {
-  const n = parseInt(process.env.OCR_IDLE_TIMEOUT_MS || "", 10);
-  return Number.isFinite(n) && n > 0 ? n : 60_000;
 }

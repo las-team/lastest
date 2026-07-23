@@ -19,13 +19,11 @@ services:
     labels:
       com.docker.compose.project: lastest
 
-  # Optional OCR offload container (profile "ocr"):
-  #   pnpm ocr:up   — builds the package + image and starts it
-  # Then set OCR_SERVICE_URL=http://localhost:8891 in .env.local.
-  # Without the profile, `docker compose up -d` starts only postgres and the
-  # app runs Tesseract in-process as before.
+  # OCR service (packages/ocr-service) — the ONLY OCR backend; the app has no
+  # in-process Tesseract. `docker compose up -d` builds + starts it (the
+  # Dockerfile is self-contained), then set
+  # OCR_SERVICE_URL=http://localhost:8891 in .env.local.
   ocr:
-    profiles: ["ocr"]
     build:
       context: .
       dockerfile: packages/ocr-service/Dockerfile

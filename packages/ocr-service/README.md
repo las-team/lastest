@@ -57,8 +57,12 @@ When `OCR_SERVICE_TOKEN` is set, POST endpoints require
 
 ## Build & run
 
+The Dockerfile is self-contained (compiles the TypeScript in a builder
+stage), so no local build step is needed:
+
 ```bash
-pnpm --filter @lastest/ocr-service build
+docker compose up -d          # part of the repo's default compose stack
+# or standalone:
 docker build -f packages/ocr-service/Dockerfile -t lastest-ocr-service:latest .
 docker run --rm -p 8891:8891 lastest-ocr-service:latest
 ```
@@ -66,6 +70,7 @@ docker run --rm -p 8891:8891 lastest-ocr-service:latest
 Dev (host, no container): `pnpm --filter @lastest/ocr-service dev`
 
 App side: set `OCR_SERVICE_URL=http://localhost:8891` (and optionally
-`OCR_SERVICE_TOKEN`). When `OCR_SERVICE_URL` is unset the app runs Tesseract
-in-process exactly as before — the container is fully optional (ZimaOS /
-Olares deployments keep working unchanged until the operator opts in).
+`OCR_SERVICE_TOKEN`). This service is the **only** OCR backend — the app
+ships no in-process Tesseract. When `OCR_SERVICE_URL` is unset, OCR features
+(ocr-text selectors, text-region-aware diffing) are disabled with a warning;
+everything else keeps working.

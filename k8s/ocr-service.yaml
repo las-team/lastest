@@ -1,10 +1,9 @@
 # OCR service — standalone Tesseract container (packages/ocr-service).
 #
-# Optional offload of OCR work (recording-time `ocr-text` selectors +
-# text-region-aware diffing) out of the app process. The app opts in by
-# setting OCR_SERVICE_URL=http://lastest-ocr:8891 (in-namespace DNS); when
-# the env var is unset the app runs Tesseract in-process and this Deployment
-# can simply not be applied.
+# The ONLY OCR backend: the app ships no in-process Tesseract. OCR work
+# (recording-time `ocr-text` selectors + text-region-aware diffing) requires
+# this Deployment plus OCR_SERVICE_URL=http://lastest-ocr:8891 (in-namespace
+# DNS) on the app; without them, OCR features are disabled.
 #
 # Sizing rationale (be considerate of homeserver clusters like Olares):
 #   - requests are tiny (50m / 128Mi) — the service sleeps to near-zero when

@@ -39,7 +39,10 @@ shift || true
 SKIP_CHECKS=false
 APP_ONLY=false
 EB_ONLY=false
-WITH_OCR=false
+# OCR ships by default: the app has no in-process Tesseract — without the OCR
+# container (and OCR_SERVICE_URL on the app), OCR features are disabled.
+# Opt out with --no-ocr (e.g. targets that don't use OCR features).
+WITH_OCR=true
 
 for arg in "$@"; do
   case "$arg" in
@@ -47,6 +50,7 @@ for arg in "$@"; do
     --app-only)    APP_ONLY=true ;;
     --eb-only)     EB_ONLY=true ;;
     --with-ocr)    WITH_OCR=true ;;
+    --no-ocr)      WITH_OCR=false ;;
     --) ;; # ignore pnpm separator
     *) echo "Unknown option: $arg"; exit 1 ;;
   esac
@@ -152,13 +156,11 @@ build_eb() {
   ok "Built $IMAGE_EB:latest"
 }
 
-# Optional OCR offload container. Deployed only with --with-ocr — the app
-# falls back to in-process Tesseract when OCR_SERVICE_URL is unset, so
-# existing targets keep working without it.
+# OCR service container — the only OCR backend (the app ships no in-process
+# Tesseract). The Dockerfile is self-contained (builds dist inside), so no
+# local pnpm build step is needed.
 build_ocr() {
   local tag="${1:-latest}"
-  log "Building OCR service package..."
-  pnpm --filter @lastest/ocr-service build
   log "Building $IMAGE_OCR:$tag"
   docker build \
     -t "$IMAGE_OCR:$tag" \
@@ -273,10 +275,10 @@ deploy_zima() {
       fi
     done
   fi
-  # OCR container is opt-in: remind rather than fail when the compose file
-  # hasn't been wired up for it yet.
+  # The app has no in-process Tesseract — without the OCR container + env,
+  # OCR features (ocr-text selectors, text-aware diffing) are disabled.
   if [ "$WITH_OCR" = true ] && ! echo "$remote_compose" | grep -q 'ocr'; then
-    warn "OCR image transferred but compose has no ocr service — add one (image $IMAGE_OCR:latest, port 8891) and set OCR_SERVICE_URL on the app service to activate"
+    warn "Compose has no ocr service — OCR features stay disabled until one is added (image $IMAGE_OCR:latest, port 8891) and OCR_SERVICE_URL is set on the app service"
   fi
   ok "Compose file looks good"
 
@@ -417,7 +419,8 @@ usage() {
   echo "  --skip-checks    Skip lint/test before deploy"
   echo "  --app-only       Only build/deploy main app image"
   echo "  --eb-only        Only build/deploy EB image"
-  echo "  --with-ocr       Also build/deploy the OCR offload container"
+  echo "  --with-ocr       Build/deploy the OCR service container (default: on)"
+  echo "  --no-ocr         Skip the OCR container (OCR features stay disabled)"
   echo ""
   echo "Version: $VERSION | Hash: $GIT_HASH | Build: #$GIT_COMMIT_COUNT"
 }

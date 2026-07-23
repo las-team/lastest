@@ -1,25 +1,25 @@
 /**
- * Unified OCR facade.
+ * Unified OCR facade — remote-only.
  *
- * Backend is picked per-call from env: remote container when OCR_SERVICE_URL
- * is set (see `config.ts`), in-process Tesseract otherwise. Both backends
- * share the same wake/sleep model — warm up when recording starts or a
- * text-aware diff batch begins, sleep on recording stop or after idle.
+ * All OCR work (recording-time `ocr-text` selectors + text-region-aware
+ * diffing) runs in the standalone OCR container (`packages/ocr-service`).
+ * `OCR_SERVICE_URL` is required for OCR features — for local dev the
+ * container ships in ./docker-compose.yml, so `docker compose up -d` plus
+ * `OCR_SERVICE_URL=http://localhost:8891` in `.env.local` is all it takes.
  *
- * All results are best-effort: failures surface as `null` / empty regions and
- * callers degrade gracefully (standard diff, no ocr-text selector).
+ * When the env var is unset the app still boots, but OCR features are
+ * disabled: calls return null / no regions (standard diff, no ocr-text
+ * selector) and a one-time warning is logged. There is deliberately no
+ * in-process Tesseract fallback — that would silently reintroduce the WASM
+ * memory/CPU load in the app process that the container exists to isolate.
+ *
+ * Wake/sleep: the service wakes lazily on any request; `ocrWarmup()` is
+ * called at recording start and before diff pairs so the first real request
+ * doesn't pay worker-init latency, `ocrSleep()` on recording stop; the
+ * service also auto-sleeps after idle so a missed hint never leaks memory.
  */
 
 import { isRemoteOCR } from "@/lib/ocr/config";
-import {
-  recognizeLocal,
-  terminateLocalWorker,
-  warmupLocalWorker,
-} from "@/lib/ocr/local";
-import {
-  extractRegionsFromBlocks,
-  extractWordsFromBlocks,
-} from "@/lib/ocr/regions";
 import {
   remoteDetectRegions,
   remoteRecognize,
@@ -30,36 +30,41 @@ import type {
   OcrGranularity,
   OcrRecognition,
   OcrRegion,
+  OcrWord,
 } from "@/lib/ocr/types";
 
-export type { OcrGranularity, OcrRecognition, OcrRegion };
+export type { OcrGranularity, OcrRecognition, OcrRegion, OcrWord };
 export { isRemoteOCR };
+
+let warnedUnconfigured = false;
+
+function serviceConfigured(): boolean {
+  if (isRemoteOCR()) return true;
+  if (!warnedUnconfigured) {
+    warnedUnconfigured = true;
+    console.warn(
+      "[OCR] OCR_SERVICE_URL is not set — OCR features (ocr-text selectors, " +
+        "text-region-aware diffing) are disabled. Start the OCR container " +
+        "(`docker compose up -d`) and set OCR_SERVICE_URL=http://localhost:8891.",
+    );
+  }
+  return false;
+}
 
 /**
  * Full-image text extraction (recording-time `ocr-text` selectors).
- * Returns null when OCR fails or is unavailable.
+ * Returns null when OCR fails or is not configured.
  */
 export async function ocrRecognize(
   image: Buffer,
 ): Promise<OcrRecognition | null> {
-  if (isRemoteOCR()) {
-    return remoteRecognize(image);
-  }
-  // blocks:true so per-word confidences ride along (same contract as the
-  // remote /recognize) — callers use them to drop icon-glyph junk words.
-  const result = await recognizeLocal(image, { blocks: true });
-  return result
-    ? {
-        text: result.text,
-        confidence: result.confidence,
-        words: result.blocks ? extractWordsFromBlocks(result.blocks) : null,
-      }
-    : null;
+  if (!serviceConfigured()) return null;
+  return remoteRecognize(image);
 }
 
 /**
  * Detect text bounding boxes for text-region-aware diffing.
- * Returns null when OCR fails or is unavailable (caller falls back to a
+ * Returns null when OCR fails or is not configured (caller falls back to a
  * standard single-pass diff), otherwise the raw (unmerged) region list.
  */
 export async function ocrDetectRegions(
@@ -67,37 +72,25 @@ export async function ocrDetectRegions(
   granularity: OcrGranularity,
   minConfidence: number,
 ): Promise<OcrRegion[] | null> {
-  if (isRemoteOCR()) {
-    return remoteDetectRegions(image, granularity, minConfidence);
-  }
-  const result = await recognizeLocal(image, { blocks: true });
-  if (!result) return null;
-  return result.blocks
-    ? extractRegionsFromBlocks(result.blocks, granularity, minConfidence)
-    : [];
+  if (!serviceConfigured()) return null;
+  return remoteDetectRegions(image, granularity, minConfidence);
 }
 
 /**
- * Wake the OCR backend so the first real request doesn't pay worker-init
+ * Wake the OCR service so the first real request doesn't pay worker-init
  * latency. Fire-and-forget and idempotent — safe to call on every recording
  * start / diff batch.
  */
 export function ocrWarmup(workers = 1): void {
-  if (isRemoteOCR()) {
-    void remoteWarmup(workers);
-    return;
-  }
-  warmupLocalWorker();
+  if (!serviceConfigured()) return;
+  void remoteWarmup(workers);
 }
 
 /**
- * Put the OCR backend to sleep (recording stop). Best-effort — both backends
- * also auto-sleep after their idle timeout, so a missed call never leaks.
+ * Put the OCR service to sleep (recording stop). Best-effort — the service
+ * also auto-sleeps after its idle timeout, so a missed call never leaks.
  */
 export async function ocrSleep(): Promise<void> {
-  if (isRemoteOCR()) {
-    await remoteSleep();
-    return;
-  }
-  await terminateLocalWorker();
+  if (!isRemoteOCR()) return;
+  await remoteSleep();
 }

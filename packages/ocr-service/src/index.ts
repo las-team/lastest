@@ -2,9 +2,11 @@
  * Lastest OCR Service
  *
  * Standalone HTTP microservice that wraps Tesseract OCR (tesseract.js) so the
- * heavy WASM workers run outside the app process. The app talks to it via
- * `src/lib/ocr/remote.ts` when `OCR_SERVICE_URL` is set; when unset the app
- * falls back to running Tesseract in-process, so this container is optional.
+ * heavy WASM workers run outside the app process. This is the ONLY OCR
+ * backend: the app talks to it via `src/lib/ocr/remote.ts` and requires
+ * `OCR_SERVICE_URL`; when unset, OCR features are disabled (there is no
+ * in-process fallback). For local dev the container is part of the repo's
+ * docker-compose.yml.
  *
  * Wake/sleep model:
  *   - Cold by default: no Tesseract workers exist until the first request.
@@ -241,8 +243,9 @@ async function warmup(workers: number): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Region extraction (keep in sync with src/lib/ocr/regions.ts in the app —
-// same walk over Tesseract's blocks → paragraphs → lines → words tree)
+// Region extraction — walk over Tesseract's blocks → paragraphs → lines →
+// words tree. Runs server-side so only the small region/word lists cross the
+// wire; the app consumes the results via src/lib/ocr/remote.ts.
 // ---------------------------------------------------------------------------
 
 type Granularity = "word" | "line" | "block";
@@ -289,8 +292,8 @@ function extractRegions(
   return regions;
 }
 
-/** Flatten the blocks tree into word texts + confidences (keep in sync with
- *  extractWordsFromBlocks in src/lib/ocr/regions.ts). */
+/** Flatten the blocks tree into word texts + confidences (shape mirrors
+ *  `OcrWord` in src/lib/ocr/types.ts). */
 function extractWords(
   blocks: RecognizeResult["data"]["blocks"] | null,
 ): Array<{ text: string; confidence: number }> {

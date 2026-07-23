@@ -1,7 +1,27 @@
 # Lastest OCR Service — standalone Tesseract OCR container.
-# Build context is the repo root (like the EB image):
-#   pnpm --filter @lastest/ocr-service build
+# Self-contained: builds the TypeScript inside the image, so a plain
+# `docker compose up -d` works with no local pre-build. Build context is the
+# repo root:
 #   docker build -f packages/ocr-service/Dockerfile -t lastest-ocr-service:latest .
+
+# -----------------------------------------------------------------------------
+# Stage 1: Builder (dev deps + tsup)
+# -----------------------------------------------------------------------------
+FROM node:24-slim AS builder
+
+WORKDIR /build
+
+COPY packages/ocr-service/package.json packages/ocr-service/tsconfig.json packages/ocr-service/tsup.config.ts ./
+COPY packages/ocr-service/src/ ./src/
+
+# npm (not pnpm) on purpose: the package has no workspace deps, and npm avoids
+# needing the monorepo lockfile in the image build (same pattern as the EB
+# image's runtime install).
+RUN npm install && npx tsup
+
+# -----------------------------------------------------------------------------
+# Stage 2: Runtime
+# -----------------------------------------------------------------------------
 FROM node:24-slim
 
 WORKDIR /app
@@ -12,8 +32,7 @@ WORKDIR /app
 ADD https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng/4.0.0/eng.traineddata.gz /app/tessdata/eng.traineddata.gz
 RUN chmod 644 /app/tessdata/eng.traineddata.gz
 
-# Copy pre-built dist (built locally via pnpm build) and production package.json
-COPY packages/ocr-service/dist/ ./dist/
+COPY --from=builder /build/dist/ ./dist/
 COPY packages/ocr-service/package.json ./
 
 # Install only production dependencies (tesseract.js + its worker files)

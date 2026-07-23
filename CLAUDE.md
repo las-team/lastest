@@ -23,8 +23,11 @@ pnpm db:studio                  # Drizzle Studio
 # Host postgres (persists in `lastest-pgdata` named volume; defined in ./docker-compose.yml)
 docker compose up -d
 
-# Optional OCR offload container (compose profile "ocr"; see packages/ocr-service)
-pnpm ocr:up                     # build + start; then set OCR_SERVICE_URL=http://localhost:8891
+# OCR service container (packages/ocr-service) — REQUIRED for OCR features
+# (ocr-text selectors, text-region-aware diffing); the app has no in-process
+# Tesseract. Part of the default compose stack; set
+# OCR_SERVICE_URL=http://localhost:8891 in .env.local.
+pnpm ocr:up                     # docker compose up -d --build ocr
 pnpm ocr:down
 
 # k3d cluster — hosts dynamically-provisioned EB Job pods only (no app, no db)
@@ -55,6 +58,7 @@ The dev architecture is: **`pnpm dev` on the host**, postgres on the host (docke
 - Both dynamic modes inject a **per-session `EB_BOOTSTRAP_TOKEN`** (HMAC-signed with `ENCRYPTION_KEY`, bound to the EB's instanceId, TTL = its deadline) — dynamic EBs never receive a fleet-wide secret (process mode also withholds `DATABASE_URL`/`ENCRYPTION_KEY` from child env). `SYSTEM_EB_TOKEN` remains accepted at auto-register ONLY for static fleets. The pool service therefore needs the same `ENCRYPTION_KEY` as the app.
 - Required `.env.local` keys for the host dev flow (process mode):
   - `ENCRYPTION_KEY=<64 hex chars>` (shared by app + pool service; signs stream grants and EB bootstrap tokens)
+  - `OCR_SERVICE_URL=http://localhost:8891` (OCR container from docker-compose; without it OCR features are disabled)
   - `DATABASE_URL=postgresql://lastest:lastest@localhost:5432/lastest`
   - `SYSTEM_EB_TOKEN` only for static-fleet EBs; dynamic EBs use per-session bootstrap tokens
 - All built images + cluster containers carry `com.docker.compose.project=lastest` so Docker Desktop groups them as one stack.
@@ -119,7 +123,7 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 - `packages/runner/` — remote runner CLI (npm package via tsup)
 - `packages/mcp-server/` — MCP server for AI agent integration (`@lastest/mcp-server`)
 - `packages/embedded-browser/` — containerized browser with CDP live streaming
-- `packages/ocr-service/` — optional Tesseract OCR container; app-side facade in `src/lib/ocr/` (remote when `OCR_SERVICE_URL` set, in-process otherwise; both backends wake on demand and auto-sleep after idle)
+- `packages/ocr-service/` — Tesseract OCR container, the ONLY OCR backend (no in-process Tesseract in the app); app-side facade in `src/lib/ocr/` requires `OCR_SERVICE_URL` — unset means OCR features are disabled. The service wakes on demand and auto-sleeps after idle
 - `packages/vscode-extension/` — VS Code extension (esbuild)
 
 ## Billing (Stripe)
@@ -160,5 +164,5 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 
 - `VisualDiffWithTestStatus` type must stay in sync with `getVisualDiffsWithTestStatus` query select
 - Test code signature: `export async function test(page, baseUrl, screenshotPath, stepLogger)` — runner strips TS annotations
-- OCR always goes through the `src/lib/ocr` facade — never call tesseract.js directly. tesseract.js v6+ only returns `text` by default; bbox data needs the explicit `{ blocks: true }` output option. The region walk in `src/lib/ocr/regions.ts` is duplicated in `packages/ocr-service/src/index.ts` — change both together.
+- OCR always goes through the `src/lib/ocr` facade, which talks HTTP to `packages/ocr-service` (`OCR_SERVICE_URL` required; no in-process tesseract.js in the app). tesseract.js v6+ only returns `text` by default; bbox/word data needs the explicit `{ blocks: true }` output option (handled inside the service).
 - Docker entrypoint runs `drizzle-kit push --force` on startup
