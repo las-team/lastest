@@ -3,7 +3,7 @@ import { signStreamGrant } from "@/lib/eb/stream-grant";
 
 /**
  * Convert a direct ws:// streamUrl to a proxy path so the browser connects
- * through the main app's WS proxy (ws-proxy-preload.js) instead of directly
+ * through the front proxy (scripts/front-proxy.js) instead of directly
  * to the container IP — which is unreachable from the browser on both HTTPS
  * (blocked by mixed-content) and in k3s local dev (pod IPs aren't routable
  * from the host).

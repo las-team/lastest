@@ -11,48 +11,15 @@
 
 import type { BrowserContext, Page } from "playwright";
 import { createHash } from "crypto";
+import type {
+  StorageStateSnapshot,
+  UrlTrajectoryStep,
+  WebVitalsSample,
+} from "@lastest/eb-protocol";
 
-// ── Types — duplicated from src/lib/db/schema.ts because the EB package can't
-// reach into the host's @/ alias. Keep in sync.
-export interface UrlTrajectoryStep {
-  stepIndex: number;
-  stepLabel?: string;
-  finalUrl: string;
-  redirectChain: string[];
-  capturedAtMs?: number;
-}
-
-export interface WebVitalsSample {
-  stepIndex?: number;
-  stepLabel?: string;
-  url: string;
-  lcp?: number;
-  cls?: number;
-  inp?: number;
-  fcp?: number;
-  tbt?: number;
-  ttfb?: number;
-}
-
-export interface StorageStateSnapshot {
-  cookies: Array<{
-    name: string;
-    domain: string;
-    path: string;
-    httpOnly: boolean;
-    secure: boolean;
-    sameSite?: "Strict" | "Lax" | "None";
-    valueHash?: string;
-    redacted?: boolean;
-  }>;
-  localStorage: Array<{
-    origin: string;
-    name: string;
-    value?: unknown;
-    valueHash?: string;
-    redacted?: boolean;
-  }>;
-}
+// Wire types come from the canonical protocol package (the host persists
+// these verbatim into jsonb columns) — re-exported for in-package consumers.
+export type { StorageStateSnapshot, UrlTrajectoryStep, WebVitalsSample };
 
 // ── URL trajectory ─────────────────────────────────────────────────────────
 

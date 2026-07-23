@@ -10,6 +10,10 @@ import {
   rewriteDevStreamUrl,
   rewriteDevCdpUrl,
 } from "@/lib/eb/dev-port-forward";
+import {
+  verifyBootstrapToken,
+  getBootstrapTokenKey,
+} from "@lastest/pool-service/common";
 
 const SYSTEM_TEAM_NAME = "__system__";
 const SYSTEM_TEAM_SLUG = "__system__";
@@ -65,20 +69,22 @@ async function getOrCreateSystemTeam(): Promise<{
 /**
  * POST /api/embedded/auto-register
  *
- * Called by system EB containers (Docker replicas) on startup.
- * Authenticates via SYSTEM_EB_TOKEN shared secret.
- * Creates/updates a system runner per instance (identified by instanceId = os.hostname()).
+ * Called by system EB containers on startup. Two credential paths:
+ *
+ *  1. Per-session bootstrap token (`EB_BOOTSTRAP_TOKEN`) — minted by the pool
+ *     service when it provisions the Job, HMAC-signed with the shared
+ *     ENCRYPTION_KEY and bound to the pod's instanceId + the Job's deadline.
+ *     This is how the capacity plane introduces a pod it created; the app
+ *     then issues the domain credential (the per-runner token). Dynamic k8s
+ *     pool EBs always use this path.
+ *
+ *  2. Legacy fleet-wide SYSTEM_EB_TOKEN — kept for STATIC fleets only
+ *     (docker-compose replicas on Zima, where no provisioner exists to mint
+ *     per-session tokens). No longer distributed to dynamic Jobs.
+ *
+ * Creates/updates a system runner per instance (identified by instanceId).
  */
 export async function POST(request: Request) {
-  // Validate SYSTEM_EB_TOKEN
-  const expectedToken = process.env.SYSTEM_EB_TOKEN;
-  if (!expectedToken) {
-    return NextResponse.json(
-      { error: "System EB registration not configured" },
-      { status: 503 },
-    );
-  }
-
   const authHeader = request.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     return NextResponse.json(
@@ -86,31 +92,51 @@ export async function POST(request: Request) {
       { status: 401 },
     );
   }
-
   const token = authHeader.slice(7);
-  const validTokens = expectedToken
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean);
-  // Constant-time match. `Array.includes` short-circuits on first hit and
-  // compares strings byte-by-byte, leaking which token in a rotation list
-  // matches via response timing.
-  const tokenBuf = Buffer.from(token);
-  let matched = false;
-  for (const candidate of validTokens) {
-    const candBuf = Buffer.from(candidate);
-    if (
-      candBuf.length === tokenBuf.length &&
-      crypto.timingSafeEqual(candBuf, tokenBuf)
-    ) {
-      matched = true;
+
+  // Path 1: pool-service-minted bootstrap token (signature + expiry checked
+  // here; instanceId binding enforced after the body is parsed).
+  const bootstrap = verifyBootstrapToken(token);
+
+  if (!bootstrap) {
+    // Path 2: legacy shared secret (static fleets).
+    const expectedToken = process.env.SYSTEM_EB_TOKEN;
+    if (!expectedToken) {
+      // Neither a valid bootstrap token nor a configured static-fleet secret.
+      const configured = !!getBootstrapTokenKey();
+      return NextResponse.json(
+        {
+          error: configured
+            ? "Invalid token"
+            : "System EB registration not configured",
+        },
+        { status: configured ? 401 : 503 },
+      );
     }
-  }
-  if (!matched) {
-    return NextResponse.json(
-      { error: "Invalid system token" },
-      { status: 401 },
-    );
+    const validTokens = expectedToken
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    // Constant-time match. `Array.includes` short-circuits on first hit and
+    // compares strings byte-by-byte, leaking which token in a rotation list
+    // matches via response timing.
+    const tokenBuf = Buffer.from(token);
+    let matched = false;
+    for (const candidate of validTokens) {
+      const candBuf = Buffer.from(candidate);
+      if (
+        candBuf.length === tokenBuf.length &&
+        crypto.timingSafeEqual(candBuf, tokenBuf)
+      ) {
+        matched = true;
+      }
+    }
+    if (!matched) {
+      return NextResponse.json(
+        { error: "Invalid system token" },
+        { status: 401 },
+      );
+    }
   }
 
   // Parse body
@@ -132,6 +158,15 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: "streamUrl, containerUrl, and instanceId are required" },
       { status: 400 },
+    );
+  }
+
+  // Bootstrap tokens are bound to ONE pod: a token exfiltrated from instance A
+  // cannot register (or hijack the session row of) instance B.
+  if (bootstrap && body.instanceId !== bootstrap.i) {
+    return NextResponse.json(
+      { error: "Bootstrap token is not valid for this instance" },
+      { status: 403 },
     );
   }
 

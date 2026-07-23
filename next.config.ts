@@ -11,7 +11,12 @@ function git(cmd: string): string {
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  transpilePackages: ["@lastest/shared"],
+  transpilePackages: [
+    "@lastest/shared",
+    "@lastest/eb-protocol",
+    "@lastest/db",
+    "@lastest/pool-service",
+  ],
   outputFileTracingIncludes: {
     "/terms": ["./src/content/legal/terms.md"],
     "/privacy": ["./src/content/legal/privacy.md"],

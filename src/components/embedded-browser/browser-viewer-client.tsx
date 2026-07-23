@@ -15,7 +15,7 @@ import type {
   StreamMouseEvent,
   StreamKeyboardEvent,
   StreamTouchEvent,
-} from "@/lib/ws/protocol";
+} from "@lastest/eb-protocol";
 
 type ConnectionStatus =
   | "connecting"

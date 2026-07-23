@@ -26,7 +26,7 @@ import type {
   ErrorResponse,
   StepEventResponse,
   CommandAckResponse,
-} from "@/lib/ws/protocol";
+} from "@lastest/eb-protocol";
 import { recordStepEvent } from "@/lib/ws/step-state";
 import {
   waitForCommandQueued,
@@ -395,7 +395,11 @@ export async function POST(request: NextRequest) {
       case "response:screenshot": {
         // Handle screenshot upload - save directly to disk
         const screenshotMsg = message as ScreenshotUploadResponse;
-        const payload = screenshotMsg.payload;
+        // Run screenshots only — ad-hoc captures (AdHocScreenshotPayload, no
+        // filename/testRunId) take the recording path and never reach the
+        // disk-save below; sanitizeFilename throws them into the catch.
+        const payload =
+          screenshotMsg.payload as import("@lastest/eb-protocol").ScreenshotUploadPayload;
 
         try {
           // Validate inputs to prevent path traversal and DoS attacks
@@ -503,7 +507,7 @@ export async function POST(request: NextRequest) {
           testRunId,
           repositoryId,
           networkRequests,
-        } = message.payload as import("@/lib/ws/protocol").NetworkBodiesPayload;
+        } = message.payload as import("@lastest/eb-protocol").NetworkBodiesPayload;
 
         if (!commandId || !networkRequests) {
           return NextResponse.json(
@@ -1213,7 +1217,7 @@ export async function clearRemoteRecordingSession(
 // (`lastest-internal-dev`) receives the EB's `response:debug_state` POSTs.
 // Pre-DB this was a globalThis Map, which silently broke on that split.
 
-import type { DebugStateResponsePayload } from "@/lib/ws/protocol";
+import type { DebugStateResponsePayload } from "@lastest/eb-protocol";
 import { db } from "@/lib/db";
 import { remoteDebugSessions } from "@/lib/db/schema";
 import {

@@ -4,14 +4,14 @@ import {
   runnerCommands,
   runnerCommandResults,
   tests,
-  testRuns,
-} from "../schema";
+} from "@lastest/db/schema";
+import { eq, and, inArray, lt, or, isNull, notExists, sql } from "drizzle-orm";
+
 import type {
   NewRunnerCommand,
   NewRunnerCommandResult,
   RunnerCommandStatus,
-} from "../schema";
-import { eq, and, inArray, lt, or, isNull, notExists, sql } from "drizzle-orm";
+} from "@lastest/db/schema";
 
 // Time the server waits for an EB `response:command_ack` after dispatching a
 // command before redelivering on the next heartbeat. EB sends the ack as the
@@ -395,49 +395,4 @@ export async function timeoutStaleCommands(
         lt(runnerCommands.claimedAt, claimedCutoff),
       ),
     );
-}
-
-/**
- * Fail `test_runs` that no live dispatcher is driving any more.
- *
- * A run's in-flight state lives in the executor's in-memory `inFlight` map, so
- * an app-pod death mid-dispatch (OOMKill during a pool-saturating build, evict,
- * rolling deploy) loses the only thing that would ever have written a terminal
- * status. Every other actor here is reaped — runners, commands, EB Jobs — but
- * nothing reconciled `test_runs`, so the run sat at 'running' forever and the
- * user watched a build that could never finish. Found via a real run stranded
- * ~26h with 185 of 373 results written.
- *
- * Orphan test: old enough to be past any legitimate budget, AND nothing left in
- * a non-terminal command state. Those two together mean no dispatcher is coming
- * back. A genuinely long run keeps pending/claimed commands (themselves capped
- * by `timeoutStaleCommands`), so it is never reaped early.
- *
- * @param minAgeMs grace before a 'running' row is eligible. Must exceed the max
- *   command budget (30m) or a live run gets failed underneath its own dispatcher.
- */
-export async function reapOrphanedTestRuns(minAgeMs: number): Promise<number> {
-  const cutoff = new Date(Date.now() - minAgeMs);
-  const reaped = await db
-    .update(testRuns)
-    .set({ status: "failed", completedAt: new Date() })
-    .where(
-      and(
-        eq(testRuns.status, "running"),
-        lt(testRuns.startedAt, cutoff),
-        notExists(
-          db
-            .select({ one: sql`1` })
-            .from(runnerCommands)
-            .where(
-              and(
-                eq(runnerCommands.testRunId, testRuns.id),
-                inArray(runnerCommands.status, ["pending", "claimed"]),
-              ),
-            ),
-        ),
-      ),
-    )
-    .returning({ id: testRuns.id });
-  return reaped.length;
 }

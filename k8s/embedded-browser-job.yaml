@@ -1,6 +1,6 @@
 # Reference template for a single on-demand Embedded Browser Job.
 #
-# The app's provisioner (src/lib/eb/provisioner.ts) constructs the spec
+# The pool service provisioner (packages/pool-service/src/provisioner.ts) constructs the spec
 # programmatically via the Kubernetes REST API, but this file documents the
 # exact shape and is usable for manual `kubectl apply` during bring-up / debug.
 #
@@ -12,7 +12,9 @@
 #   - /dev/shm is mounted as a 512Mi memory emptyDir — Chromium crashes under
 #     load on the default 64Mi /dev/shm.
 #
-# Replace INSTANCE_ID + SYSTEM_EB_TOKEN placeholders before applying manually.
+# Replace INSTANCE_ID + EB_BOOTSTRAP_TOKEN placeholders before applying manually
+# (mint a token via the pool service, or use a static-fleet SYSTEM_EB_TOKEN env
+# instead when no pool service exists).
 # LASTEST_URL points at the host's pnpm dev via the k3d CoreDNS pin installed
 # by scripts/k3d-up.sh — change it to a Service DNS name in production
 # (Olares) where the app runs in-cluster.
@@ -48,7 +50,10 @@ spec:
           env:
             - name: LASTEST_URL
               value: "http://host.k3d.internal:3000"
-            - name: SYSTEM_EB_TOKEN
+            # Per-session credential minted by the pool service at provision
+            # time (packages/pool-service/src/common.ts). Dynamic pods never
+            # receive the fleet-wide SYSTEM_EB_TOKEN.
+            - name: EB_BOOTSTRAP_TOKEN
               value: "REPLACE_ME"
             - name: INSTANCE_ID
               value: "INSTANCE_ID"
