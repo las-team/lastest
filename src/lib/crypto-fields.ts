@@ -16,7 +16,12 @@
  */
 
 import { encrypt, decryptField, ENC_PREFIX } from "./crypto";
-import type { SetupAuthConfig, AgentSessionMetadata } from "./db/schema";
+import type {
+  SetupAuthConfig,
+  AgentSessionMetadata,
+  AgentKnowledge,
+  NewAgentKnowledge,
+} from "./db/schema";
 
 function encField(value: string): string {
   return value.startsWith(ENC_PREFIX) ? value : encrypt(value);
@@ -87,4 +92,22 @@ export function decryptSessionMetadata<
     out = { ...out, qaAuthContext: decryptField(out.qaAuthContext) };
   }
   return out;
+}
+
+// ── agent_knowledge.credPassword ────────────────────────────────────────────
+// Explorer-agent knowledge notes may carry page-scoped login credentials.
+// Only the password is encrypted; credEmail stays plaintext (identifier).
+
+export function encryptKnowledgeRow<
+  T extends Pick<NewAgentKnowledge, "credPassword"> | null | undefined,
+>(row: T): T {
+  if (!row || row.credPassword == null) return row;
+  return { ...row, credPassword: encField(row.credPassword) };
+}
+
+export function decryptKnowledgeRow<
+  T extends Pick<AgentKnowledge, "credPassword"> | null | undefined,
+>(row: T): T {
+  if (!row || row.credPassword == null) return row;
+  return { ...row, credPassword: decryptField(row.credPassword) };
 }

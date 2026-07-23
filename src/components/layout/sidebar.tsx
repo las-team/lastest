@@ -19,6 +19,7 @@ import {
   GitCommit,
   Wrench,
   Bot,
+  Compass,
   Lock,
   Waypoints,
 } from "lucide-react";
@@ -81,6 +82,7 @@ const definitionNav = [
 const executionNav = [
   { name: "Runs", href: "/run", icon: Play },
   { name: "QA Agent", href: "/qa-agent", icon: Bot },
+  { name: "Explorer", href: "/explorer", icon: Compass },
   { name: "Compare", href: "/compare", icon: GitCompare },
   { name: "URL Diff", href: "/url-diff", icon: SplitSquareHorizontal },
   { name: "Impact", href: "/analytics/impact", icon: TrendingDown },

@@ -473,6 +473,7 @@ const SOURCE_LABELS: Record<ActivitySourceType, string> = {
   generate_agent: "Generator agent",
   heal_agent: "Healer agent",
   qa_agent: "QA agent",
+  explorer_agent: "Explorer agent",
 };
 
 const EXTERNAL_ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
