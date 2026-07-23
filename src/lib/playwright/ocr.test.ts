@@ -1,65 +1,95 @@
-import { describe, it, expect, afterAll } from "vitest";
-import { extractText, terminateWorker } from "./ocr";
-import { PNG } from "pngjs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { extractText } from "./ocr";
 
 /**
- * Creates a simple PNG buffer with black text-like pixels on white background.
- * Not real text, but enough to verify Tesseract initializes and processes without crashing.
+ * extractText goes through the OCR facade, which is remote-only: all
+ * recognition happens in the ocr-service container (OCR_SERVICE_URL
+ * required). These tests mock the service and exercise the word-level
+ * confidence filtering and degradation paths.
  */
-function createTestPng(width = 200, height = 50): Buffer {
-  const png = new PNG({ width, height });
-  // Fill white background
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = (y * width + x) * 4;
-      png.data[idx] = 255; // R
-      png.data[idx + 1] = 255; // G
-      png.data[idx + 2] = 255; // B
-      png.data[idx + 3] = 255; // A
-    }
-  }
-  // Draw a crude "T" shape in black pixels
-  for (let x = 60; x < 140; x++) {
-    for (let y = 10; y < 15; y++) {
-      const idx = (y * width + x) * 4;
-      png.data[idx] = 0;
-      png.data[idx + 1] = 0;
-      png.data[idx + 2] = 0;
-    }
-  }
-  for (let y = 15; y < 40; y++) {
-    for (let x = 95; x < 105; x++) {
-      const idx = (y * width + x) * 4;
-      png.data[idx] = 0;
-      png.data[idx + 1] = 0;
-      png.data[idx + 2] = 0;
-    }
-  }
-  return PNG.sync.write(png);
+
+const PNG_STUB = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+
+function serviceResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), { status: 200 });
 }
 
-describe("Tesseract OCR", () => {
-  afterAll(async () => {
-    await terminateWorker();
+describe("extractText (remote OCR)", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubEnv("OCR_SERVICE_URL", "http://ocr.test:8891");
+    fetchMock.mockReset();
   });
 
-  it("initializes worker and processes an image without error", async () => {
-    const png = createTestPng();
-    // extractText returns string | null — we just need it to not throw
-    const result = await extractText(png);
-    expect(result === null || typeof result === "string").toBe(true);
-  }, 15_000);
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
 
-  it("returns null for a blank white image", async () => {
-    const png = new PNG({ width: 100, height: 100 });
-    for (let i = 0; i < png.data.length; i += 4) {
-      png.data[i] = 255;
-      png.data[i + 1] = 255;
-      png.data[i + 2] = 255;
-      png.data[i + 3] = 255;
-    }
-    const result = await extractText(PNG.sync.write(png));
-    // Blank image should return null (no text or low confidence)
-    expect(result).toBeNull();
-  }, 15_000);
+  it("drops low-confidence junk words and keeps the clean label", async () => {
+    fetchMock.mockResolvedValue(
+      serviceResponse({
+        text: "& Save\n",
+        confidence: 48, // dragged down by the icon glyph
+        words: [
+          { text: "&", confidence: 5 }, // icon glyph junk
+          { text: "Save", confidence: 95 },
+        ],
+      }),
+    );
+    await expect(extractText(PNG_STUB)).resolves.toBe("Save");
+  });
+
+  it("returns null when no word is confident", async () => {
+    fetchMock.mockResolvedValue(
+      serviceResponse({
+        text: "#~\n",
+        confidence: 12,
+        words: [
+          { text: "#", confidence: 20 },
+          { text: "~", confidence: 15 },
+        ],
+      }),
+    );
+    await expect(extractText(PNG_STUB)).resolves.toBeNull();
+  });
+
+  it("returns null when kept-word average confidence is below 60%", async () => {
+    fetchMock.mockResolvedValue(
+      serviceResponse({
+        text: "maybe text\n",
+        confidence: 50,
+        words: [
+          { text: "maybe", confidence: 45 },
+          { text: "text", confidence: 50 },
+        ],
+      }),
+    );
+    await expect(extractText(PNG_STUB)).resolves.toBeNull();
+  });
+
+  it("falls back to whole-image confidence when no word breakdown", async () => {
+    fetchMock.mockResolvedValue(
+      serviceResponse({ text: "Hello World\n", confidence: 91 }),
+    );
+    await expect(extractText(PNG_STUB)).resolves.toBe("Hello World");
+
+    fetchMock.mockResolvedValue(
+      serviceResponse({ text: "garbled\n", confidence: 30 }),
+    );
+    await expect(extractText(PNG_STUB)).resolves.toBeNull();
+  });
+
+  it("returns null when the OCR service is unreachable", async () => {
+    fetchMock.mockRejectedValue(new Error("ECONNREFUSED"));
+    await expect(extractText(PNG_STUB)).resolves.toBeNull();
+  });
+
+  it("returns null (no fetch) when OCR_SERVICE_URL is unset", async () => {
+    vi.stubEnv("OCR_SERVICE_URL", "");
+    await expect(extractText(PNG_STUB)).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

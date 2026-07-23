@@ -522,6 +522,20 @@ function main() {
   }
   const server = http.createServer(proxyRequest);
   server.on("upgrade", (req, socket, head) => {
+    // A client that RSTs mid-handshake — e.g. `ws` destroys its socket the
+    // moment it reads our synthetic 403/502 — surfaces as 'read ECONNRESET'
+    // on this raw socket. Raw sockets with no 'error' listener re-throw that
+    // as an uncaught 'error' event and kill the whole proxy (observed as a
+    // crash cascade: the NEXT client's handshake dies mid-flight). Attach the
+    // handler before any branch so every reject/forward path is covered.
+    socket.on("error", (e) => {
+      dlog("upgrade", "client socket error:", e.message);
+      try {
+        socket.destroy();
+      } catch {
+        /* ignore */
+      }
+    });
     const cfg = parseTarget(req.url || "");
     if (!cfg) return passthroughUpgrade(req, socket, head);
     if (cfg.reject) {
