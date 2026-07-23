@@ -42,6 +42,10 @@ export interface PlanConfig {
   projectLimit: number | null;
   /** Concurrent run cap. Informational only today. */
   concurrentRunLimit: number;
+  /** Max parallel explorers (EB pods) an App Map "Explore app" run may
+   *  request. Exploration itself stays Pro-only (assertQaAgentAccess) — this
+   *  field drives the dialog's slider cap and future per-tier gating. */
+  maxExplorers: number;
   /** True if checkout flows should be offered for this tier. */
   purchasable: boolean;
   /** Feature bullets surfaced in the billing UI. */
@@ -61,6 +65,7 @@ export const PLANS: Record<Exclude<TeamPlan, "demo" | "trial">, PlanConfig> = {
     monthlyRunQuota: 500,
     projectLimit: 1,
     concurrentRunLimit: 1,
+    maxExplorers: 1,
     purchasable: false,
     features: [
       "1 project",
@@ -82,6 +87,7 @@ export const PLANS: Record<Exclude<TeamPlan, "demo" | "trial">, PlanConfig> = {
     monthlyRunQuota: 5000,
     projectLimit: 3,
     concurrentRunLimit: 2,
+    maxExplorers: 2,
     purchasable: true,
     features: [
       "3 projects",
@@ -102,6 +108,7 @@ export const PLANS: Record<Exclude<TeamPlan, "demo" | "trial">, PlanConfig> = {
     monthlyRunQuota: 30000,
     projectLimit: 10,
     concurrentRunLimit: 5,
+    maxExplorers: 5,
     purchasable: true,
     features: [
       "10 projects",
@@ -124,6 +131,7 @@ export const PLANS: Record<Exclude<TeamPlan, "demo" | "trial">, PlanConfig> = {
     monthlyRunQuota: 120000,
     projectLimit: null,
     concurrentRunLimit: 15,
+    maxExplorers: 10,
     purchasable: true,
     features: [
       "Unlimited projects (reasonable quotas)",
@@ -151,6 +159,7 @@ export const FALLBACK_PLAN: PlanConfig = {
   monthlyRunQuota: 0,
   projectLimit: 0,
   concurrentRunLimit: 0,
+  maxExplorers: 0,
   purchasable: false,
   features: [],
 };

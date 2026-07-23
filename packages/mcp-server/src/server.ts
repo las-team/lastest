@@ -2296,6 +2296,150 @@ export function createServer(client: LastestClient): McpServer {
     }),
   );
 
+  // --- lastest_explorer ---
+  server.tool(
+    "lastest_explorer",
+    "Start the Explorer — an autonomous exploratory-testing agent (explorbot-style). It loops research → plan → act → analyze on a live Embedded Browser: maps each page, drafts scenarios in rotating styles (normal/curious/psycho), drives the browser through them adapting as it goes, records defect/UX findings clustered by root cause, learns per-page experience reused on later runs, and keeps passing flows as quarantined tests. WATCHABLE live in the Lastest activity feed. Async: returns a sessionId — poll lastest_explorer_status.",
+    {
+      repositoryId: z.string().describe("Repository ID to explore for"),
+      url: z
+        .string()
+        .optional()
+        .describe("Target app URL (defaults to the repo base URL)"),
+      maxIterations: z
+        .number()
+        .optional()
+        .describe("Loop-iteration budget (default from settings, max 12)"),
+    },
+    withActivityReporting(client, "lastest_explorer", async (params) => {
+      const { sessionId } = await client.startExplorer(
+        params.repositoryId as string,
+        {
+          url: params.url as string | undefined,
+          maxIterations: params.maxIterations as number | undefined,
+        },
+      );
+      const response: ToolResponse = {
+        status: "explorer_started",
+        summary: `Explorer session ${sessionId} started — it is exploring in an Embedded Browser, watchable live in the Lastest activity feed.`,
+        actionRequired: [
+          `Poll lastest_explorer_status with sessionId "${sessionId}" until status is "completed", then read the report and lastest_explorer_findings.`,
+        ],
+        details: { sessionId },
+      };
+      return {
+        content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
+      };
+    }),
+  );
+
+  // --- lastest_explorer_status ---
+  server.tool(
+    "lastest_explorer_status",
+    "Poll an explorer session: status, current iteration, live stream URL, findings summary, and — once completed — the root-cause-clustered report plus any kept test ids.",
+    {
+      sessionId: z
+        .string()
+        .describe("Explorer session ID from lastest_explorer"),
+    },
+    withActivityReporting(client, "lastest_explorer_status", async (params) => {
+      const s = await client.getExplorerStatus(params.sessionId as string);
+      const done = s.status === "completed";
+      const response: ToolResponse = {
+        status: s.status,
+        summary: done
+          ? `Explorer complete: ${s.findingsSummary.total} findings across ${s.metadata.iteration} iterations${(s.metadata.keptTestIds?.length ?? 0) > 0 ? `, ${s.metadata.keptTestIds!.length} flows kept as tests` : ""}.`
+          : s.metadata.queuedForBrowser
+            ? "Waiting for an Embedded Browser to become available…"
+            : `Explorer ${s.status} — iteration ${s.metadata.iteration + 1}${s.metadata.maxIterations ? `/${s.metadata.maxIterations}` : ""}, ${s.findingsSummary.total} findings so far.`,
+        actionRequired: done
+          ? [
+              "Read details.metadata.report for the clustered assessment; call lastest_explorer_findings for full finding rows.",
+            ]
+          : s.status === "failed" || s.status === "cancelled"
+            ? ["The run ended early; findings so far are still readable."]
+            : ["Poll again in a few seconds."],
+        details: s as unknown as Record<string, unknown>,
+      };
+      return {
+        content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
+      };
+    }),
+  );
+
+  // --- lastest_explorer_findings ---
+  server.tool(
+    "lastest_explorer_findings",
+    "List the full finding rows (defects + UX issues with severity, root-cause cluster, page state, and evidence) recorded by an explorer session.",
+    {
+      sessionId: z
+        .string()
+        .describe("Explorer session ID from lastest_explorer"),
+    },
+    withActivityReporting(
+      client,
+      "lastest_explorer_findings",
+      async (params) => {
+        const { findings } = await client.getExplorerFindings(
+          params.sessionId as string,
+        );
+        const response: ToolResponse = {
+          status: "ok",
+          summary: `${findings.length} finding(s).`,
+          details: { findings },
+        };
+        return {
+          content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
+        };
+      },
+    ),
+  );
+
+  // --- lastest_explorer_learn ---
+  server.tool(
+    "lastest_explorer_learn",
+    "Teach the Explorer about the app: store a knowledge note (markdown hint) matched to pages by URL pattern — quirks, form rules, test data, navigation notes. Matching notes are injected into the explorer's planning and testing prompts on later runs (explorbot's /learn).",
+    {
+      repositoryId: z.string().describe("Repository ID the note belongs to"),
+      urlPattern: z
+        .string()
+        .describe(
+          'URL pattern: "/login" (exact/prefix), "/admin/*" (prefix), a regex, or "*" for all pages',
+        ),
+      matchKind: z
+        .enum(["exact", "prefix", "regex"])
+        .optional()
+        .describe("How to match the pattern (default prefix)"),
+      title: z.string().optional().describe("Short note title"),
+      body: z
+        .string()
+        .describe("The hint itself (markdown) — what the explorer should know"),
+    },
+    withActivityReporting(client, "lastest_explorer_learn", async (params) => {
+      const { id } = await client.addExplorerKnowledge(
+        params.repositoryId as string,
+        {
+          title: params.title as string | undefined,
+          urlPattern: params.urlPattern as string,
+          matchKind: params.matchKind as
+            | "exact"
+            | "prefix"
+            | "regex"
+            | undefined,
+          body: params.body as string,
+        },
+      );
+      const response: ToolResponse = {
+        status: "learned",
+        summary: `Knowledge note ${id} stored for pattern "${params.urlPattern}". The explorer will load it whenever a matching page opens.`,
+        details: { id },
+      };
+      return {
+        content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
+      };
+    }),
+  );
+
   // --- lastest_create_test ---
   server.tool(
     "lastest_create_test",

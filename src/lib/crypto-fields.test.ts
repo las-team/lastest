@@ -139,6 +139,24 @@ describe("encryptSessionMetadata / decryptSessionMetadata", () => {
     expect(decryptSessionMetadata(meta)).toBe(meta);
   });
 
+  it("encrypts qaAuthContext (Explore sign-in prose) alongside the password", () => {
+    const meta: AgentSessionMetadata = {
+      qaAuthContext: "Log in with demo@acme.com / hunter2, then tap Continue",
+      quickstartPassword: "pw",
+      qaTargetUrl: "https://app.acme.test",
+    };
+    const enc = encryptSessionMetadata(meta)!;
+    expect(enc.qaAuthContext!.startsWith(ENC_PREFIX)).toBe(true);
+    expect(enc.quickstartPassword!.startsWith(ENC_PREFIX)).toBe(true);
+    expect(enc.qaTargetUrl).toBe("https://app.acme.test");
+
+    const twice = encryptSessionMetadata(enc)!;
+    expect(twice.qaAuthContext).toBe(enc.qaAuthContext);
+
+    const dec = decryptSessionMetadata(enc)!;
+    expect(dec).toEqual(meta);
+  });
+
   it("passes null/undefined through", () => {
     expect(encryptSessionMetadata(null)).toBeNull();
     expect(encryptSessionMetadata(undefined)).toBeUndefined();
