@@ -1,6 +1,13 @@
 # RBAC for the Lastest app pod to provision on-demand EB Jobs.
 # Scope is namespace-local — no cluster-wide rights.
 #
+# Single-container topology only (root Dockerfile — app process also runs the
+# EB pool service in-process). In the split-services topology (Dockerfile.app
+# + packages/pool-service/Dockerfile), the pool service runs as its own
+# Deployment and k8s/pool-service.yaml carries the equivalent RBAC bound to
+# that pod instead — the app pod itself then needs none of this. k3d-up.sh
+# still applies this file for local dev-cluster parity.
+#
 # Apply once per environment:
 #   kubectl apply -n lastest -f k8s/embedded-browser-rbac.yaml
 #

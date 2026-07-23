@@ -1,9 +1,29 @@
-import {
-  query,
-  type PermissionMode,
-  type McpStdioServerConfig,
+import type {
+  query as sdkQuery,
+  PermissionMode,
+  McpStdioServerConfig,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { AIProvider, GenerateOptions, StreamCallbacks } from "./types";
+
+/**
+ * The SDK is loaded lazily so importing this module never requires the
+ * package to be installed. API-key-only images (Dockerfile.app) don't ship
+ * @anthropic-ai/claude-agent-sdk (it's a serverExternalPackage, pruned from
+ * the standalone build and deliberately not copied back in) — a top-level
+ * import would crash every consumer of @/lib/ai at load time, even when a
+ * different provider is selected.
+ */
+async function loadQuery(): Promise<typeof sdkQuery> {
+  try {
+    const mod = await import("@anthropic-ai/claude-agent-sdk");
+    return mod.query;
+  } catch (err) {
+    throw new Error(
+      "Claude Agent SDK is not available in this deployment (API-key-only image?). " +
+        `Configure an API-key provider (Anthropic, OpenAI, OpenRouter) instead. (${err instanceof Error ? err.message : String(err)})`,
+    );
+  }
+}
 
 export interface ClaudeAgentSDKOptions {
   permissionMode?: PermissionMode;
@@ -80,6 +100,8 @@ export class ClaudeAgentSDKProvider implements AIProvider {
     const assistantChunks: string[] = [];
     let resultText: string | null = null;
     const stderrChunks: string[] = [];
+
+    const query = await loadQuery();
 
     try {
       for await (const message of query({
@@ -172,6 +194,9 @@ export class ClaudeAgentSDKProvider implements AIProvider {
     const stderrChunks: string[] = [];
 
     try {
+      // Inside the try so a missing SDK reaches callbacks.onError like any
+      // other provider failure.
+      const query = await loadQuery();
       for await (const message of query({
         prompt: fullPrompt,
         options: {

@@ -25,7 +25,10 @@ import { AiAdvancedSettings } from "@/components/settings/ai-advanced-settings";
 import { McpConnect } from "@/components/mcp/mcp-connect";
 import { McpPromptHints } from "@/components/mcp/mcp-prompt-hints";
 import { McpStatusBadge } from "@/components/mcp/mcp-status-badge";
-import { isByokConfigured } from "@/lib/ai/availability";
+import {
+  isByokConfigured,
+  hostCliProvidersDisabled,
+} from "@/lib/ai/availability";
 import { getAISettings as getMaskedAISettings } from "@/server/actions/ai-settings";
 import { AILogsCard } from "@/components/settings/ai-logs-card";
 import { NotificationSettingsCard } from "@/components/settings/notification-settings-card";
@@ -634,6 +637,7 @@ export default async function SettingsPage({
               <AISettingsCard
                 settings={aiSettings}
                 repositoryId={selectedRepo?.id}
+                hostCliDisabled={hostCliProvidersDisabled()}
               />
             </div>
           </AiAdvancedSettings>

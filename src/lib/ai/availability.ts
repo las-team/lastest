@@ -1,6 +1,18 @@
 import type { AISettings } from "@/lib/db/schema";
 
 /**
+ * API-key-only deployments (e.g. the split-services k8s image built from
+ * Dockerfile.app) ship neither the Claude Code CLI binary nor the Agent SDK's
+ * native runtime, and set AI_HOST_CLI_DISABLED=1. The host-credential
+ * providers ('claude-cli', 'claude-agent-sdk') are then reported unavailable
+ * everywhere instead of failing at spawn time with ENOENT.
+ */
+export function hostCliProvidersDisabled(): boolean {
+  const v = (process.env.AI_HOST_CLI_DISABLED || "").trim().toLowerCase();
+  return v === "1" || v === "true";
+}
+
+/**
  * In-product AI ("BYOK" — bring your own key) is considered *configured* only
  * when the team has explicitly saved an AI-settings row whose selected provider
  * has the credential/config it needs to actually run. A bare default row (no
@@ -42,10 +54,11 @@ export function isByokConfigured(
     case "ollama":
       return !!settings.ollamaBaseUrl && !!settings.ollamaModel;
     // Host-side credentials (CLI login / SDK env) — treated as configured once
-    // the team has explicitly selected the provider and saved the row.
+    // the team has explicitly selected the provider and saved the row, unless
+    // this deployment is API-key-only (AI_HOST_CLI_DISABLED).
     case "claude-cli":
     case "claude-agent-sdk":
-      return true;
+      return !hostCliProvidersDisabled();
     default:
       return false;
   }

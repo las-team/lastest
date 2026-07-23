@@ -1,0 +1,58 @@
+# =============================================================================
+# Lastest — database migration image (run once per deploy, not per app pod)
+#
+# The split-services app image (Dockerfile.app) does NOT migrate at boot. This
+# image runs scripts/migrate.js (pre-create/backfill SQL + `drizzle-kit push
+# --force`) as a one-shot k8s Job (k8s/migrate-job.yaml) or `docker run`.
+#
+# It installs EXACTLY three packages — nothing from the app dependency tree,
+# no workspace install:
+#   - drizzle-kit  : the `push` CLI (bundles the config + schema with esbuild)
+#   - drizzle-orm  : the schema's only runtime import (drizzle-orm/pg-core)
+#   - postgres     : the DB driver drizzle-kit connects through, and what
+#                    migrate.js's pre-steps require() for the backfill SQL
+#
+# No @lastest/* workspace packages are needed: packages/db/src/schema.ts imports
+# @lastest/eb-protocol as `import type` only (and re-exports it as `export type`),
+# both of which esbuild — drizzle-kit's schema loader — erases without resolving.
+# So only the schema file itself is copied; its cross-package imports vanish.
+#
+# Only DATABASE_URL is required at run time (migrate.js + drizzle.config.ts).
+# Versions are pinned to the repo lockfile — bump them together.
+#
+# Build (repo root as context):
+#   docker build -f Dockerfile.migrate -t lastest-migrate:latest .
+# =============================================================================
+FROM node:24-slim
+
+WORKDIR /app
+
+# Exactly the three packages drizzle-kit push needs — no monorepo, no app deps.
+RUN npm install --no-audit --no-fund \
+      drizzle-kit@0.31.8 \
+      drizzle-orm@0.45.2 \
+      postgres@3.4.8 \
+    && npm cache clean --force
+
+# The schema (type-only @lastest imports are erased by drizzle-kit's esbuild
+# loader), the config that points at it, and the migration script. `drizzle-kit
+# push` reads no migration files, so the drizzle/ out-dir is intentionally absent.
+COPY packages/db/src/schema.ts ./packages/db/src/schema.ts
+COPY drizzle.config.ts ./
+COPY scripts/migrate.js ./scripts/migrate.js
+
+# Non-root: migrate.js only touches the DB, no filesystem writes outside /app.
+RUN useradd --uid 1002 --shell /usr/sbin/nologin --no-create-home migrate && \
+    chown -R migrate:migrate /app
+USER migrate
+
+# DATABASE_URL must be injected by the deployment — no default.
+ENV NODE_ENV=production
+
+LABEL org.opencontainers.image.title="Lastest DB Migrate"
+LABEL org.opencontainers.image.description="One-shot schema migration (drizzle-kit push) for the Lastest platform"
+LABEL org.opencontainers.image.source="https://github.com/las-team/lastest"
+
+# cwd is /app so migrate.js resolves ./node_modules/.bin/drizzle-kit and
+# drizzle.config.ts's ./packages/db/src/schema.ts.
+CMD ["node", "scripts/migrate.js"]

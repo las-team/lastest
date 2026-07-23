@@ -52,6 +52,9 @@ import { toast } from "sonner";
 interface AISettingsCardProps {
   settings: AISettings;
   repositoryId?: string | null;
+  /** True on API-key-only deployments (AI_HOST_CLI_DISABLED): the claude-cli
+   *  and claude-agent-sdk providers are not offered. */
+  hostCliDisabled?: boolean;
 }
 
 const OPENROUTER_MODELS = [
@@ -76,6 +79,7 @@ const OPENAI_MODELS = [
 export function AISettingsCard({
   settings,
   repositoryId,
+  hostCliDisabled,
 }: AISettingsCardProps) {
   const [isPending, startTransition] = useTransition();
   const [isTesting, setIsTesting] = useState(false);
@@ -389,24 +393,28 @@ export function AISettingsCard({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="claude-cli">
-                <div className="flex items-center gap-2">
-                  <Zap className="h-4 w-4" />
-                  Claude CLI (requires `claude login`)
-                </div>
-              </SelectItem>
+              {!hostCliDisabled && (
+                <SelectItem value="claude-cli">
+                  <div className="flex items-center gap-2">
+                    <Zap className="h-4 w-4" />
+                    Claude CLI (requires `claude login`)
+                  </div>
+                </SelectItem>
+              )}
               <SelectItem value="openrouter">
                 <div className="flex items-center gap-2">
                   <Sparkles className="h-4 w-4" />
                   OpenRouter API
                 </div>
               </SelectItem>
-              <SelectItem value="claude-agent-sdk">
-                <div className="flex items-center gap-2">
-                  <Bot className="h-4 w-4" />
-                  Claude Agent SDK
-                </div>
-              </SelectItem>
+              {!hostCliDisabled && (
+                <SelectItem value="claude-agent-sdk">
+                  <div className="flex items-center gap-2">
+                    <Bot className="h-4 w-4" />
+                    Claude Agent SDK
+                  </div>
+                </SelectItem>
+              )}
               <SelectItem value="anthropic">
                 <div className="flex items-center gap-2">
                   <Brain className="h-4 w-4" />

@@ -1,0 +1,54 @@
+# One-shot database migration Job (Dockerfile.migrate).
+#
+# Runs scripts/migrate.js — pre-create/backfill SQL + `drizzle-kit push --force`
+# — once per deploy, replacing the old per-app-pod boot migration. The app image
+# (Dockerfile.app) no longer carries drizzle-kit and never migrates at boot.
+#
+# Run it BEFORE rolling the app Deployment, and wait for completion:
+#   kubectl apply -f k8s/migrate-job.yaml
+#   kubectl -n lastest wait --for=condition=complete job/lastest-migrate --timeout=300s
+#
+# A Job's pod template is immutable, so re-running for the next deploy needs a
+# fresh Job — delete first (or `kubectl replace --force -f`):
+#   kubectl -n lastest delete job lastest-migrate --ignore-not-found
+#
+# Only DATABASE_URL is required (migrate.js + drizzle.config.ts). ENCRYPTION_KEY
+# is NOT needed here — the schema push touches no encrypted columns.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: lastest-migrate
+  namespace: lastest
+  labels:
+    app: lastest-migrate
+spec:
+  # Cap runtime so a wedged push can't hang the rollout gate.
+  activeDeadlineSeconds: 600
+  # backoffLimit>0: migrate.js is idempotent (IF NOT EXISTS / GREATEST / dedup),
+  # so a transient DB blip is safe to retry.
+  backoffLimit: 3
+  # Auto-clean the finished Job/pod 5 min after completion.
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: lastest-migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: lastest-migrate:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: lastest-secrets
+                  key: database-url
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
