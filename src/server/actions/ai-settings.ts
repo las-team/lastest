@@ -7,6 +7,7 @@ import {
   SsrfBlockedError,
 } from "@/lib/security/outbound-url";
 import type { AIProvider, AgentSdkPermissionMode } from "@/lib/db/schema";
+import { hostCliProvidersDisabled } from "@/lib/ai/availability";
 import { revalidatePath } from "next/cache";
 import { exec } from "child_process";
 import { promisify } from "util";
@@ -172,6 +173,19 @@ export async function testAIConnection(
       anthropicApiKey = stored.anthropicApiKey ?? undefined;
     if (!openaiApiKey || isMaskedValue(openaiApiKey))
       openaiApiKey = stored.openaiApiKey ?? undefined;
+  }
+
+  // API-key-only deployment: neither the claude CLI binary nor the Agent SDK
+  // runtime is shipped — fail the test with a clear message instead of ENOENT.
+  if (
+    (provider === "claude-cli" || provider === "claude-agent-sdk") &&
+    hostCliProvidersDisabled()
+  ) {
+    return {
+      success: false,
+      message:
+        "This provider is disabled in this deployment (AI_HOST_CLI_DISABLED) — use an API-key provider (Anthropic, OpenAI, OpenRouter) instead",
+    };
   }
 
   try {

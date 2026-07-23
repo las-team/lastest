@@ -7,6 +7,7 @@ import { createOpenAIProvider } from "./openai";
 import { createAnthropicDirectProvider } from "./anthropic-direct";
 import { MCPBridge, createPlaywrightMCPBridge } from "./mcp-bridge";
 import type { MCPServerConfig } from "./mcp-bridge";
+import { hostCliProvidersDisabled } from "./availability";
 import { createAIPromptLog, updateAIPromptLog } from "@/lib/db/queries";
 import type { AIActionType, AILogStatus } from "@/lib/db/schema";
 
@@ -37,6 +38,11 @@ export function getAIProvider(config: AIProviderConfig): AIProvider {
   }
 
   if (config.provider === "claude-agent-sdk") {
+    if (hostCliProvidersDisabled()) {
+      throw new Error(
+        "The Claude Agent SDK provider is disabled in this deployment (AI_HOST_CLI_DISABLED) — configure an API-key provider (Anthropic, OpenAI, OpenRouter) in AI settings",
+      );
+    }
     return new ClaudeAgentSDKProvider({
       permissionMode: config.agentSdkPermissionMode,
       model: config.agentSdkModel || undefined,
@@ -79,6 +85,11 @@ export function getAIProvider(config: AIProviderConfig): AIProvider {
   }
 
   // Default to Claude CLI
+  if (hostCliProvidersDisabled()) {
+    throw new Error(
+      "The Claude CLI provider is disabled in this deployment (AI_HOST_CLI_DISABLED) — configure an API-key provider (Anthropic, OpenAI, OpenRouter) in AI settings",
+    );
+  }
   return new ClaudeCLIProvider();
 }
 
