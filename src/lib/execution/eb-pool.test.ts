@@ -183,6 +183,7 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@lastest/pool-service/common", () => ({
   isKubernetesMode: vi.fn(() => false),
   isDynamicPoolMode: vi.fn(() => false),
+  provisionerMode: vi.fn(() => "none"),
   jobNameForRunnerName: vi.fn(() => null),
 }));
 vi.mock("@lastest/pool-service/client", () => ({

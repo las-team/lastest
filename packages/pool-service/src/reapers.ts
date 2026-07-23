@@ -26,9 +26,9 @@ import {
 import { and, eq } from "drizzle-orm";
 import { isDynamicPoolMode, jobNameForRunnerName } from "./common";
 import {
-  currentPoolSize,
   ensureWarmPool,
   ebIdleTTLMs,
+  livePoolCount,
   terminateEBJob,
   warmPoolMin,
 } from "./provisioner";
@@ -87,10 +87,13 @@ export async function reapStalePoolEBs(
 export async function reapIdleEBJobs(idleTtlMs: number): Promise<number> {
   if (!isDynamicPoolMode()) return 0;
 
-  // currentPoolSize excludes offline rows; they count as already-dead slots.
-  // Offline reaping is always safe (we aren't burning capacity by tearing them down).
-  // Idle-online reaping is bounded by warmPoolMin so we preserve the warm pool.
-  const activeSize = await currentPoolSize();
+  // livePoolCount counts live Jobs/children — including just-launched EBs
+  // that haven't registered yet, which is the protective direction for the
+  // warm-pool bound below. Offline reaping is always safe (we aren't burning
+  // capacity by tearing them down); idle-online reaping is bounded by
+  // warmPoolMin so we preserve the warm pool. A k8s-list failure throws out
+  // to the loop's catch — don't reap on an unknown ledger; retried in 60s.
+  const activeSize = await livePoolCount();
   const minKeep = warmPoolMin();
 
   const cutoff = new Date(Date.now() - idleTtlMs);
