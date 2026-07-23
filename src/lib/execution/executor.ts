@@ -1843,7 +1843,7 @@ async function executeViaPoolWorkers(
     prewarmForBuild,
     ensureWarmPool,
   } = await import("@lastest/pool-service/client");
-  const { isDynamicPoolMode } = await import("@lastest/pool-service/common");
+  const { isKubernetesMode } = await import("@lastest/pool-service/common");
 
   // A1 (watchdog liveness keepalive). getRunnerById exposes the EB's DB
   // heartbeat (last_seen, updated cross-pod on each EB poll); SESSION_TIMEOUT_MS
@@ -1866,7 +1866,11 @@ async function executeViaPoolWorkers(
   // setup, when configured) so the first batch of tests doesn't pay the
   // sequential cold-start cost. Throttled by awaitLaunchSlot internally.
   // See docs/eb-and-setup-plan.md B3.
-  if (isDynamicPoolMode()) {
+  // Kubernetes mode only: prewarm exists to hide pod cold start (image pull,
+  // 5-30s). Process mode skips it (the service no-ops it too) — local spawn
+  // is ~2-5s, and prewarm racing the on-demand claim double-spawned a
+  // Chromium per build. The gate here just saves the pointless HTTP call.
+  if (isKubernetesMode()) {
     const prewarmTarget =
       Math.min(maxParallelEBs, tests.length) + (options.setupInfo ? 1 : 0);
     prewarmForBuild(prewarmTarget).catch((err) => {
