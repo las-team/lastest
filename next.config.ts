@@ -31,7 +31,6 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_BUILD_DATE: new Date().toISOString().split("T")[0],
   },
   serverExternalPackages: [
-    "tesseract.js",
     "playwright",
     "playwright-core",
     "@anthropic-ai/claude-agent-sdk",

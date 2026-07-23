@@ -14,6 +14,7 @@ import {
   getDefaultSetupSteps,
 } from "@/lib/db/queries";
 import { requireCapability, requireRepoCapability } from "@/lib/auth";
+import { ocrSleep, ocrWarmup } from "@/lib/ocr";
 import {
   safeOutboundFetch,
   SsrfBlockedError,
@@ -268,6 +269,13 @@ export async function startRecording(
     `[Recording] Setup chain: ${stepsToResolve.length} step(s) declared, ${resolvedSetupSteps?.length ?? 0} resolved with code ${traceTag}`,
   );
 
+  const ocrEnabled =
+    selectorPriority.find((s) => s.type === "ocr-text")?.enabled ?? false;
+  // Wake the OCR backend now so the first ocr-text capture during the
+  // recording doesn't pay Tesseract init latency (fire-and-forget; the
+  // backend auto-sleeps on idle if the recording never uses it).
+  if (ocrEnabled) ocrWarmup();
+
   // Queue start_recording command to the runner
   const command = createMessage<StartRecordingCommand>(
     "command:start_recording",
@@ -281,8 +289,7 @@ export async function startRecording(
       browser:
         (settings.browser as "chromium" | "firefox" | "webkit") ?? "chromium",
       selectorPriority,
-      ocrEnabled:
-        selectorPriority.find((s) => s.type === "ocr-text")?.enabled ?? false,
+      ocrEnabled,
       pointerGestures: settings.pointerGestures ?? false,
       cursorFPS: settings.cursorFPS ?? 30,
       setupSteps: resolvedSetupSteps,
@@ -462,6 +469,18 @@ export async function stopRecording(repositoryId?: string | null) {
 
     // Generate code from the stored events (merged in-memory + DB-forwarded)
     const allEvents = await getRemoteRecordingEvents(repositoryId);
+    // The EB attaches a screencast-frame crop of each clicked element when
+    // ocr-text is enabled; extract the text here (in-process Tesseract or the
+    // OCR_SERVICE_URL container) and turn it into ocr-text fallback selectors
+    // before codegen. The EB never talks to the OCR backend itself. Touched
+    // events are written back so the DB rows match what codegen used (selector
+    // added, crop stripped) — the timeline UI and any cross-pod reader would
+    // otherwise still show these clicks as coords-only.
+    const ocrTouched = await applyOcrTextSelectors(
+      allEvents,
+      remoteSession.selectorPriority,
+    );
+    await persistOcrEventUpdates(remoteSession.sessionId, ocrTouched);
     const recordingSettings = await getPlaywrightSettings(repositoryId);
     const generatedCode = generateCodeFromRemoteEvents(
       allEvents,
@@ -473,6 +492,10 @@ export async function stopRecording(repositoryId?: string | null) {
 
     // Release the EB back to the pool
     await releasePoolEB(remoteSession.runnerId);
+
+    // Recording done — let the OCR backend sleep (fire-and-forget; both
+    // backends also auto-sleep after their idle timeout).
+    void ocrSleep().catch(() => {});
 
     return {
       id: remoteSession.sessionId,
@@ -993,6 +1016,95 @@ export async function getOrCreateFunctionalArea(name: string) {
   }
 
   return createFunctionalArea({ name });
+}
+
+/**
+ * Recording-time OCR: convert each event's `data.ocrCrop` (base64 PNG of the
+ * clicked element, cropped by the EB from the live screencast frame) into an
+ * `ocr-text="…"` fallback selector appended to `data.selectors`. Crops are
+ * always stripped, extraction is best-effort, and events without a crop are
+ * untouched — so coordinate-only clicks gain a text fallback when possible
+ * and nothing regresses when OCR fails or is disabled.
+ *
+ * Returns the events whose `data` was mutated (crop stripped and/or selector
+ * added) so the caller can write them back to the DB.
+ */
+async function applyOcrTextSelectors(
+  events: RemoteRecordingEvent[],
+  selectorPriority: Array<{ type: string; enabled: boolean; priority: number }>,
+): Promise<RemoteRecordingEvent[]> {
+  const ocrEnabled =
+    selectorPriority.find((s) => s.type === "ocr-text")?.enabled ?? false;
+  const targets = events.filter(
+    (e) => typeof e.data?.ocrCrop === "string" && e.data.ocrCrop,
+  );
+  if (targets.length === 0) return [];
+  if (!ocrEnabled) {
+    // Setting flipped mid-recording — drop the crops, don't OCR them.
+    for (const event of targets) delete event.data.ocrCrop;
+    return targets;
+  }
+  const { extractText } = await import("@/lib/playwright/ocr");
+  await Promise.allSettled(
+    targets.map(async (event) => {
+      const crop = event.data.ocrCrop as string;
+      delete event.data.ocrCrop;
+      const raw = await extractText(Buffer.from(crop, "base64"));
+      // Playwright's getByText normalizes whitespace, so collapse runs — a
+      // wrapped button label OCRs with a newline that would never match. Also
+      // strip leading/trailing symbol junk: icons next to labels OCR as
+      // stray glyphs ('© Verify' for an icon+text nav item), and getByText
+      // needs the whole string present in the DOM to match.
+      const text = raw
+        ?.replace(/\s+/g, " ")
+        .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "")
+        .trim();
+      if (!text) return;
+      // A label longer than this isn't a label — it's a container crop that
+      // slipped through (getByText needs the whole string in one element, so
+      // an over-long value can only ever fail at replay).
+      if (text.length > 80) return;
+      const selectors = Array.isArray(event.data.selectors)
+        ? (event.data.selectors as Array<{ type: string; value: string }>)
+        : (event.data.selectors = []);
+      selectors.push({ type: "ocr-text", value: `ocr-text="${text}"` });
+    }),
+  );
+  return targets;
+}
+
+/**
+ * Write OCR-touched events back to `remote_recording_events` so the persisted
+ * rows carry the appended ocr-text selectors (and lose the crop payload).
+ * Best-effort: codegen already ran on the in-memory copies.
+ */
+async function persistOcrEventUpdates(
+  sessionId: string,
+  events: RemoteRecordingEvent[],
+): Promise<void> {
+  if (events.length === 0) return;
+  try {
+    const { db } = await import("@/lib/db");
+    const { remoteRecordingEvents } = await import("@/lib/db/schema");
+    const { and, eq } = await import("drizzle-orm");
+    await Promise.all(
+      events.map((event) =>
+        db
+          .update(remoteRecordingEvents)
+          .set({ data: event.data as Record<string, unknown> })
+          .where(
+            and(
+              eq(remoteRecordingEvents.sessionId, sessionId),
+              eq(remoteRecordingEvents.sequence, event.sequence),
+            ),
+          ),
+      ),
+    );
+  } catch (err) {
+    console.warn(
+      `[Recording] Failed to persist OCR selector updates for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
 // ============================================

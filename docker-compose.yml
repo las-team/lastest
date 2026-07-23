@@ -19,6 +19,25 @@ services:
     labels:
       com.docker.compose.project: lastest
 
+  # OCR service (packages/ocr-service) — the ONLY OCR backend; the app has no
+  # in-process Tesseract. `docker compose up -d` builds + starts it (the
+  # Dockerfile is self-contained), then set
+  # OCR_SERVICE_URL=http://localhost:8891 in .env.local.
+  ocr:
+    build:
+      context: .
+      dockerfile: packages/ocr-service/Dockerfile
+    image: lastest-ocr-service:latest
+    container_name: lastest-dev-ocr
+    restart: unless-stopped
+    ports:
+      - "8891:8891"
+    environment:
+      OCR_IDLE_TIMEOUT_MS: "120000"
+      OCR_MAX_WORKERS: "2"
+    labels:
+      com.docker.compose.project: lastest
+
 volumes:
   lastest-pgdata:
     name: lastest-pgdata
