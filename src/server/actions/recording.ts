@@ -28,7 +28,7 @@ import {
 } from "@/lib/playwright/selector-analysis";
 import { v4 as uuid } from "uuid";
 import { revalidatePath } from "next/cache";
-import { createMessage } from "@/lib/ws/protocol";
+import { createMessage } from "@lastest/eb-protocol";
 import type {
   StartRecordingCommand,
   StopRecordingCommand,
@@ -38,7 +38,7 @@ import type {
   FlagDownloadCommand,
   InsertTimestampCommand,
   PromoteSelectorCommand,
-} from "@/lib/ws/protocol";
+} from "@lastest/eb-protocol";
 import {
   claimOrProvisionPoolEB,
   releasePoolEB,

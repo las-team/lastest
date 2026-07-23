@@ -102,21 +102,20 @@ describe("expiry", () => {
   });
 });
 
-describe("ws-proxy-preload.js stays byte-compatible", () => {
-  // The proxy runs before any TS loader, so it carries its own copy of the
-  // verifier. Drift between the two would silently break streaming (or worse,
-  // accept something this module rejects), so cross-check the real file.
-  // Run in a child process: requiring the preload patches
-  // http.Server.prototype.listen for the whole process.
-  function inPreload(
+describe("front-proxy.js stays byte-compatible", () => {
+  // The front proxy is a dependency-free script with no TS loader, so it
+  // carries its own copy of the verifier. Drift between the two would silently
+  // break streaming (or worse, accept something this module rejects), so
+  // cross-check the real file. Run in a child process so its module scope
+  // (env-derived key) is isolated from this one.
+  function inProxy(
     grant: string | null,
     query: string,
     env: Record<string, string> = { ENCRYPTION_KEY: TEST_ENCRYPTION_KEY },
   ): unknown {
     const script = `
       const p = require(${JSON.stringify(
-        new URL("../../../scripts/ws-proxy-preload.js", import.meta.url)
-          .pathname,
+        new URL("../../../scripts/front-proxy.js", import.meta.url).pathname,
       )});
       const grant = ${JSON.stringify(grant)};
       process.stdout.write(JSON.stringify({
@@ -136,10 +135,7 @@ describe("ws-proxy-preload.js stays byte-compatible", () => {
 
   it("accepts a grant this module signed and routes to its target", () => {
     const grant = signStreamGrant("10.42.0.7", 9223, "sess-1")!;
-    const out = inPreload(
-      grant,
-      `g=${encodeURIComponent(grant)}&token=abc`,
-    ) as {
+    const out = inProxy(grant, `g=${encodeURIComponent(grant)}&token=abc`) as {
       verified: { h: string; p: number };
       parsed: { host: string; port: number; path: string; reject?: unknown };
     };
@@ -154,7 +150,7 @@ describe("ws-proxy-preload.js stays byte-compatible", () => {
 
   it("rejects a grant when the proxy has a different key", () => {
     const grant = signStreamGrant("10.42.0.7", 9223, "sess-1")!;
-    const out = inPreload(grant, `g=${encodeURIComponent(grant)}`, {
+    const out = inProxy(grant, `g=${encodeURIComponent(grant)}`, {
       ENCRYPTION_KEY: "b".repeat(64),
     }) as { verified: unknown; parsed: { reject?: { code: number } } };
 
@@ -163,7 +159,7 @@ describe("ws-proxy-preload.js stays byte-compatible", () => {
   });
 
   it("refuses the old ?target= form outright", () => {
-    const out = inPreload(null, "target=169.254.169.254%3A80") as {
+    const out = inProxy(null, "target=169.254.169.254%3A80") as {
       parsed: { reject?: { code: number }; host?: string };
     };
     expect(out.parsed.reject?.code).toBe(403);

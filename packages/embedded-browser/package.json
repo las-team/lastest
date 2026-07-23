@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@axe-core/playwright": "^4.11.0",
+    "@lastest/eb-protocol": "workspace:*",
     "@lastest/shared": "workspace:*",
     "jpeg-js": "^0.4.4",
     "playwright": "1.57.0",

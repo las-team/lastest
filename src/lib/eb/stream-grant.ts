@@ -7,7 +7,7 @@ import crypto from "node:crypto";
  *
  *     <base64url(JSON payload)>.<base64url(HMAC-SHA256(payload, secret))>
  *
- * The verification half of this is DUPLICATED in scripts/ws-proxy-preload.js
+ * The verification half of this is DUPLICATED in scripts/front-proxy.js
  */
 
 /** Matches the Job's activeDeadlineSeconds — a grant never outlives its EB. */
