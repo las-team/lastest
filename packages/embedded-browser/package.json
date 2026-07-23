@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@axe-core/playwright": "^4.11.0",
+    "@lastest/eb-protocol": "workspace:*",
     "@lastest/shared": "workspace:*",
     "playwright": "1.57.0",
     "sucrase": "^3.35.0",

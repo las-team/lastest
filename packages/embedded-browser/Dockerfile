@@ -12,7 +12,7 @@ COPY packages/embedded-browser/dist/ ./dist/
 COPY packages/embedded-browser/package.json ./
 
 # Install only production dependencies (skip workspace deps — they're bundled by tsup)
-RUN sed -i '/"@lastest\/shared": "workspace:\*"/d' package.json && npm install --omit=dev
+RUN sed -i '/"@lastest\/[a-z-]*": "workspace:\*"/d' package.json && npm install --omit=dev
 
 # Expose CDP port, streaming port, and health check port
 EXPOSE 9222 9223 9224

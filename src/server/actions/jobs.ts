@@ -303,11 +303,23 @@ export async function cancelJob(
       | string
       | undefined;
     if (testRunId) {
-      await queueCancelCommandToDB(
-        effectiveRunnerId,
-        testRunId,
-        "Cancelled by user",
-      );
+      // Best-effort: `runner_commands.runnerId` is a NOT NULL FK to `runners.id`,
+      // and cancelling a job whose EB already died means the stale-runner reaper
+      // has deleted that row — so the insert raises 23503. That must not abort
+      // the status reconciliation below, which is the only thing keeping the
+      // build/testRun from sitting at 'running' forever.
+      try {
+        await queueCancelCommandToDB(
+          effectiveRunnerId,
+          testRunId,
+          "Cancelled by user",
+        );
+      } catch (err) {
+        console.warn(
+          `[Jobs] cancel dispatch failed for runner ${effectiveRunnerId}; continuing to reconcile statuses:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
     }
   }
 

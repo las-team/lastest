@@ -23,7 +23,7 @@ import { toProxyStreamUrl } from "@/lib/eb/stream-url";
 import { appendStreamToken } from "@/lib/eb/stream-token";
 import { crawlTargetApp } from "@/lib/qa-agent/crawl";
 import { exploreTargetApp } from "@/lib/qa-agent/explore";
-import { poolMax } from "@/lib/eb/provisioner";
+import { getGlobalPoolLimits } from "@/lib/db/queries/settings";
 import {
   findAuthLinksOnEb,
   findExistingAuthSetup,
@@ -335,7 +335,8 @@ async function mergeMetadata(
 
 function proxiedStream(raw: string | null | undefined): string | undefined {
   if (!raw) return undefined;
-  const proxied = toProxyStreamUrl(raw) ?? raw;
+  const proxied = toProxyStreamUrl(raw);
+  if (!proxied) return undefined;
   return appendStreamToken(proxied, process.env.STREAM_AUTH_TOKEN) || undefined;
 }
 
@@ -1111,9 +1112,11 @@ async function runQaDiscoverSwarm(args: {
   const config = args.initialExplore.config;
 
   // Cap the swarm so builds keep pool headroom: min(requested, poolMax − 5).
-  const max = await poolMax().catch(
-    () => config.explorers + SWARM_POOL_HEADROOM,
-  );
+  const max = await getGlobalPoolLimits()
+    .then(
+      (limits) => limits?.ebPoolMax ?? config.explorers + SWARM_POOL_HEADROOM,
+    )
+    .catch(() => config.explorers + SWARM_POOL_HEADROOM);
   const want = Math.max(
     1,
     Math.min(config.explorers, max - SWARM_POOL_HEADROOM),

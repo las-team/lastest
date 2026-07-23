@@ -59,7 +59,9 @@ export async function GET(
       runnerId: session.runnerId,
       status: session.status,
       streamUrl:
-        isLive && probedAlive ? toProxyStreamUrl(session.streamUrl) : null,
+        isLive && probedAlive
+          ? toProxyStreamUrl(session.streamUrl, session.id)
+          : null,
       viewport: session.viewport,
       currentUrl: session.currentUrl,
       streamAuthToken,

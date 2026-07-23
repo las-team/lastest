@@ -23,24 +23,8 @@ export async function register() {
     console.error("[Boot] reconcileOrphanedPoolEBs failed:", err);
   }
 
-  // Top up the warm EB pool immediately so the first debug/record/test click
-  // hits a ready EB without waiting for the cleanup loop in /api/ws/runner
-  // (which only starts after an EB polls in — chicken-and-egg if the pool is
-  // empty at boot). Requires the global playwright_settings row to exist.
-  try {
-    const { ensureGlobalPlaywrightSettings } =
-      await import("@/lib/db/queries/settings");
-    await ensureGlobalPlaywrightSettings();
-    const { isKubernetesMode, ensureWarmPool } =
-      await import("@/lib/eb/provisioner");
-    if (isKubernetesMode()) {
-      const launched = await ensureWarmPool();
-      if (launched > 0)
-        console.log(`[Boot] Warm pool topped up (+${launched}) at startup`);
-    }
-  } catch (err) {
-    console.error("[Boot] ensureWarmPool failed:", err);
-  }
+  // Warm-pool boot top-up moved to the pool service (`pnpm pool` /
+  // packages/pool-service/src/main.ts) — the app no longer provisions EBs directly.
 
   // Start the periodic reaper loop here — not lazily from `/api/ws/runner` —
   // because EBs hit the envoy-less companion pod via LASTEST_URL, leaving the
@@ -51,17 +35,5 @@ export async function register() {
     startCleanupLoop();
   } catch (err) {
     console.error("[Boot] startCleanupLoop failed:", err);
-  }
-
-  // Activity-feed WS server (port 9400). Previously started from the (app)
-  // layout, which forced every static-page-collection worker during `next
-  // build` to race for the port and EADDRINUSE against the dev server.
-  // Booting once here keeps the singleton process-scoped.
-  try {
-    const { startActivityFeedServer } =
-      await import("@/lib/ws/activity-feed-server");
-    startActivityFeedServer();
-  } catch (err) {
-    console.error("[Boot] startActivityFeedServer failed:", err);
   }
 }

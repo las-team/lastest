@@ -527,11 +527,15 @@ export function QaSummaryPanel({
           <div className="space-y-1">
             <h4 className="text-sm font-medium">Journey traceability</h4>
             <div className="rounded-md border divide-y">
-              {plan.journeys.map((journey) => {
+              {plan.journeys.map((journey, idx) => {
                 const testIds = summary.journeyCoverage[journey.id] ?? [];
                 return (
                   <div
-                    key={journey.id}
+                    // Index-suffixed so a legacy plan carrying duplicate journey
+                    // ids (minted by a since-fixed bug) still renders without a
+                    // React key collision; journey.id stays the coverage lookup
+                    // key. Fresh plans have unique ids, so idx is inert there.
+                    key={`${journey.id}-${idx}`}
                     className="flex items-center justify-between px-3 py-1.5 text-sm gap-2"
                   >
                     <span className="truncate">{journey.title}</span>

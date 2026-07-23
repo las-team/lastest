@@ -95,6 +95,37 @@ vi.mock("@/lib/db", () => ({
   db: mockDb,
 }));
 
+// The pool-service package (reapers) imports the DB via @lastest/db directly,
+// not through the app's @/lib/db shim — mock both specifiers with the same
+// fakes so app modules and package modules see one mocked DB.
+vi.mock("@lastest/db", () => ({
+  db: mockDb,
+  sql: {},
+}));
+
+vi.mock("@lastest/db/schema", () => ({
+  runners: {
+    id: "id",
+    teamId: "team_id",
+    status: "status",
+    isSystem: "is_system",
+    type: "type",
+    name: "name",
+    lastSeen: "last_seen",
+  },
+  embeddedSessions: {
+    id: "id",
+    runnerId: "runner_id",
+    status: "status",
+    busySince: "busy_since",
+    userId: "user_id",
+    lastActivityAt: "last_activity_at",
+    teamId: "team_id",
+  },
+  runnerCommands: { id: "id", runnerId: "runner_id", status: "status" },
+  runnerCommandResults: { id: "id", runnerId: "runner_id" },
+}));
+
 vi.mock("@/lib/db/schema", () => ({
   runners: {
     id: "id",
@@ -145,20 +176,25 @@ vi.mock("@/lib/auth", () => ({
     .mockResolvedValue({ team: { id: "team-1" }, user: { id: "user-1" } }),
 }));
 
-// Stub provisioner so tests don't react to the host's EB_PROVISIONER env var.
-// deploy.sh sources .env.local (EB_PROVISIONER=kubernetes) before `pnpm vitest`,
-// which flipped isPoolBusy into the k8s branch and broke the mock sequencing.
-vi.mock("@/lib/eb/provisioner", () => ({
+// Stub the pool mode + client so tests don't react to the host's
+// EB_PROVISIONER env var (deploy.sh sources .env.local with
+// EB_PROVISIONER=kubernetes before `pnpm vitest`, which flipped isPoolBusy
+// into the k8s branch) and never hit the pool-service HTTP surface.
+vi.mock("@lastest/pool-service/common", () => ({
   isKubernetesMode: vi.fn(() => false),
-  launchEBJob: vi.fn(),
-  terminateEBJob: vi.fn(),
-  jobNameForRunnerName: vi.fn(),
-  listEBJobNames: vi.fn().mockResolvedValue([]),
-  poolMax: vi.fn().mockResolvedValue(10),
-  warmPoolMin: vi.fn().mockResolvedValue(0),
-  currentPoolSize: vi.fn().mockResolvedValue(0),
-  incInFlightProvisions: vi.fn(),
-  decInFlightProvisions: vi.fn(),
+  isDynamicPoolMode: vi.fn(() => false),
+  jobNameForRunnerName: vi.fn(() => null),
+}));
+vi.mock("@lastest/pool-service/client", () => ({
+  getPoolStatus: vi.fn().mockResolvedValue({ online: 0, size: 0, max: 10 }),
+  provisionEB: vi.fn().mockResolvedValue(null),
+  terminatePoolJob: vi.fn().mockResolvedValue(undefined),
+  listEBJobNames: vi.fn().mockResolvedValue(null),
+  ensureWarmPool: vi.fn().mockResolvedValue(undefined),
+  prewarmForBuild: vi.fn().mockResolvedValue(0),
+  incBuildDispatch: vi.fn(),
+  decBuildDispatch: vi.fn(),
+  getEBPodInfo: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("next/cache", () => ({
@@ -303,7 +339,7 @@ describe("EB Pool Management", () => {
       ];
 
       const { reapStalePoolEBs } =
-        await import("@/server/actions/embedded-sessions");
+        await import("@lastest/pool-service/reapers");
       const reaped = await reapStalePoolEBs();
 
       expect(reaped).toBe(1);
@@ -325,7 +361,7 @@ describe("EB Pool Management", () => {
       ];
 
       const { reapStalePoolEBs } =
-        await import("@/server/actions/embedded-sessions");
+        await import("@lastest/pool-service/reapers");
       const reaped = await reapStalePoolEBs();
 
       expect(reaped).toBe(0);
@@ -335,7 +371,7 @@ describe("EB Pool Management", () => {
       dbSelectResults = [[]];
 
       const { reapStalePoolEBs } =
-        await import("@/server/actions/embedded-sessions");
+        await import("@lastest/pool-service/reapers");
       const reaped = await reapStalePoolEBs();
 
       expect(reaped).toBe(0);
@@ -356,7 +392,7 @@ describe("EB Pool Management", () => {
       ];
 
       const { reapStalePoolEBs } =
-        await import("@/server/actions/embedded-sessions");
+        await import("@lastest/pool-service/reapers");
       const reaped = await reapStalePoolEBs();
 
       expect(reaped).toBe(1);

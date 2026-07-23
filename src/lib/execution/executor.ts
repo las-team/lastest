@@ -24,8 +24,8 @@ import type {
   RunTestCommand,
   RunSetupCommand,
   StabilizationPayload,
-} from "@/lib/ws/protocol";
-import { createMessage } from "@/lib/ws/protocol";
+} from "@lastest/eb-protocol";
+import { createMessage } from "@lastest/eb-protocol";
 import {
   queueCommandToDB,
   queueCancelCommandToDB,
@@ -1109,8 +1109,17 @@ async function executeViaRunner(
       cancelled = true;
       // Clear pending so no more tests get queued
       pending.length = 0;
-      // Send cancel to the remote runner for in-flight tests
-      await queueCancelCommandToDB(runnerId, runId, "Cancelled by user");
+      // Send cancel to the remote runner for in-flight tests. Best-effort: the
+      // runner row may already be reaped (NOT NULL FK → 23503), and a throw here
+      // would skip the in-flight drain below, stranding the whole run.
+      try {
+        await queueCancelCommandToDB(runnerId, runId, "Cancelled by user");
+      } catch (err) {
+        console.warn(
+          `[Executor] cancel dispatch failed for runner ${runnerId} during user cancel; draining in-flight anyway:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
       // Mark remaining in-flight as failed and break out
       for (const [commandId, info] of inFlight) {
         inFlight.delete(commandId);
@@ -1540,8 +1549,10 @@ async function executeViaRunner(
         let podDiagnostics = "";
         if (runnerRow?.name) {
           try {
-            const { getEBPodInfo, jobNameForRunnerName } =
-              await import("@/lib/eb/provisioner");
+            const { getEBPodInfo } =
+              await import("@lastest/pool-service/client");
+            const { jobNameForRunnerName } =
+              await import("@lastest/pool-service/common");
             const jobName = jobNameForRunnerName(runnerRow.name);
             if (jobName) {
               const info = await getEBPodInfo(jobName, 80);
@@ -1635,10 +1646,27 @@ async function executeViaRunner(
         console.error(
           `[Executor] Test ${info.testId} timed out: ${errorMessage}`,
         );
-        // Cancel the stale test on the runner so it frees resources (no-op if
-        // the runner is already dead — the cancel command just gets reaped
-        // alongside the dead runner's other commands).
-        await queueCancelCommandToDB(runnerId, runId, errorMessage);
+        // Cancel the stale test on the runner so it frees resources — but only
+        // when a runner is actually there to receive it. `runner_commands.runnerId`
+        // is a NOT NULL FK to `runners.id`, and the stale-runner reaper deletes
+        // that row the moment the EB stops heartbeating (that deletion is WHY
+        // `runnerDead` is set). Queueing a cancel for a reaped runner therefore
+        // raises a 23503 FK violation rather than the no-op this once assumed.
+        // Cleanup must never be able to destroy the diagnostic it was called
+        // with: an escaping throw here skipped `results.push(timeoutResult)`
+        // and stripped the `[EB-dead]` tag that `EB_INFRA_ERR_RX` matches on,
+        // so a dead pod hard-failed the user's test instead of retrying it on
+        // a fresh EB.
+        if (!runnerDead) {
+          try {
+            await queueCancelCommandToDB(runnerId, runId, errorMessage);
+          } catch (err) {
+            console.warn(
+              `[Executor] cancel dispatch failed for runner ${runnerId} (test ${info.testId}); keeping original timeout diagnostic:`,
+              err instanceof Error ? err.message : err,
+            );
+          }
+        }
         inFlight.delete(commandId);
         completedCount++;
         const timeoutResult: TestRunResult = {
@@ -1678,7 +1706,7 @@ async function executeViaRunner(
  * Each test then claims a fresh EB, applies the broadcast storageState cold,
  * runs the test, and releases the EB. Concurrency is bounded by
  * `maxParallelEBs`; provisioning scales to meet demand (see
- * `src/lib/eb/provisioner.ts`). Per-test retry is limited to one extra EB
+ * `packages/pool-service/src/provisioner.ts`). Per-test retry is limited to one extra EB
  * attempt for genuinely dead EB infra.
  *
  * Returns the collected results, or `null` if no EB could be claimed at all
@@ -1814,8 +1842,8 @@ async function executeViaPoolWorkers(
     decBuildDispatch,
     prewarmForBuild,
     ensureWarmPool,
-    isKubernetesMode,
-  } = await import("@/lib/eb/provisioner");
+  } = await import("@lastest/pool-service/client");
+  const { isDynamicPoolMode } = await import("@lastest/pool-service/common");
 
   // A1 (watchdog liveness keepalive). getRunnerById exposes the EB's DB
   // heartbeat (last_seen, updated cross-pod on each EB poll); SESSION_TIMEOUT_MS
@@ -1838,7 +1866,7 @@ async function executeViaPoolWorkers(
   // setup, when configured) so the first batch of tests doesn't pay the
   // sequential cold-start cost. Throttled by awaitLaunchSlot internally.
   // See docs/eb-and-setup-plan.md B3.
-  if (isKubernetesMode()) {
+  if (isDynamicPoolMode()) {
     const prewarmTarget =
       Math.min(maxParallelEBs, tests.length) + (options.setupInfo ? 1 : 0);
     prewarmForBuild(prewarmTarget).catch((err) => {

@@ -17,6 +17,10 @@ RUN corepack enable && corepack prepare pnpm@10.28.1 --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/runner/package.json ./packages/runner/
 COPY packages/embedded-browser/package.json ./packages/embedded-browser/
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/eb-protocol/package.json ./packages/eb-protocol/
+COPY packages/db/package.json ./packages/db/
+COPY packages/pool-service/package.json ./packages/pool-service/
 
 # Install dependencies
 RUN pnpm install --frozen-lockfile
@@ -77,6 +81,9 @@ RUN pnpm build
 
 # Build embedded-browser
 RUN cd packages/embedded-browser && npx tsup src/index.ts --format esm --dts
+
+# Build the EB pool service (standalone process — see packages/pool-service/)
+RUN pnpm build:pool
 
 # -----------------------------------------------------------------------------
 # Stage 3: Production Runner (with Playwright)
@@ -181,7 +188,7 @@ RUN ln -sf .pnpm/tesseract.js@7.0.0/node_modules/tesseract.js ./node_modules/tes
 RUN npm install -g @anthropic-ai/claude-code@latest 2>/dev/null || \
     ln -s /app/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude /usr/local/bin/claude
 
-# Copy ws (used by activity-feed-server + embedded-browser)
+# Copy ws (used by the bundled embedded-browser dist)
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/ws@8.21.0/node_modules/ws ./node_modules/.pnpm/ws@8.21.0/node_modules/ws
 RUN ln -sf .pnpm/ws@8.21.0/node_modules/ws ./node_modules/ws
 
@@ -197,7 +204,11 @@ RUN mkdir -p /app/embedded-browser/node_modules && \
 COPY --chown=nextjs:nodejs scripts/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 COPY --chown=nextjs:nodejs scripts/migrate.js /app/migrate.js
-COPY --chown=nextjs:nodejs scripts/ws-proxy-preload.js /app/ws-proxy-preload.js
+
+# EB pool service bundle (started by the entrypoint as its own process —
+# the only process in the container that talks to the Kubernetes API)
+COPY --from=builder --chown=nextjs:nodejs /app/packages/pool-service/dist /app/dist-pool
+COPY --chown=nextjs:nodejs scripts/front-proxy.js /app/front-proxy.js
 
 # Create storage directories
 RUN mkdir -p /app/storage/screenshots /app/storage/baselines /app/storage/diffs /app/storage/traces /app/storage/videos /app/storage/planned /app/storage/bug-reports && \
@@ -230,4 +241,6 @@ USER nextjs
 VOLUME ["/app/storage"]
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["node", "--require", "./ws-proxy-preload.js", "server.js"]
+# front-proxy owns :3000 and spawns Next's standalone server on 127.0.0.1:3001
+# (PORT/HOSTNAME are overridden for the child by front-proxy itself).
+CMD ["node", "front-proxy.js", "--", "node", "server.js"]
