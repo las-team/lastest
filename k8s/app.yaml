@@ -1,0 +1,136 @@
+# Lastest app — split-services Deployment (Dockerfile.app).
+#
+# The app half of the 4-image topology: it runs ONLY the Next.js server behind
+# scripts/front-proxy.js (which owns :3000 and terminates EB stream WebSocket
+# upgrades). It never migrates at boot (k8s/migrate-job.yaml), never runs the
+# pool service in-process (k8s/pool-service.yaml), and does no OCR
+# (k8s/ocr-service.yaml). It therefore needs NO Job-create RBAC — the default
+# ServiceAccount is fine; provisioning rights live on the pool-service pod.
+#
+# The Service MUST be named `lastest`: k8s/pool-service.yaml injects
+# LASTEST_URL=http://lastest:3000 into EB Job pods, which POST results back
+# through it.
+#
+# Deploy order (see also k8s/migrate-job.yaml):
+#   kubectl apply -f k8s/namespace.yaml
+#   kubectl -n lastest create secret generic lastest-secrets \
+#     --from-literal=database-url=... --from-literal=encryption-key=... \
+#     --from-literal=better-auth-secret=... --from-literal=eb-pool-service-token=...
+#   kubectl apply -f k8s/migrate-job.yaml && kubectl -n lastest wait --for=condition=complete job/lastest-migrate --timeout=300s
+#   kubectl apply -f k8s/ocr-service.yaml -f k8s/pool-service.yaml -f k8s/app.yaml
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lastest-storage
+  namespace: lastest
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lastest
+  namespace: lastest
+  labels:
+    app: lastest
+spec:
+  replicas: 1
+  strategy:
+    # /app/storage is a single RWO PVC — a rolling second pod would wedge on
+    # the volume attach. Recreate until storage moves to object storage / RWX.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: lastest
+  template:
+    metadata:
+      labels:
+        app: lastest
+    spec:
+      containers:
+        - name: app
+          image: lastest-app:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: lastest-secrets
+                  key: database-url
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: lastest-secrets
+                  key: encryption-key
+            - name: BETTER_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: lastest-secrets
+                  key: better-auth-secret
+            # Split-services wiring: pool service + OCR are their own
+            # Deployments, reached over in-namespace Service DNS.
+            - name: EB_POOL_SERVICE_URL
+              value: "http://lastest-pool:9500"
+            - name: EB_POOL_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: lastest-secrets
+                  key: eb-pool-service-token
+                  optional: true
+            - name: OCR_SERVICE_URL
+              value: "http://lastest-ocr:8891"
+            # Plain-HTTP access (port-forward / NodePort). Set to "true" (or
+            # drop, production defaults secure) behind a TLS ingress.
+            - name: BETTER_AUTH_COOKIE_SECURE
+              value: "false"
+          ports:
+            - containerPort: 3000
+              name: http
+          volumeMounts:
+            - name: storage
+              mountPath: /app/storage
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: lastest-storage
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lastest
+  namespace: lastest
+  labels:
+    app: lastest
+spec:
+  type: ClusterIP
+  selector:
+    app: lastest
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
