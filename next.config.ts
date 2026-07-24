@@ -11,6 +11,10 @@ function git(cmd: string): string {
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // next/image is served as-is (no server-side resize/format conversion) so the
+  // production runtime never needs `sharp` + `libvips` (~15MB+). Images still
+  // get layout/lazy-loading from next/image, just at their source resolution.
+  images: { unoptimized: true },
   transpilePackages: [
     "@lastest/shared",
     "@lastest/eb-protocol",
@@ -22,6 +26,27 @@ const nextConfig: NextConfig = {
     "/privacy": ["./src/content/legal/privacy.md"],
     "/cookies": ["./src/content/legal/cookies.md"],
     "/dpa": ["./src/content/legal/dpa.md"],
+  },
+  // Next's file tracer (nft) over-includes build-only packages into the
+  // standalone bundle. None of these are needed by the running server, so
+  // prune them to keep the production image slim:
+  //   - typescript: not a runtime dep (`pnpm why typescript --prod` is empty);
+  //     @lastest/db is transpiled at build time, not required as TS at runtime.
+  //   - tesseract.js: OCR runs in the separate ocr-service container.
+  //   - sharp/@img: unused now that image optimization is off (above).
+  //   - source maps / type decls: never loaded by the server.
+  // NOTE: @anthropic-ai/claude-agent-sdk can't be pruned here — it's a
+  // serverExternalPackage, which forces nft to keep it regardless of this
+  // exclude list. Dockerfile.app removes it surgically from the runner stage.
+  outputFileTracingExcludes: {
+    "*": [
+      "**/typescript/**",
+      "**/tesseract.js/**",
+      "**/@img/**",
+      "**/sharp/**",
+      "**/*.map",
+      "**/*.d.ts",
+    ],
   },
   env: {
     NEXT_PUBLIC_GIT_HASH:
