@@ -45,6 +45,20 @@ docs
 # Scripts (not needed in build except entrypoint)
 scripts/*.ts
 
+# CI / infra manifests — not part of the app build context
+k8s
+.github
+
+# Sibling services / packages the app image doesn't build (the builder stage
+# rm -rf's these anyway; keeping them out shrinks the COPY . . context tarball)
+packages/ocr-service
+packages/vscode-extension
+packages/runner
+
+# Large local artifacts
+storage
+.turbo
+
 # Misc
 *.log
 *.tmp

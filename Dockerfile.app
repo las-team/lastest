@@ -21,7 +21,7 @@
 # -----------------------------------------------------------------------------
 # Stage 1: Dependencies
 # -----------------------------------------------------------------------------
-FROM node:24-slim AS deps
+FROM node:24-alpine AS deps
 
 WORKDIR /app
 
@@ -42,7 +42,7 @@ RUN pnpm install --frozen-lockfile
 # -----------------------------------------------------------------------------
 # Stage 2: Builder
 # -----------------------------------------------------------------------------
-FROM node:24-slim AS builder
+FROM node:24-alpine AS builder
 
 WORKDIR /app
 
@@ -93,39 +93,52 @@ RUN pnpm build
 # playwright JS package (copied in below), NOT a local Chromium binary or its
 # system libraries. The single local `chromium.launch()` (quickstart
 # storage-capture's self-hosted fallback) is gated off in Kubernetes mode
-# (isKubernetesMode()), so it never executes here. Using node:slim instead of
+# (isKubernetesMode()), so it never executes here. Using node:alpine instead of
 # mcr.microsoft.com/playwright drops ~1.8GB of base image.
 # -----------------------------------------------------------------------------
-FROM node:24-slim AS runner
+FROM node:24-alpine AS runner
 
 WORKDIR /app
 
-# C.UTF-8 is always present on Debian — no locale-gen / apt layer needed. Node
-# ships full ICU, so Intl/date formatting is independent of the system locale;
-# UTF-8 byte handling is all the app needs (screenshot rendering, where en_US
-# mattered for the Playwright base, now happens entirely in the EB pod).
+# C.UTF-8 is valid on Alpine/musl — no locale packages needed. Node ships full
+# ICU, so Intl/date formatting is independent of the system locale; UTF-8 byte
+# handling is all the app needs (screenshot rendering, where en_US mattered for
+# the Playwright base, now happens entirely in the EB pod).
 ENV LANG=C.UTF-8
 ENV TZ=UTC
 
 # Service account: no interactive login shell (nologin). The passwd shell is
 # only consulted for `su - nextjs` / login sessions — never by the ENTRYPOINT,
-# Node's child_process, or `docker exec -it … bash` (which names the command).
-# --create-home is still needed: the shared entrypoint symlinks
+# Node's child_process, or `docker exec -it … sh` (which names the command).
+# A home dir (-h) is still needed: the shared entrypoint symlinks
 # /home/nextjs/.claude → /app/storage/.claude and that requires the home dir.
-RUN groupadd --gid 1002 nodejs && \
-    useradd --uid 1002 --gid nodejs --shell /usr/sbin/nologin --create-home nextjs
+# Alpine BusyBox tools: nologin lives at /sbin/nologin, -D = no password.
+RUN addgroup -g 1002 nodejs && \
+    adduser -u 1002 -G nodejs -s /sbin/nologin -h /home/nextjs -D nextjs
 
 # Standalone build (includes its own pruned node_modules)
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+# Drop @anthropic-ai/claude-agent-sdk from the traced bundle. It's a
+# serverExternalPackage (which forces nft to include it — outputFileTracingExcludes
+# can't remove it), but this API-key-only image must NOT ship it
+# (AI_HOST_CLI_DISABLED=1). The app only reaches it via a guarded `await import()`
+# (src/lib/ai/claude-agent-sdk.ts), which then fails gracefully to "use an
+# API-key provider". Version-agnostic glob so a dependency bump keeps working.
+RUN rm -rf ./node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@* \
+           ./node_modules/@anthropic-ai/claude-agent-sdk
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/build-info.json ./build-info.json
 
-# next.config.ts serverExternalPackages — standalone tracing prunes these,
-# so they're copied in by exact pnpm store path. Keep in sync with the
-# installed store via `node scripts/sync-docker-pins.mjs Dockerfile.app`.
+# next.config.ts serverExternalPackages (playwright, playwright-core). nft's
+# standalone trace handles these asymmetrically (verified against a real build):
+#   - playwright-core@1.57.0: traced in FULL (~6.9M) — no content copy needed.
+#   - playwright@1.57.0 (thin wrapper): only a ~12K stub is traced, MISSING its
+#     index.js entry, so `require("playwright")` fails without the real package.
+# So copy ONLY the wrapper, rely on the trace for playwright-core, and recreate
+# the top-level symlinks (nft never creates those) into the pnpm store.
+# Keep the pinned versions in sync via `node scripts/sync-docker-pins.mjs Dockerfile.app`.
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/playwright@1.57.0/node_modules/playwright ./node_modules/.pnpm/playwright@1.57.0/node_modules/playwright
-COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/playwright-core@1.57.0/node_modules/playwright-core ./node_modules/.pnpm/playwright-core@1.57.0/node_modules/playwright-core
 RUN ln -sf .pnpm/playwright@1.57.0/node_modules/playwright ./node_modules/playwright && \
     ln -sf .pnpm/playwright-core@1.57.0/node_modules/playwright-core ./node_modules/playwright-core
 
@@ -134,15 +147,15 @@ RUN ln -sf .pnpm/playwright@1.57.0/node_modules/playwright ./node_modules/playwr
 # they run once per deploy as a dedicated k8s Job (Dockerfile.migrate +
 # k8s/migrate-job.yaml). Everything the app SERVER imports at runtime
 # (drizzle-orm, postgres via @lastest/db, all workspace-package source) is
-# already traced into the Next standalone bundle copied above; the only runtime
-# deps that need a manual copy are next.config.ts serverExternalPackages
-# (playwright, above — claude-agent-sdk deliberately omitted, see below), which
-# Next excludes from the trace by design.
+# already traced into the Next standalone bundle copied above. The only manual
+# step for a serverExternalPackage is re-linking playwright's top-level symlink
+# (above) — nft traces its content but not the symlink. claude-agent-sdk is the
+# inverse: also traced in, but deliberately deleted above (API-key-only image).
 
 # API-key-only AI: this image ships neither the Claude Code CLI binary nor
-# the @anthropic-ai/claude-agent-sdk runtime (a serverExternalPackage the
-# standalone build prunes — deliberately NOT copied back in; the app
-# lazy-imports it, see src/lib/ai/claude-agent-sdk.ts). AI_HOST_CLI_DISABLED
+# the @anthropic-ai/claude-agent-sdk runtime (a serverExternalPackage nft
+# traces into the bundle, so it's deleted above; the app only lazy-imports it
+# behind a guarded try/catch, see src/lib/ai/claude-agent-sdk.ts). AI_HOST_CLI_DISABLED
 # below makes the app report the 'claude-cli' / 'claude-agent-sdk' providers
 # as unavailable — use the Anthropic/OpenAI/OpenRouter API-key providers.
 
@@ -177,7 +190,7 @@ LABEL org.opencontainers.image.description="Lastest visual regression platform �
 LABEL org.opencontainers.image.vendor="Lastest"
 LABEL org.opencontainers.image.source="https://github.com/las-team/lastest"
 
-# node:slim ships no wget/curl — use node's global fetch for the healthcheck
+# node:alpine ships no curl — use node's global fetch for the healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD node -e "fetch('http://localhost:3000/api/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
