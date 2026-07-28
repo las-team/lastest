@@ -126,12 +126,12 @@ COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.bin/drizzle-kit ./node
 # Postgres driver required by drizzle-kit push at container startup
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/postgres@3.4.8 ./node_modules/.pnpm/postgres@3.4.8
 RUN ln -sf .pnpm/postgres@3.4.8/node_modules/postgres ./node_modules/postgres
-COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/esbuild@0.25.12 ./node_modules/.pnpm/esbuild@0.25.12
-COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/@esbuild+linux-x64@0.25.12 ./node_modules/.pnpm/@esbuild+linux-x64@0.25.12
-COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/esbuild-register@3.6.0_esbuild@0.25.12 ./node_modules/.pnpm/esbuild-register@3.6.0_esbuild@0.25.12
-RUN ln -sf .pnpm/esbuild@0.25.12/node_modules/esbuild ./node_modules/esbuild && \
-    ln -sf .pnpm/@esbuild+linux-x64@0.25.12/node_modules/@esbuild ./node_modules/@esbuild && \
-    ln -sf .pnpm/esbuild-register@3.6.0_esbuild@0.25.12/node_modules/esbuild-register ./node_modules/esbuild-register
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/esbuild@0.27.2 ./node_modules/.pnpm/esbuild@0.27.2
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/@esbuild+linux-x64@0.27.2 ./node_modules/.pnpm/@esbuild+linux-x64@0.27.2
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/esbuild-register@3.6.0_esbuild@0.27.2 ./node_modules/.pnpm/esbuild-register@3.6.0_esbuild@0.27.2
+RUN ln -sf .pnpm/esbuild@0.27.2/node_modules/esbuild ./node_modules/esbuild && \
+    ln -sf .pnpm/@esbuild+linux-x64@0.27.2/node_modules/@esbuild ./node_modules/@esbuild && \
+    ln -sf .pnpm/esbuild-register@3.6.0_esbuild@0.27.2/node_modules/esbuild-register ./node_modules/esbuild-register
 
 # Copy claude-agent-sdk (standalone prunes serverExternalPackages)
 COPY --from=deps --chown=nextjs:nodejs \
