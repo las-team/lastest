@@ -7,9 +7,11 @@
  * domain, one service per state domain"):
  *   - It is the ONLY process holding infra credentials (in-pod SA token or
  *     kubeconfig). The Next.js app keeps zero cluster access.
- *   - The pool's in-memory state (in-flight provisions, launch throttle,
+ *   - The pool's serialized provision path (provision lock, launch throttle,
  *     build-dispatch suppression) is only correct in a single process; app
- *     replicas each had their own copies before the extraction.
+ *     replicas each had their own copies before the extraction. Capacity
+ *     itself has no in-memory counter — the ledger is the backend (live k8s
+ *     Jobs / live child processes), so it survives restarts.
  *   - Pool failures (k8s API slowness, CNI flakes) get their own logs,
  *     health endpoint and lifecycle, isolated from the app's event loop.
  *
@@ -43,22 +45,20 @@ import http from "node:http";
 import crypto from "node:crypto";
 import { db, sql } from "@lastest/db";
 import { runners } from "@lastest/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { isDynamicPoolMode, isKubernetesMode, provisionerMode } from "./common";
 import { terminateAllEBProcesses } from "./process-provisioner";
 import {
-  currentPoolSize,
+  AtCapacityError,
+  cachedLivePoolCount,
   decBuildDispatch,
-  decInFlightProvisions,
   ensureWarmPool,
   getEBPodInfo,
   incBuildDispatch,
-  incInFlightProvisions,
-  interactiveReservedSlots,
-  launchEBJob,
   listEBJobNames,
   poolMax,
   prewarmForBuild,
+  provisionOneEB,
   terminateEBJob,
 } from "./provisioner";
 import { startPoolLoop, stopPoolLoop } from "./reapers";
@@ -106,14 +106,15 @@ async function readJsonBody(
 
 /**
  * Provision one EB Job, enforcing the pool cap with the build/interactive
- * reservation. Moved from the app's `claimOrProvisionPoolEB` — the cap check,
- * in-flight reservation and launch throttle all need singleton state, so they
- * live here. The APP still polls the DB for the pod's auto-registration and
- * claims it; this endpoint's contract is only "a Job now exists (or cannot)".
+ * reservation. Moved from the app's `claimOrProvisionPoolEB` — the serialized
+ * capacity decision and launch throttle need singleton state, so they live
+ * here (in `provisionOneEB`). The APP still polls the DB for the pod's
+ * auto-registration and claims it; this endpoint's contract is only "a Job
+ * now exists (or cannot)".
  *
- * The in-flight reservation is decremented by a DB watcher (below) when the
- * pod's runner row appears — with a 120s grace fallback mirroring
- * `ensureWarmPool` — so a crashed pod can't pin pool capacity forever.
+ * A k8s-ledger read failure surfaces as 500, never as a provision: capacity
+ * decisions fail closed rather than falling back to a count that can't see
+ * unregistered Jobs.
  */
 async function handleProvision(
   purpose: "build" | "interactive",
@@ -131,64 +132,23 @@ async function handleProvision(
     };
   }
 
-  const size = await currentPoolSize();
-  const cap = await poolMax();
-  const reserved = purpose === "build" ? interactiveReservedSlots() : 0;
-  const effectiveCap = Math.max(0, cap - reserved);
-  if (size >= effectiveCap) {
-    console.warn(
-      reserved > 0
-        ? `[Pool] At build cap (${size}/${effectiveCap}, hard cap ${cap}, reserved ${reserved} for interactive) — cannot provision new EB for build`
-        : `[Pool] At capacity (${size}/${cap}) — cannot provision new EB`,
-    );
-    return { status: 409, body: { error: "at-capacity", size, cap } };
-  }
-
-  incInFlightProvisions();
-  let jobInfo: { jobName: string; instanceId: string };
   try {
-    jobInfo = await launchEBJob();
+    return { status: 201, body: await provisionOneEB(purpose) };
   } catch (err) {
-    decInFlightProvisions();
-    console.error("[Pool] launchEBJob failed:", err);
+    if (err instanceof AtCapacityError) {
+      console.warn(
+        purpose === "build"
+          ? `[Pool] At build cap (${err.size}/${err.cap} incl. interactive reservation) — cannot provision new EB for build`
+          : `[Pool] At capacity (${err.size}/${err.cap}) — cannot provision new EB`,
+      );
+      return {
+        status: 409,
+        body: { error: "at-capacity", size: err.size, cap: err.cap },
+      };
+    }
+    console.error("[Pool] provisionOneEB failed:", err);
     return { status: 500, body: { error: String(err) } };
   }
-
-  watchForRegistration(jobInfo.instanceId);
-  return { status: 201, body: jobInfo };
-}
-
-/** Decrement the in-flight reservation once the pod's runner row exists
- *  (then it counts via `currentPoolSize`'s DB query instead), or after a
- *  120s grace period if it never registers. */
-function watchForRegistration(instanceId: string): void {
-  const expectedRunnerName = `System EB-${instanceId}`;
-  const deadline = Date.now() + 120_000;
-  const timer = setInterval(async () => {
-    let done = Date.now() > deadline;
-    if (!done) {
-      try {
-        const [row] = await db
-          .select({ id: runners.id })
-          .from(runners)
-          .where(
-            and(
-              eq(runners.name, expectedRunnerName),
-              eq(runners.isSystem, true),
-            ),
-          )
-          .limit(1);
-        done = !!row;
-      } catch {
-        // DB hiccup — keep polling until the grace deadline
-      }
-    }
-    if (done) {
-      clearInterval(timer);
-      decInFlightProvisions();
-    }
-  }, 2_000);
-  timer.unref?.();
 }
 
 async function poolStatus(): Promise<{
@@ -206,7 +166,27 @@ async function poolStatus(): Promise<{
         eq(runners.type, "embedded"),
       ),
     );
-  const [size, max] = await Promise.all([currentPoolSize(), poolMax()]);
+  const [cachedSize, max] = await Promise.all([
+    cachedLivePoolCount(),
+    poolMax(),
+  ]);
+  let size = cachedSize;
+  if (size === null) {
+    // Ledger unreachable (k8s API down) — degrade to the DB proxy of
+    // non-offline system EB rows. Display-only: provision decisions never
+    // take this path (they fail closed inside provisionOneEB).
+    const rows = await db
+      .select({ id: runners.id })
+      .from(runners)
+      .where(
+        and(
+          eq(runners.isSystem, true),
+          eq(runners.type, "embedded"),
+          ne(runners.status, "offline"),
+        ),
+      );
+    size = rows.length;
+  }
   return { online: onlineRows.length, size, max };
 }
 
