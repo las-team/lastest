@@ -260,7 +260,17 @@ export function explainInvalidQaPlan(v: unknown): string | null {
 export function sanitizeQaPlan(
   plan: QaTestPlan,
   groups: QaTestGroup[],
+  /** P3: coverage-derived item budget. Absent → the fixed MAX_PLAN_ITEMS
+   *  backstop, which is all that was available before a coverage model
+   *  existed. Never allowed to exceed MAX_PLAN_ITEMS: browser tests generate
+   *  sequentially, so the wall-clock ceiling is real regardless of what
+   *  coverage says would be desirable. */
+  opts: { maxItems?: number } = {},
 ): QaTestPlan {
+  const itemCap = Math.max(
+    1,
+    Math.min(opts.maxItems ?? MAX_PLAN_ITEMS, MAX_PLAN_ITEMS),
+  );
   const allowed = new Set(groups);
   // Cap journeys first so item journey-refs resolve against the kept set.
   const journeys = plan.journeys.slice(0, MAX_PLAN_JOURNEYS);
@@ -277,14 +287,14 @@ export function sanitizeQaPlan(
   }
   // Backstop overflow: keep original order under the cap; when over it, trim
   // lowest-priority first (stable within a priority) so P1 coverage survives.
-  if (items.length > MAX_PLAN_ITEMS) {
+  if (items.length > itemCap) {
     const rank: Record<QaPriority, number> = { P1: 0, P2: 1, P3: 2 };
     items = items
       .map((it, idx) => ({ it, idx }))
       .sort(
         (a, b) => rank[a.it.priority] - rank[b.it.priority] || a.idx - b.idx,
       )
-      .slice(0, MAX_PLAN_ITEMS)
+      .slice(0, itemCap)
       .sort((a, b) => a.idx - b.idx)
       .map((x) => x.it);
   }
@@ -483,6 +493,12 @@ export function buildPlannerUserPrompt(opts: {
   /** Condensed uploaded product documentation (requirements/specs/manuals) —
    *  authoritative for intended behavior, journeys, and business areas. */
   docsDigest?: string;
+  /** P3: ranked uncovered data cells + the measured item budget. See
+   *  buildCoverageDirective. Present only when a coverage model exists. */
+  coverageDirective?: string;
+  /** P3: effective item cap for this run. Overrides the fixed limit stated in
+   *  the system prompt when coverage measured a smaller (or larger) budget. */
+  maxItems?: number;
 }): string {
   const groupList = opts.groups
     .map((g) => {
@@ -505,6 +521,14 @@ export function buildPlannerUserPrompt(opts: {
   if (opts.existingCoverage) {
     parts.push(
       `The repository ALREADY CONTAINS the automated tests listed below (created by earlier runs or by hand). Design the plan for the application as it is NOW: keep the plan complete (every journey and coverage angle listed, so traceability stays whole), and when a scenario is already well covered by an existing test, reuse that test's exact name as the item title so it can be matched — do not invent a variation of it. Focus new/changed scenarios on what the existing suite does NOT cover.\n\n--- EXISTING TESTS ---\n${opts.existingCoverage}`,
+    );
+  }
+  if (opts.coverageDirective) {
+    parts.push(opts.coverageDirective);
+  }
+  if (opts.maxItems !== undefined) {
+    parts.push(
+      `ITEM BUDGET FOR THIS RUN: at most ${opts.maxItems} item(s). This number was measured from current data coverage, and it OVERRIDES the general limit stated in your instructions. Do not pad the plan to reach it — planning fewer items than the budget is correct when the remaining gaps do not warrant more.`,
     );
   }
   if (opts.feedback) {

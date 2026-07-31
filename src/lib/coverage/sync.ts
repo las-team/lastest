@@ -42,6 +42,10 @@ export interface SyncOptions {
   stopPolicy?: CoverageStopPolicy;
   /** Per-object-type business criticality, 0..1. Defaults to 0.5. */
   criticality?: Record<string, number>;
+  /** P4: per-object-type vendor-release churn, 0..1. An object type a release
+   *  touched outranks an equally sized untouched one — this is the mechanism
+   *  behind release-wave prioritisation. Defaults to 0. */
+  churn?: Record<string, number>;
   /** Cap on historical runs scanned for profiling/attribution. */
   runLimit?: number;
 }
@@ -347,6 +351,7 @@ export async function recomputeWeights(
       runCount: c.runCount,
       failCount: c.failCount,
       criticality: opts.criticality?.[objectType] ?? 0.5,
+      churn: opts.churn?.[objectType] ?? 0,
       covered: isCovered(c),
     }));
     const weighted = computeWeights(inputs, policy, strength);
@@ -422,6 +427,61 @@ export async function syncCoverage(
       runsSoFar: cells.filter((c) => c.runCount > 0).length,
     }),
   };
+}
+
+/**
+ * Live attribution for a just-finished build.
+ *
+ * Called from the build-completion path so coverage reflects reality without
+ * waiting for a manual sync. Cheap: it only touches cells whose coordsKey the
+ * build actually produced, and it never creates cells — a run against a
+ * combination with no cell means the dimension set does not cover it, which is
+ * a profiling gap to surface, not a cell to invent.
+ */
+export async function attributeBuildRuns(
+  repositoryId: string,
+  results: Array<{
+    testResultId: string;
+    testId?: string | null;
+    buildId?: string | null;
+    dataCell?: string | null;
+    status?: string | null;
+    ranAt?: Date | null;
+  }>,
+  opts: SyncOptions = {},
+): Promise<{ attributed: number; unmatchedCells: string[] }> {
+  const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
+  const withCells = results.filter((r) => !!r.dataCell);
+  if (withCells.length === 0) return { attributed: 0, unmatchedCells: [] };
+
+  const cells = await queries.getCoverageCells(repositoryId, {
+    environmentKey,
+  });
+  const byKey = new Map(cells.map((c) => [c.coordsKey, c.id]));
+
+  const attributions: Parameters<typeof queries.recordCoverageCellRuns>[0] = [];
+  const unmatched = new Set<string>();
+  for (const r of withCells) {
+    const cellId = byKey.get(r.dataCell!);
+    if (!cellId) {
+      unmatched.add(r.dataCell!);
+      continue;
+    }
+    attributions.push({
+      cellId,
+      testResultId: r.testResultId,
+      testId: r.testId ?? null,
+      buildId: r.buildId ?? null,
+      verdict: r.status ?? null,
+      ranAt: r.ranAt ?? null,
+    });
+  }
+
+  if (attributions.length > 0) {
+    await queries.recordCoverageCellRuns(attributions);
+    await queries.refreshCoverageCellStats(repositoryId, environmentKey);
+  }
+  return { attributed: attributions.length, unmatchedCells: [...unmatched] };
 }
 
 /** Read-only report — no profiling, no writes. */

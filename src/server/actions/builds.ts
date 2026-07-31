@@ -855,6 +855,10 @@ async function runBuildAsync(
     totalSteps?: number;
     extractedVariables?: Record<string, string>;
     assignedVariables?: Record<string, string>;
+    // P2 matrix identity — set only on runs from a matrix expansion.
+    dataCell?: string;
+    matrixIndex?: number;
+    matrixTotal?: number;
     logs?: Array<{ timestamp: number; level: string; message: string }>;
     urlTrajectory?: import("@/lib/db/schema").UrlTrajectoryStep[];
     webVitals?: import("@/lib/db/schema").WebVitalsSample[];
@@ -895,6 +899,9 @@ async function runBuildAsync(
       totalSteps: result.totalSteps,
       extractedVariables: result.extractedVariables,
       assignedVariables: result.assignedVariables,
+      dataCell: result.dataCell,
+      matrixIndex: result.matrixIndex,
+      matrixTotal: result.matrixTotal,
       logs: result.logs,
       urlTrajectory: result.urlTrajectory,
       webVitals: result.webVitals,
@@ -1356,6 +1363,9 @@ async function runBuildAsync(
                 totalSteps: result.totalSteps,
                 extractedVariables: result.extractedVariables,
                 assignedVariables: result.assignedVariables,
+                dataCell: result.dataCell,
+                matrixIndex: result.matrixIndex,
+                matrixTotal: result.matrixTotal,
                 logs: result.logs,
                 urlTrajectory: result.urlTrajectory,
                 webVitals: result.webVitals,

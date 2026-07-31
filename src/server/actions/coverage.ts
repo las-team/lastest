@@ -6,9 +6,15 @@ import { requireRepoAccess } from "@/lib/auth";
 import {
   getCoverageReport,
   profileDimensions,
+  recomputeWeights,
   syncCoverage,
   type SyncOptions,
 } from "@/lib/coverage/sync";
+import {
+  profileFromSut,
+  RestProfiler,
+  VaultProfiler,
+} from "@/lib/coverage/profilers";
 import { DEFAULT_COVERAGE_ENVIRONMENT } from "@/lib/db/schema";
 import type { CoverageCellStatus } from "@/lib/db/schema";
 
@@ -79,6 +85,77 @@ export async function listCoverageCellsAction(
 ) {
   await requireRepoAccess(repositoryId);
   return queries.getCoverageCells(repositoryId, opts);
+}
+
+/**
+ * P4: profile real record distributions from the system under test.
+ *
+ * Credentials are taken per-call and never persisted here — storing SUT
+ * credentials is a decision for the (not yet built) environment model, and
+ * quietly writing them to a settings row now would be the wrong default for
+ * exactly the regulated customers this exists for.
+ */
+export async function profileFromSutAction(
+  repositoryId: string,
+  input: {
+    objectType: string;
+    fields: string[];
+    where?: string;
+    limit?: number;
+    environmentKey?: string;
+    connection:
+      | {
+          kind: "vault";
+          baseUrl: string;
+          username: string;
+          password: string;
+          apiVersion?: string;
+        }
+      | {
+          kind: "rest";
+          urlTemplate: string;
+          headers?: Record<string, string>;
+          recordsPath?: string;
+          paging?: {
+            limitParam: string;
+            offsetParam: string;
+            pageSize: number;
+          };
+        };
+  },
+) {
+  await requireRepoAccess(repositoryId);
+  if (!input.objectType?.trim()) throw new Error("An object type is required");
+  if (!input.fields?.length) throw new Error("At least one field is required");
+
+  const profiler =
+    input.connection.kind === "vault"
+      ? new VaultProfiler(input.connection)
+      : new RestProfiler(input.connection);
+
+  const connection = await profiler.testConnection();
+  if (!connection.ok) {
+    throw new Error(
+      `Could not connect to ${profiler.label}: ${connection.error}`,
+    );
+  }
+
+  const outcome = await profileFromSut({
+    repositoryId,
+    environmentKey: input.environmentKey,
+    profiler,
+    objectType: input.objectType.trim(),
+    fields: input.fields,
+    where: input.where,
+    limit: input.limit,
+  });
+
+  // Profiled counts change every weight, so re-score before reporting.
+  await recomputeWeights(repositoryId, {
+    environmentKey: input.environmentKey,
+  });
+  revalidatePath(`/coverage`);
+  return outcome;
 }
 
 /** Excluding a cell requires a reason — that reason is the artifact that lets

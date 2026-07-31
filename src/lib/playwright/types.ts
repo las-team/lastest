@@ -51,6 +51,11 @@ export interface TestRunResult {
   totalSteps?: number;
   extractedVariables?: Record<string, string>;
   assignedVariables?: Record<string, string>;
+  // ── Matrix expansion (P2) — set only on runs produced by a matrix fan-out ──
+  /** Canonical coordsKey of the data cell this run exercised. */
+  dataCell?: string;
+  matrixIndex?: number;
+  matrixTotal?: number;
   logs?: Array<{ timestamp: number; level: string; message: string }>;
   // ── Multi-layer comparison capture (v1.13) ─────────────────────────────
   urlTrajectory?: UrlTrajectoryStep[];

@@ -71,6 +71,11 @@ import {
   type SheetSourceLike,
 } from "@lastest/google-sheets";
 import { resolveCsvReferences, type CsvSourceLike } from "@lastest/csv";
+import {
+  expandTestsForMatrix,
+  type MatrixRunMeta,
+  type RunnableTest,
+} from "@/lib/execution/matrix-expand";
 import type { TestVariable } from "@/lib/db/schema";
 import { getAISettings } from "@/lib/db/queries";
 import { generateWithAI, type AIProviderConfig } from "@/lib/ai";
@@ -407,6 +412,48 @@ export async function executeTests(
   onProgress?: (progress: ExecutionProgress) => void,
   onResult?: (result: TestRunResult) => Promise<void>,
 ): Promise<TestRunResult[]> {
+  // P2: fan matrix tests out into one instance per data cell BEFORE any
+  // dispatch decision, so every path below inherits it unchanged. Guarded so a
+  // re-entrant call (the api/browser split recurses) does not expand twice.
+  const alreadyExpanded = tests.some(
+    (t) => (t as RunnableTest).matrixRun !== undefined,
+  );
+  if (!alreadyExpanded) {
+    const expansion = expandTestsForMatrix(
+      tests,
+      options.repositoryId
+        ? await googleSheetsDataSourcesForRepo(options.repositoryId)
+        : [],
+      options.repositoryId
+        ? await csvDataSourcesForRepo(options.repositoryId)
+        : [],
+    );
+    for (const note of expansion.notes) {
+      console.log(`[executor] matrix ${note.testName}: ${note.explanation}`);
+    }
+    if (expansion.tests.length !== tests.length || expansion.failures.length) {
+      const failed: TestRunResult[] = expansion.failures.map((f) => ({
+        testId: f.testId,
+        status: "failed" as const,
+        durationMs: 0,
+        screenshots: [],
+        errorMessage: `Matrix expansion failed: ${f.error}`,
+      }));
+      for (const r of failed) await onResult?.(r);
+      const rest =
+        expansion.tests.length > 0
+          ? await executeTests(
+              expansion.tests,
+              runId,
+              options,
+              onProgress,
+              onResult,
+            )
+          : [];
+      return [...failed, ...rest];
+    }
+  }
+
   // E1: API tests run in-process (no browser). Split them off the top and let
   // the remaining browser tests flow through the normal runner/EB dispatch.
   const apiTests = tests.filter((t) => t.testType === "api");
@@ -756,6 +803,8 @@ async function executeViaRunner(
       completedSeenAt?: number;
       assignedVariables?: Record<string, string>;
       sentDesignSystem?: boolean;
+      /** P2: matrix identity of this in-flight run, carried onto the result. */
+      matrixRun?: MatrixRunMeta;
     }
   >();
   let completedCount = 0;
@@ -1126,6 +1175,7 @@ async function executeViaRunner(
             ? assignedVariables
             : undefined,
         sentDesignSystem: !!designSystemPayload,
+        matrixRun: (test as RunnableTest).matrixRun,
       });
     }
   };
@@ -1469,6 +1519,12 @@ async function executeViaRunner(
         // alongside extractedVariables so the Vars-tab "Last run" column has
         // data for both modes (especially with random/increment row picks).
         assignedVariables: info.assignedVariables,
+        // P2: the data cell this run exercised. Persisted explicitly rather
+        // than re-derived from assignedVariables, so attribution survives the
+        // user enabling or disabling dimensions afterwards.
+        dataCell: info.matrixRun?.dataCell,
+        matrixIndex: info.matrixRun?.index,
+        matrixTotal: info.matrixRun?.total,
         logs: (() => {
           const base =
             Array.isArray(payload.logs) && payload.logs.length > 0

@@ -241,45 +241,63 @@ export async function getActiveBaseline(
   branch?: string,
   defaultBranch?: string,
   browser: string = "chromium",
+  /** P2: data cell of the current run. Cell-specific baselines win; a run with
+   *  no cell, or a cell with no baseline of its own, falls back to the shared
+   *  (NULL-cell) baseline. That fallback is what lets the representative-cell
+   *  policy work — 39 of 40 expanded runs compare against the one baseline the
+   *  representative captured, instead of each demanding its own. */
+  dataCell?: string | null,
 ) {
   const stepConditions = stepLabel
     ? [eq(baselines.stepLabel, stepLabel)]
     : [isNull(baselines.stepLabel)];
 
-  // 1. Try branch-specific baseline
-  if (branch) {
-    const [branchBaseline] = await db
-      .select()
-      .from(baselines)
-      .where(
-        and(
-          eq(baselines.testId, testId),
-          eq(baselines.isActive, true),
-          eq(baselines.branch, branch),
-          eq(baselines.browser, browser),
-          ...stepConditions,
-        ),
-      )
-      .orderBy(desc(baselines.createdAt));
-    if (branchBaseline) return branchBaseline;
-  }
+  // Cell-specific first, then the shared baseline. Ordering matters: querying
+  // both at once and taking the newest would let an unrelated cell's baseline
+  // win purely on timestamp.
+  const cellVariants: Array<ReturnType<typeof eq> | ReturnType<typeof isNull>> =
+    dataCell
+      ? [eq(baselines.dataCell, dataCell), isNull(baselines.dataCell)]
+      : [isNull(baselines.dataCell)];
 
-  // 2. Try default branch baseline
-  if (defaultBranch && defaultBranch !== branch) {
-    const [mainBaseline] = await db
-      .select()
-      .from(baselines)
-      .where(
-        and(
-          eq(baselines.testId, testId),
-          eq(baselines.isActive, true),
-          eq(baselines.branch, defaultBranch),
-          eq(baselines.browser, browser),
-          ...stepConditions,
-        ),
-      )
-      .orderBy(desc(baselines.createdAt));
-    if (mainBaseline) return mainBaseline;
+  for (const cellCondition of cellVariants) {
+    // 1. Try branch-specific baseline
+    if (branch) {
+      const [branchBaseline] = await db
+        .select()
+        .from(baselines)
+        .where(
+          and(
+            eq(baselines.testId, testId),
+            eq(baselines.isActive, true),
+            eq(baselines.branch, branch),
+            eq(baselines.browser, browser),
+            cellCondition,
+            ...stepConditions,
+          ),
+        )
+        .orderBy(desc(baselines.createdAt));
+      if (branchBaseline) return branchBaseline;
+    }
+
+    // 2. Try default branch baseline
+    if (defaultBranch && defaultBranch !== branch) {
+      const [mainBaseline] = await db
+        .select()
+        .from(baselines)
+        .where(
+          and(
+            eq(baselines.testId, testId),
+            eq(baselines.isActive, true),
+            eq(baselines.branch, defaultBranch),
+            eq(baselines.browser, browser),
+            cellCondition,
+            ...stepConditions,
+          ),
+        )
+        .orderBy(desc(baselines.createdAt));
+      if (mainBaseline) return mainBaseline;
+    }
   }
 
   // 3. Legacy fallback — any active baseline for this browser

@@ -424,6 +424,36 @@ D0 → D2 is the highest-leverage sequence in this entire document. It is ~6 wee
 
 ---
 
+## 9. Implementation status (2026-07-31)
+
+The data workstream (D0–D3, shipped as P1–P4) is built. What exists in code:
+
+| Phase | Delivered | Key paths |
+|---|---|---|
+| **P1** | Dimension registry, occurring-cell derivation, run attribution, 5-term weighting, t-way stop rule, roll-up report, `/api/v1/repos/:id/data-coverage` | `src/lib/coverage/{coords,dimensions,cells,weight,stop,rollup,sync}.ts`, `src/lib/db/queries/coverage.ts` |
+| **P2** | `sourceRowMode:'matrix'`, `rowFilter` slices, greedy t-way reduction, representative-cell visual policy, cell-keyed baselines, live attribution | `src/lib/coverage/{matrix,row-filter}.ts`, `src/lib/execution/matrix-expand.ts` |
+| **P3** | Coverage-derived plan budget replacing `MAX_PLAN_ITEMS`, ranked-cell planner directive, stop explanation emitted to the activity feed | `src/lib/qa-agent/coverage-budget.ts` |
+| **P4** | Vault VQL profiler, generic REST profiler, profile→dimension→cell persistence, release-churn signal feeding the weight formula | `src/lib/coverage/profilers/` |
+
+### Design decisions worth remembering
+
+- **Cells are derived from occurring data, never from a cartesian product.** The report surfaces `skippedAsNonOccurring` precisely so "work we correctly are not doing" is a visible number rather than an absence.
+- **Derivation reconciles, never appends.** Changing the enabled dimension set changes which fields a cell spans; leaving the previous generation in place silently corrupts every denominator. Found in a live smoke test, not in unit tests.
+- **Auto-detected dimensions start disabled.** One free-text column enabled by default turns into thousands of junk cells and a meaningless coverage number.
+- **`MAX_PLAN_ITEMS` survives as an absolute backstop only.** Browser tests generate sequentially, so a wall-clock ceiling is real regardless of what coverage says is desirable. The coverage budget can lower it, never raise it.
+- **Baselines fall back from cell-specific to shared (NULL-cell).** That fallback is what makes the representative-cell policy work and what keeps every pre-P2 baseline valid.
+- **A matrix test that expands to zero runs FAILS.** Running it once with unpinned rows would test the wrong data and report green.
+- **Profilers are read-only.** No customer points a tool holding write credentials at a validated GxP system.
+
+### Not yet built (deliberate)
+
+- No UI. Everything is reachable through server actions and the API; the settings screens for dimension confirmation, cell exclusion, and matrix policy are not written.
+- SUT credentials are passed per-call and never persisted — that belongs to the environment model (B2), not to a settings row bolted on early.
+- `environment_key` exists on every coverage row and is always `'default'`. B2 becomes a backfill rather than a restructure.
+- The churn signal accepts a per-object-type score; nothing yet fetches Veeva release notes on a schedule to produce it.
+
+---
+
 ## Sources
 
 - [About Vault CRM Releases — Veeva](https://vaultcrmhelp.veeva.com/doc/Content/CRM_topics/General/AboutCRMReleases.htm)

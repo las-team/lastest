@@ -114,6 +114,9 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 - `src/lib/execution/executor.ts` — test executor (~1800 lines)
 - `src/lib/verify/` — check-modes system: 9 layers (visual, text, dom, network, console, a11y, design, perf, url) × enforce/log/disable; case-status derivation
 - `src/lib/coverage/` — data-driven coverage model: profiles dimensions from CSV/Sheet caches + historical `test_results.assignedVariables`, derives the cells that actually occur, weights them, and evaluates a t-way (default pairwise) stopping rule with an explanation. `syncCoverage()` in `sync.ts` is the entry point; derivation always reconciles (prunes stale cells) rather than appending
+  - `matrix.ts` + `row-filter.ts` — matrix execution: one test x N data rows = N runs in one build, with `rowFilter` slices and greedy t-way reduction. Expansion happens in `src/lib/execution/matrix-expand.ts` at the top of `executeTests()`, rewriting matrix vars to `sourceRowMode:'fixed'` so the rest of the executor is unaware of matrices
+  - `profilers/` — system-under-test profilers for REAL record volume (`VaultProfiler` over VQL, `RestProfiler` over JSON collections). Read-only by construction; VQL identifiers are allowlisted, never escaped
+- `src/lib/qa-agent/coverage-budget.ts` — replaces the QA agent's hardcoded `MAX_PLAN_ITEMS` cap with a coverage-derived item budget, feeds the planner a ranked list of uncovered cells, and produces the stop explanation. Falls back to the fixed cap when a repo has no coverage model
 - `src/lib/design-system/` — design-token comparison engine (the "design" check layer)
 - `src/lib/url-diff/` — URL trajectory capture + diffing, rate-limit, SSRF guards
 - `src/lib/billing/` — Stripe billing: plans, live catalog, webhook sync
