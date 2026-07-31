@@ -21,6 +21,7 @@ import {
   Compass,
   Lock,
   Waypoints,
+  Grid3x3,
 } from "lucide-react";
 import Image from "next/image";
 import {
@@ -74,6 +75,7 @@ const EARLY_ADOPTER_ITEMS = new Set(["Compose", "Compare", "Impact"]);
 const definitionNav = [
   { name: "Tests", href: "/tests", icon: FileCode },
   { name: "App Map", href: "/app-map", icon: Waypoints },
+  { name: "Coverage", href: "/coverage", icon: Grid3x3 },
   { name: "Setup", href: "/setup", icon: Wrench },
   { name: "Compose", href: "/compose", icon: Layers },
 ];

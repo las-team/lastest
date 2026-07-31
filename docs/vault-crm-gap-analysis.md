@@ -445,9 +445,22 @@ The data workstream (D0–D3, shipped as P1–P4) is built. What exists in code:
 - **A matrix test that expands to zero runs FAILS.** Running it once with unpinned rows would test the wrong data and report green.
 - **Profilers are read-only.** No customer points a tool holding write credentials at a validated GxP system.
 
+### The Coverage screen (`/coverage`)
+
+The spec is not just an internal structure — it is the product surface.
+
+- **Breakdown** — per object type and per dimension: which values have been exercised, each tagged with its record count, and how many cartesian combinations were correctly skipped.
+- **Dimensions** — confirm or reject auto-detected columns. Rejected candidates show the reason ("looks like an identifier", "exceeds the cardinality cap"), so an over-eager filter is visible rather than silent.
+- **Coverage matrix** — the full cell grid: coordinates, records, weight, status, pass/run counts. Excluding a cell requires a typed reason, which lands in the spec.
+- **Specification** — how the spec is built (profile → derive → attribute → weight → stop), documented exclusions, ranked outstanding work, and an exportable markdown document with scope, acceptance criteria, and the coverage matrix — the structure a PQ protocol needs.
+- **Data sources** — connected CSV/Sheet sources; upload a CSV to analyse a new data set in place.
+
+`scripts/extract-coverage-sample.mjs` pulls sample data sets out of Lastest's own database (test executions by browser × viewport × status × branch × speed band, visual diffs, the test catalogue). Real skewed distributions, so the volume weighting and non-occurring-combination behaviour are visible rather than hidden behind tidy synthetic fixtures.
+
 ### Not yet built (deliberate)
 
-- No UI. Everything is reachable through server actions and the API; the settings screens for dimension confirmation, cell exclusion, and matrix policy are not written.
+- Matrix policy has no editor yet — `sourceRowMode: 'matrix'` and `rowFilter` are set through the API/DB, not the test UI.
+- SUT profiling (P4) is reachable via `profileFromSutAction` but has no connection form on the Coverage screen.
 - SUT credentials are passed per-call and never persisted — that belongs to the environment model (B2), not to a settings row bolted on early.
 - `environment_key` exists on every coverage row and is always `'default'`. B2 becomes a backfill rather than a restructure.
 - The churn signal accepts a per-object-type score; nothing yet fetches Veeva release notes on a schedule to produce it.

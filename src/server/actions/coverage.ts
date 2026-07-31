@@ -15,6 +15,7 @@ import {
   RestProfiler,
   VaultProfiler,
 } from "@/lib/coverage/profilers";
+import { buildCoverageSpec, renderSpecMarkdown } from "@/lib/coverage/spec";
 import { DEFAULT_COVERAGE_ENVIRONMENT } from "@/lib/db/schema";
 import type { CoverageCellStatus } from "@/lib/db/schema";
 
@@ -59,6 +60,34 @@ export async function getCoverageReportAction(
 ) {
   await requireRepoAccess(repositoryId);
   return getCoverageReport(repositoryId, opts);
+}
+
+/** The full test specification — scope, acceptance criteria, per-object-type
+ *  coverage matrix, documented exclusions, ranked outstanding work. */
+export async function getCoverageSpecAction(
+  repositoryId: string,
+  opts: SyncOptions = {},
+) {
+  await requireRepoAccess(repositoryId);
+  const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
+  const [{ report, stop }, cells, dimensions] = await Promise.all([
+    getCoverageReport(repositoryId, opts),
+    queries.getCoverageCells(repositoryId, { environmentKey }),
+    queries.getCoverageDimensions(repositoryId, environmentKey),
+  ]);
+  const spec = buildCoverageSpec({
+    repositoryId,
+    environmentKey,
+    report,
+    stop,
+    cells,
+    dimensions,
+    policy: opts.stopPolicy,
+  });
+  // Stamped here, not in the builder — the builder stays deterministic so the
+  // same inputs always render an identical document.
+  spec.generatedAt = new Date().toISOString();
+  return { spec, markdown: renderSpecMarkdown(spec) };
 }
 
 export async function listCoverageDimensionsAction(
