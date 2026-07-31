@@ -113,6 +113,15 @@ export const baselines = pgTable("baselines", {
   branch: text("branch").notNull(),
   isActive: boolean("is_active").default(true),
   browser: text("browser").default("chromium"), // browser this baseline applies to
+  // Data-cell coordinate this baseline belongs to (P2), as a canonical
+  // coordsKey — e.g. 'callType=Detail|country=DE'. NULL means "not matrix
+  // scoped", which is every pre-P2 baseline and every non-matrix test.
+  //
+  // Without this, two expanded runs of the same step (DE and FR) fight over one
+  // baseline row and each build flips it back and forth. Lookup falls back to
+  // the NULL-cell baseline when no cell-specific one exists, so existing tests
+  // are unaffected and a matrix test can share one representative baseline.
+  dataCell: text("data_cell"),
   // DOM snapshot of the page state this baseline image represents, captured at
   // the same moment as the screenshot. The per-step DOM diff compares the
   // current run's per-step snapshot against this. Set when the baseline is

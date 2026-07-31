@@ -87,6 +87,7 @@ import {
   extractSourceIp,
 } from "@/lib/security/outbound-url";
 import { checkRateLimit } from "@/lib/rate-limit/endpoint-bucket";
+import { getCoverageReport } from "@/lib/coverage/sync";
 import {
   generateAndStoreCaptionsForBuild,
   storeCaptionsForBuild,
@@ -778,6 +779,29 @@ export async function GET(
               : 0,
         };
         return NextResponse.json({ routeCoverage, areaCoverage });
+      }
+
+      // GET /api/v1/repos/:id/data-coverage — data-driven coverage: per object
+      // type / dimension / cell, plus the stop decision. Kept separate from
+      // `coverage` above, which is route/area based and consumed by the MCP
+      // server — the two answer different questions.
+      if (subResource === "data-coverage") {
+        const environmentKey =
+          request.nextUrl.searchParams.get("environment") ?? undefined;
+        const { report, stop } = await getCoverageReport(id, {
+          environmentKey,
+        });
+        return NextResponse.json({
+          report,
+          stop: {
+            shouldStop: stop.shouldStop,
+            reasons: stop.reasons,
+            metrics: stop.metrics,
+            explanation: stop.explanation,
+            // The planner's work queue: highest-weight uncovered cells first.
+            queue: stop.queue.slice(0, 100),
+          },
+        });
       }
 
       // GET /api/v1/repos/:id/qa-agent — QA agent status for external agents:

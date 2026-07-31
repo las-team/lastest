@@ -303,6 +303,9 @@ export const tests = pgTable("tests", {
   // here so 'fixed' refresh-mode reuses it across runs and 'random' mode can
   // fall back to it when AI is misconfigured / rate-limited.
   aiVarLastValues: jsonb("ai_var_last_values").$type<Record<string, string>>(),
+  // Matrix-execution policy (P2). Governs how far the fan-out goes and which
+  // expanded runs capture visual baselines. Null = DEFAULT_MATRIX_POLICY.
+  matrixPolicy: jsonb("matrix_policy").$type<MatrixPolicy>(),
   // E1: test type discriminator. 'browser' (Playwright, default) | 'api' (headless HTTP).
   testType: text("test_type").default("browser"),
   apiDefinition: jsonb("api_definition").$type<ApiTestDefinition>(),
@@ -391,7 +394,14 @@ export type TestVariableAttribute =
   | "innerText"
   | "innerHTML";
 
-export type TestVariableSourceRowMode = "fixed" | "increment" | "random";
+// 'matrix' (P2) fans the test out into ONE RUN PER SELECTED ROW within a single
+// build, which is what makes data diversity inside one environment expressible.
+// The other three modes all pick a single row per run.
+export type TestVariableSourceRowMode =
+  | "fixed"
+  | "increment"
+  | "random"
+  | "matrix";
 
 // Built-in AI-generated attribute presets. 'custom' means use aiCustomPrompt.
 export type AIVarPreset =
@@ -427,6 +437,11 @@ export interface TestVariable {
   // For 'ai-generated' source: 'fixed' = pinned to cached value, 'random' =
   // regenerate per run with cache fallback. 'increment' is rejected for AI vars.
   sourceRowMode?: TestVariableSourceRowMode;
+  /** Row selector for sourceRowMode='matrix' — binds the test to a SLICE of the
+   *  data rather than a row. Grammar: `col IN (a, b)`, `col = a`, `col != a`,
+   *  and `AND`-joined combinations. Empty/absent selects every row.
+   *  See @lastest/coverage-model's row-filter. */
+  rowFilter?: string;
   staticValue?: string;
   // AI-generated source
   aiPreset?: AIVarPreset;
@@ -437,6 +452,37 @@ export interface TestVariable {
   assertSeverity?: StepRuleSeverity;
   description?: string;
 }
+
+/** How a matrix test's expanded runs are selected and which of them capture a
+ *  visual baseline. */
+export interface MatrixPolicy {
+  /** 'all' runs every selected row. 'pairwise' reduces to a t-way covering set,
+   *  which is normally a fraction of the rows for the same defect yield. */
+  selection: "all" | "pairwise";
+  /** t for 'pairwise' selection. 2 unless a slice is high risk. */
+  strength: number;
+  /**
+   * Visual layer policy across expanded runs.
+   *
+   * 'representative' (the default) captures a PNG baseline for ONE run per
+   * slice; the rest run the cheap layers only (dom/network/url/console). This
+   * is not a nicety — a per-cell PNG baseline for a 40-cell matrix multiplies
+   * storage and human review load by 40, which is what makes matrix testing
+   * unusable in practice. 'all' opts into per-cell visual baselines anyway;
+   * 'none' disables the visual layer for expanded runs entirely.
+   */
+  visual: "representative" | "all" | "none";
+  /** Hard ceiling on expanded runs per test. A data source that grows
+   *  unexpectedly must not silently turn one test into thousands of runs. */
+  maxRuns: number;
+}
+
+export const DEFAULT_MATRIX_POLICY: MatrixPolicy = {
+  selection: "pairwise",
+  strength: 2,
+  visual: "representative",
+  maxRuns: 50,
+};
 
 // ── Multi-layer comparison types (v1.13) ─────────────────────────────────────
 
@@ -511,6 +557,14 @@ export const testResults = pgTable("test_results", {
   // tell which row was actually used).
   assignedVariables:
     jsonb("assigned_variables").$type<Record<string, string>>(),
+  // Canonical coordsKey of the data cell this run exercised (P2 matrix runs).
+  // Redundant with assignedVariables — deliberately so: attribution must not
+  // depend on re-deriving which variables happened to be dimensions at the
+  // time, since that set changes as the user enables and disables dimensions.
+  dataCell: text("data_cell"),
+  // Position of this run within its matrix expansion. Null for single-row runs.
+  matrixIndex: integer("matrix_index"),
+  matrixTotal: integer("matrix_total"),
   // ── Multi-layer comparison capture (v1.13) ─────────────────────────────
   // URL trajectory: ordered list of {stepIndex, finalUrl, redirectChain}
   urlTrajectory: jsonb("url_trajectory").$type<UrlTrajectoryStep[]>(),

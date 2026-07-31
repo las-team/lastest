@@ -45,6 +45,9 @@ export * from "./schema/runs";
 export * from "./schema/visual";
 // Per-repo settings, setup/teardown, storage states, external data sources.
 export * from "./schema/settings";
+// Data-driven coverage: dimensions, occurring cells, cell<->run attribution,
+// coverage snapshots. Slated for extraction into `plugins/coverage`.
+export * from "./schema/coverage";
 
 // ── Feature surfaces (RFC §7 marks both for extraction into plugins) ─────────
 // QA agent / explorer / app map / RCA session state.
