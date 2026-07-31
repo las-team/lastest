@@ -85,6 +85,36 @@ describe("deriveCells", () => {
       [],
     );
   });
+
+  it("emits a single consistent field set — mixed sets corrupt denominators", () => {
+    const cells = deriveCells({
+      objectType: "calls",
+      fields: ["country", "callType"],
+      records: [
+        ...records,
+        // A record carrying an extra field must not widen its cell.
+        { country: "IT", callType: "Detail", channel: "F2F" },
+      ],
+    });
+    const fieldSets = new Set(
+      cells.map((c) => Object.keys(c.coords).sort().join("+")),
+    );
+    expect([...fieldSets]).toEqual(["callType+country"]);
+  });
+
+  it("is order-independent in the field list", () => {
+    const a = deriveCells({
+      objectType: "calls",
+      fields: ["country", "callType"],
+      records,
+    });
+    const b = deriveCells({
+      objectType: "calls",
+      fields: ["callType", "country"],
+      records,
+    });
+    expect(a.map((c) => c.coordsKey)).toEqual(b.map((c) => c.coordsKey));
+  });
 });
 
 describe("tableToRecords", () => {

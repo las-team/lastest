@@ -20,7 +20,7 @@ import {
   type NewCoverageCell,
   type NewCoverageDimension,
 } from "../schema";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 
 // ── Dimensions ──────────────────────────────────────────────────────────────
@@ -183,6 +183,56 @@ export async function setCoverageCellStatus(
       updatedAt: new Date(),
     })
     .where(eq(coverageCells.id, id));
+}
+
+/**
+ * Drop cells of an object type that are no longer in the derived set.
+ *
+ * Two things make a cell stale: the enabled dimension set changed (so its
+ * coordinates span the wrong fields), or a data refresh means the combination
+ * no longer occurs. Both must vacate — a leftover cell inflates the coverage
+ * denominator forever and silently corrupts every percentage downstream.
+ *
+ * Attribution rows cascade away with the cell. That is correct: a combination
+ * that no longer exists in the data has no coverage to account for.
+ */
+export async function pruneCoverageCells(
+  repositoryId: string,
+  environmentKey: string,
+  objectType: string,
+  keepCoordsKeys: string[],
+): Promise<number> {
+  const conditions = [
+    eq(coverageCells.repositoryId, repositoryId),
+    eq(coverageCells.environmentKey, environmentKey),
+    eq(coverageCells.objectType, objectType),
+  ];
+  if (keepCoordsKeys.length > 0) {
+    conditions.push(notInArray(coverageCells.coordsKey, keepCoordsKeys));
+  }
+  const deleted = await db
+    .delete(coverageCells)
+    .where(and(...conditions))
+    .returning({ id: coverageCells.id });
+  return deleted.length;
+}
+
+/** Object types that currently have cells — needed to prune object types whose
+ *  dimensions were all disabled, which derivation no longer visits at all. */
+export async function getCoverageCellObjectTypes(
+  repositoryId: string,
+  environmentKey: string = DEFAULT_COVERAGE_ENVIRONMENT,
+): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ objectType: coverageCells.objectType })
+    .from(coverageCells)
+    .where(
+      and(
+        eq(coverageCells.repositoryId, repositoryId),
+        eq(coverageCells.environmentKey, environmentKey),
+      ),
+    );
+  return rows.map((r) => r.objectType);
 }
 
 export async function deleteCoverageCellsByRepo(

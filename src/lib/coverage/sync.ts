@@ -56,6 +56,8 @@ export interface SyncResult {
   }>;
   dimensionsEnabled: number;
   cellsUpserted: number;
+  /** Cells dropped as stale — wrong field set, or no longer occurring. */
+  cellsPruned: number;
   runsScanned: number;
   attributionsRecorded: number;
   report: CoverageReport;
@@ -125,16 +127,44 @@ export async function profileDimensions(
   return { proposed, rejected, runsScanned: runs.length };
 }
 
-/** Build the occurring-cell set for every enabled dimension group. */
+/**
+ * Build the occurring-cell set for every enabled dimension group, and prune
+ * anything stale.
+ *
+ * Pruning is not optional bookkeeping. Enabling or disabling a dimension
+ * changes which fields a cell spans, so the previous generation of cells
+ * becomes meaningless — but they still count toward the denominator, which
+ * quietly corrupts every coverage percentage and every stop decision derived
+ * from it. Derivation therefore always reconciles, never just appends.
+ */
 export async function deriveAndPersistCells(
   repositoryId: string,
   opts: SyncOptions = {},
-): Promise<number> {
+): Promise<{ derived: number; pruned: number }> {
   const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
   const dimensions = (
     await queries.getCoverageDimensions(repositoryId, environmentKey)
   ).filter((d) => d.enabled);
-  if (dimensions.length === 0) return 0;
+
+  // Object types that had cells but no longer have any enabled dimension must
+  // still be visited, or their cells survive forever.
+  const existingObjectTypes = await queries.getCoverageCellObjectTypes(
+    repositoryId,
+    environmentKey,
+  );
+
+  if (dimensions.length === 0) {
+    let pruned = 0;
+    for (const objectType of existingObjectTypes) {
+      pruned += await queries.pruneCoverageCells(
+        repositoryId,
+        environmentKey,
+        objectType,
+        [],
+      );
+    }
+    return { derived: 0, pruned };
+  }
 
   const [csvSources, sheetSources, runs] = await Promise.all([
     queries.getCsvDataSources(repositoryId),
@@ -169,7 +199,30 @@ export async function deriveAndPersistCells(
       observedCount: c.observedCount,
     })),
   );
-  return derived.length;
+
+  // Reconcile every object type that either was just derived or still holds
+  // cells from an earlier dimension selection.
+  const keptByObjectType = new Map<string, string[]>();
+  for (const c of derived) {
+    keptByObjectType.set(c.objectType, [
+      ...(keptByObjectType.get(c.objectType) ?? []),
+      c.coordsKey,
+    ]);
+  }
+  let pruned = 0;
+  for (const objectType of new Set([
+    ...keptByObjectType.keys(),
+    ...existingObjectTypes,
+  ])) {
+    pruned += await queries.pruneCoverageCells(
+      repositoryId,
+      environmentKey,
+      objectType,
+      keptByObjectType.get(objectType) ?? [],
+    );
+  }
+
+  return { derived: derived.length, pruned };
 }
 
 function recordsForObjectType(
@@ -320,7 +373,8 @@ export async function syncCoverage(
     repositoryId,
     opts,
   );
-  const cellsUpserted = await deriveAndPersistCells(repositoryId, opts);
+  const { derived: cellsUpserted, pruned: cellsPruned } =
+    await deriveAndPersistCells(repositoryId, opts);
   const attribution = await attributeRuns(repositoryId, opts);
   await recomputeWeights(repositoryId, opts);
 
@@ -353,6 +407,7 @@ export async function syncCoverage(
     })),
     dimensionsEnabled: dimensions.filter((d) => d.enabled).length,
     cellsUpserted,
+    cellsPruned,
     runsScanned: Math.max(runsScanned, attribution.runsScanned),
     attributionsRecorded: attribution.attributionsRecorded,
     report: buildCoverageReport({

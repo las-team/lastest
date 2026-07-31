@@ -88,6 +88,7 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
   - `visual-diffs.ts` — visual diffs, baselines, ignore regions, planned screenshots
   - `step-comparisons.ts` — per-(build, test, step) multi-layer verdicts + evidence (v1.13)
   - `change-maps.ts` — build-level Change Map (Verify phase, v1.14+)
+  - `coverage.ts` — data-driven coverage: dimensions, occurring cells, cell↔run attribution
   - `layer-baselines.ts` / `layer-feedback.ts` — per-layer baselines + step feedback (Verify, v1.14+)
   - `repositories.ts` — repos, PRs, github/gitlab accounts
   - `settings.ts` — playwright, environment, diff, AI, notification settings
@@ -112,6 +113,7 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
   - `misc.ts` — selector stats, bug reports, review todos
 - `src/lib/execution/executor.ts` — test executor (~1800 lines)
 - `src/lib/verify/` — check-modes system: 9 layers (visual, text, dom, network, console, a11y, design, perf, url) × enforce/log/disable; case-status derivation
+- `src/lib/coverage/` — data-driven coverage model: profiles dimensions from CSV/Sheet caches + historical `test_results.assignedVariables`, derives the cells that actually occur, weights them, and evaluates a t-way (default pairwise) stopping rule with an explanation. `syncCoverage()` in `sync.ts` is the entry point; derivation always reconciles (prunes stale cells) rather than appending
 - `src/lib/design-system/` — design-token comparison engine (the "design" check layer)
 - `src/lib/url-diff/` — URL trajectory capture + diffing, rate-limit, SSRF guards
 - `src/lib/billing/` — Stripe billing: plans, live catalog, webhook sync
