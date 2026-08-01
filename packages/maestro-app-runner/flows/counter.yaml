@@ -1,0 +1,21 @@
+# Maestro flow for the PoC RN app (packages/maestro-poc-app).
+# Drives the counter: assert initial state, increment twice, reset.
+# appId is injected by the runner in real mode, or set here for standalone runs.
+appId: com.lastest.maestropoc
+---
+- launchApp:
+    clearState: true
+- assertVisible:
+    id: "home-screen"
+- assertVisible: "Count: 0"
+- takeScreenshot: 01-initial
+- tapOn:
+    id: "increment-button"
+- tapOn:
+    id: "increment-button"
+- assertVisible: "Count: 2"
+- takeScreenshot: 02-after-increment
+- tapOn:
+    id: "reset-button"
+- assertVisible: "Count: 0"
+- takeScreenshot: 03-after-reset

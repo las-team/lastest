@@ -1,0 +1,19 @@
+# Real Maestro flow driving the built-in iOS Settings app on the simulator.
+# Used to prove Maestro can launch, assert, tap, and screenshot on iOS with no
+# custom app build (the RN app build hit an Xcode/Boost toolchain wall).
+appId: com.apple.Preferences
+---
+- launchApp:
+    clearState: false
+- assertVisible: "Settings"
+- takeScreenshot: 01-settings-home
+- tapOn: "General"
+- assertVisible: "About"
+- takeScreenshot: 02-general
+- tapOn: "About"
+- assertVisible: "Name"
+- takeScreenshot: 03-about
+- back
+- back
+- assertVisible: "Settings"
+- takeScreenshot: 04-back-home
