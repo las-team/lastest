@@ -10,6 +10,7 @@ import type { TestRunResult } from "@/lib/playwright/types";
 import type { SetupContext } from "@/lib/setup/types";
 import { executeTests } from "@/lib/execution/executor";
 import { attributeBuildRuns } from "@/lib/coverage/sync";
+import { captureCoverageSnapshot } from "@/lib/coverage/trend";
 import { resolveBuildSetup } from "@/lib/setup/resolve-build-setup";
 import { requireTeamAccess, requireRepoAccess } from "@/lib/auth";
 import { requireBuildOwnership } from "@/lib/auth/ownership";
@@ -1603,6 +1604,17 @@ async function runBuildAsync(
             `[coverage] build ${buildId}: attributed ${attributed} matrix run(s) to coverage cells`,
           );
         }
+      }
+
+      // One point on the coverage trend per build. Taken after attribution so
+      // it reflects what this build actually covered, and keyed on buildId so
+      // a re-run or a later backfill updates the point instead of adding a
+      // second one for the same build.
+      if (repositoryId) {
+        await captureCoverageSnapshot(repositoryId, {
+          buildId,
+          source: "build",
+        });
       }
     } catch (err) {
       console.warn("[coverage] build attribution failed:", err);

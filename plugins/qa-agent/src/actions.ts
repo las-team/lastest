@@ -85,7 +85,7 @@ import {
   buildStopSummary,
   computePlanBudget,
 } from "@/lib/qa-agent/coverage-budget";
-import { getCoverageReport } from "@/lib/coverage/sync";
+import { ensureFreshCoverage } from "@/lib/coverage/sync";
 import {
   buildTaskPlanFromTriage,
   buildTaskTriageSystemPrompt,
@@ -2083,10 +2083,19 @@ async function runQaPlan(
   // P3: the item budget and the planner's work queue come from measured data
   // coverage rather than a constant. When no coverage model exists this yields
   // the old fixed cap, so repos that never profiled dimensions are unaffected.
-  const coverageState = await getCoverageReport(repositoryId).catch((err) => {
+  // Re-derive first when the model has gone stale. A scheduled run is exactly
+  // the case where nobody has opened the Coverage page since the data moved,
+  // and planning against yesterday's cell set produces a queue of gaps that no
+  // longer exist. A failed re-sync degrades to the stale model, never to none.
+  const coverageState = await ensureFreshCoverage(repositoryId).catch((err) => {
     console.warn("[qa-agent] coverage report unavailable:", err);
     return null;
   });
+  if (coverageState?.stale) {
+    console.warn(
+      `[qa-agent] planning against a stale coverage model for repo ${repositoryId}`,
+    );
+  }
   const planBudget = computePlanBudget({ stop: coverageState?.stop ?? null });
   // Excluded cells are deliberately absent from stop.queue, so they have to be
   // read back from the ledger — sourcing them from the queue yielded an always

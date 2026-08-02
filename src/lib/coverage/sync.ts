@@ -32,6 +32,7 @@ import { computeWeights, type WeightInput } from "./weight";
 import { loadCsvTable, loadSheetTable, type SourceTable } from "./source-rows";
 import { buildCoverageReport, isCovered, type CoverageReport } from "./rollup";
 import { evaluateStop, type StopDecision, type StopCell } from "./stop";
+import { backfillCoverageSnapshots, captureCoverageSnapshot } from "./trend";
 
 /** Object type used for dimensions inferred from run history, which has no
  *  inherent object type — the variable names are all we know. */
@@ -462,6 +463,37 @@ export async function syncCoverage(
     excludedReason: c.excludedReason ?? undefined,
   }));
 
+  const report = buildCoverageReport({
+    repositoryId,
+    environmentKey,
+    cells,
+    dimensions,
+    strength: stopPolicy.strength,
+  });
+  const stop = evaluateStop(stopCells, {
+    policy: stopPolicy,
+    runsSoFar: cells.filter((c) => c.runCount > 0).length,
+  });
+
+  // Snapshot the result, and reconstruct any pre-snapshot history the
+  // attribution ledger still holds. Best-effort: a repo whose trend fails to
+  // record still has a valid current model, and failing the sync would throw
+  // that away too.
+  try {
+    await captureCoverageSnapshot(repositoryId, {
+      environmentKey,
+      source: "sync",
+      strength: stopPolicy.strength,
+      shouldStop: stop.shouldStop,
+    });
+    await backfillCoverageSnapshots(repositoryId, {
+      environmentKey,
+      strength: stopPolicy.strength,
+    });
+  } catch (err) {
+    console.warn("[coverage] snapshot/backfill failed:", err);
+  }
+
   return {
     environmentKey,
     dimensionsProposed: proposed.length,
@@ -476,18 +508,77 @@ export async function syncCoverage(
     runsScanned: Math.max(runsScanned, attribution.runsScanned),
     attributionsRecorded: attribution.attributionsRecorded,
     sources,
-    report: buildCoverageReport({
-      repositoryId,
-      environmentKey,
-      cells,
-      dimensions,
-      strength: stopPolicy.strength,
-    }),
-    stop: evaluateStop(stopCells, {
-      policy: stopPolicy,
-      runsSoFar: cells.filter((c) => c.runCount > 0).length,
-    }),
+    report,
+    stop,
   };
+}
+
+/** How long a coverage model may go unsynced before anything that plans
+ *  against it re-derives first. Six hours: long enough that a normal working
+ *  day costs a couple of syncs, short enough that an overnight data refresh is
+ *  reflected by the morning's scheduled run. */
+export const DEFAULT_COVERAGE_MAX_AGE_MINUTES = 360;
+
+export function coverageMaxAgeMs(): number {
+  const raw = Number(process.env.COVERAGE_SYNC_INTERVAL_MINUTES);
+  const minutes =
+    Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_COVERAGE_MAX_AGE_MINUTES;
+  return minutes * 60_000;
+}
+
+/**
+ * Re-derive the model if it has gone stale, then report.
+ *
+ * The failure this closes: `syncCoverage` only ever ran from the Coverage
+ * page, so a scheduled QA run planned against whatever the last human visit
+ * left behind — a CSV refreshed since then was invisible, and the "uncovered
+ * cells" queue it worked from described a data space that no longer existed.
+ *
+ * A failed re-sync is not fatal. A stale model still beats no model, so the
+ * previous state is reported with `stale: true` rather than throwing into the
+ * caller's planning path.
+ */
+export async function ensureFreshCoverage(
+  repositoryId: string,
+  opts: SyncOptions & { maxAgeMs?: number; force?: boolean } = {},
+): Promise<{
+  report: CoverageReport;
+  stop: StopDecision;
+  synced: boolean;
+  stale: boolean;
+  lastSyncedAt: Date | null;
+}> {
+  const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
+  const maxAgeMs = opts.maxAgeMs ?? coverageMaxAgeMs();
+  const latest = await queries
+    .getLatestCoverageSnapshot(repositoryId, environmentKey)
+    .catch(() => null);
+  const lastSyncedAt = latest?.capturedAt ?? null;
+  const age = lastSyncedAt ? Date.now() - lastSyncedAt.getTime() : Infinity;
+  const needsSync = opts.force === true || age > maxAgeMs;
+
+  if (needsSync) {
+    try {
+      const result = await syncCoverage(repositoryId, opts);
+      return {
+        report: result.report,
+        stop: result.stop,
+        synced: true,
+        stale: false,
+        lastSyncedAt: new Date(),
+      };
+    } catch (err) {
+      console.warn(
+        `[coverage] re-sync failed for repo ${repositoryId}, reporting stale model:`,
+        err,
+      );
+      const fallback = await getCoverageReport(repositoryId, opts);
+      return { ...fallback, synced: false, stale: true, lastSyncedAt };
+    }
+  }
+
+  const current = await getCoverageReport(repositoryId, opts);
+  return { ...current, synced: false, stale: false, lastSyncedAt };
 }
 
 /**

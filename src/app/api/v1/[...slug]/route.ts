@@ -87,7 +87,8 @@ import {
   extractSourceIp,
 } from "@/lib/security/outbound-url";
 import { checkRateLimit } from "@/lib/rate-limit/endpoint-bucket";
-import { getCoverageReport } from "@/lib/coverage/sync";
+import { ensureFreshCoverage, getCoverageReport } from "@/lib/coverage/sync";
+import { DEFAULT_COVERAGE_ENVIRONMENT } from "@/lib/db/schema";
 import {
   generateAndStoreCaptionsForBuild,
   storeCaptionsForBuild,
@@ -788,19 +789,66 @@ export async function GET(
       if (subResource === "data-coverage") {
         const environmentKey =
           request.nextUrl.searchParams.get("environment") ?? undefined;
-        const { report, stop } = await getCoverageReport(id, {
-          environmentKey,
-        });
+        // `fresh=1` re-derives the model before answering. Off by default: a
+        // read of the current state must stay cheap, and a caller that wants
+        // an up-to-date number should have to say so.
+        const wantsFresh =
+          request.nextUrl.searchParams.get("fresh") === "1" ||
+          request.nextUrl.searchParams.get("fresh") === "true";
+        const trendLimit = Math.min(
+          Number(request.nextUrl.searchParams.get("trendLimit")) || 30,
+          200,
+        );
+
+        const state = wantsFresh
+          ? await ensureFreshCoverage(id, { environmentKey, force: true })
+          : await getCoverageReport(id, { environmentKey }).then((r) => ({
+              ...r,
+              synced: false,
+              stale: false,
+              lastSyncedAt: null as Date | null,
+            }));
+
+        const [trend, latestSnapshot] = await Promise.all([
+          queries.getCoverageTrend(id, { environmentKey, limit: trendLimit }),
+          queries.getLatestCoverageSnapshot(
+            id,
+            environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT,
+          ),
+        ]);
+        const lastSyncedAt = state.lastSyncedAt ?? latestSnapshot?.capturedAt;
+
         return NextResponse.json({
-          report,
+          report: state.report,
           stop: {
-            shouldStop: stop.shouldStop,
-            reasons: stop.reasons,
-            metrics: stop.metrics,
-            explanation: stop.explanation,
+            shouldStop: state.stop.shouldStop,
+            reasons: state.stop.reasons,
+            metrics: state.stop.metrics,
+            explanation: state.stop.explanation,
             // The planner's work queue: highest-weight uncovered cells first.
-            queue: stop.queue.slice(0, 100),
+            queue: state.stop.queue.slice(0, 100),
           },
+          // Freshness is part of the answer: a consumer that cannot tell a
+          // measurement from a stale one will quote the stale one.
+          freshness: {
+            lastSyncedAt: lastSyncedAt?.toISOString() ?? null,
+            resynced: state.synced,
+            stale: state.stale,
+          },
+          // Oldest first. `source` distinguishes measured points from ones
+          // reconstructed out of the attribution ledger.
+          trend: trend.map((s) => ({
+            capturedAt: s.capturedAt.toISOString(),
+            buildId: s.buildId,
+            source: s.source,
+            totalCells: s.totalCells,
+            coveredCells: s.coveredCells,
+            excludedCells: s.excludedCells,
+            failingCells: s.failingCells,
+            cellCoverage: s.cellCoverage,
+            tupleCoverage: s.tupleCoverage,
+            weightedVolumeCoverage: s.weightedVolumeCoverage,
+          })),
         });
       }
 

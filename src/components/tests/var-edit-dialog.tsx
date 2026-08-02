@@ -34,6 +34,8 @@ import type {
 } from "@lastest/plugin-data-sources";
 import { AI_VAR_PRESETS, AI_VAR_PRESET_KEYS } from "@/lib/vars/ai-presets";
 import { generateAIVarValuePreview } from "@/server/actions/tests";
+import { selectRowIndices } from "@/lib/coverage/row-filter";
+import { tableToRecords } from "@/lib/coverage/cells";
 
 export interface VarEditDialogProps {
   open: boolean;
@@ -104,6 +106,7 @@ export function VarEditDialog({
   const [sourceRowMode, setSourceRowMode] = useState<TestVariableSourceRowMode>(
     initial?.sourceRowMode ?? "fixed",
   );
+  const [rowFilter, setRowFilter] = useState(initial?.rowFilter ?? "");
   const [staticValue, setStaticValue] = useState(initial?.staticValue ?? "");
   const [aiPreset, setAiPreset] = useState<AIVarPreset>(
     initial?.aiPreset ?? "firstName",
@@ -144,6 +147,7 @@ export function VarEditDialog({
       initial?.sourceRowMode ??
         (initial?.sourceType === "ai-generated" ? "random" : "fixed"),
     );
+    setRowFilter(initial?.rowFilter ?? "");
     setStaticValue(initial?.staticValue ?? "");
     setAiPreset(initial?.aiPreset ?? "firstName");
     setAiCustomPrompt(initial?.aiCustomPrompt ?? "");
@@ -179,6 +183,32 @@ export function VarEditDialog({
       );
     return [];
   }, [sourceType, sourceAlias, sheetSources, csvSources]);
+
+  // Cached rows of the selected source, as records — what the row filter is
+  // evaluated against for the live match count. Preview only; the executor
+  // re-resolves from the same cache at run time.
+  const sourceRecords = useMemo<Array<Record<string, string>>>(() => {
+    const source =
+      sourceType === "gsheet"
+        ? sheetSources.find((s) => s.alias === sourceAlias)
+        : sourceType === "csv"
+          ? csvSources.find((s) => s.alias === sourceAlias)
+          : undefined;
+    if (!source) return [];
+    return tableToRecords(source.cachedHeaders ?? [], source.cachedData ?? []);
+  }, [sourceType, sourceAlias, sheetSources, csvSources]);
+
+  // A filter that matches nothing, or does not parse, means the test runs
+  // zero rows — surfaced here rather than discovered as an empty build.
+  const rowFilterPreview = useMemo(() => {
+    if (sourceRowMode !== "matrix") return null;
+    const { indices, errors } = selectRowIndices(sourceRecords, rowFilter);
+    return {
+      matched: indices.length,
+      total: sourceRecords.length,
+      errors,
+    };
+  }, [sourceRowMode, sourceRecords, rowFilter]);
 
   // Auto-suggest a name from alias+column for CSV/Sheet assign vars, until
   // the user starts typing one themselves.
@@ -227,6 +257,13 @@ export function VarEditDialog({
       ) {
         return "Source alias and column are required";
       }
+      if (sourceRowMode === "matrix") {
+        if (sourceType !== "csv" && sourceType !== "gsheet")
+          return "Matrix mode needs a CSV or Google Sheet source";
+        if (rowFilterPreview?.errors.length) return rowFilterPreview.errors[0];
+        if (rowFilterPreview && rowFilterPreview.matched === 0)
+          return "This row filter matches no rows";
+      }
       if (sourceType === "ai-generated") {
         if (!aiPreset) return 'Pick a preset or "Custom prompt"';
         if (aiPreset === "custom" && !aiCustomPrompt.trim())
@@ -263,6 +300,11 @@ export function VarEditDialog({
                   // the value is picked at run time and stored on the test.
                   ...(sourceRowMode === "fixed"
                     ? { sourceRow: parseInt(sourceRow, 10) || 0 }
+                    : {}),
+                  // Only meaningful in matrix mode — persisting it otherwise
+                  // stores a setting that silently does nothing.
+                  ...(sourceRowMode === "matrix" && rowFilter.trim()
+                    ? { rowFilter: rowFilter.trim() }
                     : {}),
                   staticValue: staticValue || undefined,
                 }
@@ -451,6 +493,9 @@ export function VarEditDialog({
                             Increment per run
                           </SelectItem>
                           <SelectItem value="random">Random per run</SelectItem>
+                          <SelectItem value="matrix">
+                            Matrix — one run per row
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -471,11 +516,54 @@ export function VarEditDialog({
                         <p className="text-xs text-muted-foreground pt-2">
                           {sourceRowMode === "random"
                             ? "Picked at random each run."
-                            : "Walks forward across runs; wraps to row 2 after the last row."}
+                            : sourceRowMode === "matrix"
+                              ? "Every matching row runs, inside one build."
+                              : "Walks forward across runs; wraps to row 2 after the last row."}
                         </p>
                       </div>
                     )}
                   </div>
+
+                  {sourceRowMode === "matrix" && (
+                    <div className="space-y-1.5 rounded-md border p-3">
+                      <Label htmlFor="var-row-filter">
+                        Row filter (optional)
+                      </Label>
+                      <Input
+                        id="var-row-filter"
+                        value={rowFilter}
+                        onChange={(e) => setRowFilter(e.target.value)}
+                        placeholder="country IN (DE, FR) AND callType = Detail"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Binds this test to a slice of the source. Supports{" "}
+                        <code>col IN (a, b)</code>,{" "}
+                        <code>col NOT IN (a, b)</code>, <code>col = a</code>,{" "}
+                        <code>col != a</code>, joined with <code>AND</code>.
+                        Leave empty to select every row.
+                      </p>
+                      {rowFilterPreview &&
+                        (rowFilterPreview.errors.length > 0 ? (
+                          <p className="text-xs text-destructive">
+                            {rowFilterPreview.errors.join("; ")}
+                          </p>
+                        ) : (
+                          <p
+                            className={
+                              rowFilterPreview.matched === 0
+                                ? "text-xs text-destructive"
+                                : "text-xs text-muted-foreground"
+                            }
+                          >
+                            Matches {rowFilterPreview.matched} of{" "}
+                            {rowFilterPreview.total} cached rows
+                            {rowFilterPreview.matched === 0
+                              ? " — this test would run nothing."
+                              : ". The matrix policy on the Variables tab decides how many of those actually run."}
+                          </p>
+                        ))}
+                    </div>
+                  )}
 
                   {renderNameField()}
                 </>

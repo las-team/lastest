@@ -11,16 +11,19 @@ import {
   coverageCells,
   coverageCellRuns,
   coverageDimensions,
+  coverageSnapshots,
   testResults,
   testRuns,
   DEFAULT_COVERAGE_ENVIRONMENT,
   type CoverageCell,
   type CoverageCellStatus,
   type CoverageDimension,
+  type CoverageSnapshot,
   type NewCoverageCell,
   type NewCoverageDimension,
+  type NewCoverageSnapshot,
 } from "../schema";
-import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 
 // ── Dimensions ──────────────────────────────────────────────────────────────
@@ -87,6 +90,21 @@ export async function setCoverageDimensionEnabled(
 
 export async function deleteCoverageDimension(id: string): Promise<void> {
   await db.delete(coverageDimensions).where(eq(coverageDimensions.id, id));
+}
+
+/** Every (repo, environment) pair with at least one confirmed dimension —
+ *  i.e. the repos that actually have a coverage model to keep fresh. A repo
+ *  with only auto-proposed (disabled) dimensions has nothing to re-sync. */
+export async function getReposWithEnabledCoverageDimensions(): Promise<
+  Array<{ repositoryId: string; environmentKey: string }>
+> {
+  return db
+    .selectDistinct({
+      repositoryId: coverageDimensions.repositoryId,
+      environmentKey: coverageDimensions.environmentKey,
+    })
+    .from(coverageDimensions)
+    .where(eq(coverageDimensions.enabled, true));
 }
 
 // ── Cells ───────────────────────────────────────────────────────────────────
@@ -417,6 +435,170 @@ export async function refreshCoverageCellStats(
         sql`NOT EXISTS (SELECT 1 FROM coverage_cell_runs r WHERE r.cell_id = ${coverageCells.id})`,
       ),
     );
+}
+
+// ── Snapshots (trend) ───────────────────────────────────────────────────────
+
+/**
+ * Persist one point on the trend line.
+ *
+ * Build-scoped snapshots upsert on (repo, env, buildId): the build hook and a
+ * later backfill both describe the same build, and a trend that double-counts
+ * builds is worse than no trend. Sync snapshots carry a NULL buildId, which
+ * Postgres treats as distinct, so each sync appends its own point.
+ */
+export async function recordCoverageSnapshot(
+  data: Omit<NewCoverageSnapshot, "id" | "capturedAt"> & {
+    id?: string;
+    capturedAt?: Date;
+  },
+): Promise<void> {
+  const now = new Date();
+  const row = {
+    ...data,
+    id: data.id ?? uuid(),
+    environmentKey: data.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT,
+    capturedAt: data.capturedAt ?? now,
+    createdAt: now,
+  };
+  if (!row.buildId) {
+    await db.insert(coverageSnapshots).values(row);
+    return;
+  }
+  await db
+    .insert(coverageSnapshots)
+    .values(row)
+    .onConflictDoUpdate({
+      target: [
+        coverageSnapshots.repositoryId,
+        coverageSnapshots.environmentKey,
+        coverageSnapshots.buildId,
+      ],
+      set: {
+        source: row.source,
+        capturedAt: row.capturedAt,
+        totalCells: row.totalCells,
+        coveredCells: row.coveredCells,
+        excludedCells: row.excludedCells,
+        failingCells: row.failingCells,
+        cellCoverage: row.cellCoverage,
+        tupleCoverage: row.tupleCoverage,
+        weightedVolumeCoverage: row.weightedVolumeCoverage,
+        dimensionsEnabled: row.dimensionsEnabled,
+        strength: row.strength,
+        shouldStop: row.shouldStop,
+        byObjectType: row.byObjectType,
+      },
+    });
+}
+
+/** Trend, oldest first — the order a chart plots in. */
+export async function getCoverageTrend(
+  repositoryId: string,
+  opts: { environmentKey?: string; limit?: number } = {},
+): Promise<CoverageSnapshot[]> {
+  const rows = await db
+    .select()
+    .from(coverageSnapshots)
+    .where(
+      and(
+        eq(coverageSnapshots.repositoryId, repositoryId),
+        eq(
+          coverageSnapshots.environmentKey,
+          opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT,
+        ),
+      ),
+    )
+    .orderBy(desc(coverageSnapshots.capturedAt))
+    .limit(opts.limit ?? 100);
+  return rows.reverse();
+}
+
+export async function getLatestCoverageSnapshot(
+  repositoryId: string,
+  environmentKey: string = DEFAULT_COVERAGE_ENVIRONMENT,
+): Promise<CoverageSnapshot | null> {
+  const [row] = await db
+    .select()
+    .from(coverageSnapshots)
+    .where(
+      and(
+        eq(coverageSnapshots.repositoryId, repositoryId),
+        eq(coverageSnapshots.environmentKey, environmentKey),
+      ),
+    )
+    .orderBy(desc(coverageSnapshots.capturedAt))
+    .limit(1);
+  return row ?? null;
+}
+
+/** Builds that already have a snapshot — so a backfill only reconstructs what
+ *  is missing instead of rewriting measured history. */
+export async function getSnapshottedBuildIds(
+  repositoryId: string,
+  environmentKey: string = DEFAULT_COVERAGE_ENVIRONMENT,
+): Promise<string[]> {
+  const rows = await db
+    .select({ buildId: coverageSnapshots.buildId })
+    .from(coverageSnapshots)
+    .where(
+      and(
+        eq(coverageSnapshots.repositoryId, repositoryId),
+        eq(coverageSnapshots.environmentKey, environmentKey),
+        sql`${coverageSnapshots.buildId} IS NOT NULL`,
+      ),
+    );
+  return rows.map((r) => r.buildId!).filter(Boolean);
+}
+
+/**
+ * Every attribution this repo holds, oldest first, with the build that
+ * produced it. This is the raw material the trend is reconstructed from — the
+ * ledger already records which run touched which cell, so history exists even
+ * though nobody was writing snapshots yet.
+ */
+export async function getCoverageAttributionTimeline(
+  repositoryId: string,
+  opts: { environmentKey?: string; limit?: number } = {},
+): Promise<
+  Array<{
+    cellId: string;
+    buildId: string;
+    ranAt: Date | null;
+    verdict: string | null;
+  }>
+> {
+  const rows = await db
+    .select({
+      cellId: coverageCellRuns.cellId,
+      buildId: coverageCellRuns.buildId,
+      ranAt: coverageCellRuns.ranAt,
+      verdict: coverageCellRuns.verdict,
+      recordedAt: coverageCellRuns.recordedAt,
+    })
+    .from(coverageCellRuns)
+    .innerJoin(coverageCells, eq(coverageCellRuns.cellId, coverageCells.id))
+    .where(
+      and(
+        eq(coverageCells.repositoryId, repositoryId),
+        eq(
+          coverageCells.environmentKey,
+          opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT,
+        ),
+        sql`${coverageCellRuns.buildId} IS NOT NULL`,
+      ),
+    )
+    .orderBy(asc(coverageCellRuns.ranAt), asc(coverageCellRuns.recordedAt))
+    .limit(opts.limit ?? 50000);
+
+  return rows.map((r) => ({
+    cellId: r.cellId,
+    buildId: r.buildId!,
+    // ranAt is nullable on the ledger; recordedAt is not, and is the honest
+    // fallback for ordering a point on the trend.
+    ranAt: r.ranAt ?? r.recordedAt ?? null,
+    verdict: r.verdict,
+  }));
 }
 
 export async function getCoverageCellsByKeys(

@@ -72,6 +72,11 @@ export function ensureSchedulerStarted() {
     } catch (error) {
       console.error("[scheduler] Error processing launch cohorts:", error);
     }
+    try {
+      await processStaleCoverageModels();
+    } catch (error) {
+      console.error("[scheduler] Error re-syncing coverage models:", error);
+    }
   }, 60_000); // Check every 60 seconds
 
   // Don't keep process alive just for scheduler
@@ -155,5 +160,51 @@ async function processDueExplorerTriggers() {
     }
   } finally {
     explorerProcessing = false;
+  }
+}
+
+let coverageProcessing = false;
+
+/**
+ * Keep every confirmed coverage model fresh.
+ *
+ * Until this existed, `syncCoverage` only ran when a human opened the Coverage
+ * page: a nightly CSV refresh or a new data source was invisible to anything
+ * scheduled, so a QA agent run planned against a data space that had already
+ * moved. Repos with no enabled dimension have no model and are skipped
+ * entirely — profiling proposals are not a model.
+ *
+ * One repo at a time, and only when stale, because a sync re-reads every data
+ * source and re-scores every cell; a fleet of repos syncing on the same tick
+ * is a self-inflicted load spike.
+ */
+async function processStaleCoverageModels() {
+  if (coverageProcessing) return;
+  coverageProcessing = true;
+
+  try {
+    const { ensureFreshCoverage } = await import("@/lib/coverage/sync");
+    const targets = await queries.getReposWithEnabledCoverageDimensions();
+
+    for (const target of targets) {
+      try {
+        const result = await ensureFreshCoverage(target.repositoryId, {
+          environmentKey: target.environmentKey,
+        });
+        if (result.synced) {
+          console.log(
+            `[scheduler] Re-synced coverage for repo ${target.repositoryId} ` +
+              `(${Math.round(result.report.totals.cellCoverage * 100)}% of ${result.report.totals.cells} cells)`,
+          );
+        }
+      } catch (error) {
+        console.error(
+          `[scheduler] Coverage re-sync failed for repo ${target.repositoryId}:`,
+          error,
+        );
+      }
+    }
+  } finally {
+    coverageProcessing = false;
   }
 }

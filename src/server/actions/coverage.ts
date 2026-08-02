@@ -90,6 +90,17 @@ export async function getCoverageSpecAction(
   return { spec, markdown: renderSpecMarkdown(spec) };
 }
 
+/** The coverage trend, oldest first. Points are written by sync and by build
+ *  completion; pre-snapshot history is reconstructed from the attribution
+ *  ledger and marked `source: 'backfill'`. */
+export async function getCoverageTrendAction(
+  repositoryId: string,
+  opts: { environmentKey?: string; limit?: number } = {},
+) {
+  await requireRepoAccess(repositoryId);
+  return queries.getCoverageTrend(repositoryId, opts);
+}
+
 export async function listCoverageDimensionsAction(
   repositoryId: string,
   environmentKey: string = DEFAULT_COVERAGE_ENVIRONMENT,

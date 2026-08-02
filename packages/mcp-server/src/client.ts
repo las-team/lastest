@@ -384,6 +384,22 @@ export class LastestClient {
     return this.get(`/api/v1/repos/${repoId}/coverage`);
   }
 
+  /** Data-driven coverage: cells, dimensions, stop decision, trend. A
+   *  different question from `getCoverage`, which counts routes and areas. */
+  async getDataCoverage(
+    repoId: string,
+    opts: { environment?: string; fresh?: boolean; trendLimit?: number } = {},
+  ): Promise<unknown> {
+    const params = new URLSearchParams();
+    if (opts.environment) params.set("environment", opts.environment);
+    if (opts.fresh) params.set("fresh", "1");
+    if (opts.trendLimit) params.set("trendLimit", String(opts.trendLimit));
+    const qs = params.toString();
+    return this.get(
+      `/api/v1/repos/${repoId}/data-coverage${qs ? `?${qs}` : ""}`,
+    );
+  }
+
   // --- QA Agent (ongoing agent: runs, direction queue) ---
 
   async getQaAgentStatus(repoId: string): Promise<unknown> {

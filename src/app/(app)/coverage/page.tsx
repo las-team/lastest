@@ -6,6 +6,7 @@ import {
   getCoverageDimensions,
   getCsvDataSources,
   getGoogleSheetsDataSources,
+  getCoverageTrend,
 } from "@/lib/db/queries";
 import { getCoverageReport } from "@/lib/coverage/sync";
 import { buildCoverageSpec } from "@/lib/coverage/spec";
@@ -34,14 +35,21 @@ export default async function CoveragePage() {
   }
 
   const env = DEFAULT_COVERAGE_ENVIRONMENT;
-  const [{ report, stop }, cells, dimensions, csvSources, sheetSources] =
-    await Promise.all([
-      getCoverageReport(selectedRepo.id, { environmentKey: env }),
-      getCoverageCells(selectedRepo.id, { environmentKey: env }),
-      getCoverageDimensions(selectedRepo.id, env),
-      getCsvDataSources(selectedRepo.id),
-      getGoogleSheetsDataSources(selectedRepo.id),
-    ]);
+  const [
+    { report, stop },
+    cells,
+    dimensions,
+    csvSources,
+    sheetSources,
+    snapshots,
+  ] = await Promise.all([
+    getCoverageReport(selectedRepo.id, { environmentKey: env }),
+    getCoverageCells(selectedRepo.id, { environmentKey: env }),
+    getCoverageDimensions(selectedRepo.id, env),
+    getCsvDataSources(selectedRepo.id),
+    getGoogleSheetsDataSources(selectedRepo.id),
+    getCoverageTrend(selectedRepo.id, { environmentKey: env, limit: 60 }),
+  ]);
 
   // Resolved the same way profiling resolves them, so the disclosed sample
   // size is the one the numbers were actually computed from.
@@ -69,6 +77,18 @@ export default async function CoveragePage() {
         explanation: stop.explanation,
       }}
       dimensions={dimensions}
+      trend={snapshots.map((s) => ({
+        capturedAt: s.capturedAt.toISOString(),
+        buildId: s.buildId,
+        source: s.source,
+        totalCells: s.totalCells,
+        coveredCells: s.coveredCells,
+        excludedCells: s.excludedCells,
+        failingCells: s.failingCells,
+        cellCoverage: s.cellCoverage,
+        tupleCoverage: s.tupleCoverage,
+        weightedVolumeCoverage: s.weightedVolumeCoverage,
+      }))}
       sources={[
         ...csvSources.map((s) => ({
           kind: "csv" as const,

@@ -1819,6 +1819,7 @@ export function TestDetailClient({
               onRefresh={onRefresh}
               aiAvailable={aiAvailable && aiEnabled}
               aiVarLastValues={test.aiVarLastValues ?? null}
+              matrixPolicy={test.matrixPolicy ?? null}
               onSaveVariables={async (next) => {
                 const { saveTestVariables } =
                   await import("@/server/actions/tests");

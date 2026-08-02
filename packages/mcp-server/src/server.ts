@@ -1794,18 +1794,103 @@ export function createServer(client: LastestClient): McpServer {
   // Replaces lastest_get_coverage, lastest_qa_summary.
   server.tool(
     "lastest_insights",
-    'Repository-level insights (needs repositoryId). `action`: "coverage" (test coverage statistics by functional area and route), "qa" (comprehensive QA overview: test health, recent builds, and action items).',
+    'Repository-level insights (needs repositoryId). `action`: "coverage" (STRUCTURAL coverage — which routes and functional areas have any test at all), "data_coverage" (DATA coverage — the combinatorial cell model: cell/t-way/weighted-volume coverage, the stopping decision, the highest-weight uncovered cells, and the coverage trend over recent builds), "qa" (comprehensive QA overview: test health, recent builds, and action items). Use "data_coverage" for "are we testing enough of the data space / is coverage improving"; "coverage" only answers "which pages have a test".',
     {
       action: z
-        .enum(["coverage", "qa"])
-        .describe('"coverage" = coverage stats; "qa" = QA health summary'),
+        .enum(["coverage", "data_coverage", "qa"])
+        .describe(
+          '"coverage" = route/area stats; "data_coverage" = combinatorial data-cell coverage + trend; "qa" = QA health summary',
+        ),
       repositoryId: z.string().describe("Repository ID"),
+      environment: z
+        .string()
+        .optional()
+        .describe('data_coverage only: environment key (default "default")'),
+      fresh: z
+        .boolean()
+        .optional()
+        .describe(
+          "data_coverage only: re-derive the model from the data sources before answering (slower; use when the data has just changed)",
+        ),
     },
     async (
       params,
     ): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
-      const action = params.action as "coverage" | "qa";
+      const action = params.action as "coverage" | "data_coverage" | "qa";
       const repositoryId = params.repositoryId as string;
+
+      if (action === "data_coverage") {
+        const data = (await client.getDataCoverage(repositoryId, {
+          environment: params.environment as string | undefined,
+          fresh: params.fresh as boolean | undefined,
+        })) as {
+          report?: {
+            totals?: {
+              cells?: number;
+              coveredCells?: number;
+              excludedCells?: number;
+              cellCoverage?: number;
+              dimensions?: number;
+            };
+          };
+          stop?: {
+            shouldStop?: boolean;
+            explanation?: string;
+            metrics?: { tupleCoverage?: number };
+            queue?: Array<{ coordsKey?: string; weight?: number }>;
+          };
+          freshness?: { lastSyncedAt?: string | null; stale?: boolean };
+          trend?: Array<{ capturedAt: string; cellCoverage: number }>;
+        };
+
+        const totals = data.report?.totals;
+        const pct = (v?: number) =>
+          v === undefined ? "N/A" : `${Math.round(v * 100)}%`;
+
+        const trend = data.trend ?? [];
+        const first = trend[0];
+        const last = trend[trend.length - 1];
+        const delta =
+          first && last ? last.cellCoverage - first.cellCoverage : null;
+        const trendSummary =
+          trend.length < 2 || delta === null
+            ? "no trend yet (fewer than two snapshots)"
+            : `${delta >= 0 ? "+" : ""}${Math.round(delta * 100)} pts across ${trend.length} snapshots since ${first.capturedAt.slice(0, 10)}`;
+
+        const actionRequired: string[] = [];
+        if (totals?.cells === 0 || totals?.cells === undefined) {
+          actionRequired.push(
+            "No coverage model — no dimensions are enabled for this repository. Profile and confirm dimensions on the Coverage page first.",
+          );
+        } else if (data.stop?.shouldStop === false) {
+          const top = (data.stop?.queue ?? [])
+            .slice(0, 3)
+            .map((c) => c.coordsKey)
+            .filter(Boolean);
+          actionRequired.push(
+            `Coverage targets not met — highest-weight uncovered cells: ${top.join(", ") || "see queue"}`,
+          );
+        }
+        if (data.freshness?.stale) {
+          actionRequired.push(
+            "The model is stale (re-sync failed) — numbers describe the last successful sync.",
+          );
+        }
+
+        const response: ToolResponse = {
+          status: totals?.cells ? "coverage_retrieved" : "no_coverage_model",
+          summary:
+            `Data coverage: ${pct(totals?.cellCoverage)} of ${totals?.cells ?? 0} occurring cells ` +
+            `(${pct(data.stop?.metrics?.tupleCoverage)} t-way), ${totals?.excludedCells ?? 0} excluded. ` +
+            `Stop rule: ${data.stop?.shouldStop ? "targets met" : "more work"}. Trend: ${trendSummary}.`,
+          actionRequired:
+            actionRequired.length > 0 ? actionRequired : undefined,
+          details: data as Record<string, unknown>,
+        };
+        return {
+          content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
+        };
+      }
 
       if (action === "coverage") {
         const coverage = (await client.getCoverage(repositoryId)) as Record<

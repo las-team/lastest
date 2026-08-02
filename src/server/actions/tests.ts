@@ -210,11 +210,70 @@ export async function saveTestVariables(
           throw new Error(`AI variable "${v.name}" cannot use increment mode`);
         }
       }
+      if (v.sourceRowMode === "matrix") {
+        // Matrix fans a test out over rows of a tabular source. There is
+        // nothing to fan out for a static or AI-generated value.
+        if (v.sourceType !== "csv" && v.sourceType !== "gsheet") {
+          throw new Error(
+            `Variable "${v.name}" can only use matrix mode with a CSV or Google Sheet source`,
+          );
+        }
+        const { parseRowFilter } = await import("@/lib/coverage/row-filter");
+        const parsed = parseRowFilter(v.rowFilter);
+        if (parsed.errors.length > 0) {
+          throw new Error(
+            `Row filter on "${v.name}" is invalid: ${parsed.errors.join("; ")}`,
+          );
+        }
+      } else if (v.rowFilter) {
+        // A filter that only applies in matrix mode, on a variable that is not
+        // in matrix mode, silently does nothing — drop it rather than store a
+        // setting the user believes is in effect.
+        delete v.rowFilter;
+      }
     }
   }
 
   await queries.updateTest(testId, { variables });
   revalidatePath("/tests");
+  revalidatePath(`/tests/${testId}`);
+  return { success: true };
+}
+
+/**
+ * Persist a test's matrix-execution policy — how far the fan-out goes and
+ * which expanded runs capture a visual baseline.
+ *
+ * The visual policy is the load-bearing one: 'all' multiplies PNG baselines
+ * and human review by the number of cells, which is what makes matrix testing
+ * unusable in practice, so it is an explicit opt-in and never a default.
+ */
+export async function saveTestMatrixPolicy(
+  testId: string,
+  policy: import("@/lib/db/schema").MatrixPolicy,
+) {
+  const session = await requireCapability("tests:write");
+  const test = await queries.getTest(testId);
+  if (!test) throw new Error("Test not found");
+  if (test.repositoryId) {
+    const repo = await queries.getRepository(test.repositoryId);
+    if (!repo || repo.teamId !== session.team.id) throw new Error("Forbidden");
+  }
+
+  if (policy.selection !== "all" && policy.selection !== "pairwise") {
+    throw new Error("Matrix selection must be 'all' or 'pairwise'");
+  }
+  if (!["representative", "all", "none"].includes(policy.visual)) {
+    throw new Error("Matrix visual policy must be representative, all or none");
+  }
+  if (!Number.isInteger(policy.strength) || policy.strength < 2) {
+    throw new Error("Matrix strength must be an integer of 2 or more");
+  }
+  if (!Number.isInteger(policy.maxRuns) || policy.maxRuns < 1) {
+    throw new Error("Matrix max runs must be a positive integer");
+  }
+
+  await queries.updateTest(testId, { matrixPolicy: policy });
   revalidatePath(`/tests/${testId}`);
   return { success: true };
 }

@@ -48,6 +48,10 @@ import {
   getCoverageSpecAction,
 } from "@/server/actions/coverage";
 import { uploadCsvSource } from "@/server/actions/csv-sources";
+import {
+  CoverageTrendPanel,
+  type CoverageTrendPoint,
+} from "./coverage-trend-panel";
 
 interface SourceSummary {
   kind: "csv" | "sheet";
@@ -72,6 +76,9 @@ interface CoverageClientProps {
   };
   dimensions: CoverageDimension[];
   sources: SourceSummary[];
+  /** Oldest first. Written by sync and by build completion; pre-snapshot
+   *  history is reconstructed from the run-attribution ledger. */
+  trend: CoverageTrendPoint[];
 }
 
 const pct = (n: number) => `${Math.round(n * 1000) / 10}%`;
@@ -153,6 +160,7 @@ export function CoverageClient({
   stop,
   dimensions,
   sources,
+  trend,
 }: CoverageClientProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -448,6 +456,14 @@ export function CoverageClient({
               {enabledDims.length}/{dimensions.length}
             </Badge>
           </TabsTrigger>
+          <TabsTrigger value="trend">
+            Trend
+            {trend.length > 0 ? (
+              <Badge variant="secondary" className="ml-1.5">
+                {trend.length}
+              </Badge>
+            ) : null}
+          </TabsTrigger>
           <TabsTrigger value="matrix">Coverage matrix</TabsTrigger>
           <TabsTrigger value="spec">Specification</TabsTrigger>
           <TabsTrigger value="sources">Data sources</TabsTrigger>
@@ -552,6 +568,11 @@ export function CoverageClient({
               </Card>
             ))
           )}
+        </TabsContent>
+
+        {/* ── Trend: coverage over time ────────────────────────────────── */}
+        <TabsContent value="trend" className="space-y-4 mt-4">
+          <CoverageTrendPanel points={trend} />
         </TabsContent>
 
         {/* ── Gaps: what is not tested, ranked ─────────────────────────── */}
