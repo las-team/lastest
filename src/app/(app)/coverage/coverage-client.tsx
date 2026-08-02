@@ -34,6 +34,8 @@ import {
   Upload,
   FileSpreadsheet,
   AlertTriangle,
+  Target,
+  Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CoverageDimension } from "@/lib/db/schema";
@@ -50,7 +52,11 @@ import { uploadCsvSource } from "@/server/actions/csv-sources";
 interface SourceSummary {
   kind: "csv" | "sheet";
   alias: string;
+  /** Rows the source has in total. */
   rows: number;
+  /** Rows the coverage numbers were actually computed from. */
+  profiledRows: number;
+  truncated: boolean;
   columns: string[];
 }
 
@@ -151,6 +157,10 @@ export function CoverageClient({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [busy, setBusy] = useState<string | null>(null);
+  const [matrixStatus, setMatrixStatus] = useState<"all" | SpecCell["status"]>(
+    "all",
+  );
+  const [matrixQuery, setMatrixQuery] = useState("");
   const [excludeTarget, setExcludeTarget] = useState<{
     cellId: string;
     coords: Record<string, string>;
@@ -271,6 +281,39 @@ export function CoverageClient({
   const proposedDims = dimensions.filter((d) => !d.enabled);
   const anyProfiled = dimensions.some((d) => d.valueSource === "profiled");
 
+  // The gap set: every occurring combination no run has exercised, ranked by
+  // weight, plus the dimension values never exercised at all. `spec.outstanding`
+  // is already the agent's work queue, so the screen and the agent cannot
+  // disagree about what is missing.
+  const untestedCells = spec.outstanding;
+  const untestedRecords = untestedCells.reduce(
+    (a, c) => a + c.observedCount,
+    0,
+  );
+  const totalRecords = spec.sections.reduce(
+    (a, s) => a + s.totals.totalRecords,
+    0,
+  );
+  const untestedValues = spec.sections.flatMap((sec) =>
+    sec.dimensions
+      .map((d) => ({
+        objectType: sec.objectType,
+        field: d.field,
+        valueSource: d.valueSource,
+        values: d.values
+          .filter((v) => !v.covered)
+          .sort((a, b) => b.recordCount - a.recordCount),
+        total: d.values.length,
+      }))
+      .filter((d) => d.values.length > 0),
+  );
+  const truncatedSources = sources.filter((s) => s.truncated);
+  const cellById = new Map(
+    spec.sections.flatMap((sec) =>
+      sec.cells.map((c) => [c.coordsKey, sec.objectType] as const),
+    ),
+  );
+
   return (
     <div className="p-6 space-y-6 overflow-auto">
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -312,6 +355,25 @@ export function CoverageClient({
           </Button>
         </div>
       </div>
+
+      {truncatedSources.length > 0 ? (
+        <Card className="border-amber-500/40 bg-amber-500/5">
+          <CardContent className="pt-6 flex gap-2 text-sm">
+            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+            <span>
+              {truncatedSources
+                .map(
+                  (s) =>
+                    `${s.alias}: ${s.profiledRows.toLocaleString()}/${s.rows.toLocaleString()} rows`,
+                )
+                .join(" · ")}{" "}
+              — the original upload is no longer on disk, so profiling fell back
+              to the cached preview. Re-upload the file to measure the full data
+              set.
+            </span>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {spec.caveats.length > 0 ? (
         <Card className="border-amber-500/40 bg-amber-500/5">
@@ -372,6 +434,14 @@ export function CoverageClient({
       <Tabs defaultValue="breakdown">
         <TabsList>
           <TabsTrigger value="breakdown">Breakdown</TabsTrigger>
+          <TabsTrigger value="gaps">
+            Gaps
+            {untestedCells.length > 0 ? (
+              <Badge variant="secondary" className="ml-1.5">
+                {untestedCells.length}
+              </Badge>
+            ) : null}
+          </TabsTrigger>
           <TabsTrigger value="dimensions">
             Dimensions{" "}
             <Badge variant="secondary" className="ml-1.5">
@@ -404,6 +474,31 @@ export function CoverageClient({
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {s.sample ? (
+                    <div
+                      className={cn(
+                        "text-xs rounded-md border px-2.5 py-1.5",
+                        s.sample.truncated
+                          ? "border-amber-500/40 bg-amber-500/5 text-amber-700 dark:text-amber-400"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {s.sample.truncated ? (
+                        <>
+                          Sampled: these numbers come from{" "}
+                          {s.sample.profiledRows.toLocaleString()} of{" "}
+                          {s.sample.totalRows.toLocaleString()} source rows.
+                          Combinations that only occur past that point are
+                          missing.
+                        </>
+                      ) : (
+                        <>
+                          Profiled from all{" "}
+                          {s.sample.totalRows.toLocaleString()} source rows.
+                        </>
+                      )}
+                    </div>
+                  ) : null}
                   <Progress value={s.totals.cellCoverage * 100} />
                   <div className="space-y-3">
                     {s.dimensions.map((d) => {
@@ -423,6 +518,11 @@ export function CoverageClient({
                             </span>
                             <span className="tabular-nums text-muted-foreground">
                               {cov}/{d.values.length} values
+                              {cov < d.values.length ? (
+                                <span className="ml-1.5 text-amber-600 dark:text-amber-400">
+                                  · {d.values.length - cov} untested
+                                </span>
+                              ) : null}
                             </span>
                           </div>
                           <div className="flex flex-wrap gap-1">
@@ -434,7 +534,7 @@ export function CoverageClient({
                                   "text-[11px] px-1.5 py-0.5 rounded border tabular-nums",
                                   v.covered
                                     ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-400"
-                                    : "bg-muted border-border text-muted-foreground",
+                                    : "bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-400",
                                 )}
                               >
                                 {v.value}
@@ -451,6 +551,169 @@ export function CoverageClient({
                 </CardContent>
               </Card>
             ))
+          )}
+        </TabsContent>
+
+        {/* ── Gaps: what is not tested, ranked ─────────────────────────── */}
+        <TabsContent value="gaps" className="space-y-4 mt-4">
+          {untestedCells.length === 0 && untestedValues.length === 0 ? (
+            <Card>
+              <CardContent className="pt-6 text-sm text-muted-foreground">
+                {spec.sections.length === 0
+                  ? "No coverage model yet — enable dimensions on the Dimensions tab, then press Re-profile."
+                  : "Every occurring combination has been exercised at least once."}
+              </CardContent>
+            </Card>
+          ) : (
+            <>
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Target className="h-4 w-4" />
+                    {untestedCells.length} untested combination(s)
+                  </CardTitle>
+                  <CardDescription>
+                    Covering {untestedRecords.toLocaleString()} of{" "}
+                    {totalRecords.toLocaleString()} records
+                    {totalRecords > 0
+                      ? ` (${pct(untestedRecords / totalRecords)} of the data)`
+                      : ""}
+                    . This is exactly the queue the QA agent plans from, highest
+                    weight first.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+
+              {untestedValues.length > 0 ? (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">
+                      Values never exercised
+                    </CardTitle>
+                    <CardDescription>
+                      No test has ever run against these. A value here means a
+                      whole slice of the data space is unseen, not just one
+                      combination.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {untestedValues.map((d) => (
+                      <div
+                        key={`${d.objectType}.${d.field}`}
+                        className="space-y-1.5"
+                      >
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="font-medium">
+                            <code>{d.objectType}</code>.<code>{d.field}</code>
+                          </span>
+                          <span className="tabular-nums text-muted-foreground">
+                            {d.values.length}/{d.total} values untested
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {d.values.map((v) => (
+                            <span
+                              key={v.value}
+                              title={`${v.recordCount} record(s) · ${pct(v.share)} of this dimension`}
+                              className="text-[11px] px-1.5 py-0.5 rounded border tabular-nums bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-400"
+                            >
+                              {v.value}
+                              <span className="opacity-60 ml-1">
+                                {v.recordCount}
+                              </span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              ) : null}
+
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">
+                    Untested combinations, ranked
+                  </CardTitle>
+                  <CardDescription>
+                    Weight = volume × criticality × failure history × vendor
+                    churn, minus redundancy with what is already covered.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
+                          <th className="py-2 pr-4 font-medium">Combination</th>
+                          <th className="py-2 pr-4 font-medium text-right">
+                            Records
+                          </th>
+                          <th className="py-2 pr-4 font-medium text-right">
+                            Weight
+                          </th>
+                          <th className="py-2 font-medium" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {untestedCells.slice(0, 200).map((c) => (
+                          <tr
+                            key={c.coordsKey}
+                            className="border-b last:border-0 hover:bg-muted/40"
+                          >
+                            <td className="py-2 pr-4">
+                              <div className="flex flex-wrap gap-1">
+                                {Object.entries(c.coords)
+                                  .sort(([a], [b]) => a.localeCompare(b))
+                                  .map(([k, v]) => (
+                                    <span
+                                      key={k}
+                                      className="text-[11px] px-1.5 py-0.5 rounded border bg-muted"
+                                    >
+                                      <span className="opacity-60">{k}=</span>
+                                      {v}
+                                    </span>
+                                  ))}
+                              </div>
+                              <div className="text-[11px] text-muted-foreground mt-0.5">
+                                <code>{cellById.get(c.coordsKey) ?? ""}</code>
+                              </div>
+                            </td>
+                            <td className="py-2 pr-4 text-right tabular-nums">
+                              {c.observedCount.toLocaleString()}
+                            </td>
+                            <td className="py-2 pr-4 text-right tabular-nums">
+                              {c.weight.toFixed(3)}
+                            </td>
+                            <td className="py-2 text-right">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busy !== null}
+                                title="Exclude — record why this is deliberately not tested"
+                                onClick={() =>
+                                  setExcludeTarget({
+                                    cellId: c.id,
+                                    coords: c.coords,
+                                  })
+                                }
+                              >
+                                <Ban className="h-3.5 w-3.5" />
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {untestedCells.length > 200 ? (
+                      <p className="text-xs text-muted-foreground mt-2">
+                        Showing the top 200 of {untestedCells.length}.
+                      </p>
+                    ) : null}
+                  </div>
+                </CardContent>
+              </Card>
+            </>
           )}
         </TabsContent>
 
@@ -504,14 +767,51 @@ export function CoverageClient({
 
         {/* ── Coverage matrix: the cell grid ────────────────────────────── */}
         <TabsContent value="matrix" className="space-y-4 mt-4">
+          <div className="flex flex-wrap items-center gap-2">
+            {(
+              ["all", "uncovered", "covered", "failing", "excluded"] as const
+            ).map((st) => (
+              <Button
+                key={st}
+                size="sm"
+                variant={matrixStatus === st ? "default" : "outline"}
+                onClick={() => setMatrixStatus(st)}
+              >
+                {st}
+              </Button>
+            ))}
+            <div className="relative ml-auto">
+              <Search className="h-3.5 w-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={matrixQuery}
+                onChange={(e) => setMatrixQuery(e.target.value)}
+                placeholder="Filter by value, e.g. DE"
+                className="pl-7 h-8 w-56"
+              />
+            </div>
+          </div>
           {spec.sections.map((s) => {
             const fields = s.dimensions.map((d) => d.field);
+            const q = matrixQuery.trim().toLowerCase();
+            const rows = s.cells.filter(
+              (c) =>
+                (matrixStatus === "all" || c.status === matrixStatus) &&
+                (!q ||
+                  Object.entries(c.coords).some(
+                    ([k, v]) =>
+                      v.toLowerCase().includes(q) ||
+                      k.toLowerCase().includes(q),
+                  )),
+            );
             return (
               <Card key={s.objectType}>
                 <CardHeader>
                   <CardTitle className="text-base">
-                    <code>{s.objectType}</code> — {s.cells.length} occurring
-                    combination(s)
+                    <code>{s.objectType}</code> — {rows.length}
+                    {rows.length === s.cells.length
+                      ? ""
+                      : ` of ${s.cells.length}`}{" "}
+                    occurring combination(s)
                   </CardTitle>
                   <CardDescription>
                     Ranked by weight: volume × criticality × failure history ×
@@ -542,7 +842,7 @@ export function CoverageClient({
                         </tr>
                       </thead>
                       <tbody>
-                        {s.cells.map((c) => (
+                        {rows.map((c) => (
                           <tr
                             key={c.coordsKey}
                             className="border-b last:border-0 hover:bg-muted/40"
@@ -797,7 +1097,15 @@ export function CoverageClient({
                         </Badge>
                       </div>
                       <div className="text-xs text-muted-foreground truncate">
-                        {s.rows} row(s) · {s.columns.join(", ")}
+                        {s.truncated ? (
+                          <span className="text-amber-600 dark:text-amber-400">
+                            {s.profiledRows.toLocaleString()} of{" "}
+                            {s.rows.toLocaleString()} row(s) profiled
+                          </span>
+                        ) : (
+                          <>{s.rows.toLocaleString()} row(s)</>
+                        )}{" "}
+                        · {s.columns.join(", ")}
                       </div>
                     </div>
                   </div>

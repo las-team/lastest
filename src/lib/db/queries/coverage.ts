@@ -300,6 +300,43 @@ export async function getAssignedVariableRuns(
     }));
 }
 
+/**
+ * Results of one run that carry a matrix data-cell coordinate.
+ *
+ * Matrix runs record their cell on the row directly, and never in
+ * `assignedVariables` — so the historical-scan attribution path cannot see
+ * them. This is what the build-completion hook attributes from.
+ */
+export async function getDataCellResults(testRunId: string): Promise<
+  Array<{
+    testResultId: string;
+    testId: string | null;
+    buildId: string | null;
+    dataCell: string | null;
+    status: string | null;
+    ranAt: Date | null;
+  }>
+> {
+  const rows = await db
+    .select({
+      testResultId: testResults.id,
+      testId: testResults.testId,
+      buildId: testRuns.id,
+      dataCell: testResults.dataCell,
+      status: testResults.status,
+      ranAt: testRuns.startedAt,
+    })
+    .from(testResults)
+    .innerJoin(testRuns, eq(testResults.testRunId, testRuns.id))
+    .where(
+      and(
+        eq(testResults.testRunId, testRunId),
+        sql`${testResults.dataCell} IS NOT NULL`,
+      ),
+    );
+  return rows;
+}
+
 /** Record cell↔run attribution. Idempotent per (cell, testResult). */
 export async function recordCoverageCellRuns(
   runs: Array<{

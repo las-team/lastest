@@ -29,6 +29,7 @@ import {
   type ProfiledDimension,
 } from "./dimensions";
 import { computeWeights, type WeightInput } from "./weight";
+import { loadCsvTable, loadSheetTable, type SourceTable } from "./source-rows";
 import { buildCoverageReport, isCovered, type CoverageReport } from "./rollup";
 import { evaluateStop, type StopDecision, type StopCell } from "./stop";
 
@@ -50,6 +51,15 @@ export interface SyncOptions {
   runLimit?: number;
 }
 
+/** How many rows each data source's numbers actually rest on. Reported so a
+ *  sampled profile can never be mistaken for the full distribution. */
+export interface SourceSample {
+  objectType: string;
+  profiledRows: number;
+  totalRows: number;
+  truncated: boolean;
+}
+
 export interface SyncResult {
   environmentKey: string;
   dimensionsProposed: number;
@@ -64,6 +74,8 @@ export interface SyncResult {
   cellsPruned: number;
   runsScanned: number;
   attributionsRecorded: number;
+  /** Per-source sample size behind the reported record counts. */
+  sources: SourceSample[];
   report: CoverageReport;
   /** Only meaningful once dimensions are enabled; all-zero before that. */
   stop: StopDecision;
@@ -82,6 +94,7 @@ export async function profileDimensions(
   proposed: ProfiledDimension[];
   rejected: ProfiledDimension[];
   runsScanned: number;
+  sources: SourceSample[];
 }> {
   const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
   const [csvSources, sheetSources, runs] = await Promise.all([
@@ -92,14 +105,27 @@ export async function profileDimensions(
 
   const proposed: ProfiledDimension[] = [];
   const rejected: ProfiledDimension[] = [];
+  const sources: SourceSample[] = [];
 
   for (const source of csvSources) {
-    const { accepted, rejected: rej } = profileCsvSource(source);
+    const table = await loadCsvTable(source);
+    sources.push(toSample(table));
+    const { accepted, rejected: rej } = profileCsvSource(
+      source,
+      undefined,
+      table,
+    );
     proposed.push(...accepted);
     rejected.push(...rej);
   }
   for (const source of sheetSources) {
-    const { accepted, rejected: rej } = profileSheetSource(source);
+    const table = loadSheetTable(source);
+    sources.push(toSample(table));
+    const { accepted, rejected: rej } = profileSheetSource(
+      source,
+      undefined,
+      table,
+    );
     proposed.push(...accepted);
     rejected.push(...rej);
   }
@@ -128,7 +154,16 @@ export async function profileDimensions(
     });
   }
 
-  return { proposed, rejected, runsScanned: runs.length };
+  return { proposed, rejected, runsScanned: runs.length, sources };
+}
+
+function toSample(table: SourceTable): SourceSample {
+  return {
+    objectType: table.alias,
+    profiledRows: table.profiledRows,
+    totalRows: table.totalRows,
+    truncated: table.truncated,
+  };
 }
 
 /**
@@ -146,9 +181,19 @@ export async function deriveAndPersistCells(
   opts: SyncOptions = {},
 ): Promise<{ derived: number; pruned: number }> {
   const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
-  const dimensions = (
-    await queries.getCoverageDimensions(repositoryId, environmentKey)
-  ).filter((d) => d.enabled);
+  const allDimensions = await queries.getCoverageDimensions(
+    repositoryId,
+    environmentKey,
+  );
+  const dimensions = allDimensions.filter((d) => d.enabled);
+  // A SUT-profiled object type stays SUT-owned even if the user disables its
+  // dimensions — the cells are still the profiler's to reconcile, not ours to
+  // delete.
+  const sutObjectTypes = new Set(
+    allDimensions
+      .filter((d) => d.valueSource === "profiled")
+      .map((d) => d.objectType),
+  );
 
   // Object types that had cells but no longer have any enabled dimension must
   // still be visited, or their cells survive forever.
@@ -160,6 +205,7 @@ export async function deriveAndPersistCells(
   if (dimensions.length === 0) {
     let pruned = 0;
     for (const objectType of existingObjectTypes) {
+      if (sutObjectTypes.has(objectType)) continue;
       pruned += await queries.pruneCoverageCells(
         repositoryId,
         environmentKey,
@@ -184,12 +230,21 @@ export async function deriveAndPersistCells(
     ]);
   }
 
+  // Object types whose dimensions came from a system-under-test profile are
+  // owned by that profiler, which enumerates the occurring combinations
+  // directly and reconciles them itself. There is no local table to re-derive
+  // them from, so deriving here would produce zero cells and the reconcile
+  // below would then delete the entire profile along with its attribution
+  // history. Leave them alone.
+  const sutOwned = sutObjectTypes;
+  for (const objectType of sutOwned) byObjectType.delete(objectType);
+
   const derived: DerivedCell[] = [];
   for (const [objectType, fields] of byObjectType) {
     const records =
       objectType === OBSERVED_OBJECT_TYPE
         ? runs.map((r) => r.assignedVariables)
-        : recordsForObjectType(objectType, csvSources, sheetSources);
+        : await recordsForObjectType(objectType, csvSources, sheetSources);
     derived.push(...deriveCells({ objectType, fields, records }));
   }
 
@@ -218,6 +273,7 @@ export async function deriveAndPersistCells(
     ...keptByObjectType.keys(),
     ...existingObjectTypes,
   ])) {
+    if (sutOwned.has(objectType)) continue;
     pruned += await queries.pruneCoverageCells(
       repositoryId,
       environmentKey,
@@ -229,19 +285,23 @@ export async function deriveAndPersistCells(
   return { derived: derived.length, pruned };
 }
 
-function recordsForObjectType(
+async function recordsForObjectType(
   objectType: string,
   csvSources: Awaited<ReturnType<typeof queries.getCsvDataSources>>,
   sheetSources: Awaited<ReturnType<typeof queries.getGoogleSheetsDataSources>>,
-): Array<Record<string, string>> {
+): Promise<Array<Record<string, string>>> {
   // objectType defaults to the source alias during profiling, so match on it.
+  // Cells are derived from the same full-file view the dimensions were
+  // profiled from, or the two disagree about which combinations occur.
   const csv = csvSources.find((s) => s.alias === objectType);
   if (csv) {
-    return tableToRecords(csv.cachedHeaders ?? [], csv.cachedData ?? []);
+    const table = await loadCsvTable(csv);
+    return tableToRecords(table.headers, table.rows);
   }
   const sheet = sheetSources.find((s) => s.alias === objectType);
   if (sheet) {
-    return tableToRecords(sheet.cachedHeaders ?? [], sheet.cachedData ?? []);
+    const table = loadSheetTable(sheet);
+    return tableToRecords(table.headers, table.rows);
   }
   return [];
 }
@@ -374,7 +434,7 @@ export async function syncCoverage(
 ): Promise<SyncResult> {
   const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
 
-  const { proposed, rejected, runsScanned } = await profileDimensions(
+  const { proposed, rejected, runsScanned, sources } = await profileDimensions(
     repositoryId,
     opts,
   );
@@ -415,6 +475,7 @@ export async function syncCoverage(
     cellsPruned,
     runsScanned: Math.max(runsScanned, attribution.runsScanned),
     attributionsRecorded: attribution.attributionsRecorded,
+    sources,
     report: buildCoverageReport({
       repositoryId,
       environmentKey,

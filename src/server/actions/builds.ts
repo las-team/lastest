@@ -9,6 +9,7 @@ import { getOpenMRsForBranch } from "@/lib/gitlab/oauth";
 import type { TestRunResult } from "@/lib/playwright/types";
 import type { SetupContext } from "@/lib/setup/types";
 import { executeTests } from "@/lib/execution/executor";
+import { attributeBuildRuns } from "@/lib/coverage/sync";
 import { resolveBuildSetup } from "@/lib/setup/resolve-build-setup";
 import { requireTeamAccess, requireRepoAccess } from "@/lib/auth";
 import { requireBuildOwnership } from "@/lib/auth/ownership";
@@ -1576,6 +1577,37 @@ async function runBuildAsync(
       ...a11yUpdate,
       ...designSystemUpdate,
     });
+
+    // Data-coverage attribution for matrix runs. A matrix run records its cell
+    // as `data_cell` on the result row and not in `assignedVariables`, so
+    // without this hook the cell it exercised stays "uncovered" until someone
+    // manually re-profiles. Best-effort: coverage is a reporting concern and
+    // must never fail a build.
+    try {
+      const dataCellResults = repositoryId
+        ? await queries.getDataCellResults(testRunId)
+        : [];
+      if (repositoryId && dataCellResults.length > 0) {
+        const { attributed, unmatchedCells } = await attributeBuildRuns(
+          repositoryId,
+          dataCellResults,
+        );
+        if (unmatchedCells.length > 0) {
+          console.warn(
+            `[coverage] build ${buildId}: ${unmatchedCells.length} run(s) hit a data cell with no profiled cell ` +
+              `(${unmatchedCells.slice(0, 3).join(", ")}) — the dimension set does not cover them`,
+          );
+        }
+        if (attributed > 0) {
+          console.log(
+            `[coverage] build ${buildId}: attributed ${attributed} matrix run(s) to coverage cells`,
+          );
+        }
+      }
+    } catch (err) {
+      console.warn("[coverage] build attribution failed:", err);
+    }
+
     await completeJob(jobId);
 
     // Send notifications after build completion

@@ -129,7 +129,15 @@ export function evaluateStop(
       metrics.tupleCoverage >= policy.pairwiseTarget &&
       metrics.weightedVolumeCoverage >= policy.weightedVolumeTarget;
     if (targetsMet) reasons.push("targets_met");
-    if (metrics.marginalWeight < policy.marginalWeightEpsilon) {
+    // The marginal-weight rule is a diminishing-returns test: the next cell is
+    // not worth the run GIVEN what has already been covered. With nothing
+    // covered at all there are no diminishing returns to detect, and firing it
+    // there tells the agent to stop before it has done anything — which is
+    // exactly what an unweighted cell set (weight defaults to 0) produces.
+    if (
+      metrics.coveredCells > 0 &&
+      metrics.marginalWeight < policy.marginalWeightEpsilon
+    ) {
       reasons.push("marginal_below_epsilon");
     }
   }

@@ -9,6 +9,7 @@ import {
 } from "@/lib/db/queries";
 import { getCoverageReport } from "@/lib/coverage/sync";
 import { buildCoverageSpec } from "@/lib/coverage/spec";
+import { describeSources } from "@/lib/coverage/source-rows";
 import { DEFAULT_COVERAGE_ENVIRONMENT } from "@/lib/db/schema";
 import { AddRepoEmptyState } from "../tests/add-repo-empty-state";
 import { CoverageClient } from "./coverage-client";
@@ -42,6 +43,10 @@ export default async function CoveragePage() {
       getGoogleSheetsDataSources(selectedRepo.id),
     ]);
 
+  // Resolved the same way profiling resolves them, so the disclosed sample
+  // size is the one the numbers were actually computed from.
+  const sourceSamples = await describeSources(csvSources, sheetSources);
+
   const spec = buildCoverageSpec({
     repositoryId: selectedRepo.id,
     environmentKey: env,
@@ -49,6 +54,7 @@ export default async function CoveragePage() {
     stop,
     cells,
     dimensions,
+    sources: sourceSamples,
   });
 
   return (
@@ -67,13 +73,24 @@ export default async function CoveragePage() {
         ...csvSources.map((s) => ({
           kind: "csv" as const,
           alias: s.alias,
-          rows: s.cachedData?.length ?? 0,
+          rows:
+            sourceSamples.find((x) => x.objectType === s.alias)?.totalRows ??
+            s.rowCount ??
+            0,
+          profiledRows:
+            sourceSamples.find((x) => x.objectType === s.alias)?.profiledRows ??
+            0,
+          truncated:
+            sourceSamples.find((x) => x.objectType === s.alias)?.truncated ??
+            false,
           columns: s.cachedHeaders ?? [],
         })),
         ...sheetSources.map((s) => ({
           kind: "sheet" as const,
           alias: s.alias,
           rows: s.cachedData?.length ?? 0,
+          profiledRows: s.cachedData?.length ?? 0,
+          truncated: false,
           columns: s.cachedHeaders ?? [],
         })),
       ]}

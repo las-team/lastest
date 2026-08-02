@@ -12,6 +12,7 @@
 import * as queries from "@/lib/db/queries";
 import { DEFAULT_COVERAGE_ENVIRONMENT } from "@/lib/db/schema";
 import { coordsKey } from "../coords";
+import { recomputeWeights } from "../sync";
 import { groupsToDimensionValues, type SutProfiler } from "./types";
 
 export * from "./types";
@@ -128,6 +129,13 @@ export async function profileFromSut(opts: {
       "Stale cells were not pruned because the profile was truncated.",
     );
   }
+
+  // Cells are written with a default weight of 0, and weight is what orders
+  // the QA agent's work queue and drives the stopping rule. Leaving it unset
+  // makes a 1,800-record gap rank below a 3-record one, and an all-zero queue
+  // trips the marginal-weight stop — the agent is told there is nothing worth
+  // testing at 0% coverage. Score them here, as part of profiling.
+  await recomputeWeights(opts.repositoryId, { environmentKey });
 
   return {
     objectType: opts.objectType,

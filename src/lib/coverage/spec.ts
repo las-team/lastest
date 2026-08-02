@@ -70,6 +70,13 @@ export interface SpecSection {
     skippedAsNonOccurring: number;
     totalRecords: number;
   };
+  /** How many source rows the numbers above rest on. Absent when the object
+   *  type has no local tabular source (a SUT profile, or run history). */
+  sample?: {
+    profiledRows: number;
+    totalRows: number;
+    truncated: boolean;
+  };
 }
 
 export interface CoverageSpec {
@@ -131,6 +138,14 @@ export function buildCoverageSpec(opts: {
   cells: CoverageCell[];
   dimensions: CoverageDimension[];
   policy?: CoverageStopPolicy;
+  /** Per-source sample sizes from the last profile, keyed by object type. A
+   *  spec that cannot say how many rows it read cannot be audited. */
+  sources?: Array<{
+    objectType: string;
+    profiledRows: number;
+    totalRows: number;
+    truncated: boolean;
+  }>;
 }): CoverageSpec {
   const policy = { ...DEFAULT_COVERAGE_STOP_POLICY, ...(opts.policy ?? {}) };
   const enabledDims = opts.dimensions.filter((d) => d.enabled);
@@ -162,6 +177,13 @@ export function buildCoverageSpec(opts: {
       };
     });
 
+    const sample = opts.sources?.find((s) => s.objectType === ot.objectType);
+    if (sample?.truncated) {
+      caveats.push(
+        `"${ot.objectType}": profiled from ${sample.profiledRows.toLocaleString()} of ${sample.totalRows.toLocaleString()} rows. Every record count and weight below is a sample, and combinations that only occur past that point are missing entirely.`,
+      );
+    }
+
     if (dims.length > 0 && dims.every((d) => d.valueSource !== "profiled")) {
       caveats.push(
         `"${ot.objectType}": counts come from local data sources or run history, not the system under test. Weights reflect spreadsheet rows or how often a test ran — not production volume. Profile the source system to make the ranking meaningful.`,
@@ -189,6 +211,7 @@ export function buildCoverageSpec(opts: {
         skippedAsNonOccurring: ot.skippedAsNonOccurring,
         totalRecords: cells.reduce((s, c) => s + c.observedCount, 0),
       },
+      ...(sample ? { sample } : {}),
     };
   });
 
@@ -281,6 +304,15 @@ export function renderSpecMarkdown(spec: CoverageSpec): string {
         `${s.totals.cartesianCombinations} cartesian combinations, ${s.totals.skippedAsNonOccurring} of which do not occur.`,
       ``,
     );
+
+    if (s.sample) {
+      out.push(
+        s.sample.truncated
+          ? `> **Sampled**: profiled from ${s.sample.profiledRows.toLocaleString()} of ${s.sample.totalRows.toLocaleString()} source rows. Counts below are a sample, not the full distribution.`
+          : `Profiled from all ${s.sample.totalRows.toLocaleString()} source rows.`,
+        ``,
+      );
+    }
 
     if (s.dimensions.length > 0) {
       out.push(

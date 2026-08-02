@@ -133,14 +133,20 @@ export function profileTable(opts: {
   return { accepted, rejected };
 }
 
+/**
+ * `table` overrides the cached rows — coverage resolves the full file rather
+ * than the capped UI cache, so that the record counts it reports are the real
+ * distribution and not its first page. Omitted, the cache is used.
+ */
 export function profileCsvSource(
   source: CsvDataSource,
   options?: ProfileOptions,
+  table?: { headers: string[]; rows: string[][] },
 ) {
   return profileTable({
     alias: source.alias,
-    headers: source.cachedHeaders ?? [],
-    rows: source.cachedData ?? [],
+    headers: table?.headers ?? source.cachedHeaders ?? [],
+    rows: table?.rows ?? source.cachedData ?? [],
     valueSource: "csv",
     options,
   });
@@ -149,11 +155,12 @@ export function profileCsvSource(
 export function profileSheetSource(
   source: GoogleSheetsDataSource,
   options?: ProfileOptions,
+  table?: { headers: string[]; rows: string[][] },
 ) {
   return profileTable({
     alias: source.alias,
-    headers: source.cachedHeaders ?? [],
-    rows: source.cachedData ?? [],
+    headers: table?.headers ?? source.cachedHeaders ?? [],
+    rows: table?.rows ?? source.cachedData ?? [],
     valueSource: "sheet",
     options,
   });

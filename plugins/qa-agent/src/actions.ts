@@ -2088,12 +2088,33 @@ async function runQaPlan(
     return null;
   });
   const planBudget = computePlanBudget({ stop: coverageState?.stop ?? null });
+  // Excluded cells are deliberately absent from stop.queue, so they have to be
+  // read back from the ledger — sourcing them from the queue yielded an always
+  // empty list and the "do NOT plan these" section never rendered.
+  const excludedCells = coverageState
+    ? await queries
+        .getCoverageCells(repositoryId)
+        .then((cells) =>
+          cells
+            .filter((c) => c.status === "excluded")
+            .map((c) => ({
+              coordsKey: c.coordsKey,
+              coords: c.coords,
+              observedCount: c.observedCount,
+              weight: c.weight,
+              covered: false,
+              excluded: true,
+              excludedReason: c.excludedReason ?? undefined,
+            })),
+        )
+        .catch(() => [])
+    : [];
   const coverageDirective = coverageState
     ? buildCoverageDirective({
         report: coverageState.report,
         queue: coverageState.stop.queue,
         budget: planBudget,
-        excluded: coverageState.stop.queue.filter((c) => c.excluded),
+        excluded: excludedCells,
       })
     : null;
 
