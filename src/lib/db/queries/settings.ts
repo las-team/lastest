@@ -252,44 +252,6 @@ async function repoBranchBaseUrl(
 
 // Environment Configs
 
-/**
- * Base URL a repo carries on its branches (`repositories.branch_base_urls`).
- * Resolution order: default branch → comparison baseline branch → any other
- * branch. The legacy repo-wide "default" key is ignored (write-once, goes
- * stale — same rule as `pickRepoBaseUrl` in @/lib/quickstart/gating).
- *
- * Unlike `pickRepoBaseUrl`, localhost URLs are NOT skipped: a dev testing
- * http://localhost:3000 is a legitimate environment.
- */
-async function getRepoBranchBaseUrl(
-  repositoryId: string,
-): Promise<string | null> {
-  const [repo] = await db
-    .select({
-      branchBaseUrls: repositories.branchBaseUrls,
-      defaultBranch: repositories.defaultBranch,
-      comparisonBaselineBranch: repositories.comparisonBaselineBranch,
-    })
-    .from(repositories)
-    .where(eq(repositories.id, repositoryId));
-  if (!repo) return null;
-
-  const map = repo.branchBaseUrls ?? {};
-  const ordered = [
-    repo.defaultBranch,
-    repo.comparisonBaselineBranch,
-    ...Object.keys(map),
-  ];
-  for (const branch of ordered) {
-    if (!branch || branch === "default") continue;
-    const url = map[branch];
-    if (typeof url === "string" && url.length > 0) {
-      return url.replace(/\/+$/, "");
-    }
-  }
-  return null;
-}
-
 export async function getEnvironmentConfig(repositoryId?: string | null) {
   if (repositoryId) {
     const [config] = await db
