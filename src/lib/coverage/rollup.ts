@@ -64,6 +64,7 @@ export function isCovered(cell: Pick<CoverageCell, "status" | "runCount">) {
 
 function toStopCell(cell: CoverageCell): StopCell {
   return {
+    objectType: cell.objectType,
     coordsKey: cell.coordsKey,
     coords: cell.coords,
     observedCount: cell.observedCount,

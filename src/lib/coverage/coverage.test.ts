@@ -340,6 +340,7 @@ describe("stop rule", () => {
     observedCount = 10,
     weight = 0.5,
   ) => ({
+    objectType: "calls",
     coordsKey: coordsKey(coords),
     coords,
     observedCount,

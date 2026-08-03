@@ -132,7 +132,7 @@ export function buildCoverageDirective(opts: {
 
   const lines: string[] = [
     "--- DATA COVERAGE DIRECTIVE ---",
-    "Coverage here is measured over the application's DATA SPACE, not its page count. A 'cell' is a combination of data-dimension values that actually occurs in the data. Plan tests that exercise the UNCOVERED cells listed below, highest weight first.",
+    "Coverage here is measured over the application's DATA SPACE, not its page count. A 'cell' is a combination of data-dimension values that actually occurs in the data. Plan tests that exercise the UNCOVERED cells listed below, working down each object-type group in the order given.",
     "",
     `Budget: at most ${opts.budget.maxItems} plan item(s). ${opts.budget.rationale}`,
     "",
@@ -160,20 +160,37 @@ export function buildCoverageDirective(opts: {
   }
 
   if (opts.queue.length > 0) {
+    // Ranked WITHIN each object type, never across them. Weights are volume
+    // normalised against the largest cell of their own object type
+    // (recomputeWeights), so a cell from a big table and a cell from a small
+    // one carry numbers on different scales. Listing them as one ranked run
+    // made a mid-sized row of one table outrank the single largest gap in
+    // another, and the agent worked the wrong table first.
     lines.push(
       "",
-      "Uncovered cells, ranked by weight (volume x criticality x failure history x vendor churn, minus redundancy):",
+      "Uncovered cells, ranked by weight (volume x criticality x failure history x vendor churn, minus redundancy) WITHIN each object type. Weights are normalised per object type, so do not compare them across the groups below — work down each group.",
     );
-    for (const c of opts.queue.slice(0, MAX_DIRECTIVE_CELLS)) {
-      lines.push(
-        `- [${c.weight.toFixed(3)}] ${describeCoords(c.coords)}` +
-          (c.observedCount > 0 ? ` (${c.observedCount} record(s))` : ""),
-      );
-    }
-    if (opts.queue.length > MAX_DIRECTIVE_CELLS) {
-      lines.push(
-        `… and ${opts.queue.length - MAX_DIRECTIVE_CELLS} more below the top ${MAX_DIRECTIVE_CELLS}.`,
-      );
+    const budgetPerType = Math.max(
+      1,
+      Math.floor(
+        MAX_DIRECTIVE_CELLS / Math.max(opts.report.byObjectType.length, 1),
+      ),
+    );
+    for (const ot of opts.report.byObjectType) {
+      const cells = opts.queue.filter((c) => c.objectType === ot.objectType);
+      if (cells.length === 0) continue;
+      lines.push("", `${ot.objectType}:`);
+      for (const c of cells.slice(0, budgetPerType)) {
+        lines.push(
+          `- [${c.weight.toFixed(3)}] ${describeCoords(c.coords)}` +
+            (c.observedCount > 0 ? ` (${c.observedCount} record(s))` : ""),
+        );
+      }
+      if (cells.length > budgetPerType) {
+        lines.push(
+          `… and ${cells.length - budgetPerType} more uncovered cell(s) in ${ot.objectType}.`,
+        );
+      }
     }
   }
 

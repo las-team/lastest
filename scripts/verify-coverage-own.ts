@@ -38,7 +38,7 @@ import {
   buildStopSummary,
 } from "@/lib/qa-agent/coverage-budget";
 
-const FIXTURE_DIR = process.argv[2] ?? "/tmp/covsample";
+const FIXTURE_DIR = process.argv[2] ?? "/tmp/covsample2";
 const KEEP = process.argv.includes("--keep");
 const REPO_NAME = "coverage-verify-own";
 
@@ -51,6 +51,9 @@ const DATASETS = [
   PRIMARY,
   "visual-diffs",
   "test-catalog",
+  "step-comparisons",
+  // Two real id extracts, kept only to exercise the identifier / free-text
+  // rejection rules and to produce a coordsKey shared by two object types.
   "result-ids",
   "result-ids-head40",
 ];
@@ -442,13 +445,7 @@ async function main() {
   check(
     "D2.1b",
     "only the test-executions object type is credited by these runs",
-    {
-      [PRIMARY]: 2,
-      "visual-diffs": 0,
-      "test-catalog": 0,
-      "result-ids": 0,
-      "result-ids-head40": 0,
-    },
+    Object.fromEntries(DATASETS.map((n) => [n, n === PRIMARY ? 2 : 0])),
     coveredByType,
     "run variables are projected onto EVERY object type's field set",
   );
@@ -557,8 +554,8 @@ async function main() {
         .sort();
       check(
         "D2.10",
-        "a matrix run's data_cell credits the object type it belongs to",
-        { attributed: 1, gainedARun: ["result-ids"] },
+        "a colliding data_cell credits every cell carrying those coordinates, none lost",
+        { attributed: 2, gainedARun: ["result-ids", "result-ids-head40"] },
         { attributed: res.attributed, gainedARun: gained },
         `collision on coordsKey ${target.coordsKey}`,
       );
@@ -624,21 +621,39 @@ async function main() {
     parseLine(rankedPrimary[0] ?? "- [0.000] "),
     `oracle w=${oracle.scenario.rankedAfterSeed[0].weight.toFixed(4)} vol=${oracle.scenario.rankedAfterSeed[0].observedCount}`,
   );
-  check(
+  // The highest-VOLUME gap need not be #1: the redundancy term demotes a cell
+  // whose value pairs are already covered elsewhere. Assert it stays near the
+  // top rather than that it leads.
+  checkTrue(
     "D3.6",
-    "within test-executions, the #1 ranked gap is the highest-VOLUME untested cell",
-    ck(oracle.scenario.highestVolumeUncovered.coords),
-    parseLine(rankedPrimary[0] ?? "- [0.000] "),
+    "the highest-VOLUME untested cell still ranks in its object type's top 5",
+    rankedPrimary
+      .slice(0, 5)
+      .some(
+        (l) =>
+          parseLine(l) === ck(oracle.scenario.highestVolumeUncovered.coords),
+      ),
     `highest-volume uncovered has ${oracle.scenario.highestVolumeUncovered.observedCount} records`,
   );
-  // PROBE: weights are normalised WITHIN an object type (recomputeWeights
-  // docstring), but the queue ranks the union of all object types.
-  check(
+  // Weights are normalised WITHIN an object type, so the directive must never
+  // present one ranked list across types.
+  const groupOf = (l: string) =>
+    DATASETS.find((n) =>
+      oracle.datasets[n].accepted.every((f: string) => l.includes(`${f}=`)),
+    ) ?? "?";
+  const seq = ranked.map(groupOf);
+  checkTrue(
     "D3.6b",
-    "the globally #1 ranked cell is not outranked by a smaller cell from another object type",
-    ck(oracle.scenario.highestVolumeUncovered.coords),
-    parseLine(ranked[0] ?? "- [0.000] "),
-    `global #1: ${ranked[0]}`,
+    "the directive groups uncovered cells by object type (no cross-type ranking)",
+    seq.every(
+      (g, i) => i === 0 || g === seq[i - 1] || !seq.slice(0, i).includes(g),
+    ),
+    `group sequence: ${[...new Set(seq)].join(" -> ")}`,
+  );
+  checkTrue(
+    "D3.6c",
+    "the directive warns that weights are not comparable across object types",
+    /normalised per object type/.test(directive),
   );
   console.log(
     `        top 3 for the agent:\n          ${ranked.slice(0, 3).join("\n          ")}`,
@@ -748,7 +763,10 @@ async function main() {
     "D3.15",
     "the next-ranked test-executions cell takes over once the top one is excluded",
     (rankedPrimary2[0] ?? "") !== (rankedPrimary[0] ?? "") &&
-      rankedPrimary2.length === rankedPrimary.length - 1,
+      !rankedPrimary2.some(
+        (l) =>
+          parseLine(l) === ck(excludeTarget.coords as Record<string, string>),
+      ),
     rankedPrimary2[0] ?? "(none)",
   );
   const summary = buildStopSummary({
@@ -831,19 +849,41 @@ async function main() {
   );
   check(
     "D4.6",
-    "spec.outstanding is EXACTLY the agent's work queue, in order",
-    uiState.stop.queue.map((c) => c.coordsKey),
-    uiSpec.outstanding.map((c) => c.coordsKey),
+    "spec.outstanding is EXACTLY the agent's work queue (same cells, by identity)",
+    [...uiState.stop.queue.map((c) => `${c.objectType} ${c.coordsKey}`)].sort(),
+    [...uiSpec.outstanding.map((c) => `${c.objectType} ${c.coordsKey}`)].sort(),
+  );
+  checkTrue(
+    "D4.6b",
+    "spec.outstanding is grouped by object type, never interleaved",
+    (() => {
+      const seen: string[] = [];
+      for (const c of uiSpec.outstanding) {
+        if (seen[seen.length - 1] === c.objectType) continue;
+        if (seen.includes(c.objectType)) return false;
+        seen.push(c.objectType);
+      }
+      return seen.length > 0;
+    })(),
+    uiSpec.outstanding
+      .map((c) => c.objectType)
+      .filter((t, i, a) => t !== a[i - 1])
+      .join(" -> "),
   );
   checkTrue(
     "D4.7",
-    "spec.outstanding is ranked by weight, descending",
+    "spec.outstanding is ranked by weight descending within each object type",
     uiSpec.outstanding.every(
-      (c, i) => i === 0 || uiSpec.outstanding[i - 1].weight >= c.weight,
+      (c, i) =>
+        i === 0 ||
+        uiSpec.outstanding[i - 1].objectType !== c.objectType ||
+        uiSpec.outstanding[i - 1].weight >= c.weight,
     ),
     uiSpec.outstanding
       .map((c, i) =>
-        i > 0 && uiSpec.outstanding[i - 1].weight < c.weight
+        i > 0 &&
+        uiSpec.outstanding[i - 1].objectType === c.objectType &&
+        uiSpec.outstanding[i - 1].weight < c.weight
           ? `${i}:${c.weight}`
           : null,
       )
@@ -851,8 +891,8 @@ async function main() {
       .slice(0, 5)
       .join(", "),
   );
-  // PROBE: outstanding resolves queue entries by coordsKey ALONE. coordsKey is
-  // unique per (repo, env, objectType, coordsKey) — not on its own.
+  // A cell's identity is (objectType, coordsKey). This data really does contain
+  // keys shared by two object types, which is what makes D4.7c meaningful.
   const dupKeys = [
     ...new Map<string, number>(
       uiCells.reduce<Array<[string, number]>>((acc, c) => {
@@ -863,22 +903,23 @@ async function main() {
       }, []),
     ),
   ].filter(([, n]) => n > 1);
-  check(
+  checkTrue(
     "D4.7b",
-    "no coordsKey is shared by two object types (the assumption outstanding relies on)",
-    0,
-    dupKeys.length,
-    dupKeys
+    "the data really does contain coordsKeys shared by two object types",
+    dupKeys.length > 0,
+    `${dupKeys.length} shared: ${dupKeys
       .slice(0, 3)
       .map(([k, n]) => `${k} x${n}`)
-      .join(" | "),
+      .join(" | ")}`,
   );
   check(
     "D4.7c",
-    "every spec.outstanding row belongs to the object type its queue entry came from",
+    "every spec.outstanding row carries its OWN queue entry's numbers",
     0,
-    uiSpec.outstanding.filter((c, i) => {
-      const q = uiState.stop.queue[i];
+    uiSpec.outstanding.filter((c) => {
+      const q = uiState.stop.queue.find(
+        (x) => x.objectType === c.objectType && x.coordsKey === c.coordsKey,
+      );
       return !q || q.weight !== c.weight || q.observedCount !== c.observedCount;
     }).length,
     "outstanding rows whose weight/record count disagrees with their own queue entry",

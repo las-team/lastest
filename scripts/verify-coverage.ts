@@ -723,6 +723,7 @@ async function main() {
     const excludedCells = (await queries.getCoverageCells(repositoryId))
       .filter((c) => c.status === "excluded")
       .map((c) => ({
+        objectType: c.objectType,
         coordsKey: c.coordsKey,
         coords: c.coords,
         observedCount: c.observedCount,

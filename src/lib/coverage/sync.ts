@@ -312,6 +312,15 @@ async function recordsForObjectType(
  * assignedVariables map contains every coordinate of that cell with matching
  * values — a superset match, since a test may bind variables beyond the ones
  * that happen to be dimensions.
+ *
+ * The superset rule is per object type, and the MOST SPECIFIC match wins: an
+ * object type whose field set is a strict subset of another matched object
+ * type's is not credited. A plain run carries no object-type marker, so
+ * without this rule any two sources sharing a column name cross-credit each
+ * other — a run binding {branch, speed_band, stability, status, viewport}
+ * also closed a cell on an unrelated table whose only dimensions happened to
+ * be {status, viewport}, inflating that table's coverage with runs that never
+ * touched it.
  */
 export async function attributeRuns(
   repositoryId: string,
@@ -326,24 +335,37 @@ export async function attributeRuns(
     return { runsScanned: runs.length, attributionsRecorded: 0 };
   }
 
-  // Index cells by the fields they constrain, so each run is matched by
-  // projecting its variable map rather than scanning every cell.
-  const byFieldSet = new Map<string, Map<string, string>>();
+  // Index cells by (objectType, field set), so each run is matched by
+  // projecting its variable map rather than scanning every cell. The object
+  // type is part of the index key because a coordsKey is only unique within
+  // one — keying the bucket on coordsKey alone made one of two colliding
+  // cells permanently unattributable.
+  interface Group {
+    objectType: string;
+    fields: string[];
+    byCoordsKey: Map<string, string>;
+  }
+  const groups = new Map<string, Group>();
   for (const cell of cells) {
     const fields = Object.keys(cell.coords).sort();
-    const fieldSetKey = fields.join(",");
-    const bucket = byFieldSet.get(fieldSetKey) ?? new Map<string, string>();
-    bucket.set(cell.coordsKey, cell.id);
-    byFieldSet.set(fieldSetKey, bucket);
+    const key = `${cell.objectType} ${fields.join(",")}`;
+    const group = groups.get(key) ?? {
+      objectType: cell.objectType,
+      fields,
+      byCoordsKey: new Map<string, string>(),
+    };
+    group.byCoordsKey.set(cell.coordsKey, cell.id);
+    groups.set(key, group);
   }
 
   const attributions: Parameters<typeof queries.recordCoverageCellRuns>[0] = [];
   for (const run of runs) {
-    for (const [fieldSetKey, bucket] of byFieldSet) {
-      const fields = fieldSetKey.split(",");
+    // Every group the run's variable map fully covers.
+    const matched: Array<{ group: Group; cellId: string }> = [];
+    for (const group of groups.values()) {
       const projected: Record<string, string> = {};
       let complete = true;
-      for (const f of fields) {
+      for (const f of group.fields) {
         const v = run.assignedVariables[f];
         if (v === undefined || v === null || String(v).trim() === "") {
           complete = false;
@@ -352,9 +374,25 @@ export async function attributeRuns(
         projected[f] = String(v).trim();
       }
       if (!complete) continue;
+      const cellId = group.byCoordsKey.get(coordsKey(projected));
+      if (cellId) matched.push({ group, cellId });
+    }
 
-      const cellId = bucket.get(coordsKey(projected));
-      if (!cellId) continue;
+    // Most specific wins: drop any match whose field set is a strict subset of
+    // another match's. A run that binds five variables is evidence about the
+    // five-dimension table, not about every table that happens to reuse two of
+    // its column names.
+    const specific = matched.filter(
+      ({ group }) =>
+        !matched.some(
+          (other) =>
+            other.group !== group &&
+            other.group.fields.length > group.fields.length &&
+            group.fields.every((f) => other.group.fields.includes(f)),
+        ),
+    );
+
+    for (const { cellId } of specific) {
       attributions.push({
         cellId,
         testResultId: run.testResultId,
@@ -454,6 +492,7 @@ export async function syncCoverage(
     ...(opts.stopPolicy ?? {}),
   };
   const stopCells: StopCell[] = cells.map((c) => ({
+    objectType: c.objectType,
     coordsKey: c.coordsKey,
     coords: c.coords,
     observedCount: c.observedCount,
@@ -609,24 +648,36 @@ export async function attributeBuildRuns(
   const cells = await queries.getCoverageCells(repositoryId, {
     environmentKey,
   });
-  const byKey = new Map(cells.map((c) => [c.coordsKey, c.id]));
+  // One coordsKey can belong to several object types, and a matrix run's
+  // data_cell records only the coordinates — the source alias behind them is
+  // not persisted. A Map keyed on coordsKey therefore kept exactly one of the
+  // colliding cells and left the other permanently unattributable, so a real
+  // run against it never registered. Every cell carrying those coordinates is
+  // credited instead: they are the same fields with the same values, and
+  // silently dropping one of them loses coverage that was genuinely exercised.
+  const byKey = new Map<string, string[]>();
+  for (const c of cells) {
+    byKey.set(c.coordsKey, [...(byKey.get(c.coordsKey) ?? []), c.id]);
+  }
 
   const attributions: Parameters<typeof queries.recordCoverageCellRuns>[0] = [];
   const unmatched = new Set<string>();
   for (const r of withCells) {
-    const cellId = byKey.get(r.dataCell!);
-    if (!cellId) {
+    const cellIds = byKey.get(r.dataCell!);
+    if (!cellIds || cellIds.length === 0) {
       unmatched.add(r.dataCell!);
       continue;
     }
-    attributions.push({
-      cellId,
-      testResultId: r.testResultId,
-      testId: r.testId ?? null,
-      buildId: r.buildId ?? null,
-      verdict: r.status ?? null,
-      ranAt: r.ranAt ?? null,
-    });
+    for (const cellId of cellIds) {
+      attributions.push({
+        cellId,
+        testResultId: r.testResultId,
+        testId: r.testId ?? null,
+        buildId: r.buildId ?? null,
+        verdict: r.status ?? null,
+        ranAt: r.ranAt ?? null,
+      });
+    }
   }
 
   if (attributions.length > 0) {
@@ -661,6 +712,7 @@ export async function getCoverageReport(
     }),
     stop: evaluateStop(
       cells.map((c) => ({
+        objectType: c.objectType,
         coordsKey: c.coordsKey,
         coords: c.coords,
         observedCount: c.observedCount,

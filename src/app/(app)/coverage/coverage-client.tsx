@@ -1015,7 +1015,9 @@ export function CoverageClient({
                   Outstanding work ({spec.outstanding.length})
                 </CardTitle>
                 <CardDescription>
-                  The QA agent&apos;s queue, highest weight first.
+                  The QA agent&apos;s queue, grouped by object type, highest
+                  weight first within each. Weights are normalised per object
+                  type, so they do not compare across groups.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-1.5">

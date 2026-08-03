@@ -19,6 +19,11 @@ import {
 import { tupleKeys, coveredTupleKeys } from "./weight";
 
 export interface StopCell {
+  /** A cell's identity is (objectType, coordsKey) — the coordsKey alone is not
+   *  unique, because two data sources can share a column name and a value
+   *  ("status=passed|viewport=1280x720" occurs in more than one table). Every
+   *  consumer that resolves a queue entry back to a cell needs both halves. */
+  objectType: string;
   coordsKey: string;
   coords: Record<string, string>;
   observedCount: number;

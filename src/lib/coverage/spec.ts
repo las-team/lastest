@@ -25,6 +25,8 @@ export interface SpecCell {
   /** Row id — the spec is also the UI's working surface, and exclusion acts
    *  on the cell itself, not on its coordinates. */
   id: string;
+  /** Cell identity is (objectType, coordsKey); the key alone is not unique. */
+  objectType: string;
   coordsKey: string;
   coords: Record<string, string>;
   observedCount: number;
@@ -117,6 +119,7 @@ export interface CoverageSpec {
 function toSpecCell(c: CoverageCell): SpecCell {
   return {
     id: c.id,
+    objectType: c.objectType,
     coordsKey: c.coordsKey,
     coords: c.coords,
     observedCount: c.observedCount,
@@ -256,10 +259,30 @@ export function buildCoverageSpec(opts: {
         coords: c.coords,
         reason: c.excludedReason ?? "(no reason recorded)",
       })),
-    outstanding: opts.stop.queue
-      .map((q) => opts.cells.find((c) => c.coordsKey === q.coordsKey))
-      .filter((c): c is CoverageCell => !!c)
-      .map(toSpecCell),
+    // Resolved on (objectType, coordsKey): a coordsKey is only unique WITHIN an
+    // object type, so matching on it alone silently returns another table's
+    // cell — wrong record counts and weights, and a list that is no longer
+    // weight-ordered. Grouped by object type for the same reason the directive
+    // is: weights are normalised within an object type, so a single ranked list
+    // across types compares numbers that are not comparable.
+    outstanding: (() => {
+      const byId = new Map(
+        opts.cells.map((c) => [`${c.objectType} ${c.coordsKey}`, c]),
+      );
+      const order = new Map(
+        opts.report.byObjectType.map((o, i) => [o.objectType, i]),
+      );
+      return opts.stop.queue
+        .map((q) => byId.get(`${q.objectType} ${q.coordsKey}`))
+        .filter((c): c is CoverageCell => !!c)
+        .sort(
+          (a, b) =>
+            (order.get(a.objectType) ?? 0) - (order.get(b.objectType) ?? 0) ||
+            b.weight - a.weight ||
+            a.coordsKey.localeCompare(b.coordsKey),
+        )
+        .map(toSpecCell);
+    })(),
     caveats,
   };
 }
@@ -371,17 +394,32 @@ export function renderSpecMarkdown(spec: CoverageSpec): string {
   }
 
   if (spec.outstanding.length > 0) {
-    out.push(`## 5. Outstanding work (ranked)`, ``);
-    for (const c of spec.outstanding.slice(0, 50)) {
-      const coords = Object.entries(c.coords)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([, v]) => v)
-        .join(" / ");
-      out.push(
-        `- [${c.weight.toFixed(3)}] ${coords} — ${c.observedCount} record(s)`,
+    out.push(
+      `## 5. Outstanding work (ranked within each object type)`,
+      ``,
+      `Weights are normalised per object type, so they rank work inside a group and are not comparable between groups.`,
+      ``,
+    );
+    for (const s of spec.sections) {
+      const rows = spec.outstanding.filter(
+        (c) => c.objectType === s.objectType,
       );
+      if (rows.length === 0) continue;
+      out.push(`### \`${s.objectType}\``, ``);
+      for (const c of rows.slice(0, 50)) {
+        const coords = Object.entries(c.coords)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([, v]) => v)
+          .join(" / ");
+        out.push(
+          `- [${c.weight.toFixed(3)}] ${coords} — ${c.observedCount} record(s)`,
+        );
+      }
+      if (rows.length > 50) {
+        out.push(`- … and ${rows.length - 50} more.`);
+      }
+      out.push(``);
     }
-    out.push(``);
   }
 
   if (spec.caveats.length > 0) {

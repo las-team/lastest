@@ -66,6 +66,7 @@ export function summarizeCoverage(
       : c.status === "failing";
 
   const toStop = (c: CoverageCell): StopCell => ({
+    objectType: c.objectType,
     coordsKey: c.coordsKey,
     coords: c.coords,
     observedCount: c.observedCount,

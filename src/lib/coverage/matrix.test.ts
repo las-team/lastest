@@ -430,6 +430,7 @@ describe("computePlanBudget", () => {
       stop: mkStop({
         queue: [
           {
+            objectType: "calls",
             coordsKey: "a",
             coords: { c: "1" },
             observedCount: 5,
@@ -454,6 +455,7 @@ describe("computePlanBudget", () => {
           tupleCoverage: 0,
         },
         queue: Array.from({ length: 500 }, (_, i) => ({
+          objectType: "calls",
           coordsKey: `k${i}`,
           coords: { c: String(i) },
           observedCount: 1,
@@ -522,6 +524,7 @@ describe("buildCoverageDirective", () => {
       report,
       queue: [
         {
+          objectType: "calls",
           coordsKey: "k",
           coords: { country: "FR", callType: "Detail" },
           observedCount: 42,
@@ -547,6 +550,7 @@ describe("buildCoverageDirective", () => {
       budget,
       excluded: [
         {
+          objectType: "calls",
           coordsKey: "x",
           coords: { country: "PT" },
           observedCount: 0,
