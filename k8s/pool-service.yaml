@@ -1,0 +1,149 @@
+# EB Pool Service — dedicated single-replica Deployment (packages/pool-service).
+#
+# In the split-services topology (Dockerfile.app for the app + this for the
+# pool service), the app never spawns the pool service in-process — it talks
+# to this Deployment over HTTP via EB_POOL_SERVICE_URL=http://lastest-pool:9500
+# (+ EB_POOL_SERVICE_TOKEN bearer auth, optional but recommended since the
+# pool service mints EB bootstrap tokens). This Deployment is also the ONLY
+# place in the cluster with Job-create RBAC — the app pod holds none.
+#
+# Supersedes attaching embedded-browser-rbac.yaml's ServiceAccount to the app
+# deployment: that pattern was for the single-container image (root
+# Dockerfile) where the app process itself ran the pool service in-process.
+#
+# Requires (same as the app): DATABASE_URL, ENCRYPTION_KEY (must match the
+# app's — signs stream grants + EB bootstrap tokens).
+#
+# Apply:
+#   kubectl apply -n lastest -f k8s/pool-service.yaml
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: lastest-pool
+  namespace: lastest
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: lastest-eb-provisioner
+  namespace: lastest
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: lastest-eb-provisioner
+  namespace: lastest
+subjects:
+  - kind: ServiceAccount
+    name: lastest-pool
+    namespace: lastest
+roleRef:
+  kind: Role
+  name: lastest-eb-provisioner
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lastest-pool
+  namespace: lastest
+  labels:
+    app: lastest-pool
+spec:
+  replicas: 1
+  strategy:
+    # Job-create RBAC + in-flight pool state live on a single pod — never run
+    # two replicas of this Deployment (double-provisioning risk).
+    type: Recreate
+  selector:
+    matchLabels:
+      app: lastest-pool
+  template:
+    metadata:
+      labels:
+        app: lastest-pool
+    spec:
+      serviceAccountName: lastest-pool
+      containers:
+        - name: pool-service
+          image: lastest-pool-service:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: EB_PROVISIONER
+              value: "kubernetes"
+            - name: EB_NAMESPACE
+              value: "lastest"
+            - name: EB_IMAGE
+              value: "lastest-embedded-browser:latest"
+            # In-cluster app Service DNS name EB pods POST results back to.
+            - name: LASTEST_URL
+              value: "http://lastest:3000"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: lastest-secrets
+                  key: database-url
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: lastest-secrets
+                  key: encryption-key
+            - name: EB_POOL_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: lastest-secrets
+                  key: eb-pool-service-token
+                  optional: true
+          ports:
+            - containerPort: 9500
+              name: http
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9500
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9500
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lastest-pool
+  namespace: lastest
+  labels:
+    app: lastest-pool
+spec:
+  # ClusterIP only — never exposed through ingress/envoy. Only the app pod
+  # (and cluster-internal callers) should ever reach it.
+  type: ClusterIP
+  selector:
+    app: lastest-pool
+  ports:
+    - name: http
+      port: 9500
+      targetPort: 9500

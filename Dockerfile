@@ -116,10 +116,16 @@ COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/playwright-core@1
 RUN ln -sf .pnpm/playwright@1.57.0/node_modules/playwright ./node_modules/playwright && \
     ln -sf .pnpm/playwright-core@1.57.0/node_modules/playwright-core ./node_modules/playwright-core
 
-# Copy drizzle config and drizzle-kit for schema push on startup
+# Copy drizzle config and drizzle-kit for schema push on startup.
+# drizzle.config.ts reads `./packages/db/src/schema.ts` (NOT the app-side
+# `src/lib/db/schema.ts`, which is only a `export * from "@lastest/db/schema"`
+# re-export shim). Copy the real file to the path the config points at. Its
+# only value import is drizzle-orm/pg-core (copied below); the
+# `import type … from "@lastest/eb-protocol"` is erased by drizzle-kit's esbuild
+# schema loader, so no @lastest workspace source is needed here.
 COPY --from=builder --chown=nextjs:nodejs /app/drizzle ./drizzle
 COPY --from=builder --chown=nextjs:nodejs /app/drizzle.config.ts ./drizzle.config.ts
-COPY --from=builder --chown=nextjs:nodejs /app/src/lib/db/schema.ts ./src/lib/db/schema.ts
+COPY --from=builder --chown=nextjs:nodejs /app/packages/db/src/schema.ts ./packages/db/src/schema.ts
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/drizzle-kit ./node_modules/drizzle-kit
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.bin/drizzle-kit ./node_modules/.bin/drizzle-kit

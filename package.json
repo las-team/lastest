@@ -116,12 +116,10 @@
   "devDependencies": {
     "@playwright/test": "^1.57.0",
     "@tailwindcss/postcss": "^4",
-    "@types/libsodium-wrappers": "^0.8.2",
     "@types/node": "^20",
     "@types/pngjs": "^6.0.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@types/uuid": "^11.0.0",
     "concurrently": "^10.0.3",
     "drizzle-kit": "^0.31.8",
     "eslint": "^9.39.4",

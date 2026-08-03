@@ -1650,6 +1650,10 @@ export type AISettings = typeof aiSettings.$inferSelect;
 export type NewAISettings = typeof aiSettings.$inferInsert;
 
 export const DEFAULT_AI_SETTINGS = {
+  // Nominal default only. The provider a team without a saved row actually gets
+  // is resolved per-deployment by defaultAiProvider() in src/lib/ai/availability.ts,
+  // which falls back to a BYOK provider where the Agent SDK has no credentials —
+  // never hand out a default that cannot run.
   provider: "claude-agent-sdk" as AIProvider,
   openrouterModel: "anthropic/claude-sonnet-4",
   agentSdkPermissionMode: "acceptEdits" as AgentSdkPermissionMode,
