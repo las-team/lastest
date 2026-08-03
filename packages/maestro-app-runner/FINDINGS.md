@@ -150,21 +150,27 @@ layers **capability-gated** (a Maestro run reports only the layers it can
 produce), which the check-modes system (`enforce/log/disable` per layer) is
 already structured to support.
 
-## 6. Streaming + manual editing ❌ (stretch, not done here)
+## 6. Streaming + manual editing ⚠️ (assessed — feasible, phase 2)
 
-- **Streaming:** the EB streams CDP screencast frames over a WS `stream-server`.
-  Maestro/simulator have no CDP. Options evaluated:
-  - `xcrun simctl io booted recordVideo` — post-hoc video, not live frames.
-  - `ios-bridge` (ticket link) — targets **real devices**; sim streaming would
-    more likely use `simctl` screenshots at interval or an AVFoundation capture.
-  - Live streaming into the existing `stream-server` is a **separate, larger
-    workstream** (new frame source + input injection via `simctl`/`idb`).
-- **Manual editing / recording:** Maestro ships `maestro studio` (a local
-  inspector/recorder) — a natural fit for the "manual editing, local only" step,
-  but it's a separate UI, not the current in-app recorder.
+Full assessment in **[STREAMING.md](./STREAMING.md)**. Headline: the fit is
+better than expected. `ios-bridge` (the ticket's link) is **simulator-focused**
+(not real-device as I first assumed) and its frame format is the **same shape**
+as Lastest's `stream:frame` — base64 JPEG in a JSON envelope — while its control
+channel (`{t:"tap"/"swipe"/"text"}` via `idb ui …`) maps 1:1 onto Lastest's
+`stream:input`. So streaming needs an **adapter + a mobile input path**, not a
+new viewer or protocol.
 
-Both are explicitly *local-only* in the ticket and are the highest-effort items.
-Recommend treating them as a **phase 2** after run-only integration lands.
+- Local checks: `simctl io recordVideo` is post-hoc (not live); `simctl io
+  screenshot` ≈ 3 FPS (fine for "watch progress", too slow for interaction).
+  The 30–60 FPS path is `idb video-stream`, which is what ios-bridge uses.
+- **Recommended shape:** run `idb video-stream` + `idb ui tap/…` directly inside
+  the TS runner (mirrors how the browser EB self-hosts its `StreamServer`), with
+  ios-bridge as the reference implementation — avoids adding a Python service.
+- **Manual editing / recording:** layers on the same input path, or use
+  `maestro studio` (Maestro's local inspector/recorder) in the interim.
+
+Still a distinct, larger workstream than run-only, so **phase 2** after the run
+pipeline (already proven) lands.
 
 ---
 
@@ -180,8 +186,10 @@ Recommend treating them as a **phase 2** after run-only integration lands.
 3. **Decouple the local/manual runner path from the k8s provisioner** (the
    `none`-provisioner path already exists; make sure registration never assumes
    a pod).
-4. **Defer streaming + in-app recording** to a follow-up; use `maestro studio`
-   for authoring in the interim.
+4. **Streaming is feasible** (see STREAMING.md) — ios-bridge's frame/input model
+   already matches Lastest's `stream:frame`/`stream:input`. Do it via `idb`
+   directly in the runner. Still phase 2; use `maestro studio` for authoring
+   in the interim.
 
 Net: **Lastest can include mobile testing without a fundamental rewrite of the
 protocol or dispatch.** The scope is a new runner package + capability-gated
