@@ -58,6 +58,14 @@ WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@10.28.1 --activate
 
 COPY --from=deps /app/node_modules ./node_modules
+# pnpm does not hoist: a workspace package's own devDependencies land in ITS
+# node_modules/.bin, never the root's. `pnpm build` runs `pnpm --filter
+# @lastest/mcp-server build` -> tsup, so that one package's node_modules has to
+# come along. The other workspace deps (db, pool-service, eb-protocol, shared)
+# need no such copy: the app imports them as source and everything they require
+# at runtime is also a root dependency, so Node resolution walks up to
+# /app/node_modules and finds it.
+COPY --from=deps /app/packages/mcp-server/node_modules ./packages/mcp-server/node_modules
 COPY . .
 RUN rm -rf packages/runner packages/embedded-browser packages/ocr-service packages/vscode-extension
 
