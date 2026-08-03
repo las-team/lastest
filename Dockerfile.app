@@ -39,6 +39,15 @@ COPY packages/mcp-server/package.json ./packages/mcp-server/
 
 RUN pnpm install --frozen-lockfile
 
+# Stage the Agent SDK's platform-native CLI binary at a fixed, arch-independent
+# path. It ships as an optionalDependency, so only the variant matching this
+# build's platform is installed (…-linux-x64-musl or …-linux-arm64-musl on this
+# alpine/musl base) — a hardcoded COPY path in the runner stage would break the
+# other architecture. `cp -RL` fails the build loudly if the optional dep ever
+# stops resolving, instead of failing silently at runtime.
+RUN mkdir -p /sdk-native && \
+    cp -RL node_modules/.pnpm/@anthropic-ai+claude-agent-sdk-linux-*-musl@*/node_modules/@anthropic-ai/claude-agent-sdk-linux-*-musl /sdk-native/
+
 # -----------------------------------------------------------------------------
 # Stage 2: Builder
 # -----------------------------------------------------------------------------
@@ -110,22 +119,15 @@ ENV TZ=UTC
 # Service account: no interactive login shell (nologin). The passwd shell is
 # only consulted for `su - nextjs` / login sessions — never by the ENTRYPOINT,
 # Node's child_process, or `docker exec -it … sh` (which names the command).
-# A home dir (-h) is still needed: the shared entrypoint symlinks
-# /home/nextjs/.claude → /app/storage/.claude and that requires the home dir.
+# A home dir (-h) is still needed: app-entrypoint.sh symlinks
+# /home/nextjs/.claude → /app/storage/.claude (Agent SDK state) and that
+# requires the home dir to exist.
 # Alpine BusyBox tools: nologin lives at /sbin/nologin, -D = no password.
 RUN addgroup -g 1002 nodejs && \
     adduser -u 1002 -G nodejs -s /sbin/nologin -h /home/nextjs -D nextjs
 
 # Standalone build (includes its own pruned node_modules)
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-# Drop @anthropic-ai/claude-agent-sdk from the traced bundle. It's a
-# serverExternalPackage (which forces nft to include it — outputFileTracingExcludes
-# can't remove it), but this API-key-only image must NOT ship it
-# (AI_HOST_CLI_DISABLED=1). The app only reaches it via a guarded `await import()`
-# (src/lib/ai/claude-agent-sdk.ts), which then fails gracefully to "use an
-# API-key provider". Version-agnostic glob so a dependency bump keeps working.
-RUN rm -rf ./node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@* \
-           ./node_modules/@anthropic-ai/claude-agent-sdk
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/build-info.json ./build-info.json
@@ -149,15 +151,35 @@ RUN ln -sf .pnpm/playwright@1.57.0/node_modules/playwright ./node_modules/playwr
 # (drizzle-orm, postgres via @lastest/db, all workspace-package source) is
 # already traced into the Next standalone bundle copied above. The only manual
 # step for a serverExternalPackage is re-linking playwright's top-level symlink
-# (above) — nft traces its content but not the symlink. claude-agent-sdk is the
-# inverse: also traced in, but deliberately deleted above (API-key-only image).
+# (above) — nft traces its content but not the symlink.
 
-# API-key-only AI: this image ships neither the Claude Code CLI binary nor
-# the @anthropic-ai/claude-agent-sdk runtime (a serverExternalPackage nft
-# traces into the bundle, so it's deleted above; the app only lazy-imports it
-# behind a guarded try/catch, see src/lib/ai/claude-agent-sdk.ts). AI_HOST_CLI_DISABLED
-# below makes the app report the 'claude-cli' / 'claude-agent-sdk' providers
-# as unavailable — use the Anthropic/OpenAI/OpenRouter API-key providers.
+# @anthropic-ai/claude-agent-sdk is a serverExternalPackage, so it needs the same
+# two manual fixups playwright does above, plus one of its own:
+#   1. nft traces the JS package's CONTENT into .pnpm/… but not its top-level
+#      node_modules/@anthropic-ai/claude-agent-sdk symlink, so the bare specifier
+#      `import("@anthropic-ai/claude-agent-sdk")` does not resolve without it.
+#   2. The platform-native CLI binary that sdk.mjs spawns is an optionalDependency
+#      nft never sees at all (staged at /sdk-native in the deps stage above).
+# The binary goes in as a sibling under node_modules/@anthropic-ai/: sdk.mjs
+# locates it with createRequire, and Node resolves the symlink to its .pnpm
+# realpath first, so the lookup walks up to /app/node_modules and finds it there.
+COPY --from=deps --chown=nextjs:nodejs /sdk-native/ ./node_modules/@anthropic-ai/
+RUN set -e; \
+    sdk=$(ls -d /app/node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@*/node_modules/@anthropic-ai/claude-agent-sdk | head -1); \
+    ln -sfn "$sdk" /app/node_modules/@anthropic-ai/claude-agent-sdk
+
+# Resolve both the way the app does at runtime, so a broken layout fails the
+# build instead of surfacing as "Native CLI binary not found" on a live pod.
+RUN node --input-type=module -e "import { createRequire } from 'node:module'; const m = await import('@anthropic-ai/claude-agent-sdk'); if (typeof m.query !== 'function') throw new Error('claude-agent-sdk: missing query export'); const req = createRequire('/app/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs'); const arch = process.arch === 'arm64' ? 'arm64' : 'x64'; console.log('claude-agent-sdk OK:', req.resolve('@anthropic-ai/claude-agent-sdk-linux-' + arch + '-musl/claude'));"
+
+# AI providers in this image: the Claude Agent SDK runs (its JS + native runtime
+# are both present, see above); the 'claude-cli' provider does NOT — no `claude`
+# on PATH and no interactive `claude login`, which is what AI_HOST_CLI_DISABLED=1
+# below reports. Because there is no login, the SDK takes its credentials from
+# the environment: set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (k8s/app.yaml
+# wires both as optional secrets). Without either, the app reports the SDK as
+# unconfigured and steers users to the Anthropic/OpenAI/OpenRouter API-key
+# providers — see src/lib/ai/availability.ts.
 
 # OCR runs in the dedicated ocr-service container (packages/ocr-service) —
 # tesseract.js is not shipped in this image. Set OCR_SERVICE_URL to enable.
@@ -177,8 +199,13 @@ ARG NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=""
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=$NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
-# API-key-only image: no claude CLI / Agent SDK runtime on board (see above)
+# No `claude` binary on PATH and no interactive login: disables the 'claude-cli'
+# provider only. The Agent SDK stays available (see above).
 ENV AI_HOST_CLI_DISABLED=1
+# Docker derives HOME from /etc/passwd for USER nextjs, but be explicit — the
+# Agent SDK writes its state under $HOME/.claude, which app-entrypoint.sh
+# redirects onto the /app/storage volume so it survives pod restarts.
+ENV HOME=/home/nextjs
 # DATABASE_URL must be injected by the deployment — no default. Missing env is fatal at boot.
 # EB_POOL_SERVICE_URL must point at the pool-service Deployment/Service
 # (e.g. http://lastest-pool:9500) — this image never runs it in-process.

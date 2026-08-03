@@ -27,7 +27,8 @@ import { McpPromptHints } from "@/components/mcp/mcp-prompt-hints";
 import { McpStatusBadge } from "@/components/mcp/mcp-status-badge";
 import {
   isByokConfigured,
-  hostCliProvidersDisabled,
+  hostClaudeCliUnavailable,
+  agentSdkReadiness,
 } from "@/lib/ai/availability";
 import { getAISettings as getMaskedAISettings } from "@/server/actions/ai-settings";
 import { AILogsCard } from "@/components/settings/ai-logs-card";
@@ -637,7 +638,8 @@ export default async function SettingsPage({
               <AISettingsCard
                 settings={aiSettings}
                 repositoryId={selectedRepo?.id}
-                hostCliDisabled={hostCliProvidersDisabled()}
+                claudeCliAvailable={!hostClaudeCliUnavailable()}
+                agentSdkAvailable={agentSdkReadiness().runnable}
               />
             </div>
           </AiAdvancedSettings>

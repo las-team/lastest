@@ -1,5 +1,6 @@
 import { db } from "../index";
 import { encryptField, decryptField } from "@/lib/crypto";
+import { defaultAiProvider } from "@/lib/ai/availability";
 import {
   playwrightSettings,
   environmentConfigs,
@@ -461,7 +462,9 @@ export async function getAISettings(repositoryId?: string | null) {
   return {
     id: "",
     repositoryId: null,
-    provider: DEFAULT_AI_SETTINGS.provider as AIProvider,
+    // Deployment-aware: images that ship no credentials for the Agent SDK must
+    // not default fresh teams to a provider whose first call would fail.
+    provider: defaultAiProvider() as AIProvider,
     openrouterApiKey: null,
     openrouterModel: DEFAULT_AI_SETTINGS.openrouterModel,
     agentSdkPermissionMode: DEFAULT_AI_SETTINGS.agentSdkPermissionMode,

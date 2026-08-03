@@ -15,7 +15,9 @@
 #   kubectl apply -f k8s/namespace.yaml
 #   kubectl -n lastest create secret generic lastest-secrets \
 #     --from-literal=database-url=... --from-literal=encryption-key=... \
-#     --from-literal=better-auth-secret=... --from-literal=eb-pool-service-token=...
+#     --from-literal=better-auth-secret=... --from-literal=eb-pool-service-token=... \
+#     [--from-literal=anthropic-api-key=...]   # optional: enables the Claude Agent SDK provider
+#                                              # (or claude-code-oauth-token=... instead)
 #   kubectl apply -f k8s/migrate-job.yaml && kubectl -n lastest wait --for=condition=complete job/lastest-migrate --timeout=300s
 #   kubectl apply -f k8s/ocr-service.yaml -f k8s/pool-service.yaml -f k8s/app.yaml
 ---
@@ -83,6 +85,23 @@ spec:
                   optional: true
             - name: OCR_SERVICE_URL
               value: "http://lastest-ocr:8891"
+            # Claude Agent SDK credentials. The image ships the SDK but has no
+            # interactive `claude login`, so it reads them from the environment.
+            # Optional: without either key the app reports the Agent SDK as
+            # unconfigured and teams use a BYOK provider instead (see
+            # src/lib/ai/availability.ts).
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: lastest-secrets
+                  key: anthropic-api-key
+                  optional: true
+            - name: CLAUDE_CODE_OAUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: lastest-secrets
+                  key: claude-code-oauth-token
+                  optional: true
             # Plain-HTTP access (port-forward / NodePort). Set to "true" (or
             # drop, production defaults secure) behind a TLS ingress.
             - name: BETTER_AUTH_COOKIE_SECURE

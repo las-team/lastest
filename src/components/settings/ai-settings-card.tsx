@@ -26,6 +26,7 @@ import {
   testAIConnection,
 } from "@/server/actions/ai-settings";
 import { DEFAULT_AI_SETTINGS } from "@/lib/db/schema";
+import { defaultAiProvider } from "@/lib/ai/availability";
 import type {
   AISettings,
   AIProvider,
@@ -52,9 +53,13 @@ import { toast } from "sonner";
 interface AISettingsCardProps {
   settings: AISettings;
   repositoryId?: string | null;
-  /** True on API-key-only deployments (AI_HOST_CLI_DISABLED): the claude-cli
-   *  and claude-agent-sdk providers are not offered. */
-  hostCliDisabled?: boolean;
+  /** False on images with no `claude` binary on PATH (AI_HOST_CLI_DISABLED):
+   *  the claude-cli provider is not offered. */
+  claudeCliAvailable?: boolean;
+  /** False when the deployment ships no credentials the Agent SDK can use:
+   *  the claude-agent-sdk provider is not offered. Server env is not visible
+   *  here, so both flags are resolved server-side and passed in. */
+  agentSdkAvailable?: boolean;
 }
 
 const OPENROUTER_MODELS = [
@@ -79,7 +84,8 @@ const OPENAI_MODELS = [
 export function AISettingsCard({
   settings,
   repositoryId,
-  hostCliDisabled,
+  claudeCliAvailable,
+  agentSdkAvailable,
 }: AISettingsCardProps) {
   const [isPending, startTransition] = useTransition();
   const [isTesting, setIsTesting] = useState(false);
@@ -88,8 +94,14 @@ export function AISettingsCard({
     message: string;
   } | null>(null);
 
+  // Deployment-aware default: images that can't run the Agent SDK must not
+  // offer it as the initial selection.
+  const deploymentDefaultProvider = defaultAiProvider(
+    agentSdkAvailable,
+  ) as AIProvider;
+
   const [provider, setProvider] = useState<AIProvider>(
-    (settings.provider as AIProvider) || DEFAULT_AI_SETTINGS.provider,
+    (settings.provider as AIProvider) || deploymentDefaultProvider,
   );
   const [openrouterApiKey, setOpenrouterApiKey] = useState(
     settings.openrouterApiKey || "",
@@ -155,7 +167,7 @@ export function AISettingsCard({
 
   // Store original values to compare against (prevents save on mount)
   const originalValues = useRef({
-    provider: (settings.provider as AIProvider) || DEFAULT_AI_SETTINGS.provider,
+    provider: (settings.provider as AIProvider) || deploymentDefaultProvider,
     openrouterApiKey: settings.openrouterApiKey || "",
     openrouterModel:
       settings.openrouterModel || DEFAULT_AI_SETTINGS.openrouterModel,
@@ -316,7 +328,7 @@ export function AISettingsCard({
   const handleReset = () => {
     startTransition(async () => {
       await resetAISettings(repositoryId);
-      setProvider(DEFAULT_AI_SETTINGS.provider);
+      setProvider(deploymentDefaultProvider);
       setOpenrouterApiKey("");
       setOpenrouterModel(DEFAULT_AI_SETTINGS.openrouterModel);
       setCustomInstructions("");
@@ -393,7 +405,7 @@ export function AISettingsCard({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {!hostCliDisabled && (
+              {claudeCliAvailable && (
                 <SelectItem value="claude-cli">
                   <div className="flex items-center gap-2">
                     <Zap className="h-4 w-4" />
@@ -407,7 +419,7 @@ export function AISettingsCard({
                   OpenRouter API
                 </div>
               </SelectItem>
-              {!hostCliDisabled && (
+              {agentSdkAvailable && (
                 <SelectItem value="claude-agent-sdk">
                   <div className="flex items-center gap-2">
                     <Bot className="h-4 w-4" />

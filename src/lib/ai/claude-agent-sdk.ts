@@ -6,12 +6,15 @@ import type {
 import type { AIProvider, GenerateOptions, StreamCallbacks } from "./types";
 
 /**
- * The SDK is loaded lazily so importing this module never requires the
- * package to be installed. API-key-only images (Dockerfile.app) don't ship
- * @anthropic-ai/claude-agent-sdk (it's a serverExternalPackage, pruned from
- * the standalone build and deliberately not copied back in) — a top-level
- * import would crash every consumer of @/lib/ai at load time, even when a
- * different provider is selected.
+ * The SDK is loaded lazily so importing this module never requires the package
+ * to be installed — a top-level import would crash every consumer of @/lib/ai
+ * at load time, even when a different provider is selected.
+ *
+ * Every shipped image does include it (both the JS and its platform-native CLI
+ * binary — see Dockerfile / Dockerfile.app, which verify this at build time),
+ * so reaching the catch below means a genuinely broken install, not a
+ * deployment that opted out. Whether the SDK can *authenticate* is a separate
+ * question, gated earlier by agentSdkReadiness() in ./availability.
  */
 async function loadQuery(): Promise<typeof sdkQuery> {
   try {
@@ -19,7 +22,7 @@ async function loadQuery(): Promise<typeof sdkQuery> {
     return mod.query;
   } catch (err) {
     throw new Error(
-      "Claude Agent SDK is not available in this deployment (API-key-only image?). " +
+      "Claude Agent SDK failed to load — the @anthropic-ai/claude-agent-sdk package is missing or broken in this image. " +
         `Configure an API-key provider (Anthropic, OpenAI, OpenRouter) instead. (${err instanceof Error ? err.message : String(err)})`,
     );
   }

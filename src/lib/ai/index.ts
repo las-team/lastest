@@ -7,7 +7,11 @@ import { createOpenAIProvider } from "./openai";
 import { createAnthropicDirectProvider } from "./anthropic-direct";
 import { MCPBridge, createPlaywrightMCPBridge } from "./mcp-bridge";
 import type { MCPServerConfig } from "./mcp-bridge";
-import { hostCliProvidersDisabled } from "./availability";
+import {
+  hostClaudeCliUnavailable,
+  checkAiConfigReadiness,
+  CLAUDE_CLI_UNAVAILABLE_MESSAGE,
+} from "./availability";
 import { createAIPromptLog, updateAIPromptLog } from "@/lib/db/queries";
 import type { AIActionType, AILogStatus } from "@/lib/db/schema";
 
@@ -27,22 +31,21 @@ const TOOL_CALLING_PROVIDERS: AIProviderType[] = [
 ];
 
 export function getAIProvider(config: AIProviderConfig): AIProvider {
+  // Single readiness gate: unconfigured/disabled-provider setups fail here
+  // with one actionable message instead of deep provider errors.
+  const readiness = checkAiConfigReadiness(config);
+  if (!readiness.runnable) {
+    throw new Error(readiness.reason);
+  }
+
   if (config.provider === "openrouter") {
-    if (!config.openrouterApiKey) {
-      throw new Error("OpenRouter API key is required");
-    }
     return createOpenRouterProvider({
-      apiKey: config.openrouterApiKey,
+      apiKey: config.openrouterApiKey!,
       model: config.openrouterModel || "anthropic/claude-sonnet-4",
     });
   }
 
   if (config.provider === "claude-agent-sdk") {
-    if (hostCliProvidersDisabled()) {
-      throw new Error(
-        "The Claude Agent SDK provider is disabled in this deployment (AI_HOST_CLI_DISABLED) — configure an API-key provider (Anthropic, OpenAI, OpenRouter) in AI settings",
-      );
-    }
     return new ClaudeAgentSDKProvider({
       permissionMode: config.agentSdkPermissionMode,
       model: config.agentSdkModel || undefined,
@@ -55,40 +58,29 @@ export function getAIProvider(config: AIProviderConfig): AIProvider {
   }
 
   if (config.provider === "ollama") {
-    if (!config.ollamaModel) {
-      throw new Error("Ollama model is required");
-    }
     return createOllamaProvider({
       baseUrl: config.ollamaBaseUrl || "http://localhost:11434",
-      model: config.ollamaModel,
+      model: config.ollamaModel!,
     });
   }
 
   if (config.provider === "openai") {
-    if (!config.openaiApiKey) {
-      throw new Error("OpenAI API key is required");
-    }
     return createOpenAIProvider({
-      apiKey: config.openaiApiKey,
+      apiKey: config.openaiApiKey!,
       model: config.openaiModel || "gpt-4o",
     });
   }
 
   if (config.provider === "anthropic") {
-    if (!config.anthropicApiKey) {
-      throw new Error("Anthropic API key is required");
-    }
     return createAnthropicDirectProvider({
-      apiKey: config.anthropicApiKey,
+      apiKey: config.anthropicApiKey!,
       model: config.anthropicModel || "claude-sonnet-4-5-20250929",
     });
   }
 
   // Default to Claude CLI
-  if (hostCliProvidersDisabled()) {
-    throw new Error(
-      "The Claude CLI provider is disabled in this deployment (AI_HOST_CLI_DISABLED) — configure an API-key provider (Anthropic, OpenAI, OpenRouter) in AI settings",
-    );
+  if (hostClaudeCliUnavailable()) {
+    throw new Error(CLAUDE_CLI_UNAVAILABLE_MESSAGE);
   }
   return new ClaudeCLIProvider();
 }
