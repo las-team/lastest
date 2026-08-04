@@ -58,6 +58,13 @@ import { activeRunnerSessions, startCleanupLoop } from "@/lib/eb/cleanup-loop";
 
 const MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024; // 10MB limit
 
+// Heartbeat long-poll window. Must stay comfortably under the runner's HTTP
+// timeout and under any ingress/proxy read timeout in front of the app.
+const COMMAND_LONG_POLL_MS = 25_000;
+
+// How often the parked long-poll re-checks the command queue.
+const COMMAND_POLL_INTERVAL_MS = 1_000;
+
 /**
  * Sanitize filename to prevent path traversal attacks.
  * Only allows alphanumeric characters, dots, hyphens, and underscores.
@@ -249,10 +256,24 @@ export async function POST(request: NextRequest) {
           runner.maxParallelTests ?? undefined,
         );
 
-        // Long-poll: if no commands, wait up to 25s for a command to be queued
+        // Long-poll: if no commands, hold the request open and re-check the
+        // queue until something lands or the window closes. This polls rather
+        // than waiting on a NOTIFY because LISTEN cannot survive a
+        // transaction-mode connection pooler and, with the app scaled out, the
+        // pod that queues a command is rarely the pod parked here.
+        // `waitForCommandQueued` is just the sleep — it returns early when the
+        // enqueue happened to land on this same pod, which turns the common
+        // single-pod case back into near-zero latency. The re-query is what
+        // guarantees delivery, so the loop re-checks on timeout too.
         if (dispatched.length === 0) {
-          const notified = await waitForCommandQueued(runner.id, 25_000);
-          if (notified) {
+          const deadline = Date.now() + COMMAND_LONG_POLL_MS;
+          while (dispatched.length === 0) {
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) break;
+            await waitForCommandQueued(
+              runner.id,
+              Math.min(COMMAND_POLL_INTERVAL_MS, remaining),
+            );
             dispatched = await dispatchPendingCommands(
               runner.id,
               runner.maxParallelTests ?? undefined,
