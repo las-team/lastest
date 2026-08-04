@@ -47,5 +47,7 @@ test the sibling Expo app (`packages/maestro-poc-app`, bundle id
 - `src/stream.ts` — live simulator streaming (idb → ffmpeg → `stream:frame`).
 - `flows/` — Maestro flows (`ios-settings.yaml`, `counter.yaml`).
 - `scripts/dispatch-run-test.mjs` — enqueues a `run_test` for a given runnerId.
+- `viewer.html` — standalone stream viewer (renders frames + click-to-tap), no
+  Lastest login needed.
 - `SETUP.md` — reviewer setup & reproduction guide.
 - `FINDINGS.md` / `STREAMING.md` — protocol + streaming write-ups.
