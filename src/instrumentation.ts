@@ -5,6 +5,18 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
+  // Structured JSON logging first, so every boot step below is captured by it.
+  // Production only — dev keeps the raw console output Next's overlay expects.
+  if (process.env.NODE_ENV === "production") {
+    try {
+      const { installConsoleBridge } =
+        await import("@/lib/logger-console-bridge");
+      installConsoleBridge();
+    } catch (err) {
+      console.error("[Boot] installConsoleBridge failed:", err);
+    }
+  }
+
   // Must run before `reconcileOrphanedPoolEBs` — deleting the Jobs here is
   // what produces the phantom rows that reconcile prunes.
   try {

@@ -65,6 +65,11 @@ const nextConfig: NextConfig = {
     "playwright",
     "playwright-core",
     "@anthropic-ai/claude-agent-sdk",
+    // pino resolves its transports/serializers through runtime `require`s that
+    // webpack can't statically trace; bundling it breaks the logger at boot.
+    "pino",
+    "pino-std-serializers",
+    "thread-stream",
   ],
   experimental: {
     serverActions: {

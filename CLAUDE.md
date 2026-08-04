@@ -155,6 +155,7 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 - **Password hashing:** `@node-rs/argon2` (not bcrypt)
 - **Settings auto-save:** 500ms debounce — when adding fields, update `originalValues`, `hasChanges`, `doSave`, and `useEffect` deps
 - **AI settings:** `getAISettings()` returns `DEFAULT_AI_SETTINGS` when no DB record — all new fields must be in the default
+- **Logging:** `import { getLogger } from "@/lib/logger"` (pino) in server code — `const log = getLogger("GC"); log.warn({ runnerId }, "stale runner")`. Production writes newline-delimited JSON to stdout; dev renders short readable lines. `LOG_LEVEL` overrides the level. Server-only — never import it from a `*-client.tsx`. Existing bare `console.*` calls still work: `src/lib/logger-console-bridge.ts` patches console onto pino at boot (production only, from `src/instrumentation.ts`), lifting a leading `[Prefix]` into `scope` and `Error` args into `err`.
 - **Schema types:** use `$inferSelect` / `$inferInsert` patterns
 - **Monorepo:** pnpm workspaces, pnpm 10.x
 - **pnpm config:** `overrides` / `onlyBuiltDependencies` live in `pnpm-workspace.yaml` — never in a `package.json` `pnpm` block (deprecated)
