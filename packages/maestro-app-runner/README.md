@@ -16,6 +16,8 @@ with no host changes?_ See [FINDINGS.md](./FINDINGS.md) for the answer.
 3. On `command:run_test`, treats the dispatched `code` payload as **Maestro
    YAML** (not Playwright JS), runs `maestro test`, and maps the screenshots +
    exit code back into `response:screenshot` + `response:test_result`.
+4. With `MAESTRO_STREAM=1`, serves the booted simulator's screen live to
+   Lastest's existing viewer (see [STREAMING.md](./STREAMING.md)).
 
 Two modes via `RUNNER_MODE`:
 
@@ -23,61 +25,27 @@ Two modes via `RUNNER_MODE`:
   the host accepts a non-Playwright runner end-to-end without driving a device.
 - `real` — actually runs `maestro test` against the booted simulator.
 
-## Prerequisites (this machine)
+## Setup & running
 
-Maestro needs JDK 17+, and Node/Expo need Node ≥20. The login shell has neither
-first on PATH, so source the pinned env recipe:
+**See [SETUP.md](./SETUP.md)** for the dependency list (with minimum versions)
+and the end-to-end reproduction steps. In short: install the required tools, boot
+an iOS simulator, start the host with `EB_PROVISIONER=none`, start the runner,
+and dispatch a `run_test` whose `code` is a Maestro flow. The runner
+auto-detects the booted simulator, so no UDID needs to be set.
 
-```bash
-source packages/maestro-app-runner/.poc-env.sh   # JDK17 + Node24 + Maestro on PATH
-```
+### Testing the bundled RN app
 
-- **Maestro 2.8.0** — installed at `~/.maestro/bin` (the Homebrew formula was
-  blocked by an unrelated Xcode-version gate; used the official installer).
-- **openjdk@17** — keg-only brew formula; `.poc-env.sh` sets `JAVA_HOME`.
-- **iOS sim app** — `packages/maestro-poc-app` (Expo RN), bundle id
-  `com.anonymous.maestro-poc-app`, built + installed on a booted iPhone 16 sim.
-
-## Run the end-to-end PoC
-
-```bash
-# 1. Host (separate terminal). Two overrides matter:
-#    - :3000 was taken by another app here, so use 3100.
-#    - EB_PROVISIONER=none / EB_DEV_PORT_FORWARD=0: a manually-launched,
-#      non-containerized runner must NOT route through the k8s EB provisioner,
-#      which otherwise 500s auto-register trying to kubectl a non-existent pod.
-source packages/maestro-app-runner/.poc-env.sh
-EB_PROVISIONER=none EB_DEV_PORT_FORWARD=0 PORT=3100 \
-  NODE_OPTIONS='--require ./scripts/ws-proxy-preload.js' \
-  node_modules/.bin/next dev -p 3100
-
-# 2. Boot sim + install the RN app (once):
-xcrun simctl boot "iPhone 16"
-cd packages/maestro-poc-app && npx expo run:ios --device "iPhone 16"
-
-# 3. The runner (real mode). Note bundle id = com.lastest.maestropoc (app.json):
-source packages/maestro-app-runner/.poc-env.sh
-env \
-  SYSTEM_EB_TOKEN="$(grep SYSTEM_EB_TOKEN .env | cut -d= -f2)" \
-  LASTEST_URL=http://localhost:3100 \
-  RUNNER_MODE=real \
-  MAESTRO_PLATFORM=ios \
-  MAESTRO_APP_ID=com.lastest.maestropoc \
-  node --experimental-strip-types packages/maestro-app-runner/src/index.ts
-
-# 4. Dispatch a run_test carrying the Maestro YAML as its `code` payload.
-#    Grab the runnerId the runner logged, then:
-DATABASE_URL="$(grep DATABASE_URL .env | cut -d= -f2-)" \
-  node packages/maestro-app-runner/scripts/dispatch-run-test.mjs <runnerId>
-```
-
-The runner registers as a system EB and long-polls. Step 4 enqueues a
-`command:run_test` whose `code` is `flows/counter.yaml`; the runner runs
-`maestro test` and reports the result + step screenshots back to the host.
+The default flow drives the built-in iOS Settings app to skip a native build. To
+test the sibling Expo app (`packages/maestro-poc-app`, bundle id
+`com.lastest.maestropoc`) instead, build it with `expo run:ios` and point
+`MAESTRO_APP_ID` at it.
 
 ## Files
 
-- `src/index.ts` — the runner (EB protocol client + Maestro integration).
-- `flows/counter.yaml` — a Maestro flow for the PoC RN app's counter screen.
-- `scripts/dispatch-run-test.mjs` — enqueues a run_test for a given runnerId.
-- `.poc-env.sh` — env recipe (JDK17 + Node24 + Maestro).
+- `src/index.ts` — the runner (EB protocol client + Maestro integration + sim
+  auto-detection).
+- `src/stream.ts` — live simulator streaming (idb → ffmpeg → `stream:frame`).
+- `flows/` — Maestro flows (`ios-settings.yaml`, `counter.yaml`).
+- `scripts/dispatch-run-test.mjs` — enqueues a `run_test` for a given runnerId.
+- `SETUP.md` — reviewer setup & reproduction guide.
+- `FINDINGS.md` / `STREAMING.md` — protocol + streaming write-ups.
