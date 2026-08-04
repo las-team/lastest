@@ -3,12 +3,39 @@
 **Question:** is live streaming + interaction of the iOS simulator possible
 outside Lastest, and how well would it plug into Lastest's existing viewer?
 
-**Short answer:** Yes, and the fit is *better than expected*. `ios-bridge`'s
-frame format is the **same shape** as Lastest's `stream:frame` (base64 JPEG in a
-JSON envelope), and its input channel maps 1:1 onto Lastest's `stream:input`.
-The work is an **adapter + a mobile input path**, not a new viewer or protocol.
+**Short answer:** Yes — and it's now **built and proven working**, not just
+assessed. A live iOS-simulator stream renders inside the real Lastest viewer,
+and tap input round-trips back to the sim. The fit is as good as predicted:
+`ios-bridge`'s frame format is the **same shape** as Lastest's `stream:frame`
+(base64 JPEG in a JSON envelope), so no new viewer or protocol was needed — just
+an idb-based frame source + a mobile input mapping.
 
-This section is an assessment only — `ios-bridge` was not stood up locally.
+## PROVEN — working local implementation (`src/stream.ts`)
+
+Rather than adopt ios-bridge wholesale, the runner uses **idb directly** (shape
+"B" below). End-to-end result, verified in the logged-in Lastest UI:
+
+- Pipeline: `iOS sim → idb video-stream --format h264 → ffmpeg (h264→mjpeg) →
+JPEG frame splitter → WS stream:frame → host /api/embedded/stream proxy →
+Lastest browser <canvas>`.
+- **~14–15 fps at 1178×2556**; the host's own auth'd proxy handed back the
+  runner's streamUrl (after its liveness probe) and 69 frames arrived in the
+  browser over 5s. The iPhone home screen renders live in the app.
+- **Input:** a `stream:input` mouse event (device px) → runner scales to logical
+  points → `idb ui tap` on the sim. Confirmed: `tap → 337,230 (points)`.
+
+Practical notes discovered while building it:
+
+- idb's `mjpeg`/`minicap` formats emit 0 bytes on this companion build; `h264`
+  (+ ffmpeg) is the working path — exactly ios-bridge's primary recipe.
+- ffmpeg needs `-f h264` (raw elementary stream from a pipe isn't auto-probed)
+  and must NOT be given a `data` listener on idb's stdout before `.pipe()` (it
+  steals bytes → 0 frames). Startup waits a few seconds for the first keyframe.
+- idb-companion's Homebrew formula hit the same Xcode-version gate as Maestro;
+  extracting the cached bottle by hand worked.
+- The host's `/api/embedded/stream/ws` proxy forwarded frames fine but did **not**
+  forward client→runner input in this path (input verified direct-to-runner);
+  wiring viewer input through for mobile is a small host-side follow-up.
 
 ---
 
@@ -18,7 +45,7 @@ The browser EB streams over a WebSocket `StreamServer`
 (`packages/embedded-browser/src/stream-server.ts`). The frontend consumes:
 
 - **frames** — `{ type: "stream:frame", payload: { data: <base64 JPEG>, width,
-  height, timestamp } }` (JSON text messages; `broadcastFrame`, line 245).
+height, timestamp } }` (JSON text messages; `broadcastFrame`, line 245).
 - **status** — `{ type: "stream:status", payload: { status, currentUrl, … } }`.
 - **input (client → server)** — `stream:input`, plus `stream:inspect_mode`,
   `stream:inspect_element_request`, `stream:dom_snapshot_request` (line 321+).
@@ -46,13 +73,13 @@ Source today = CDP screencast (JPEG frames). Input today = CDP
 
 ## The fit
 
-| Concern | Lastest today | ios-bridge | Gap |
-|---------|---------------|------------|-----|
-| Frame payload | base64 JPEG in JSON | base64 JPEG in JSON | **≈none** — rename keys (`data`/`width`/`height` vs `data`/`pixel_width`/`pixel_height`) |
-| Transport | WS text JSON | WS text JSON | same model |
-| Input events | `stream:input` (mouse/key) | `{t:"tap"/"swipe"/"text"}` | **map events**: viewer emits pointer coords → tap/swipe; keystrokes → text/key |
-| Frame source | CDP screencast | idb video-stream | different *source*, same *output* |
-| Coordinate space | CSS px | device px + logical points (both sent) | straightforward scale |
+| Concern          | Lastest today              | ios-bridge                             | Gap                                                                                      |
+| ---------------- | -------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Frame payload    | base64 JPEG in JSON        | base64 JPEG in JSON                    | **≈none** — rename keys (`data`/`width`/`height` vs `data`/`pixel_width`/`pixel_height`) |
+| Transport        | WS text JSON               | WS text JSON                           | same model                                                                               |
+| Input events     | `stream:input` (mouse/key) | `{t:"tap"/"swipe"/"text"}`             | **map events**: viewer emits pointer coords → tap/swipe; keystrokes → text/key           |
+| Frame source     | CDP screencast             | idb video-stream                       | different _source_, same _output_                                                        |
+| Coordinate space | CSS px                     | device px + logical points (both sent) | straightforward scale                                                                    |
 
 **So a mobile stream doesn't need a new viewer.** Two adapters bridge it:
 
@@ -87,7 +114,7 @@ booted sim is a solved problem here.
   **post-hoc**, not live frames.
 - `xcrun simctl io booted screenshot` ≈ **3 FPS** (~330ms/frame, ~3 MB PNG) —
   enough for a "watch progress" view, too slow for smooth interaction. This is
-  ios-bridge's *fallback* tier; its primary `idb video-stream` path is what gets
+  ios-bridge's _fallback_ tier; its primary `idb video-stream` path is what gets
   to 30–60 FPS, so a real integration should use idb, not a screenshot loop.
 
 ## Verdict

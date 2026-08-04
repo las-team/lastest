@@ -28,6 +28,7 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { SimStreamServer } from "./stream.ts";
 
 // ------------------------------ config ------------------------------
 
@@ -45,9 +46,21 @@ const config = {
   platform: process.env.MAESTRO_PLATFORM ?? "ios",
   // App bundle id under test (real mode passes it to Maestro if the flow omits it)
   appId: process.env.MAESTRO_APP_ID ?? "",
-  // A fake stream endpoint — the host stores it but we don't serve a real one.
-  // (Streaming is explicitly out of scope for this PoC; see FINDINGS.md.)
+  // The stream endpoint the host stores + the Lastest viewer connects to. When
+  // MAESTRO_STREAM=1 the runner actually serves live sim frames here (see
+  // stream.ts); otherwise it's a registered-but-unserved placeholder.
   streamPort: parseInt(process.env.STREAM_PORT ?? "9223", 10),
+  // Live streaming toggle + the tooling/geometry it needs.
+  stream: process.env.MAESTRO_STREAM === "1",
+  udid: process.env.MAESTRO_UDID ?? "",
+  idbBin: process.env.IDB_BIN ?? "idb",
+  ffmpegBin: process.env.FFMPEG_BIN ?? "ffmpeg",
+  streamFps: parseInt(process.env.STREAM_FPS ?? "15", 10),
+  // iPhone 16: 1178×2556 device px, 393×852 logical points.
+  deviceWidth: parseInt(process.env.DEVICE_WIDTH ?? "1178", 10),
+  deviceHeight: parseInt(process.env.DEVICE_HEIGHT ?? "2556", 10),
+  pointWidth: parseInt(process.env.POINT_WIDTH ?? "393", 10),
+  pointHeight: parseInt(process.env.POINT_HEIGHT ?? "852", 10),
 };
 
 if (!config.systemToken) {
@@ -459,13 +472,165 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// ------------------------------ sim auto-detection ------------------------------
+
+interface SimInfo {
+  udid: string;
+  name: string;
+  deviceWidth: number;
+  deviceHeight: number;
+  pointWidth: number;
+  pointHeight: number;
+}
+
+function run(bin: string, args: string[]): Promise<string> {
+  return new Promise((resolve) => {
+    const p = spawn(bin, args, { stdio: ["ignore", "pipe", "ignore"] });
+    let out = "";
+    p.stdout?.on("data", (d) => (out += d.toString()));
+    p.on("close", () => resolve(out));
+    p.on("error", () => resolve(""));
+  });
+}
+
+/**
+ * Resolve the target simulator without requiring the reviewer to hand-copy a
+ * UDID or device dimensions. Uses whatever iOS simulator is currently booted
+ * (`simctl`), then reads its exact pixel + point geometry from `idb describe`
+ * (falls back to a screenshot's PNG header for the pixel size).
+ */
+async function detectBootedSim(): Promise<SimInfo | null> {
+  const json = await run("xcrun", [
+    "simctl",
+    "list",
+    "devices",
+    "booted",
+    "-j",
+  ]);
+  let udid = "";
+  let name = "";
+  try {
+    const parsed = JSON.parse(json) as {
+      devices: Record<
+        string,
+        Array<{ udid: string; name: string; state: string }>
+      >;
+    };
+    for (const rt of Object.keys(parsed.devices)) {
+      const booted = parsed.devices[rt]!.find((d) => d.state === "Booted");
+      if (booted) {
+        udid = booted.udid;
+        name = booted.name;
+        break;
+      }
+    }
+  } catch {
+    /* no booted device */
+  }
+  if (!udid) return null;
+
+  // Geometry from idb (device px + logical points + density in one call).
+  const desc = await run(config.idbBin, ["describe", "--udid", udid, "--json"]);
+  try {
+    const line = desc.trim().split("\n")[0] ?? "";
+    const d = JSON.parse(line) as {
+      screen_dimensions?: {
+        width: number;
+        height: number;
+        width_points: number;
+        height_points: number;
+      };
+    };
+    const s = d.screen_dimensions;
+    if (s?.width && s?.height && s?.width_points && s?.height_points) {
+      return {
+        udid,
+        name,
+        deviceWidth: s.width,
+        deviceHeight: s.height,
+        pointWidth: s.width_points,
+        pointHeight: s.height_points,
+      };
+    }
+  } catch {
+    /* fall through to defaults below */
+  }
+
+  // Fallback: keep the env-configured dimensions if idb didn't return geometry.
+  return {
+    udid,
+    name,
+    deviceWidth: config.deviceWidth,
+    deviceHeight: config.deviceHeight,
+    pointWidth: config.pointWidth,
+    pointHeight: config.pointHeight,
+  };
+}
+
 // ------------------------------ main ------------------------------
 
 const client = new MaestroRunnerClient();
 console.log(
-  `[startup] maestro-app-runner mode=${config.mode} platform=${config.platform} server=${config.serverUrl}`,
+  `[startup] maestro-app-runner mode=${config.mode} platform=${config.platform} server=${config.serverUrl} stream=${config.stream}`,
 );
-client.start().catch((err) => {
+
+// Live streaming: serve sim frames on the same port we register as streamUrl,
+// so the Lastest viewer connects straight to us.
+let streamServer: SimStreamServer | null = null;
+
+process.on("SIGINT", () => {
+  streamServer?.stop();
+  process.exit(0);
+});
+process.on("SIGTERM", () => {
+  streamServer?.stop();
+  process.exit(0);
+});
+
+async function main(): Promise<void> {
+  if (config.stream) {
+    // Auto-detect the booted simulator (UDID + geometry) unless MAESTRO_UDID
+    // was set explicitly — so the reviewer just boots any sim and runs, without
+    // copying a UDID or device dimensions from another machine.
+    let udid = config.udid;
+    let dims = {
+      deviceWidth: config.deviceWidth,
+      deviceHeight: config.deviceHeight,
+      pointWidth: config.pointWidth,
+      pointHeight: config.pointHeight,
+    };
+    if (!udid) {
+      const sim = await detectBootedSim();
+      if (!sim) {
+        console.error(
+          "[startup] MAESTRO_STREAM=1 but no booted simulator found. " +
+            'Boot one (e.g. `xcrun simctl boot "iPhone 16"`) or set MAESTRO_UDID.',
+        );
+        process.exit(1);
+      }
+      udid = sim.udid;
+      dims = sim;
+      console.log(
+        `[startup] auto-detected sim "${sim.name}" ${udid} ` +
+          `(${dims.deviceWidth}x${dims.deviceHeight}px, ${dims.pointWidth}x${dims.pointHeight}pt)`,
+      );
+    }
+
+    streamServer = new SimStreamServer({
+      udid,
+      port: config.streamPort,
+      ...dims,
+      fps: config.streamFps,
+      idbBin: config.idbBin,
+      ffmpegBin: config.ffmpegBin,
+    });
+    streamServer.start();
+  }
+
+  await client.start();
+}
+
+main().catch((err) => {
   console.error("[startup] fatal:", err);
   process.exit(1);
 });
