@@ -55,17 +55,19 @@ DATABASE_URL="$(grep DATABASE_URL .env | cut -d= -f2-)" \
 The runner runs `maestro test` on the sim and reports `status=passed` + step
 screenshots back to the host.
 
-### See the live stream
+### See the live stream — in the Lastest UI
 
-Open **`packages/maestro-app-runner/viewer.html`** in a browser (it defaults to
-`ws://localhost:9223`, the runner's stream port). It renders the live simulator
-onto a canvas, and **clicking the canvas taps the sim** (`stream:input` →
-`idb ui tap`). This is a standalone viewer — no Lastest login needed. Run the
-test in step 5 while it's open to watch the flow drive the device live.
+Sign in and open **`http://localhost:3000/mobile`**. The simulator renders in
+Lastest's own `BrowserViewer` component (the same one the browser EB uses),
+fed through the host's authenticated `/api/embedded/stream` proxy. Clicking the
+canvas taps the simulator.
 
-> The same frames also flow into Lastest's built-in viewer via the host's
-> `/api/embedded/stream` proxy when signed in; the standalone page just skips the
-> login + session plumbing. See `STREAMING.md`.
+Run the test from step 5 while that page is open to watch the flow drive the
+device live.
+
+> **Expect lag.** The stream is functional but not smooth — see "Scope & known
+> limitations". A standalone `viewer.html` also ships in this package if you want
+> to see the frames without signing in (it connects straight to the runner).
 
 ## Key env vars
 
@@ -90,10 +92,15 @@ and does not show:
 - **The flow is hardened for a fresh simulator** — it dismisses first-run popups
   (optional taps) and waits for each screen, so it passes on a just-erased sim.
   If you still see a flake, erase the sim (`xcrun simctl erase <udid>`) and retry.
-- **Streaming is unoptimized** — frames are H.264→JPEG with no forced keyframes,
-  so **expect visible tearing during fast screen transitions**. It is smoother
-  when you watch on your own machine than through any screen-share/recording. The
-  deliberate `waitForAnimationToEnd` pacing in the flow reduces it.
-- **Viewer→sim input** works through the standalone `viewer.html`
-  (`stream:input` → `idb ui tap`); routing that same input through Lastest's host
-  proxy is not yet wired (frames flow, input doesn't) — see `STREAMING.md`.
+- **Streaming works but lags — this is the weakest part of the PoC.** The cause
+  is external: `idb-companion` 1.1.8 (the newest release, from Aug 2022) has a
+  broken `mjpeg` encoder and **ignores `--scale-factor`**, so ffmpeg must decode
+  full-resolution H.264 at ~0.6× realtime and falls progressively behind. The
+  view therefore trails reality and can appear to stick on a frame. Lowering
+  `STREAM_FPS` slows the drift but can't fix it. Clicks are also slow (~0.5s):
+  each tap spawns a fresh `idb ui tap` process. `STREAMING.md` lists the three
+  concrete paths to a good stream (build idb from source / screenshot polling /
+  persistent idb session) — none were attempted, as this is out of PoC scope.
+- **What streaming DOES prove:** the frames travel simulator → runner → Lastest's
+  authenticated host proxy → Lastest's real viewer component, and taps travel
+  back. The architecture is right; the frame source needs work.

@@ -150,27 +150,35 @@ layers **capability-gated** (a Maestro run reports only the layers it can
 produce), which the check-modes system (`enforce/log/disable` per layer) is
 already structured to support.
 
-## 6. Streaming + manual editing ⚠️ (assessed — feasible, phase 2)
+## 6. Streaming + manual editing ⚠️ (built; architecture right, quality poor)
 
-Full assessment in **[STREAMING.md](./STREAMING.md)**. Headline: the fit is
-better than expected. `ios-bridge` (the ticket's link) is **simulator-focused**
-(not real-device as I first assumed) and its frame format is the **same shape**
-as Lastest's `stream:frame` — base64 JPEG in a JSON envelope — while its control
-channel (`{t:"tap"/"swipe"/"text"}` via `idb ui …`) maps 1:1 onto Lastest's
-`stream:input`. So streaming needs an **adapter + a mobile input path**, not a
-new viewer or protocol.
+Full detail in **[STREAMING.md](./STREAMING.md)**.
 
-- Local checks: `simctl io recordVideo` is post-hoc (not live); `simctl io
-  screenshot` ≈ 3 FPS (fine for "watch progress", too slow for interaction).
-  The 30–60 FPS path is `idb video-stream`, which is what ios-bridge uses.
-- **Recommended shape:** run `idb video-stream` + `idb ui tap/…` directly inside
-  the TS runner (mirrors how the browser EB self-hosts its `StreamServer`), with
-  ios-bridge as the reference implementation — avoids adding a Python service.
-- **Manual editing / recording:** layers on the same input path, or use
-  `maestro studio` (Maestro's local inspector/recorder) in the interim.
+**Architecturally it fits, and it's built.** `ios-bridge` (the ticket's link) is
+**simulator-focused** (not real-device as I first assumed) and is essentially a
+wrapper around **idb** — whose frame format is the same shape as Lastest's
+`stream:frame` (base64 JPEG in JSON) and whose `idb ui tap` maps onto
+`stream:input`. So we used idb directly and needed **no new viewer or protocol**:
 
-Still a distinct, larger workstream than run-only, so **phase 2** after the run
-pipeline (already proven) lands.
+- The runner streams via `idb video-stream` → ffmpeg → `stream:frame`.
+- Frames traverse Lastest's authenticated `/api/embedded/stream` proxy.
+- `/mobile` renders them in the **real `BrowserViewer` component**, interactive.
+
+**But the stream is not production-usable**, due to an external constraint:
+`idb-companion` **1.1.8 is the newest release (Aug 2022)** and (a) its `mjpeg`
+encoder returns 0 bytes and (b) it **ignores `--scale-factor`**. So ffmpeg must
+decode full-res H.264 at ~0.6× realtime, falls behind, and the view lags. Input
+is also slow because each tap spawns a fresh `idb ui tap` process.
+
+Concrete paths to fix (none attempted — out of PoC scope): build idb-companion
+from source (~4 years of unreleased fixes), switch to screenshot polling (~7 fps
+but immune to lag/tearing), and hold a persistent idb session for input.
+
+**Manual editing / recording** layers on the same input path, or use
+`maestro studio` in the interim.
+
+Net: **streaming is feasible and wired end-to-end, but making it feel good is
+real work** — a distinct phase-2 workstream after the run pipeline.
 
 ---
 

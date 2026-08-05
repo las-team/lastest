@@ -3,39 +3,64 @@
 **Question:** is live streaming + interaction of the iOS simulator possible
 outside Lastest, and how well would it plug into Lastest's existing viewer?
 
-**Short answer:** Yes — and it's now **built and proven working**, not just
-assessed. A live iOS-simulator stream renders inside the real Lastest viewer,
-and tap input round-trips back to the sim. The fit is as good as predicted:
-`ios-bridge`'s frame format is the **same shape** as Lastest's `stream:frame`
-(base64 JPEG in a JSON envelope), so no new viewer or protocol was needed — just
-an idb-based frame source + a mobile input mapping.
+**Short answer:** Yes, it is possible and it is **built** — a live iOS-simulator
+stream renders inside the real Lastest viewer (`/mobile`) and taps round-trip
+back to the sim. The architectural fit is as good as predicted: `ios-bridge`'s
+frame format is the **same shape** as Lastest's `stream:frame` (base64 JPEG in a
+JSON envelope), so no new viewer or protocol was needed — just an idb-based frame
+source + a mobile input mapping.
 
-## PROVEN — working local implementation (`src/stream.ts`)
+**But the stream quality is NOT production-usable**, and the reason is a hard
+external constraint, not the design. See "Known limitations" below.
 
-Rather than adopt ios-bridge wholesale, the runner uses **idb directly** (shape
-"B" below). End-to-end result, verified in the logged-in Lastest UI:
+## Built — working local implementation
 
-- Pipeline: `iOS sim → idb video-stream --format h264 → ffmpeg (h264→mjpeg) →
-JPEG frame splitter → WS stream:frame → host /api/embedded/stream proxy →
-Lastest browser <canvas>`.
-- **~14–15 fps at 1178×2556**; the host's own auth'd proxy handed back the
-  runner's streamUrl (after its liveness probe) and 69 frames arrived in the
-  browser over 5s. The iPhone home screen renders live in the app.
-- **Input:** a `stream:input` mouse event (device px) → runner scales to logical
-  points → `idb ui tap` on the sim. Confirmed: `tap → 337,230 (points)`.
+- Runner side: `src/stream.ts` — `iOS sim → idb video-stream --format h264 →
+  ffmpeg (h264→mjpeg) → JPEG frame splitter → WS stream:frame`.
+- Host side: the frames flow through Lastest's own authenticated
+  `/api/embedded/stream` proxy.
+- UI side: `src/app/(app)/mobile/` renders them in the **real `BrowserViewer`
+  component** — the same one the browser EB uses — with `interactive` enabled, so
+  clicking the canvas sends `stream:input` → `idb ui tap` on the simulator.
 
-Practical notes discovered while building it:
+No mobile-specific viewer or protocol exists; the mobile runner registers as an
+ordinary EB session and the existing pipeline carries it.
 
-- idb's `mjpeg`/`minicap` formats emit 0 bytes on this companion build; `h264`
-  (+ ffmpeg) is the working path — exactly ios-bridge's primary recipe.
-- ffmpeg needs `-f h264` (raw elementary stream from a pipe isn't auto-probed)
-  and must NOT be given a `data` listener on idb's stdout before `.pipe()` (it
-  steals bytes → 0 frames). Startup waits a few seconds for the first keyframe.
-- idb-companion's Homebrew formula hit the same Xcode-version gate as Maestro;
-  extracting the cached bottle by hand worked.
-- The host's `/api/embedded/stream/ws` proxy forwarded frames fine but did **not**
-  forward client→runner input in this path (input verified direct-to-runner);
-  wiring viewer input through for mobile is a small host-side follow-up.
+## Known limitations (measured, not guessed)
+
+The blocker is **idb-companion 1.1.8** — which is the *newest release* (Aug 2022;
+facebook/idb is actively developed but has not cut a release in ~4 years):
+
+- **`--format mjpeg` produces 0 bytes.** The companion logs
+  `createStreamWithConfiguration: succeeded` and mounts the framebuffer, so it
+  accepts the config — the frames simply never reach the client. This looks like
+  a client/companion bug, not a missing capability. mjpeg would have been ideal
+  (every frame self-contained, no ffmpeg, no decode).
+- **`--scale-factor` is ignored.** The h264 bitrate is unchanged whatever value
+  is passed (~8.8 Mbit/s regardless), so ffmpeg always decodes full-resolution.
+- **Consequence:** ffmpeg decodes at ~0.6× realtime and therefore falls
+  progressively behind. What the viewer shows lags reality and appears to "stick"
+  on stale frames. Lowering `STREAM_FPS` slows the drift but cannot fix it,
+  because the knob that would (scale) is a no-op.
+- **Input latency:** every tap spawns a fresh `idb ui tap` process (Python CLI
+  startup + gRPC connect, several hundred ms). A persistent idb session would
+  remove most of this.
+
+### One real bug of ours, now fixed
+
+The visible "tearing" was substantially **our own frame splitter**: it cut frames
+at the first `0xFFD9` byte pair, but that sequence occurs naturally inside JPEG
+entropy-coded data, so half-images were being sent. It now splits on `SOI`
+(`FFD8FF`) boundaries and only emits complete frames. (An earlier note in this
+file blamed H.264 keyframes — that was wrong.)
+
+### Paths to a good stream (not attempted)
+
+1. **Build idb-companion from source** — ~4 years of unreleased fixes; would
+   likely restore mjpeg and/or scaling. Best outcome, uncertain effort.
+2. **Screenshot polling** — `idb screenshot` measured ~7 fps; every frame whole
+   and current, no ffmpeg. Lower framerate but immune to lag and tearing.
+3. **Persistent idb connection** for input, to remove per-tap process startup.
 
 ---
 
