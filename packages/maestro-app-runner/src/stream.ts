@@ -21,6 +21,9 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { WebSocketServer, type WebSocket } from "ws";
 import { randomUUID } from "node:crypto";
 
+/** Skip sending a frame while a client's socket still has this much queued. */
+const MAX_SOCKET_BACKLOG_BYTES = 256 * 1024;
+
 export interface StreamOptions {
   udid: string;
   port: number;
@@ -33,6 +36,8 @@ export interface StreamOptions {
   fps: number;
   idbBin: string;
   ffmpegBin: string;
+  /** Capture scale (1 = native). <1 keeps ffmpeg ahead of realtime. */
+  scaleFactor: number;
 }
 
 export class SimStreamServer {
@@ -46,6 +51,7 @@ export class SimStreamServer {
   private frameH = 0;
   private h264Bytes = 0;
   private frameCount = 0;
+  private droppedFrames = 0;
   private opts: StreamOptions;
 
   constructor(opts: StreamOptions) {
@@ -80,6 +86,12 @@ export class SimStreamServer {
         "h264",
         "--fps",
         String(this.opts.fps),
+        // NOTE: idb-companion 1.1.8 (the newest release, Aug 2022) IGNORES this
+        // flag — the h264 bitrate is unchanged whatever you pass, so ffmpeg
+        // still decodes at full resolution (~0.6x realtime) and falls behind.
+        // Kept because it is correct for any companion that honours it.
+        "--scale-factor",
+        String(this.opts.scaleFactor),
         "--udid",
         this.opts.udid,
       ],
@@ -139,7 +151,7 @@ export class SimStreamServer {
     // Heartbeat: report throughput so a silent stall is visible.
     setInterval(() => {
       console.log(
-        `[stream] mjpeg=${this.h264Bytes}B  frames=${this.frameCount}  clients=${this.clients.size}`,
+        `[stream] mjpeg=${this.h264Bytes}B  frames=${this.frameCount}  dropped=${this.droppedFrames}  clients=${this.clients.size}`,
       );
     }, 3000).unref?.();
   }
@@ -148,30 +160,50 @@ export class SimStreamServer {
   private onMjpeg(chunk: Buffer): void {
     this.h264Bytes += chunk.length;
     this.jpegBuf = Buffer.concat([this.jpegBuf, chunk]);
-    // A robust-enough splitter for the PoC: find EOI markers and cut there.
-    let eoi: number;
-    while ((eoi = this.jpegBuf.indexOf(Buffer.from([0xff, 0xd9]))) !== -1) {
-      const frame = this.jpegBuf.subarray(0, eoi + 2);
-      this.jpegBuf = this.jpegBuf.subarray(eoi + 2);
-      // Only forward buffers that actually start with a JPEG SOI marker.
-      if (frame.length > 4 && frame[0] === 0xff && frame[1] === 0xd8) {
-        this.broadcast(frame.toString("base64"));
-      }
+
+    // Split on START-of-image markers, not end-of-image: the byte pair 0xFFD9
+    // occurs naturally inside JPEG entropy-coded data, so cutting at the first
+    // one truncates the image mid-frame — the browser then renders a partially
+    // decoded picture, which is exactly the "screen tearing" artifact. ffmpeg's
+    // image2pipe writes complete JPEGs back-to-back, so everything between one
+    // SOI (FFD8FF) and the next is one whole frame.
+    const SOI = Buffer.from([0xff, 0xd8, 0xff]);
+    let start = this.jpegBuf.indexOf(SOI);
+    if (start === -1) return;
+
+    while (true) {
+      const next = this.jpegBuf.indexOf(SOI, start + 3);
+      if (next === -1) break; // frame still incomplete — wait for more bytes
+      const frame = this.jpegBuf.subarray(start, next);
+      if (frame.length > 4) this.broadcast(frame.toString("base64"));
+      start = next;
     }
+    // Retain the trailing (incomplete) frame for the next chunk.
+    this.jpegBuf = this.jpegBuf.subarray(start);
   }
 
   private broadcast(base64: string): void {
     this.lastFrame = base64;
     this.frameCount++;
-    // Frame dimensions are the device pixel size (idb captures at native res).
-    this.frameW = this.opts.deviceWidth;
-    this.frameH = this.opts.deviceHeight;
+    // Frames are captured at scaleFactor, so report the scaled size — the
+    // viewer measures input coordinates against these dimensions.
+    this.frameW = Math.round(this.opts.deviceWidth * this.opts.scaleFactor);
+    this.frameH = Math.round(this.opts.deviceHeight * this.opts.scaleFactor);
     for (const ws of this.clients) {
       if (ws.readyState === 1) this.sendFrame(ws, base64);
     }
   }
 
   private sendFrame(ws: WebSocket, base64: string): void {
+    // Backpressure: a live view only cares about the LATEST frame. Each frame is
+    // ~50-60KB of base64, so if the socket drains slower than capture the queue
+    // grows without bound and the viewer falls further and further behind —
+    // which looked like "stuck on intermediate frames". Skip this frame while
+    // the socket still has a backlog rather than queueing on top of it.
+    if (ws.bufferedAmount > MAX_SOCKET_BACKLOG_BYTES) {
+      this.droppedFrames++;
+      return;
+    }
     ws.send(
       JSON.stringify({
         type: "stream:frame",
@@ -198,10 +230,12 @@ export class SimStreamServer {
     if (msg.type !== "stream:input" || !msg.payload) return;
     const p = msg.payload;
 
-    // Scale device px (frame space the viewer measured against) → logical
-    // points that `idb ui` expects.
-    const sx = this.opts.pointWidth / this.opts.deviceWidth;
-    const sy = this.opts.pointHeight / this.opts.deviceHeight;
+    // Viewer coords are in SCALED frame space (see broadcast()); convert to the
+    // logical points `idb ui` expects.
+    const sx =
+      this.opts.pointWidth / (this.opts.deviceWidth * this.opts.scaleFactor);
+    const sy =
+      this.opts.pointHeight / (this.opts.deviceHeight * this.opts.scaleFactor);
 
     if (p.type === "mouse" && p.action === "down") {
       const x = Math.round(Number(p.x) * sx);

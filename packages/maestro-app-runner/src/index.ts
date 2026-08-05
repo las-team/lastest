@@ -55,7 +55,11 @@ const config = {
   udid: process.env.MAESTRO_UDID ?? "",
   idbBin: process.env.IDB_BIN ?? "idb",
   ffmpegBin: process.env.FFMPEG_BIN ?? "ffmpeg",
-  streamFps: parseInt(process.env.STREAM_FPS ?? "15", 10),
+  // Lower fps reduces how fast ffmpeg falls behind (it decodes full-res h264 at
+  // ~0.6x realtime because idb-companion 1.1.8 ignores --scale-factor — see
+  // stream.ts). STREAM_SCALE is passed through but is a no-op on that build.
+  streamFps: parseInt(process.env.STREAM_FPS ?? "10", 10),
+  streamScale: parseFloat(process.env.STREAM_SCALE ?? "0.5"),
   // iPhone 16: 1178×2556 device px, 393×852 logical points.
   deviceWidth: parseInt(process.env.DEVICE_WIDTH ?? "1178", 10),
   deviceHeight: parseInt(process.env.DEVICE_HEIGHT ?? "2556", 10),
@@ -623,6 +627,7 @@ async function main(): Promise<void> {
       fps: config.streamFps,
       idbBin: config.idbBin,
       ffmpegBin: config.ffmpegBin,
+      scaleFactor: config.streamScale,
     });
     streamServer.start();
   }
