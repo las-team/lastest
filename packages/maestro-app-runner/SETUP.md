@@ -22,38 +22,60 @@ and see the sim stream live in the Lastest UI. Throwaway spike, macOS only.
 > extract its prebuilt bottle into `~/.idb-companion/` and add it to `PATH` —
 > the binary runs fine on Xcode 16.
 
-## Run (each block in its own terminal, from repo root)
+## Run
+
+Only **two** terminals stay occupied (the host and the runner); everything else
+returns immediately. All commands run from the repo root.
+
+### Terminal 1 — setup (all of these return / run in the background)
 
 ```bash
-# 1. Boot a simulator, capture its UDID
+# Boot a simulator and grab its UDID (the companion needs it explicitly).
 xcrun simctl boot "iPhone 16"
-UDID=$(xcrun simctl list devices booted -j | \
-  node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);for(const r in j.devices)for(const d of j.devices[r])if(d.state==="Booted"){console.log(d.udid);break}})')
+UDID=$(xcrun simctl list devices booted | grep -oE '[0-9A-F-]{36}' | head -1)
 
-# 2. Start the idb companion for that sim (required for streaming + input;
-#    idb's auto-spawn is unreliable, so start it explicitly).
+# The idb companion powers streaming + input. Start it explicitly —
+# idb's auto-spawn is unreliable.
 idb_companion --udid "$UDID" --grpc-port 10882 &
 idb connect localhost 10882
 
-# 3. DB + host (EB_PROVISIONER=none: the runner isn't a k8s pod)
+# Database.
 docker compose up -d
-EB_PROVISIONER=none EB_DEV_PORT_FORWARD=0 pnpm dev        # wait for :3000
+```
 
-# 4. Runner (real mode + streaming). Auto-detects the booted sim.
-#    Prints `[register] ok runner=<id>` — copy the id.
+### Terminal 2 — the Lastest host (stays running)
+
+`EB_PROVISIONER=none` because this runner is a local process, not a k8s pod —
+otherwise `auto-register` tries to `kubectl` a pod that doesn't exist and 500s.
+
+```bash
+EB_PROVISIONER=none EB_DEV_PORT_FORWARD=0 pnpm dev        # wait for :3000
+```
+
+### Terminal 3 — the runner (stays running)
+
+Auto-detects the booted simulator, so no UDID needed here. Prints
+`[register] ok runner=<id>` — copy that id for the next step.
+
+```bash
 env SYSTEM_EB_TOKEN="$(grep SYSTEM_EB_TOKEN .env | cut -d= -f2)" \
     LASTEST_URL=http://localhost:3000 RUNNER_MODE=real MAESTRO_STREAM=1 \
     MAESTRO_APP_ID=com.apple.Preferences \
     node --experimental-strip-types packages/maestro-app-runner/src/index.ts
+```
 
-# 5. Dispatch a test (Maestro YAML as the run_test `code` payload)
+### Back in terminal 1 — dispatch a test
+
+The `code` payload is **Maestro YAML**, not Playwright JS — that's the point.
+
+```bash
 DATABASE_URL="$(grep DATABASE_URL .env | cut -d= -f2-)" \
     node packages/maestro-app-runner/scripts/dispatch-run-test.mjs \
     <runner-id> packages/maestro-app-runner/flows/ios-settings.yaml
 ```
 
-The runner runs `maestro test` on the sim and reports `status=passed` + step
-screenshots back to the host.
+The runner runs `maestro test` on the sim (a short navigation of the iOS Settings
+app) and reports `status=passed` + step screenshots back to the host.
 
 ### See the live stream — in the Lastest UI
 
@@ -62,8 +84,8 @@ Lastest's own `BrowserViewer` component (the same one the browser EB uses),
 fed through the host's authenticated `/api/embedded/stream` proxy. Clicking the
 canvas taps the simulator.
 
-Run the test from step 5 while that page is open to watch the flow drive the
-device live.
+Open this page *before* dispatching the test, then run the dispatch command to
+watch the flow drive the device live.
 
 > **Expect lag.** The stream is functional but not smooth — see "Scope & known
 > limitations". A standalone `viewer.html` also ships in this package if you want
