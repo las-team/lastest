@@ -38,6 +38,16 @@ spec:
         lastest.dev/eb-instance: INSTANCE_ID
     spec:
       restartPolicy: Never
+      # Mirror the image's non-root pwuser (uid 1001) at the orchestrator layer.
+      # The EB image's Dockerfile sets USER pwuser; this locks it down so a
+      # misconfigured image rebuild can't silently run untrusted web content
+      # + user test code as root with Chromium un-sandboxed.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
       volumes:
         - name: dshm
           emptyDir:
@@ -47,6 +57,17 @@ spec:
         - name: embedded-browser
           image: lastest-embedded-browser:latest
           imagePullPolicy: IfNotPresent
+          # Forbid privilege escalation and drop all capabilities. pwuser
+          # already can't gain root; making it explicit keeps the EB locked
+          # down even if the namespace SA is over-permissioned.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           env:
             - name: LASTEST_URL
               value: "http://host.k3d.internal:3000"

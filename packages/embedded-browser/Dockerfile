@@ -7,12 +7,22 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
   && rm -rf /var/lib/apt/lists/*
 
-# Copy pre-built dist (built locally via pnpm build) and production package.json
-COPY packages/embedded-browser/dist/ ./dist/
-COPY packages/embedded-browser/package.json ./
+# Copy pre-built dist (built locally via pnpm build) and production package.json.
+# Owned by pwuser so the non-root runtime can read its own app tree.
+COPY --chown=pwuser:pwuser packages/embedded-browser/dist/ ./dist/
+COPY --chown=pwuser:pwuser packages/embedded-browser/package.json ./
 
-# Install only production dependencies (skip workspace deps — they're bundled by tsup)
-RUN sed -i '/"@lastest\/[a-z-]*": "workspace:\*"/d' package.json && npm install --omit=dev
+# Install only production dependencies (skip workspace deps — they're bundled by tsup).
+# npm writes node_modules as root, so fix ownership afterwards so pwuser can
+# read/execute the install tree without ever running as root.
+RUN sed -i '/"@lastest\/[a-z-]*": "workspace:\*"/d' package.json \
+  && npm install --omit=dev \
+  && chown -R pwuser:pwuser /app
+
+# Run as the non-root image user (pwuser, uid 1001) shipped by the Playwright
+# base image. Running as root forced Chromium into --no-sandbox mode, leaving
+# both untrusted user code and untrusted web content un-sandboxed as root.
+USER pwuser
 
 # Expose CDP port, streaming port, and health check port
 EXPOSE 9222 9223 9224
