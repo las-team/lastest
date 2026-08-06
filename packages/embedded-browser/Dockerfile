@@ -77,7 +77,17 @@ COPY --from=builder --chown=pwuser:pwuser \
      /build/packages/embedded-browser/dist ./dist
 
 # Run as the non-root image user (pwuser, uid 1001) shipped by the Playwright
+# base image. Running as root forced Chromium into --no-sandbox mode, leaving
+# both untrusted user code and untrusted web content un-sandboxed as root.
 USER pwuser
+
+# Executed test code writes artifacts to RELATIVE paths — the executor passes
+# `screenshotPath` as a bare "screenshot.png" and the download helper returns
+# bare filenames — so they land in the process CWD. The app tree above is
+# root-owned on purpose (pwuser can read/execute it but must not be able to
+# rewrite its own code), which makes it unusable as the CWD: writing there
+# fails with EACCES mid-test. Give the runtime a scratch dir it owns instead.
+WORKDIR /home/pwuser/work
 
 # The image's own default ports, all derived from STREAM_PORT (9223) in
 # src/index.ts:
@@ -90,4 +100,5 @@ EXPOSE 9223 9224 9235
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
   CMD wget -q --spider http://localhost:9224/health || exit 1
 
-CMD ["node", "dist/index.js"]
+# Absolute — the CWD is the scratch dir, not the app tree.
+CMD ["node", "/app/packages/embedded-browser/dist/index.js"]
