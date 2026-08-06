@@ -7,6 +7,14 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+# Builds ONLY the images referenced by the Kubernetes deployment (see k8s/):
+#   lastest-app             -> Dockerfile.app                        (app.yaml)
+#   lastest-migrate         -> Dockerfile.migrate                    (migrate-job.yaml)
+#   lastest-pool-service    -> packages/pool-service/Dockerfile      (pool-service.yaml)
+#   lastest-embedded-browser-> packages/embedded-browser/Dockerfile  (embedded-browser-job.yaml)
+#   lastest-ocr-service     -> packages/ocr-service/Dockerfile       (ocr-service.yaml)
+# The standalone single-container root ./Dockerfile (Zima/self-host) is
+# intentionally NOT built here.
 jobs:
   app:
     name: Build app image
@@ -19,6 +27,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
+        if: ${{ !env.ACT }}
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -26,19 +35,118 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          images: ${{ env.REGISTRY }}/${{ github.repository }}-app
           tags: |
             type=raw,value=latest
             type=sha,format=long
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile
-          push: true
+          file: ./Dockerfile.app
+          push: ${{ !env.ACT }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=app
-          cache-to: type=gha,mode=max,scope=app
+          cache-from: ${{ !env.ACT && 'type=gha,scope=app' || '' }}
+          cache-to: ${{ !env.ACT && 'type=gha,mode=max,scope=app' || '' }}
+
+  migrate:
+    name: Build migrate image
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: ${{ !env.ACT }}
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}-migrate
+          tags: |
+            type=raw,value=latest
+            type=sha,format=long
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.migrate
+          push: ${{ !env.ACT }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: ${{ !env.ACT && 'type=gha,scope=migrate' || '' }}
+          cache-to: ${{ !env.ACT && 'type=gha,mode=max,scope=migrate' || '' }}
+
+  pool-service:
+    name: Build pool-service image
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: ${{ !env.ACT }}
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}-pool-service
+          tags: |
+            type=raw,value=latest
+            type=sha,format=long
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./packages/pool-service/Dockerfile
+          push: ${{ !env.ACT }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: ${{ !env.ACT && 'type=gha,scope=pool-service' || '' }}
+          cache-to: ${{ !env.ACT && 'type=gha,mode=max,scope=pool-service' || '' }}
+
+  ocr-service:
+    name: Build ocr-service image
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: ${{ !env.ACT }}
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}-ocr-service
+          tags: |
+            type=raw,value=latest
+            type=sha,format=long
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./packages/ocr-service/Dockerfile
+          push: ${{ !env.ACT }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: ${{ !env.ACT && 'type=gha,scope=ocr-service' || '' }}
+          cache-to: ${{ !env.ACT && 'type=gha,mode=max,scope=ocr-service' || '' }}
 
   embedded-browser:
     name: Build embedded-browser image
@@ -59,6 +167,7 @@ jobs:
       - run: pnpm --filter @lastest/embedded-browser build
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
+        if: ${{ !env.ACT }}
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -74,8 +183,8 @@ jobs:
         with:
           context: .
           file: ./packages/embedded-browser/Dockerfile
-          push: true
+          push: ${{ !env.ACT }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=eb
-          cache-to: type=gha,mode=max,scope=eb
+          cache-from: ${{ !env.ACT && 'type=gha,scope=eb' || '' }}
+          cache-to: ${{ !env.ACT && 'type=gha,mode=max,scope=eb' || '' }}

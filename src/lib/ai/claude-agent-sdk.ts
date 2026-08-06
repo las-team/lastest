@@ -1,9 +1,32 @@
-import {
-  query,
-  type PermissionMode,
-  type McpStdioServerConfig,
+import type {
+  query as sdkQuery,
+  PermissionMode,
+  McpStdioServerConfig,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { AIProvider, GenerateOptions, StreamCallbacks } from "./types";
+
+/**
+ * The SDK is loaded lazily so importing this module never requires the package
+ * to be installed — a top-level import would crash every consumer of @/lib/ai
+ * at load time, even when a different provider is selected.
+ *
+ * Every shipped image does include it (both the JS and its platform-native CLI
+ * binary — see Dockerfile / Dockerfile.app, which verify this at build time),
+ * so reaching the catch below means a genuinely broken install, not a
+ * deployment that opted out. Whether the SDK can *authenticate* is a separate
+ * question, gated earlier by agentSdkReadiness() in ./availability.
+ */
+async function loadQuery(): Promise<typeof sdkQuery> {
+  try {
+    const mod = await import("@anthropic-ai/claude-agent-sdk");
+    return mod.query;
+  } catch (err) {
+    throw new Error(
+      "Claude Agent SDK failed to load — the @anthropic-ai/claude-agent-sdk package is missing or broken in this image. " +
+        `Configure an API-key provider (Anthropic, OpenAI, OpenRouter) instead. (${err instanceof Error ? err.message : String(err)})`,
+    );
+  }
+}
 
 export interface ClaudeAgentSDKOptions {
   permissionMode?: PermissionMode;
@@ -80,6 +103,8 @@ export class ClaudeAgentSDKProvider implements AIProvider {
     const assistantChunks: string[] = [];
     let resultText: string | null = null;
     const stderrChunks: string[] = [];
+
+    const query = await loadQuery();
 
     try {
       for await (const message of query({
@@ -172,6 +197,9 @@ export class ClaudeAgentSDKProvider implements AIProvider {
     const stderrChunks: string[] = [];
 
     try {
+      // Inside the try so a missing SDK reaches callbacks.onError like any
+      // other provider failure.
+      const query = await loadQuery();
       for await (const message of query({
         prompt: fullPrompt,
         options: {

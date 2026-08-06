@@ -412,3 +412,46 @@ await page.click('#b');
     expect(spliceRecordedSteps("", 0, ["x();"], "replace")).toBeNull();
   });
 });
+
+describe("parseSteps — regex literals", () => {
+  it("does not treat // inside a regex literal as a line comment", () => {
+    // The generated buildUrl helper contains /^https?:\/\//i — without regex
+    // awareness the trailing // reads as a comment, swallows the closing
+    // parens, and every later statement collapses into one giant step.
+    const body = [
+      "  function buildUrl(base, path) {",
+      "    if (/^https?:\\/\\//i.test(path)) return path;",
+      "    return base + path;",
+      "  }",
+      "",
+      "  await page.goto(buildUrl(baseUrl, '/'));",
+      "  await page.mouse.click(81, 278);",
+      "  await expect(page).toHaveURL(/x/);",
+    ].join("\n");
+    const steps = parseSteps(body);
+    const codes = steps.map((s) => s.code);
+    expect(codes).toContain("await page.goto(buildUrl(baseUrl, '/'));");
+    expect(codes).toContain("await page.mouse.click(81, 278);");
+    expect(codes).toContain("await expect(page).toHaveURL(/x/);");
+  });
+
+  it("handles quotes and unbalanced brackets inside regex literals", () => {
+    const body = [
+      "  const text = sel.value.replace(/^ocr-text=\"/, '').replace(/\"$/, '');",
+      "  const clean = p.replace(/[.*+?()|[{}^\\]\\\\$]/g, '\\\\$&');",
+      "  await page.mouse.click(1, 2);",
+    ].join("\n");
+    const steps = parseSteps(body);
+    expect(steps.map((s) => s.code)).toContain("await page.mouse.click(1, 2);");
+    expect(steps).toHaveLength(3);
+  });
+
+  it("still treats slash after an identifier as division", () => {
+    const body = [
+      "  const half = total / 2;",
+      "  await page.mouse.click(half, 10);",
+    ].join("\n");
+    const steps = parseSteps(body);
+    expect(steps).toHaveLength(2);
+  });
+});

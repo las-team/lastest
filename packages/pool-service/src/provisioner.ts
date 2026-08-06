@@ -11,11 +11,19 @@
  *     reapers and per-session bootstrap tokens; "Job" in the exported API
  *     names just means "one provisioned EB" there.
  *
- * The in-memory state here (in-flight provision counter, launch throttle
- * chain, build-dispatch flag) is correct because the pool service is a
- * singleton by design — do NOT import this from app code, where multiple
- * replicas would each get their own copies (the bug that motivated the
- * extraction).
+ * Capacity accounting has no in-memory counter: the ledger is the backend
+ * itself. A k8s Job exists in the API the instant creation returns (no
+ * create→register gap to bridge), and a process-mode child is in the process
+ * map synchronously at spawn — so `livePoolCount()` is authoritative in both
+ * modes, survives pool-service restarts, and counts crashed-but-unreaped
+ * units for exactly as long as they hold real resources. Provision decisions
+ * are serialized through `withProvisionLock` so a fresh ledger read + create
+ * is atomic.
+ *
+ * The remaining in-memory state (provision lock, launch throttle chain,
+ * build-dispatch flag) is correct because the pool service is a singleton by
+ * design — do NOT import this from app code, where multiple replicas would
+ * each get their own copies (the bug that motivated the extraction).
  *
  * Model:
  *   - One Job = one browser = one test (1 test per EB).
@@ -54,9 +62,6 @@
 import { execFileSync } from "child_process";
 import { readFileSync } from "fs";
 import https from "https";
-import { db } from "@lastest/db";
-import { runners } from "@lastest/db/schema";
-import { and, eq, ne } from "drizzle-orm";
 import {
   isDynamicPoolMode,
   isKubernetesMode,
@@ -124,7 +129,7 @@ export function warmPoolMin(): number {
 // Pool slots held back from build dispatch so interactive callers
 // (recording, debug, AI) can always provision a fresh EB even when builds
 // have saturated the cluster. Recurring "Live-stream canvas never mounted"
-// failures traced to bursty cron-build overlap pushing currentPoolSize() to
+// failures traced to bursty cron-build overlap pushing the pool size to
 // ebPoolMax before a recording test could provision its target EB.
 export function interactiveReservedSlots(): number {
   const n = parseInt(process.env.EB_RESERVED_INTERACTIVE_SLOTS || "2", 10);
@@ -298,45 +303,85 @@ async function k8sRequest(
   });
 }
 
-// In-flight provision counter: the window between `launchEBJob()` creating a
-// k8s Job and the pod's `registerAsSystem` callback inserting a runner row is
-// 5–30s (image pull, Chromium startup, first heartbeat). During that window
-// `currentPoolSize()` used to return a low count because it only sees
-// registered runners — so concurrent callers could each think "pool is small,
-// safe to provision" and collectively blow past the cap. Observed in prod as
-// 29 EB pods created while app was restarting (pool size log stayed at 3/30).
-let _inFlightProvisions = 0;
-export function incInFlightProvisions(): void {
-  _inFlightProvisions++;
-}
-export function decInFlightProvisions(): void {
-  _inFlightProvisions = Math.max(0, _inFlightProvisions - 1);
-}
-export function inFlightProvisions(): number {
-  return _inFlightProvisions;
+/** Minimal slice of a k8s Job object needed to decide liveness. */
+export interface K8sJobLike {
+  metadata?: { name?: string; deletionTimestamp?: string };
+  status?: { succeeded?: number; failed?: number; completionTime?: string };
 }
 
 /**
- * Count currently-known system EB runners (online + busy) — proxy for pool size.
- * Offline rows are excluded: they represent dying/dead Jobs awaiting GC and shouldn't
- * block new provisioning. Also includes `_inFlightProvisions` — Jobs that were
- * created but haven't registered yet. Without that, app restarts + burst
- * claims cause runaway provisioning. Used to enforce the global ebPoolMax
- * before provisioning and to decide whether `maybeTerminateReleasedEB` can
- * tear down past warmPoolMin.
+ * A Job counts against pool capacity iff it is not terminal and not being
+ * deleted. A just-created Job has an empty status — that counts as live
+ * (which is exactly why the k8s API works as the capacity ledger: the Job is
+ * visible before its pod registers, so there is no accounting gap and no
+ * need for an in-flight counter). Completed/Failed Jobs linger up to
+ * `ttlSecondsAfterFinished` (600s, kept long for forensics) and must NOT
+ * count — their pod has exited, they hold no resources.
  */
-export async function currentPoolSize(): Promise<number> {
-  const rows = await db
-    .select({ id: runners.id })
-    .from(runners)
-    .where(
-      and(
-        eq(runners.isSystem, true),
-        eq(runners.type, "embedded"),
-        ne(runners.status, "offline"),
-      ),
-    );
-  return rows.length + _inFlightProvisions;
+export function isLiveEBJob(job: K8sJobLike): boolean {
+  if (job.metadata?.deletionTimestamp) return false;
+  const s = job.status;
+  if (!s) return true;
+  if ((s.succeeded ?? 0) > 0 || (s.failed ?? 0) > 0 || s.completionTime) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Authoritative pool occupancy — the backend IS the ledger:
+ *   kubernetes: count of live EB Jobs in the API (visible at creation time)
+ *   process:    live children in the provisioner's process map
+ * Throws when the k8s list fails: capacity decisions must fail closed, never
+ * fall back to a DB count (registered runners lag Job creation by 5–30s —
+ * counting them let concurrent callers blow past the cap; observed in prod as
+ * 29 EB pods created while the app was restarting).
+ *
+ * Static-fleet EBs (SYSTEM_EB_TOKEN compose replicas) exist only in mode
+ * 'none' where provisioning is disabled, so counting provisioner-owned units
+ * only is correct.
+ */
+export async function livePoolCount(): Promise<number> {
+  return (await listEBJobNames()).size;
+}
+
+// Non-authoritative cache of livePoolCount for display reads (`GET /v1/pool`).
+// Provision decisions always read fresh inside the provision lock.
+let _liveCountCache: { value: number; expiresAt: number } | null = null;
+const LIVE_COUNT_CACHE_TTL_MS = 3000;
+
+/**
+ * Pool size for display. Serves stale-if-available when the ledger is
+ * unreachable, `null` when there's nothing cached either — the caller
+ * degrades gracefully. NEVER use for provision decisions.
+ */
+export async function cachedLivePoolCount(): Promise<number | null> {
+  if (_liveCountCache && Date.now() < _liveCountCache.expiresAt) {
+    return _liveCountCache.value;
+  }
+  try {
+    const value = await livePoolCount();
+    _liveCountCache = {
+      value,
+      expiresAt: Date.now() + LIVE_COUNT_CACHE_TTL_MS,
+    };
+    return value;
+  } catch {
+    return _liveCountCache?.value ?? null;
+  }
+}
+
+/** Keep the display cache responsive across provision/terminate without an
+ *  extra ledger round-trip. `value` when the caller knows the new size. */
+function refreshLiveCountCache(value?: number): void {
+  if (value === undefined) {
+    _liveCountCache = null;
+  } else {
+    _liveCountCache = {
+      value,
+      expiresAt: Date.now() + LIVE_COUNT_CACHE_TTL_MS,
+    };
+  }
 }
 
 function jobSpec(name: string, instanceId: string): Record<string, unknown> {
@@ -504,19 +549,13 @@ async function awaitLaunchSlot(): Promise<void> {
   }
 }
 
-export async function launchEBJob(): Promise<{
+async function launchEBJob(): Promise<{
   jobName: string;
   instanceId: string;
 }> {
   const mode = provisionerMode();
   if (mode === "none") {
     throw new Error("launchEBJob called but EB provisioning is disabled");
-  }
-
-  const poolSize = await currentPoolSize();
-  const cap = await poolMax();
-  if (poolSize >= cap) {
-    throw new Error(`EB pool at capacity (${poolSize}/${cap})`);
   }
 
   await awaitLaunchSlot();
@@ -526,9 +565,6 @@ export async function launchEBJob(): Promise<{
 
   if (mode === "process") {
     await launchEBProcess(instanceId);
-    console.log(
-      `[EB Provisioner] Spawned local EB ${jobName} (pool size ${poolSize + 1}/${cap})`,
-    );
     return { jobName, instanceId };
   }
 
@@ -546,10 +582,76 @@ export async function launchEBJob(): Promise<{
     );
   }
 
-  console.log(
-    `[EB Provisioner] Created Job ${jobName} (pool size ${poolSize + 1}/${cap})`,
-  );
   return { jobName, instanceId };
+}
+
+/** Thrown by `provisionOneEB` when the (purpose-effective) cap is reached.
+ *  Carries the numbers so the HTTP layer can render the 409 body. */
+export class AtCapacityError extends Error {
+  constructor(
+    public readonly size: number,
+    public readonly cap: number,
+  ) {
+    super(`EB pool at capacity (${size}/${cap})`);
+    this.name = "AtCapacityError";
+  }
+}
+
+// Serializes decide+create: the next capacity decision must not run until the
+// previous Job/child is visible in the ledger (k8s API / process map). This
+// is what makes the fresh `livePoolCount()` read race-free — two concurrent
+// provisions can't both observe the pre-create count.
+let _provisionChain: Promise<void> = Promise.resolve();
+async function withProvisionLock<T>(fn: () => Promise<T>): Promise<T> {
+  const prev = _provisionChain;
+  let release!: () => void;
+  _provisionChain = new Promise<void>((r) => {
+    release = r;
+  });
+  await prev;
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
+export type ProvisionPurpose = "build" | "interactive" | "warm";
+
+/**
+ * The single choke point for creating an EB: fresh ledger read → cap check →
+ * create, atomic under the provision lock.
+ *
+ * `purpose` picks the effective cap:
+ *   - 'build':  ebPoolMax − EB_RESERVED_INTERACTIVE_SLOTS, so recording/debug/
+ *               AI can always provision even when builds saturate the pool
+ *   - 'interactive' / 'warm': the full ebPoolMax
+ *
+ * Throws `AtCapacityError` at the cap; anything else (k8s list/create
+ * failure) propagates — capacity decisions fail closed. Note the ledger read
+ * excludes the caller's own not-yet-created unit, so the last pool slot is
+ * usable (the old counter double-counted the caller's reservation and
+ * self-blocked it).
+ */
+export async function provisionOneEB(
+  purpose: ProvisionPurpose,
+): Promise<{ jobName: string; instanceId: string }> {
+  return withProvisionLock(async () => {
+    const cap = await poolMax();
+    const reserved = purpose === "build" ? interactiveReservedSlots() : 0;
+    const effectiveCap = Math.max(0, cap - reserved);
+    const size = await livePoolCount();
+    if (size >= effectiveCap) {
+      throw new AtCapacityError(size, cap);
+    }
+
+    const jobInfo = await launchEBJob();
+    refreshLiveCountCache(size + 1);
+    console.log(
+      `[EB Provisioner] Provisioned ${jobInfo.jobName} (pool size ${size + 1}/${cap}, purpose=${purpose})`,
+    );
+    return jobInfo;
+  });
 }
 
 /**
@@ -557,6 +659,7 @@ export async function launchEBJob(): Promise<{
  * Background propagation so the call returns immediately; kubelet cleans up.
  */
 export async function terminateEBJob(jobName: string): Promise<void> {
+  refreshLiveCountCache(); // display cache only — next /v1/pool re-reads the ledger
   if (provisionerMode() === "process") {
     await terminateEBProcess(jobName);
     return;
@@ -683,10 +786,18 @@ export async function getEBPodInfo(
 }
 
 /**
- * List the names of currently-existing EB Jobs in the cluster.
- * Used by boot-time reconciliation to detect "phantom" runner rows whose
- * backing Job has been deleted (e.g. TTL expiry during an app restart when
- * no reaper was running) so we don't hand them out to claimers.
+ * List the names of currently-LIVE EB Jobs (terminal and deleting Jobs
+ * excluded — see `isLiveEBJob`; the process backend already only lists
+ * un-exited children). Doubles as the capacity ledger via `livePoolCount()`
+ * and feeds boot-time reconciliation of "phantom" runner rows whose backing
+ * Job is gone (e.g. TTL expiry during an app restart when no reaper was
+ * running) so we don't hand them out to claimers.
+ *
+ * THROWS on k8s API failure instead of returning an empty set: an empty set
+ * means "no jobs exist" and would make the app-side phantom pruner delete
+ * every live runner's rows, and would let capacity checks provision without
+ * bound. The HTTP layer turns the throw into a 500, which the app client
+ * maps to `null` = "unknown, skip pruning".
  */
 export async function listEBJobNames(): Promise<Set<string>> {
   if (provisionerMode() === "process") return listEBProcessNames();
@@ -697,14 +808,14 @@ export async function listEBJobNames(): Promise<Set<string>> {
     `/apis/batch/v1/namespaces/${encodeURIComponent(creds.namespace)}/jobs?labelSelector=${encodeURIComponent("app=lastest-eb")}`,
   );
   if (status < 200 || status >= 300) {
-    console.warn(`[EB Provisioner] listEBJobNames failed: ${status}`);
-    return new Set();
+    throw new Error(`k8s Job list failed: ${status}`);
   }
-  const items =
-    (data as { items?: Array<{ metadata?: { name?: string } }> } | null)
-      ?.items ?? [];
+  const items = (data as { items?: K8sJobLike[] } | null)?.items ?? [];
   return new Set(
-    items.map((j) => j.metadata?.name).filter((n): n is string => !!n),
+    items
+      .filter(isLiveEBJob)
+      .map((j) => j.metadata?.name)
+      .filter((n): n is string => !!n),
   );
 }
 
@@ -763,23 +874,17 @@ export async function ensureWarmPool(): Promise<number> {
   const deficit = want - idle.length;
   if (deficit <= 0) return 0;
 
-  const cap = await poolMax();
-  const size = await currentPoolSize();
-  const canLaunch = Math.min(deficit, Math.max(0, cap - size));
-  if (canLaunch <= 0) return 0;
-
+  // Per-call cap enforcement lives inside provisionOneEB (fresh ledger read
+  // under the provision lock) — no racy `cap - size` precompute needed.
   let launched = 0;
-  for (let i = 0; i < canLaunch; i++) {
-    incInFlightProvisions();
+  for (let i = 0; i < deficit; i++) {
     try {
-      await launchEBJob();
+      await provisionOneEB("warm");
       launched++;
-      // Decrement scheduled after a grace period: the pod should have
-      // registered as a runner by then, so it counts via the DB row instead.
-      setTimeout(() => decInFlightProvisions(), 120_000);
     } catch (err) {
-      decInFlightProvisions();
-      console.warn("[EB Provisioner] ensureWarmPool launch failed:", err);
+      if (!(err instanceof AtCapacityError)) {
+        console.warn("[EB Provisioner] ensureWarmPool launch failed:", err);
+      }
       break;
     }
   }
@@ -805,28 +910,29 @@ export async function ensureWarmPool(): Promise<number> {
  */
 export async function prewarmForBuild(targetCount: number): Promise<number> {
   if (!isDynamicPoolMode()) return 0;
+  // Process mode: no prewarm, ever. Each claim provisions on demand, so a
+  // 1-test build spawns exactly 1 local Chromium instead of 2 (prewarm racing
+  // the on-demand claim while the prewarmed EB was still registering). N
+  // parallel workers still get N processes via their own claims, capped by
+  // EB_PROCESS_POOL_MAX. Local spawn latency (~2-5s) is the accepted cost —
+  // prewarm exists to hide k8s pod cold start (image pull, 5-30s), which
+  // local child processes don't have.
+  if (provisionerMode() === "process") return 0;
   if (targetCount <= 0) return 0;
 
-  // Builds must respect the interactive reservation here too —
-  // claimOrProvisionPoolEB({purpose:'build'}) enforces it on demand-provision,
-  // but prewarming to the full hard cap let a build occupy the slots reserved
-  // for recording/debug before any interactive caller could claim one.
-  const cap = await poolMax();
-  const size = await currentPoolSize();
-  const effectiveCap = Math.max(0, cap - interactiveReservedSlots());
-  const canLaunch = Math.min(targetCount, Math.max(0, effectiveCap - size));
-  if (canLaunch <= 0) return 0;
-
+  // Builds must respect the interactive reservation here too — prewarming to
+  // the full hard cap would let a build occupy the slots reserved for
+  // recording/debug before any interactive caller could claim one.
+  // provisionOneEB('build') enforces exactly that cap per launch.
   let launched = 0;
-  for (let i = 0; i < canLaunch; i++) {
-    incInFlightProvisions();
+  for (let i = 0; i < targetCount; i++) {
     try {
-      await launchEBJob();
+      await provisionOneEB("build");
       launched++;
-      setTimeout(() => decInFlightProvisions(), 120_000);
     } catch (err) {
-      decInFlightProvisions();
-      console.warn("[EB Provisioner] prewarmForBuild launch failed:", err);
+      if (!(err instanceof AtCapacityError)) {
+        console.warn("[EB Provisioner] prewarmForBuild launch failed:", err);
+      }
       break;
     }
   }

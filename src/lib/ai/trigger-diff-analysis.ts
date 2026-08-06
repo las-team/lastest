@@ -1,4 +1,5 @@
 import * as queries from "@/lib/db/queries";
+import { agentSdkReadiness } from "@/lib/ai/availability";
 
 import {
   analyzeDiff,
@@ -119,6 +120,16 @@ export async function triggerAIDiffAnalysis(
         effectiveProvider !== "claude-agent-sdk" &&
         effectiveProvider !== "ollama" &&
         !effectiveApiKey
+      ) {
+        await queries.updateVisualDiff(diffId, { aiAnalysisStatus: "skipped" });
+        return;
+      }
+
+      // Deployment ships no credentials for the Agent SDK. Skip instead of
+      // letting the analyzer throw and marking the diff "failed".
+      if (
+        effectiveProvider === "claude-agent-sdk" &&
+        !agentSdkReadiness().runnable
       ) {
         await queries.updateVisualDiff(diffId, { aiAnalysisStatus: "skipped" });
         return;

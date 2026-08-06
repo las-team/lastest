@@ -73,7 +73,7 @@ RUN node -e "\
   const info = { gitHash: '$GIT_HASH', commitCount: '$GIT_COMMIT_COUNT', version: pkg.version, runnerVersion: runner.version };\
   require('fs').writeFileSync('build-info.json', JSON.stringify(info));"
 
-# Run tests (includes Tesseract OCR verification)
+# Run tests
 RUN pnpm vitest run --dir src
 
 # Build the application
@@ -116,22 +116,28 @@ COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/playwright-core@1
 RUN ln -sf .pnpm/playwright@1.57.0/node_modules/playwright ./node_modules/playwright && \
     ln -sf .pnpm/playwright-core@1.57.0/node_modules/playwright-core ./node_modules/playwright-core
 
-# Copy drizzle config and drizzle-kit for schema push on startup
+# Copy drizzle config and drizzle-kit for schema push on startup.
+# drizzle.config.ts reads `./packages/db/src/schema.ts` (NOT the app-side
+# `src/lib/db/schema.ts`, which is only a `export * from "@lastest/db/schema"`
+# re-export shim). Copy the real file to the path the config points at. Its
+# only value import is drizzle-orm/pg-core (copied below); the
+# `import type … from "@lastest/eb-protocol"` is erased by drizzle-kit's esbuild
+# schema loader, so no @lastest workspace source is needed here.
 COPY --from=builder --chown=nextjs:nodejs /app/drizzle ./drizzle
 COPY --from=builder --chown=nextjs:nodejs /app/drizzle.config.ts ./drizzle.config.ts
-COPY --from=builder --chown=nextjs:nodejs /app/src/lib/db/schema.ts ./src/lib/db/schema.ts
+COPY --from=builder --chown=nextjs:nodejs /app/packages/db/src/schema.ts ./packages/db/src/schema.ts
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/drizzle-kit ./node_modules/drizzle-kit
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.bin/drizzle-kit ./node_modules/.bin/drizzle-kit
 # Postgres driver required by drizzle-kit push at container startup
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/postgres@3.4.8 ./node_modules/.pnpm/postgres@3.4.8
 RUN ln -sf .pnpm/postgres@3.4.8/node_modules/postgres ./node_modules/postgres
-COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/esbuild@0.25.12 ./node_modules/.pnpm/esbuild@0.25.12
-COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/@esbuild+linux-x64@0.25.12 ./node_modules/.pnpm/@esbuild+linux-x64@0.25.12
-COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/esbuild-register@3.6.0_esbuild@0.25.12 ./node_modules/.pnpm/esbuild-register@3.6.0_esbuild@0.25.12
-RUN ln -sf .pnpm/esbuild@0.25.12/node_modules/esbuild ./node_modules/esbuild && \
-    ln -sf .pnpm/@esbuild+linux-x64@0.25.12/node_modules/@esbuild ./node_modules/@esbuild && \
-    ln -sf .pnpm/esbuild-register@3.6.0_esbuild@0.25.12/node_modules/esbuild-register ./node_modules/esbuild-register
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/esbuild@0.27.2 ./node_modules/.pnpm/esbuild@0.27.2
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/@esbuild+linux-x64@0.27.2 ./node_modules/.pnpm/@esbuild+linux-x64@0.27.2
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/esbuild-register@3.6.0_esbuild@0.27.2 ./node_modules/.pnpm/esbuild-register@3.6.0_esbuild@0.27.2
+RUN ln -sf .pnpm/esbuild@0.27.2/node_modules/esbuild ./node_modules/esbuild && \
+    ln -sf .pnpm/@esbuild+linux-x64@0.27.2/node_modules/@esbuild ./node_modules/@esbuild && \
+    ln -sf .pnpm/esbuild-register@3.6.0_esbuild@0.27.2/node_modules/esbuild-register ./node_modules/esbuild-register
 
 # Copy claude-agent-sdk (standalone prunes serverExternalPackages)
 COPY --from=deps --chown=nextjs:nodejs \
@@ -153,34 +159,9 @@ COPY --from=deps --chown=nextjs:nodejs \
   /app/node_modules/.pnpm/@anthropic-ai+claude-agent-sdk-linux-x64@0.2.141/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64 \
   ./node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.141_zod@4.4.3/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64
 
-# Copy tesseract.js + all its transitive deps (standalone prunes serverExternalPackages)
-# Each subdep is a separate pnpm dir that tesseract.js symlinks to
-COPY --from=deps --chown=nextjs:nodejs \
-  /app/node_modules/.pnpm/tesseract.js@7.0.0 \
-  ./node_modules/.pnpm/tesseract.js@7.0.0
-COPY --from=deps --chown=nextjs:nodejs \
-  /app/node_modules/.pnpm/tesseract.js-core@7.0.0 \
-  ./node_modules/.pnpm/tesseract.js-core@7.0.0
-COPY --from=deps --chown=nextjs:nodejs \
-  /app/node_modules/.pnpm/bmp-js@0.1.0 \
-  ./node_modules/.pnpm/bmp-js@0.1.0
-COPY --from=deps --chown=nextjs:nodejs \
-  /app/node_modules/.pnpm/zlibjs@0.3.1 \
-  ./node_modules/.pnpm/zlibjs@0.3.1
-COPY --from=deps --chown=nextjs:nodejs \
-  /app/node_modules/.pnpm/wasm-feature-detect@1.8.0 \
-  ./node_modules/.pnpm/wasm-feature-detect@1.8.0
-COPY --from=deps --chown=nextjs:nodejs \
-  /app/node_modules/.pnpm/regenerator-runtime@0.13.11 \
-  ./node_modules/.pnpm/regenerator-runtime@0.13.11
-COPY --from=deps --chown=nextjs:nodejs \
-  /app/node_modules/.pnpm/is-url@1.2.4 \
-  ./node_modules/.pnpm/is-url@1.2.4
-COPY --from=deps --chown=nextjs:nodejs \
-  /app/node_modules/.pnpm/node-fetch@2.7.0 \
-  ./node_modules/.pnpm/node-fetch@2.7.0
-RUN ln -sf .pnpm/tesseract.js@7.0.0/node_modules/tesseract.js ./node_modules/tesseract.js && \
-    ln -sf .pnpm/tesseract.js-core@7.0.0/node_modules/tesseract.js-core ./node_modules/tesseract.js-core
+# OCR runs in the dedicated ocr-service container (packages/ocr-service) —
+# tesseract.js is no longer shipped in the app image. Set OCR_SERVICE_URL to
+# enable OCR features.
 
 # Install Claude Code CLI globally (for `docker exec ... claude login`)
 # Fallback symlinks the SDK's native binary — agent-sdk >=0.2.x ships the CLI as a

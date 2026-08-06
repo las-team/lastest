@@ -30,6 +30,7 @@ OLARES_INTERNAL_DEPLOY="lastest-internal-dev"
 
 IMAGE_APP="ewyc/lastest"
 IMAGE_EB="ewyc/lastest-eb"
+IMAGE_OCR="ewyc/lastest-ocr"
 
 # --- Parse args ---
 TARGET="${1:-}"
@@ -38,12 +39,18 @@ shift || true
 SKIP_CHECKS=false
 APP_ONLY=false
 EB_ONLY=false
+# OCR ships by default: the app has no in-process Tesseract — without the OCR
+# container (and OCR_SERVICE_URL on the app), OCR features are disabled.
+# Opt out with --no-ocr (e.g. targets that don't use OCR features).
+WITH_OCR=true
 
 for arg in "$@"; do
   case "$arg" in
     --skip-checks) SKIP_CHECKS=true ;;
     --app-only)    APP_ONLY=true ;;
     --eb-only)     EB_ONLY=true ;;
+    --with-ocr)    WITH_OCR=true ;;
+    --no-ocr)      WITH_OCR=false ;;
     --) ;; # ignore pnpm separator
     *) echo "Unknown option: $arg"; exit 1 ;;
   esac
@@ -149,6 +156,18 @@ build_eb() {
   ok "Built $IMAGE_EB:latest"
 }
 
+# OCR service container — the only OCR backend (the app ships no in-process
+# Tesseract). The Dockerfile is self-contained (builds dist inside), so no
+# local pnpm build step is needed.
+build_ocr() {
+  local tag="${1:-latest}"
+  log "Building $IMAGE_OCR:$tag"
+  docker build \
+    -t "$IMAGE_OCR:$tag" \
+    -f packages/ocr-service/Dockerfile .
+  ok "Built $IMAGE_OCR:$tag"
+}
+
 build_images() {
   if [ "$EB_ONLY" = true ]; then
     build_eb
@@ -187,6 +206,31 @@ build_olares() {
     -t "$IMAGE_EB:olares" \
     -f packages/embedded-browser/Dockerfile .
   ok "Built $IMAGE_EB:olares"
+
+  if [ "$WITH_OCR" = true ]; then
+    build_ocr olares
+  fi
+}
+
+# Apply the OCR Deployment/Service into the Olares namespace and roll it.
+# Olares-considerate: tiny resource requests, ClusterIP only (never touches
+# envoy/ingress), and we do NOT mutate the Olares-managed app Deployments —
+# activating OCR offload is done by the operator adding
+# OCR_SERVICE_URL=http://lastest-ocr:8891 to the app's env via Olares config.
+deploy_olares_ocr() {
+  log "Applying OCR service manifest to Olares ($OLARES_NS)..."
+  sed -e "s/^  namespace: lastest\$/  namespace: $OLARES_NS/" \
+      -e "s|image: lastest-ocr-service:latest|image: $IMAGE_OCR:olares|" \
+      "$ROOT_DIR/k8s/ocr-service.yaml" | \
+    ssh "$OLARES_USER@$OLARES_HOST" "kubectl apply -f -" || {
+      warn "OCR manifest apply failed (namespace quota/policy?) — app keeps running without OCR offload"
+      return 0
+    }
+  ssh "$OLARES_USER@$OLARES_HOST" \
+    "kubectl rollout restart deployment/lastest-ocr -n $OLARES_NS && \
+     kubectl rollout status deployment/lastest-ocr -n $OLARES_NS --timeout=120s" || \
+    warn "OCR rollout did not confirm — check 'kubectl get pods -n $OLARES_NS -l app=lastest-ocr'"
+  ok "OCR service deployed (activate with OCR_SERVICE_URL=http://lastest-ocr:8891 on the app)"
 }
 
 # --- Targets ---
@@ -205,6 +249,10 @@ deploy_zima() {
   else
     build_images
     images+=("$IMAGE_APP:latest" "$IMAGE_EB:latest")
+  fi
+  if [ "$WITH_OCR" = true ]; then
+    build_ocr latest
+    images+=("$IMAGE_OCR:latest")
   fi
 
   log "Transferring images to $ZIMA_HOST (this may take a while)..."
@@ -227,6 +275,11 @@ deploy_zima() {
       fi
     done
   fi
+  # The app has no in-process Tesseract — without the OCR container + env,
+  # OCR features (ocr-text selectors, text-aware diffing) are disabled.
+  if [ "$WITH_OCR" = true ] && ! echo "$remote_compose" | grep -q 'ocr'; then
+    warn "Compose has no ocr service — OCR features stay disabled until one is added (image $IMAGE_OCR:latest, port 8891) and OCR_SERVICE_URL is set on the app service"
+  fi
   ok "Compose file looks good"
 
   log "Restarting containers..."
@@ -241,16 +294,27 @@ deploy_olares() {
   run_checks
   build_olares
 
+  local olares_images=("$IMAGE_APP:olares" "$IMAGE_EB:olares")
+  local rm_pattern='ewyc/lastest:olares|ewyc/lastest-eb:olares'
+  if [ "$WITH_OCR" = true ]; then
+    olares_images+=("$IMAGE_OCR:olares")
+    rm_pattern="$rm_pattern|ewyc/lastest-ocr:olares"
+  fi
+
   log "Removing old images on Olares..."
   # Remove tags AND all by-digest references so ctr import fully replaces the image.
   # Without this, containerd caches old platform manifests and k8s picks them up.
   ssh "$OLARES_USER@$OLARES_HOST" \
-    "ctr -n k8s.io images ls -q | grep -E 'ewyc/lastest:olares|ewyc/lastest-eb:olares' | xargs -r ctr -n k8s.io images rm 2>/dev/null || true"
+    "ctr -n k8s.io images ls -q | grep -E '$rm_pattern' | xargs -r ctr -n k8s.io images rm 2>/dev/null || true"
 
   log "Transferring images to Olares (this takes ~10 minutes)..."
-  docker save "$IMAGE_APP:olares" "$IMAGE_EB:olares" | \
+  docker save "${olares_images[@]}" | \
     ssh "$OLARES_USER@$OLARES_HOST" 'ctr -n k8s.io images import -'
   ok "Images imported on Olares"
+
+  if [ "$WITH_OCR" = true ]; then
+    deploy_olares_ocr
+  fi
 
   log "Restarting deployments ($OLARES_DEPLOY + $OLARES_INTERNAL_DEPLOY)..."
   # Both Deployments must be rolled: the envoy-fronted one serves the UI,
@@ -320,10 +384,19 @@ deploy_zima_transfer() {
 
 deploy_olares_transfer() {
   log "Transferring to Olares..."
+  local olares_images=("$IMAGE_APP:olares" "$IMAGE_EB:olares")
+  local rm_pattern='ewyc/lastest:olares|ewyc/lastest-eb:olares'
+  if [ "$WITH_OCR" = true ]; then
+    olares_images+=("$IMAGE_OCR:olares")
+    rm_pattern="$rm_pattern|ewyc/lastest-ocr:olares"
+  fi
   ssh "$OLARES_USER@$OLARES_HOST" \
-    "ctr -n k8s.io images ls -q | grep -E 'ewyc/lastest:olares|ewyc/lastest-eb:olares' | xargs -r ctr -n k8s.io images rm 2>/dev/null || true"
-  docker save "$IMAGE_APP:olares" "$IMAGE_EB:olares" | \
+    "ctr -n k8s.io images ls -q | grep -E '$rm_pattern' | xargs -r ctr -n k8s.io images rm 2>/dev/null || true"
+  docker save "${olares_images[@]}" | \
     ssh "$OLARES_USER@$OLARES_HOST" 'ctr -n k8s.io images import -'
+  if [ "$WITH_OCR" = true ]; then
+    deploy_olares_ocr
+  fi
   ssh "$OLARES_USER@$OLARES_HOST" \
     "kubectl rollout restart deployment/$OLARES_DEPLOY deployment/$OLARES_INTERNAL_DEPLOY -n $OLARES_NS"
   ssh "$OLARES_USER@$OLARES_HOST" \
@@ -346,6 +419,8 @@ usage() {
   echo "  --skip-checks    Skip lint/test before deploy"
   echo "  --app-only       Only build/deploy main app image"
   echo "  --eb-only        Only build/deploy EB image"
+  echo "  --with-ocr       Build/deploy the OCR service container (default: on)"
+  echo "  --no-ocr         Skip the OCR container (OCR features stay disabled)"
   echo ""
   echo "Version: $VERSION | Hash: $GIT_HASH | Build: #$GIT_COMMIT_COUNT"
 }
