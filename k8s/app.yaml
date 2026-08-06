@@ -20,6 +20,10 @@
 #                                              # (or claude-code-oauth-token=... instead)
 #   kubectl apply -f k8s/migrate-job.yaml && kubectl -n lastest wait --for=condition=complete job/lastest-migrate --timeout=300s
 #   kubectl apply -f k8s/ocr-service.yaml -f k8s/pool-service.yaml -f k8s/app.yaml
+#   kubectl apply -f k8s/embedded-browser-netpol.yaml   # isolates EB pods; read
+#                                                       # its header first — it
+#                                                       # assumes k3s CIDRs and
+#                                                       # an enforcing CNI
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

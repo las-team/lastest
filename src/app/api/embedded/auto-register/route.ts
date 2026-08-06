@@ -267,6 +267,13 @@ export async function POST(request: Request) {
           cdpUrl,
           containerUrl: body.containerUrl,
           viewport: body.viewport,
+          // ONLY when a bootstrap token vouched for it. A static-fleet EB
+          // authenticates with the shared SYSTEM_EB_TOKEN and self-asserts
+          // this field, and storing it would make the proxy derive a
+          // per-instance stream token that such an EB has no way to know —
+          // locking it out of its own stream. Null here keeps static fleets on
+          // the fleet-wide STREAM_AUTH_TOKEN fallback.
+          instanceId: bootstrap ? body.instanceId : undefined,
         },
         tx,
       );

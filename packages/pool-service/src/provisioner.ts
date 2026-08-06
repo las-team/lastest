@@ -63,6 +63,7 @@ import { execFileSync } from "child_process";
 import { readFileSync } from "fs";
 import https from "https";
 import {
+  deriveStreamAuthToken,
   isDynamicPoolMode,
   isKubernetesMode,
   mintBootstrapToken,
@@ -450,6 +451,15 @@ function jobSpec(name: string, instanceId: string): Record<string, unknown> {
     );
   }
 
+  // The stream port's credential, derived from the same key. Fail closed for
+  // the same reason: an EB with no STREAM_AUTH_TOKEN refuses every viewer.
+  const streamAuthToken = deriveStreamAuthToken(instanceId);
+  if (!streamAuthToken) {
+    throw new Error(
+      "Cannot derive STREAM_AUTH_TOKEN — ENCRYPTION_KEY is unset or not 64 hex chars in the pool service env. It must match the app's ENCRYPTION_KEY.",
+    );
+  }
+
   return {
     apiVersion: "batch/v1",
     kind: "Job",
@@ -512,6 +522,7 @@ function jobSpec(name: string, instanceId: string): Record<string, unknown> {
                   ? [{ name: "LASTEST_PUBLIC_URL", value: lastestPublicUrl }]
                   : []),
                 { name: "EB_BOOTSTRAP_TOKEN", value: bootstrapToken },
+                { name: "STREAM_AUTH_TOKEN", value: streamAuthToken },
                 { name: "INSTANCE_ID", value: instanceId },
                 { name: "STREAM_PORT", value: "9223" },
                 { name: "CDP_PORT", value: "9222" },

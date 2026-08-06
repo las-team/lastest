@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import { WebSocket, WebSocketServer } from "ws";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { signStreamGrant } from "@/lib/eb/stream-grant";
+import { deriveStreamAuthToken } from "@lastest/pool-service/common";
 
 /**
  * End-to-end exercise of scripts/front-proxy.js — the process that owns :3000
@@ -117,7 +118,10 @@ beforeAll(async () => {
   ebServer = http.createServer();
   const ebWss = new WebSocketServer({ server: ebServer });
   ebWss.on("connection", (ws, req) => {
-    ws.on("message", (m) => ws.send(`eb[${req.url}]:${m}`));
+    // Echo back the request line AND the auth header, so tests can assert
+    // which of the two carried the stream token.
+    const hdr = req.headers["x-stream-token"] ?? "-";
+    ws.on("message", (m) => ws.send(`eb[${req.url}|${hdr}]:${m}`));
   });
   ebPort = await listen(ebServer);
 
@@ -129,6 +133,9 @@ beforeAll(async () => {
       FRONT_PROXY_HOST: "127.0.0.1",
       UPSTREAM_PORT: String(appPort),
       ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
+      // Explicitly empty: the static-fleet fallback must not fire in these
+      // tests just because the developer's shell happens to export one.
+      STREAM_AUTH_TOKEN: "",
     },
     stdio: ["ignore", "pipe", "inherit"],
   });
@@ -158,13 +165,25 @@ afterAll(async () => {
   ebServer?.close();
 });
 
-function grantFor(host: string, port: number): string {
+function grantFor(host: string, port: number, instanceId = ""): string {
   const saved = process.env.ENCRYPTION_KEY;
   process.env.ENCRYPTION_KEY = TEST_ENCRYPTION_KEY;
   try {
-    const grant = signStreamGrant(host, port, "sess-test");
+    const grant = signStreamGrant(host, port, "sess-test", instanceId);
     expect(grant).toBeTruthy();
     return grant!;
+  } finally {
+    if (saved === undefined) delete process.env.ENCRYPTION_KEY;
+    else process.env.ENCRYPTION_KEY = saved;
+  }
+}
+
+/** The credential the pool service would have injected for this instance. */
+function streamTokenFor(instanceId: string): string {
+  const saved = process.env.ENCRYPTION_KEY;
+  process.env.ENCRYPTION_KEY = TEST_ENCRYPTION_KEY;
+  try {
+    return deriveStreamAuthToken(instanceId)!;
   } finally {
     if (saved === undefined) delete process.env.ENCRYPTION_KEY;
     else process.env.ENCRYPTION_KEY = saved;
@@ -213,14 +232,40 @@ describe("generic WebSocket passthrough (dev HMR)", () => {
 });
 
 describe("EB stream termination (recording / debugging / agentic PW)", () => {
-  it("tunnels a granted upgrade to the pod from the grant", async () => {
-    const grant = grantFor("127.0.0.1", ebPort);
+  it("mints the pod's credential itself — the client sends none", async () => {
+    // The browser URL carries only the opaque grant. The proxy derives the
+    // instance's STREAM_AUTH_TOKEN and presents it as a header, so the
+    // credential appears neither in the client URL nor in the pod's
+    // request line.
+    const grant = grantFor("127.0.0.1", ebPort, "eb-1-abc");
     const reply = await wsRoundtrip(
-      `/api/embedded/stream/ws?g=${encodeURIComponent(grant)}&token=abc`,
+      `/api/embedded/stream/ws?g=${encodeURIComponent(grant)}&bin=1`,
       "frame-1",
     );
-    // grant stripped, EB token forwarded — the same contract the preload had
-    expect(reply).toBe("eb[/?token=abc]:frame-1");
+    expect(reply).toBe(`eb[/?bin=1|${streamTokenFor("eb-1-abc")}]:frame-1`);
+  });
+
+  it("ignores a client-supplied ?token= when the grant names an instance", async () => {
+    const grant = grantFor("127.0.0.1", ebPort, "eb-1-abc");
+    const reply = await wsRoundtrip(
+      `/api/embedded/stream/ws?g=${encodeURIComponent(grant)}&token=attacker`,
+      "frame-1",
+    );
+    expect(reply).toBe(`eb[/|${streamTokenFor("eb-1-abc")}]:frame-1`);
+    expect(reply).not.toContain("attacker");
+  });
+
+  it("drops a legacy token that would splice headers into the upstream request", async () => {
+    // No instanceId in the grant and no STREAM_AUTH_TOKEN in the proxy env, so
+    // the hostile ?token= is the only candidate — and must still be refused.
+    const grant = grantFor("127.0.0.1", ebPort);
+    const reply = await wsRoundtrip(
+      `/api/embedded/stream/ws?g=${encodeURIComponent(grant)}&token=${encodeURIComponent(
+        "abc\r\nX-Injected: yes",
+      )}`,
+      "frame-1",
+    );
+    expect(reply).toBe("eb[/|-]:frame-1");
   });
 
   it("rejects a missing grant with a real 403", async () => {

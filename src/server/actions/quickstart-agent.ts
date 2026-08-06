@@ -45,7 +45,6 @@ import { db } from "@/lib/db";
 import { embeddedSessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { toProxyStreamUrl } from "@/lib/eb/stream-url";
-import { appendStreamToken } from "@/lib/eb/stream-token";
 import { injectStorageStateIntoEb } from "@/lib/eb/inject-storage-state";
 import { readFile } from "fs/promises";
 import { resolveStoragePath } from "@/lib/storage/paths";
@@ -57,11 +56,12 @@ import { computeDiffClusters } from "@/lib/diff/diff-clusters";
  * k3s dev where pod IPs aren't routable) plus the stream auth token. Mirrors the
  * build page's stream wiring.
  */
-function proxiedStream(raw: string | null | undefined): string | undefined {
+function proxiedStream(
+  raw: string | null | undefined,
+  instanceId?: string | null,
+): string | undefined {
   if (!raw) return undefined;
-  const proxied = toProxyStreamUrl(raw);
-  if (!proxied) return undefined;
-  return appendStreamToken(proxied, process.env.STREAM_AUTH_TOKEN) || undefined;
+  return toProxyStreamUrl(raw, "", instanceId) || undefined;
 }
 
 /** Resolve the live stream URL of the EB currently running a build's test run. */
@@ -73,10 +73,13 @@ async function resolveBuildStreamUrl(
   const testRun = await queries.getTestRun(build.testRunId);
   if (!testRun?.runnerId) return undefined;
   const [sess] = await db
-    .select({ streamUrl: embeddedSessions.streamUrl })
+    .select({
+      streamUrl: embeddedSessions.streamUrl,
+      instanceId: embeddedSessions.instanceId,
+    })
     .from(embeddedSessions)
     .where(eq(embeddedSessions.runnerId, testRun.runnerId));
-  return proxiedStream(sess?.streamUrl);
+  return proxiedStream(sess?.streamUrl, sess?.instanceId);
 }
 
 // ---------------------------------------------------------------------------
@@ -535,7 +538,7 @@ async function runQsScoutPublic(
   }
   // Surface the EB's live screencast so the panel can show the scout browsing.
   await mergeMetadata(sessionId, {
-    streamUrl: proxiedStream(eb?.streamUrl),
+    streamUrl: proxiedStream(eb?.streamUrl, eb?.instanceId),
     queuedForBrowser: false,
   });
   try {
@@ -826,7 +829,7 @@ async function runQsScoutAuthed(
     return false;
   }
   await mergeMetadata(sessionId, {
-    streamUrl: proxiedStream(eb?.streamUrl),
+    streamUrl: proxiedStream(eb?.streamUrl, eb?.instanceId),
     queuedForBrowser: false,
   });
   try {

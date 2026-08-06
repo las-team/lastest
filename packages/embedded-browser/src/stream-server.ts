@@ -6,6 +6,7 @@
  */
 
 import { WebSocketServer, WebSocket } from "ws";
+import { createHash, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "http";
 import type { ScreencastManager } from "./screencast.js";
 import type { InputHandler, InputEvent } from "./input-handler.js";
@@ -35,6 +36,22 @@ function encodeBinaryFrame(base64Data: string): Buffer {
   out[0] = BINARY_FRAME_TAG;
   jpeg.copy(out, 1);
   return out;
+}
+
+/**
+ * Constant-time token comparison. `===` on strings short-circuits at the first
+ * differing byte and leaks the match length to anyone who can time the 401,
+ * which is every stream client. Hashing first gives both sides a fixed 32-byte
+ * width, so timingSafeEqual never throws on a length mismatch either.
+ */
+function tokensMatch(
+  candidate: string | null | undefined,
+  expected: string,
+): boolean {
+  if (!candidate) return false;
+  const a = createHash("sha256").update(candidate, "utf8").digest();
+  const b = createHash("sha256").update(expected, "utf8").digest();
+  return timingSafeEqual(a, b);
 }
 
 export interface ActionProgressPayload {
@@ -100,19 +117,28 @@ export class StreamServer {
       port: this.options.port,
       verifyClient: (info, callback) => {
         if (!this.authToken) {
-          callback(true);
+          callback(
+            false,
+            500,
+            "Missing auth token on server; set `authToken` in StreamServerOptions",
+          );
           return;
         }
 
-        // Check token from query string or header
+        // Prefer the header: the front proxy moves the token there so it never
+        // appears in this server's (or any intermediary's) request line. The
+        // query form stays as a fallback for clients that connect directly —
+        // a browser cannot set headers on a WS handshake.
+        const headerToken = info.req.headers["x-stream-token"];
         const url = new URL(
           info.req.url ?? "",
           `http://localhost:${this.options.port}`,
         );
         const token =
-          url.searchParams.get("token") ?? info.req.headers["x-stream-token"];
+          (Array.isArray(headerToken) ? headerToken[0] : headerToken) ??
+          url.searchParams.get("token");
 
-        if (token === this.authToken) {
+        if (tokensMatch(token, this.authToken)) {
           callback(true);
         } else {
           callback(false, 401, "Unauthorized");

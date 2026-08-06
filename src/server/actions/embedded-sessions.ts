@@ -200,6 +200,8 @@ export async function upsertEmbeddedSession(
     cdpUrl?: string;
     containerUrl: string;
     viewport?: { width: number; height: number };
+    /** Provisioner instanceId; absent for static-fleet EBs. */
+    instanceId?: string;
   },
   tx?: DBExecutor,
 ): Promise<EmbeddedSession> {
@@ -231,6 +233,7 @@ export async function upsertEmbeddedSession(
         streamUrl: params.streamUrl,
         cdpUrl: params.cdpUrl ?? null,
         containerUrl: params.containerUrl,
+        instanceId: params.instanceId ?? null,
         viewport: params.viewport ?? { width: 1280, height: 720 },
         ...(preserveBusy ? {} : { status: "ready", userId: null }),
         lastActivityAt: now,
@@ -270,6 +273,8 @@ export async function createEmbeddedSession(
     cdpUrl?: string;
     containerUrl: string;
     viewport?: { width: number; height: number };
+    /** Provisioner instanceId; absent for static-fleet EBs. */
+    instanceId?: string;
   },
   tx?: DBExecutor,
 ): Promise<EmbeddedSession> {
@@ -288,6 +293,7 @@ export async function createEmbeddedSession(
     streamUrl: params.streamUrl,
     cdpUrl: params.cdpUrl ?? null,
     containerUrl: params.containerUrl,
+    instanceId: params.instanceId ?? null,
     viewport: params.viewport ?? { width: 1280, height: 720 },
     createdAt: now,
     lastActivityAt: now,
@@ -379,7 +385,6 @@ async function lookupSessionByRunner(
 export async function getStreamUrlForRunner(runnerId: string): Promise<{
   streamUrl: string | null;
   sessionId: string | null;
-  streamAuthToken: string | null;
 } | null> {
   const authed = await requireTeamAccess();
   const session = await lookupSessionByRunner(runnerId);
@@ -388,8 +393,8 @@ export async function getStreamUrlForRunner(runnerId: string): Promise<{
   // Authorization: the caller's team must own the session. The one exception is
   // a shared system EB from the warm pool, which is intentionally streamable by
   // any team that claimed a slot (see listSystemEmbeddedSessions). Without this
-  // check, any authenticated user could pull another team's live CDP stream URL
-  // and the shared STREAM_AUTH_TOKEN.
+  // check, any authenticated user could mint a grant for another team's live
+  // EB and stream it.
   if (session.teamId !== authed.team.id) {
     const [runner] = await db
       .select({ isSystem: runners.isSystem })
@@ -398,11 +403,13 @@ export async function getStreamUrlForRunner(runnerId: string): Promise<{
     if (!runner?.isSystem) return null;
   }
 
-  const streamAuthToken = process.env.STREAM_AUTH_TOKEN || null;
   return {
-    streamUrl: toProxyStreamUrl(session.streamUrl, session.id),
+    streamUrl: toProxyStreamUrl(
+      session.streamUrl,
+      session.id,
+      session.instanceId,
+    ),
     sessionId: session.id,
-    streamAuthToken,
   };
 }
 

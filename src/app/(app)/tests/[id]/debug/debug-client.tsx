@@ -83,7 +83,6 @@ import {
 } from "@/components/embedded-browser/browser-viewer-client";
 import { Input } from "@/components/ui/input";
 import { getStreamUrlForRunner } from "@/server/actions/embedded-sessions";
-import { appendStreamToken } from "@/lib/eb/stream-token";
 
 interface DebugClientProps {
   test: Test;
@@ -522,12 +521,7 @@ export function DebugClient({ test, repositoryId }: DebugClientProps) {
           const streamInfo = await getStreamUrlForRunner(resolvedRunnerId);
           if (cancelled) return;
           if (streamInfo?.streamUrl) {
-            setStreamUrl(
-              appendStreamToken(
-                streamInfo.streamUrl,
-                streamInfo.streamAuthToken,
-              ),
-            );
+            setStreamUrl(streamInfo.streamUrl);
           } else {
             setStreamUrl(null);
           }
