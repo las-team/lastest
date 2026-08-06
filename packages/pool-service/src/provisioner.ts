@@ -210,7 +210,14 @@ function loadKubeconfigCreds(): ClusterCreds {
         `Ensure kubectl is on PATH and the current kube-context points at the target cluster (e.g. 'kubectl config use-context k3d-lastest').`,
     );
   }
-  const cfg = JSON.parse(raw) as KubectlConfigView;
+  let cfg: KubectlConfigView;
+  try {
+    cfg = JSON.parse(raw) as KubectlConfigView;
+  } catch (err) {
+    throw new Error(
+      `kubectl config view did not return valid JSON: ${(err as Error).message}`,
+    );
+  }
   const cluster = cfg.clusters?.[0]?.cluster;
   const user = cfg.users?.[0]?.user;
   const ctx = cfg.contexts?.[0]?.context;
@@ -219,7 +226,14 @@ function loadKubeconfigCreds(): ClusterCreds {
       "kubeconfig has no current cluster.server — check `kubectl config current-context`",
     );
   }
-  const url = new URL(cluster.server);
+  let url: URL;
+  try {
+    url = new URL(cluster.server);
+  } catch (err) {
+    throw new Error(
+      `kubeconfig cluster.server '${cluster.server}' is not a valid URL: ${(err as Error).message}`,
+    );
+  }
   const host = url.hostname;
   const kcPort = url.port || (url.protocol === "https:" ? "443" : "80");
   const ca = cluster["certificate-authority-data"]
@@ -458,6 +472,17 @@ function jobSpec(name: string, instanceId: string): Record<string, unknown> {
           // test_result / screenshot / network_bodies POSTs after SIGTERM.
           // Must be ≥ drain timeout in index.ts shutdown() (15s) plus headroom.
           terminationGracePeriodSeconds: 60,
+          // Pod runs as the non-root pwuser (uid 1001) shipped by the EB
+          // image's Playwright base. The image's Dockerfile sets USER pwuser;
+          // this mirrors that at the orchestrator layer so a misconfigured
+          // image (or a future rebuild that drops USER) can't silently run
+          // untrusted web content + user test code as root.
+          securityContext: {
+            runAsNonRoot: true,
+            runAsUser: 1001,
+            runAsGroup: 1001,
+            seccompProfile: { type: "RuntimeDefault" },
+          },
           // `/dev/shm` size ≥512Mi is required — default 64Mi crashes Chromium under load
           volumes: [
             {
@@ -470,6 +495,17 @@ function jobSpec(name: string, instanceId: string): Record<string, unknown> {
               name: "embedded-browser",
               image,
               imagePullPolicy: "IfNotPresent",
+              // Container-level hardening: forbid privilege escalation and
+              // drop every Linux capability. pwuser already can't gain root,
+              // but making it explicit keeps the EB locked down even if the
+              // namespace's default service account is over-permissioned.
+              securityContext: {
+                runAsNonRoot: true,
+                runAsUser: 1001,
+                runAsGroup: 1001,
+                allowPrivilegeEscalation: false,
+                capabilities: { drop: ["ALL"] },
+              },
               env: [
                 { name: "LASTEST_URL", value: lastestUrl },
                 ...(lastestPublicUrl
