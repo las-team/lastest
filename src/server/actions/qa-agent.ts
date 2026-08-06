@@ -20,7 +20,6 @@ import { claimEmbeddedBrowserForAgent } from "./ai";
 import { releasePoolEB } from "./embedded-sessions";
 import { runTestsCore } from "./runs";
 import { toProxyStreamUrl } from "@/lib/eb/stream-url";
-import { appendStreamToken } from "@/lib/eb/stream-token";
 import { crawlTargetApp } from "@/lib/qa-agent/crawl";
 import {
   findAuthLinksOnEb,
@@ -326,11 +325,12 @@ async function mergeMetadata(
   });
 }
 
-function proxiedStream(raw: string | null | undefined): string | undefined {
+function proxiedStream(
+  raw: string | null | undefined,
+  instanceId?: string | null,
+): string | undefined {
   if (!raw) return undefined;
-  const proxied = toProxyStreamUrl(raw);
-  if (!proxied) return undefined;
-  return appendStreamToken(proxied, process.env.STREAM_AUTH_TOKEN) || undefined;
+  return toProxyStreamUrl(raw, "", instanceId) || undefined;
 }
 
 /** True when the session was cancelled in the DB or aborted in-process. */
@@ -572,7 +572,7 @@ async function runQaLogin(
     }).catch(() => undefined);
     await mergeMetadata(sessionId, {
       queuedForBrowser: false,
-      ...(eb ? { streamUrl: proxiedStream(eb.streamUrl) } : {}),
+      ...(eb ? { streamUrl: proxiedStream(eb.streamUrl, eb.instanceId) } : {}),
     });
     if (eb) {
       runnerId = eb.runnerId;
@@ -1179,7 +1179,7 @@ async function runQaDiscover(
       runnerId = eb.runnerId;
       await mergeMetadata(sessionId, {
         queuedForBrowser: false,
-        streamUrl: proxiedStream(eb.streamUrl),
+        streamUrl: proxiedStream(eb.streamUrl, eb.instanceId),
       });
 
       // Start the crawl from the post-login state when qa_login resolved a
@@ -1745,7 +1745,7 @@ async function runQaGenerate(
       runnerId = eb.runnerId;
       await mergeMetadata(sessionId, {
         queuedForBrowser: false,
-        streamUrl: proxiedStream(eb.streamUrl),
+        streamUrl: proxiedStream(eb.streamUrl, eb.instanceId),
       });
 
       // Pre-authenticate the generation EB too, so the generator verifies
@@ -2127,7 +2127,7 @@ async function runQaHeal(
       runnerId = eb.runnerId;
       await mergeMetadata(sessionId, {
         queuedForBrowser: false,
-        streamUrl: proxiedStream(eb.streamUrl),
+        streamUrl: proxiedStream(eb.streamUrl, eb.instanceId),
       });
       const { agentHealTestCore } =
         await import("@/lib/playwright/healer-agent");

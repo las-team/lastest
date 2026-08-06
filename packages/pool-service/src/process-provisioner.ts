@@ -30,7 +30,11 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
-import { devCheckoutEBDir, mintBootstrapToken } from "./common";
+import {
+  deriveStreamAuthToken,
+  devCheckoutEBDir,
+  mintBootstrapToken,
+} from "./common";
 
 const PORT_STRIDE = 20;
 const LOG_RING_MAX = 500;
@@ -239,6 +243,15 @@ export async function launchEBProcess(instanceId: string): Promise<void> {
     );
   }
 
+  // The stream port's credential, derived from the same key. Fail closed for
+  // the same reason: an EB with no STREAM_AUTH_TOKEN refuses every viewer.
+  const streamAuthToken = deriveStreamAuthToken(instanceId);
+  if (!streamAuthToken) {
+    throw new Error(
+      "Cannot derive STREAM_AUTH_TOKEN — ENCRYPTION_KEY is unset or not 64 hex chars in the pool service env. It must match the app's ENCRYPTION_KEY.",
+    );
+  }
+
   const basePort = await allocatePortBlock();
 
   // Minimal child env — deliberately NOT process.env: the pool service holds
@@ -271,6 +284,7 @@ export async function launchEBProcess(instanceId: string): Promise<void> {
       NODE_ENV: process.env.NODE_ENV ?? "development",
       LASTEST_URL: appUrl(),
       EB_BOOTSTRAP_TOKEN: bootstrapToken,
+      STREAM_AUTH_TOKEN: streamAuthToken,
       INSTANCE_ID: instanceId,
       STREAM_PORT: String(basePort),
       CDP_PORT: String(basePort + 2),

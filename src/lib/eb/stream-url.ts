@@ -20,13 +20,19 @@ import { signStreamGrant } from "@/lib/eb/stream-grant";
 export function toProxyStreamUrl(
   streamUrl: string | null,
   sessionId = "",
+  instanceId: string | null = "",
 ): string | null {
   if (!streamUrl) return null;
   try {
     const url = new URL(streamUrl);
     if (url.protocol === "ws:" || url.protocol === "wss:") {
       const port = parseInt(url.port || "9223", 10);
-      const grant = signStreamGrant(url.hostname, port, sessionId);
+      const grant = signStreamGrant(
+        url.hostname,
+        port,
+        sessionId,
+        instanceId ?? "",
+      );
       if (!grant) return null;
       return `/api/embedded/stream/ws?g=${encodeURIComponent(grant)}`;
     }
