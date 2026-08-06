@@ -23,9 +23,9 @@
  *   GET    /v1/jobs                      → { jobs: string[] }
  *   DELETE /v1/jobs/:name                → 204 (404-tolerant, like kubectl)
  *   GET    /v1/jobs/:name/diagnostics    → EBPodInfo | 404
- *   POST   /v1/provisions {purpose}      → 201 { jobName, instanceId } | 409
+ *   POST   /v1/provisions {purpose,teamId?} → 201 { jobName, instanceId } | 409
  *   POST   /v1/warm-pool/ensure          → { launched }
- *   POST   /v1/prewarm {count}           → { launched }
+ *   POST   /v1/prewarm {count,teamId?}   → { launched }
  *   POST   /v1/build-dispatch {action}   → 204   (action: "inc" | "dec")
  *
  * Env:
@@ -105,6 +105,18 @@ async function readJsonBody(
 }
 
 /**
+ * The tenant an EB is being provisioned for. Only ever used to look the team's
+ * plan up in the DB (→ the pod's PriorityClass), so an unknown or bogus id
+ * degrades to the restricted tier rather than granting anything.
+ */
+function readTeamId(body: Record<string, unknown>): string | null {
+  const raw = body.teamId;
+  if (typeof raw !== "string") return null;
+  const teamId = raw.trim();
+  return teamId && teamId.length <= 128 ? teamId : null;
+}
+
+/**
  * Provision one EB Job, enforcing the pool cap with the build/interactive
  * reservation. Moved from the app's `claimOrProvisionPoolEB` — the serialized
  * capacity decision and launch throttle need singleton state, so they live
@@ -118,6 +130,7 @@ async function readJsonBody(
  */
 async function handleProvision(
   purpose: "build" | "interactive",
+  teamId: string | null,
 ): Promise<
   | { status: 201; body: { jobName: string; instanceId: string } }
   | { status: 409 | 500; body: { error: string; size?: number; cap?: number } }
@@ -133,7 +146,7 @@ async function handleProvision(
   }
 
   try {
-    return { status: 201, body: await provisionOneEB(purpose) };
+    return { status: 201, body: await provisionOneEB(purpose, { teamId }) };
   } catch (err) {
     if (err instanceof AtCapacityError) {
       console.warn(
@@ -236,7 +249,7 @@ async function route(
   if (req.method === "POST" && path === "/v1/provisions") {
     const body = await readJsonBody(req);
     const purpose = body.purpose === "build" ? "build" : "interactive";
-    const result = await handleProvision(purpose);
+    const result = await handleProvision(purpose, readTeamId(body));
     return json(res, result.status, result.body);
   }
 
@@ -247,7 +260,9 @@ async function route(
   if (req.method === "POST" && path === "/v1/prewarm") {
     const body = await readJsonBody(req);
     const count = typeof body.count === "number" ? body.count : 0;
-    return json(res, 200, { launched: await prewarmForBuild(count) });
+    return json(res, 200, {
+      launched: await prewarmForBuild(count, { teamId: readTeamId(body) }),
+    });
   }
 
   if (req.method === "POST" && path === "/v1/build-dispatch") {

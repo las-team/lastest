@@ -16,9 +16,12 @@ vi.mock("@lastest/db/settings", () => ({
 import {
   AtCapacityError,
   isLiveEBJob,
+  jobSpec,
   livePoolCount,
   prewarmForBuild,
+  priorityClassNameFor,
   provisionOneEB,
+  tierForPlan,
   type K8sJobLike,
 } from "./provisioner";
 import { listEBProcessNames, terminateEBProcess } from "./process-provisioner";
@@ -53,7 +56,13 @@ beforeEach(() => {
     EB_PROCESS_POOL_MAX: process.env.EB_PROCESS_POOL_MAX,
     EB_RESERVED_INTERACTIVE_SLOTS: process.env.EB_RESERVED_INTERACTIVE_SLOTS,
     EB_LAUNCH_INTERVAL_MS: process.env.EB_LAUNCH_INTERVAL_MS,
+    EB_PRIORITY_CLASSES: process.env.EB_PRIORITY_CLASSES,
+    EB_PRIORITY_CLASS_RESTRICTED: process.env.EB_PRIORITY_CLASS_RESTRICTED,
+    EB_PRIORITY_CLASS_UNRESTRICTED: process.env.EB_PRIORITY_CLASS_UNRESTRICTED,
   };
+  delete process.env.EB_PRIORITY_CLASSES;
+  delete process.env.EB_PRIORITY_CLASS_RESTRICTED;
+  delete process.env.EB_PRIORITY_CLASS_UNRESTRICTED;
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "eb-prov-test-"));
   const entry = path.join(tmpDir, "stub-eb.js");
   fs.writeFileSync(entry, STUB);
@@ -105,6 +114,64 @@ describe("isLiveEBJob", () => {
         metadata: { name: "eb-x", deletionTimestamp: "2026-01-01T00:00:00Z" },
       }),
     ).toBe(false);
+  });
+});
+
+describe("tenant priority classes", () => {
+  it("maps only paying tiers to unrestricted", () => {
+    expect(tierForPlan("starter")).toBe("unrestricted");
+    expect(tierForPlan("growth")).toBe("unrestricted");
+    expect(tierForPlan("pro")).toBe("unrestricted");
+    for (const plan of [
+      "free",
+      "demo",
+      "trial",
+      "enterprise",
+      "",
+      null,
+      undefined,
+    ]) {
+      expect(tierForPlan(plan)).toBe("restricted");
+    }
+  });
+
+  it("stamps nothing until the deployment opts in", () => {
+    expect(priorityClassNameFor("restricted")).toBeUndefined();
+    expect(priorityClassNameFor("unrestricted")).toBeUndefined();
+  });
+
+  it("uses the documented default names once enabled", () => {
+    process.env.EB_PRIORITY_CLASSES = "1";
+    expect(priorityClassNameFor("restricted")).toBe("lastest-eb-restricted");
+    expect(priorityClassNameFor("unrestricted")).toBe(
+      "lastest-eb-unrestricted",
+    );
+  });
+
+  it("turns on implicitly when a class name is configured, and honors overrides", () => {
+    process.env.EB_PRIORITY_CLASS_UNRESTRICTED = "eb-premium";
+    expect(priorityClassNameFor("unrestricted")).toBe("eb-premium");
+    // The unset side still falls back to its default rather than going bare.
+    expect(priorityClassNameFor("restricted")).toBe("lastest-eb-restricted");
+  });
+
+  it("stays off when explicitly disabled, even with names configured", () => {
+    process.env.EB_PRIORITY_CLASS_RESTRICTED = "eb-cheap";
+    process.env.EB_PRIORITY_CLASSES = "0";
+    expect(priorityClassNameFor("restricted")).toBeUndefined();
+  });
+
+  it("puts priorityClassName on the pod spec, and omits it when unset", () => {
+    const withClass = jobSpec("eb-1", "eb-1", "lastest-eb-unrestricted") as {
+      spec: { template: { spec: Record<string, unknown> } };
+    };
+    expect(withClass.spec.template.spec.priorityClassName).toBe(
+      "lastest-eb-unrestricted",
+    );
+    const without = jobSpec("eb-2", "eb-2") as {
+      spec: { template: { spec: Record<string, unknown> } };
+    };
+    expect(without.spec.template.spec).not.toHaveProperty("priorityClassName");
   });
 });
 
