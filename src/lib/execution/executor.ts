@@ -1862,6 +1862,19 @@ async function executeViaPoolWorkers(
   // reaped idle after TTL. See docs/eb-and-setup-plan.md B1.
   incBuildDispatch();
 
+  // Tenant whose plan decides the EB pods' PriorityClass. `options.teamId` is
+  // unset on some fire-and-forget paths (e.g. queued runs resolve the team
+  // from the runner row, which is null for pool EBs), so fall back to the
+  // repository's owner. Null only means "provision restricted".
+  const teamId =
+    options.teamId ??
+    (options.repositoryId
+      ? await (async () => {
+          const { getRepository } = await import("@/lib/db/queries");
+          return (await getRepository(options.repositoryId!))?.teamId ?? null;
+        })().catch(() => null)
+      : null);
+
   // Pre-launch one EB per concurrent worker (plus one for the broadcast
   // setup, when configured) so the first batch of tests doesn't pay the
   // sequential cold-start cost. Throttled by awaitLaunchSlot internally.
@@ -1873,7 +1886,7 @@ async function executeViaPoolWorkers(
   if (isKubernetesMode()) {
     const prewarmTarget =
       Math.min(maxParallelEBs, tests.length) + (options.setupInfo ? 1 : 0);
-    prewarmForBuild(prewarmTarget).catch((err) => {
+    prewarmForBuild(prewarmTarget, { teamId }).catch((err) => {
       console.warn("[Dispatch] prewarmForBuild failed (non-fatal):", err);
     });
   }
@@ -1886,7 +1899,7 @@ async function executeViaPoolWorkers(
       const deadline = Date.now() + claimMaxWaitMs;
       let wait = 500;
       while (Date.now() < deadline) {
-        const c = await claimOrProvisionPoolEB({ purpose: "build" });
+        const c = await claimOrProvisionPoolEB({ purpose: "build", teamId });
         if (c) return c;
         await new Promise((r) => setTimeout(r, wait));
         wait = Math.min(wait * 2, 5000);

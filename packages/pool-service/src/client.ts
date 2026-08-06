@@ -84,16 +84,21 @@ export async function getPoolStatus(): Promise<{
  * build/interactive reservation) happens service-side. Returns null when at
  * capacity, provisioning is disabled, or the service is unreachable — the
  * caller treats all three as "cannot provision".
+ *
+ * Pass `teamId` whenever the caller knows which tenant the EB is for: in
+ * kubernetes mode the service reads that team's plan and gives free tenants a
+ * preemptible PriorityClass. Omitting it provisions at the restricted tier.
  */
 export async function provisionEB(
   purpose: "build" | "interactive",
+  opts: { teamId?: string | null } = {},
 ): Promise<{ jobName: string; instanceId: string } | null> {
   try {
     // Generous timeout: the service serializes launches through its CNI
     // throttle (EB_LAUNCH_INTERVAL_MS), so a burst can queue for a few seconds.
     const res = await poolFetch("/v1/provisions", {
       method: "POST",
-      body: { purpose },
+      body: { purpose, teamId: opts.teamId ?? null },
       timeoutMs: 30_000,
     });
     if (res.status === 201) {
@@ -164,12 +169,16 @@ export async function ensureWarmPool(): Promise<void> {
 }
 
 /** Pre-launch up to `count` EB Jobs for a build. Returns the number launched
- *  (0 when at cap or the service is unreachable). */
-export async function prewarmForBuild(count: number): Promise<number> {
+ *  (0 when at cap or the service is unreachable). `teamId` selects the pods'
+ *  PriorityClass, as in `provisionEB`. */
+export async function prewarmForBuild(
+  count: number,
+  opts: { teamId?: string | null } = {},
+): Promise<number> {
   try {
     const res = await poolFetch("/v1/prewarm", {
       method: "POST",
-      body: { count },
+      body: { count, teamId: opts.teamId ?? null },
       timeoutMs: 60_000,
     });
     if (!res.ok) throw new Error(`status ${res.status}`);

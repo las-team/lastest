@@ -816,6 +816,21 @@ export async function processPoolQueue(): Promise<void> {
 }
 
 /**
+ * Team of the caller's session, or null outside a request scope (cron
+ * dispatch, queue workers, webhooks) where `headers()` isn't available.
+ * Best-effort: used only to pick an EB's PriorityClass, never to authorize
+ * anything — the call sites have already run their own auth guard.
+ */
+async function callerTeamId(): Promise<string | null> {
+  try {
+    const { getCurrentSession } = await import("@/lib/auth/session");
+    return (await getCurrentSession())?.team?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Claim an idle pool EB; if none is available and we're running in Kubernetes
  * mode (EB_PROVISIONER=kubernetes), provision a new Job and wait for it to
  * register, then claim it.
@@ -826,13 +841,24 @@ export async function processPoolQueue(): Promise<void> {
  *   - 'build': may use up to ebPoolMax - EB_RESERVED_INTERACTIVE_SLOTS, leaving
  *     headroom for interactive callers. Build dispatch passes this.
  *
+ * `teamId` is the tenant the browser is for. In kubernetes mode the pool
+ * service reads that team's plan and stamps the pod's PriorityClass
+ * accordingly (free tiers get a preemptible class). It only affects freshly
+ * provisioned Jobs — an EB claimed off the idle pool keeps the class it was
+ * created with. Pass it wherever a team is in scope; omitting it provisions at
+ * the restricted tier.
+ *
  * Returns null if:
  *   - not in kubernetes mode and no idle EB available
  *   - pool is at the effective cap for this purpose
  *   - provisioning timed out (pod failed to register within waitTimeoutMs)
  */
 export async function claimOrProvisionPoolEB(
-  opts: { waitTimeoutMs?: number; purpose?: "build" | "interactive" } = {},
+  opts: {
+    waitTimeoutMs?: number;
+    purpose?: "build" | "interactive";
+    teamId?: string | null;
+  } = {},
 ): Promise<{ runnerId: string; sessionId: string | null } | null> {
   // Fast path: an idle EB is already online. Claiming an existing EB doesn't
   // change pool size so reservation does not apply here — interactive callers
@@ -843,12 +869,18 @@ export async function claimOrProvisionPoolEB(
 
   if (!isDynamicPoolMode()) return null;
 
+  // Tenant for the new pod's PriorityClass. Interactive callers (recording,
+  // debug, AI agents, setup scripts) run under a session, so the team is
+  // already in scope and they don't have to thread it down; background
+  // contexts (build dispatch) have no session and pass `teamId` explicitly.
+  const teamId = opts.teamId ?? (await callerTeamId());
+
   // Ask the pool service for a fresh Job. Cap enforcement (global cap +
   // build/interactive reservation), the in-flight provision counter and the
   // CNI launch throttle all live service-side — they need singleton state.
   // Null covers at-capacity, provisioning-disabled and service-unreachable;
   // the service logs the specific reason.
-  const jobInfo = await provisionEB(opts.purpose ?? "interactive");
+  const jobInfo = await provisionEB(opts.purpose ?? "interactive", { teamId });
   if (!jobInfo) return null;
 
   // Wait for the new EB to auto-register and reach `online`
