@@ -20,6 +20,16 @@ export interface StreamGrantPayload {
   p: number;
   /** Embedded session id, for audit logging. Empty when unknown. */
   s: string;
+  /**
+   * Provisioner instanceId of the target EB. The proxy derives that pod's
+   * STREAM_AUTH_TOKEN from it, which is why the browser never needs to hold a
+   * stream credential at all. Empty for static-fleet EBs, where the proxy
+   * falls back to its own STREAM_AUTH_TOKEN env var.
+   *
+   * Not a secret: it names a pod, it does not authorize anything. The
+   * signature is what makes the grant unforgeable.
+   */
+  i: string;
   /** Expiry, epoch milliseconds. */
   e: number;
 }
@@ -61,6 +71,7 @@ export function signStreamGrant(
   host: string,
   port: number,
   sessionId = "",
+  instanceId = "",
 ): string | null {
   const key = getStreamGrantKey();
   if (!key) {
@@ -74,6 +85,7 @@ export function signStreamGrant(
     h: host,
     p: port,
     s: sessionId,
+    i: instanceId,
     e: Date.now() + grantTtlMs(),
   };
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");

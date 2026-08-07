@@ -20,7 +20,6 @@ import { claimEmbeddedBrowserForAgent } from "./ai";
 import { releasePoolEB } from "./embedded-sessions";
 import { runTestsCore } from "./runs";
 import { toProxyStreamUrl } from "@/lib/eb/stream-url";
-import { appendStreamToken } from "@/lib/eb/stream-token";
 import { crawlTargetApp } from "@/lib/qa-agent/crawl";
 import { exploreTargetApp } from "@/lib/qa-agent/explore";
 import { getGlobalPoolLimits } from "@/lib/db/queries/settings";
@@ -333,11 +332,12 @@ async function mergeMetadata(
   });
 }
 
-function proxiedStream(raw: string | null | undefined): string | undefined {
+function proxiedStream(
+  raw: string | null | undefined,
+  instanceId?: string | null,
+): string | undefined {
   if (!raw) return undefined;
-  const proxied = toProxyStreamUrl(raw);
-  if (!proxied) return undefined;
-  return appendStreamToken(proxied, process.env.STREAM_AUTH_TOKEN) || undefined;
+  return toProxyStreamUrl(raw, "", instanceId) || undefined;
 }
 
 /** True when the session was cancelled in the DB or aborted in-process. */
@@ -664,7 +664,7 @@ async function runQaLogin(
     }).catch(() => undefined);
     await mergeMetadata(sessionId, {
       queuedForBrowser: false,
-      ...(eb ? { streamUrl: proxiedStream(eb.streamUrl) } : {}),
+      ...(eb ? { streamUrl: proxiedStream(eb.streamUrl, eb.instanceId) } : {}),
     });
     if (eb) {
       runnerId = eb.runnerId;
@@ -1160,8 +1160,12 @@ async function runQaDiscoverSwarm(args: {
     };
   };
 
-  const ebs: Array<{ cdpUrl: string; streamUrl: string; runnerId: string }> =
-    [];
+  const ebs: Array<{
+    cdpUrl: string;
+    streamUrl: string;
+    runnerId: string;
+    instanceId?: string | null;
+  }> = [];
   try {
     // Explorer #1 must succeed — full claim timeout.
     const first = await claimEmbeddedBrowserForAgent(
@@ -1187,7 +1191,10 @@ async function runQaDiscoverSwarm(args: {
       if (e.index < ebs.length) {
         setExplorer(e.index, {
           status: "exploring",
-          streamUrl: proxiedStream(ebs[e.index]!.streamUrl),
+          streamUrl: proxiedStream(
+            ebs[e.index]!.streamUrl,
+            ebs[e.index]!.instanceId,
+          ),
         });
       } else {
         setExplorer(e.index, {
@@ -1201,7 +1208,7 @@ async function runQaDiscoverSwarm(args: {
     }
     await mergeMetadata(sessionId, {
       queuedForBrowser: false,
-      streamUrl: proxiedStream(first.streamUrl),
+      streamUrl: proxiedStream(first.streamUrl, first.instanceId),
       qaExplore: explore,
     });
     emitActivity(
@@ -1620,7 +1627,7 @@ async function runQaDiscover(
         if (exploreState) {
           setExplorerState({
             status: "exploring",
-            streamUrl: proxiedStream(eb.streamUrl),
+            streamUrl: proxiedStream(eb.streamUrl, eb.instanceId),
           });
           emitActivity(
             teamId,
@@ -1637,7 +1644,7 @@ async function runQaDiscover(
         }
         await mergeMetadata(sessionId, {
           queuedForBrowser: false,
-          streamUrl: proxiedStream(eb.streamUrl),
+          streamUrl: proxiedStream(eb.streamUrl, eb.instanceId),
           ...(exploreState ? { qaExplore: exploreState } : {}),
         });
 
@@ -2279,7 +2286,7 @@ async function runQaGenerate(
       runnerId = eb.runnerId;
       await mergeMetadata(sessionId, {
         queuedForBrowser: false,
-        streamUrl: proxiedStream(eb.streamUrl),
+        streamUrl: proxiedStream(eb.streamUrl, eb.instanceId),
       });
 
       // Pre-authenticate the generation EB too, so the generator verifies
@@ -2661,7 +2668,7 @@ async function runQaHeal(
       runnerId = eb.runnerId;
       await mergeMetadata(sessionId, {
         queuedForBrowser: false,
-        streamUrl: proxiedStream(eb.streamUrl),
+        streamUrl: proxiedStream(eb.streamUrl, eb.instanceId),
       });
       const { agentHealTestCore } =
         await import("@/lib/playwright/healer-agent");

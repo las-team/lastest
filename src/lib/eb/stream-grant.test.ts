@@ -5,10 +5,12 @@ import {
   verifyStreamGrant,
   getStreamGrantKey,
 } from "@/lib/eb/stream-grant";
+import { deriveStreamAuthToken } from "@lastest/pool-service/common";
 
 const ENV_KEYS = [
   "ENCRYPTION_KEY",
   "SYSTEM_EB_TOKEN",
+  "STREAM_AUTH_TOKEN",
   "EB_STREAM_GRANT_TTL_SECONDS",
 ] as const;
 
@@ -33,12 +35,13 @@ afterEach(() => {
 
 describe("stream grant round-trip", () => {
   it("recovers the server-selected target", () => {
-    const grant = signStreamGrant("10.42.0.7", 9223, "sess-1");
+    const grant = signStreamGrant("10.42.0.7", 9223, "sess-1", "eb-1-abc");
     expect(grant).toBeTruthy();
     expect(verifyStreamGrant(grant)).toMatchObject({
       h: "10.42.0.7",
       p: 9223,
       s: "sess-1",
+      i: "eb-1-abc",
     });
   });
 
@@ -133,19 +136,59 @@ describe("front-proxy.js stays byte-compatible", () => {
     );
   }
 
+  type Parsed = {
+    host: string;
+    port: number;
+    path: string;
+    streamToken: string;
+    reject?: { code: number };
+  };
+
   it("accepts a grant this module signed and routes to its target", () => {
-    const grant = signStreamGrant("10.42.0.7", 9223, "sess-1")!;
-    const out = inProxy(grant, `g=${encodeURIComponent(grant)}&token=abc`) as {
-      verified: { h: string; p: number };
-      parsed: { host: string; port: number; path: string; reject?: unknown };
-    };
+    const grant = signStreamGrant("10.42.0.7", 9223, "sess-1", "eb-1-abc")!;
+    const out = inProxy(
+      grant,
+      `g=${encodeURIComponent(grant)}&token=abc&bin=1`,
+    ) as { verified: { h: string; p: number }; parsed: Parsed };
 
     expect(out.verified).toMatchObject({ h: "10.42.0.7", p: 9223 });
     expect(out.parsed.reject).toBeUndefined();
     expect(out.parsed.host).toBe("10.42.0.7");
     expect(out.parsed.port).toBe(9223);
-    // The grant is stripped; the EB's own stream token is forwarded upstream.
-    expect(out.parsed.path).toBe("/?token=abc");
+    // Grant and token are both stripped from the forwarded request line; the
+    // credential rides upstream as x-stream-token. Other params pass through.
+    expect(out.parsed.path).toBe("/?bin=1");
+  });
+
+  it("derives the pod's stream token from the grant, ignoring any ?token=", () => {
+    // The whole point of the scheme: what the client sent is irrelevant, the
+    // proxy reconstructs the credential the pool service injected.
+    const grant = signStreamGrant("10.42.0.7", 9223, "sess-1", "eb-1-abc")!;
+    const out = inProxy(
+      grant,
+      `g=${encodeURIComponent(grant)}&token=attacker-supplied`,
+    ) as { parsed: Parsed };
+
+    expect(out.parsed.streamToken).toBe(deriveStreamAuthToken("eb-1-abc"));
+    expect(out.parsed.streamToken).not.toBe("attacker-supplied");
+  });
+
+  it("binds the derived token to the instance — one pod's token opens no other", () => {
+    expect(deriveStreamAuthToken("eb-1-abc")).not.toBe(
+      deriveStreamAuthToken("eb-2-def"),
+    );
+  });
+
+  it("falls back to the proxy's own STREAM_AUTH_TOKEN for static fleets", () => {
+    // A static-fleet EB has no provisioner-assigned instanceId, so the grant
+    // carries none and the shared env secret is the only credential available.
+    const grant = signStreamGrant("10.42.0.7", 9223, "sess-1")!;
+    const out = inProxy(grant, `g=${encodeURIComponent(grant)}`, {
+      ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
+      STREAM_AUTH_TOKEN: "fleet-wide-secret",
+    }) as { parsed: Parsed };
+
+    expect(out.parsed.streamToken).toBe("fleet-wide-secret");
   });
 
   it("rejects a grant when the proxy has a different key", () => {

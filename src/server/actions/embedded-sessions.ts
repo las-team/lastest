@@ -200,6 +200,8 @@ export async function upsertEmbeddedSession(
     cdpUrl?: string;
     containerUrl: string;
     viewport?: { width: number; height: number };
+    /** Provisioner instanceId; absent for static-fleet EBs. */
+    instanceId?: string;
   },
   tx?: DBExecutor,
 ): Promise<EmbeddedSession> {
@@ -231,6 +233,7 @@ export async function upsertEmbeddedSession(
         streamUrl: params.streamUrl,
         cdpUrl: params.cdpUrl ?? null,
         containerUrl: params.containerUrl,
+        instanceId: params.instanceId ?? null,
         viewport: params.viewport ?? { width: 1280, height: 720 },
         ...(preserveBusy ? {} : { status: "ready", userId: null }),
         lastActivityAt: now,
@@ -270,6 +273,8 @@ export async function createEmbeddedSession(
     cdpUrl?: string;
     containerUrl: string;
     viewport?: { width: number; height: number };
+    /** Provisioner instanceId; absent for static-fleet EBs. */
+    instanceId?: string;
   },
   tx?: DBExecutor,
 ): Promise<EmbeddedSession> {
@@ -288,6 +293,7 @@ export async function createEmbeddedSession(
     streamUrl: params.streamUrl,
     cdpUrl: params.cdpUrl ?? null,
     containerUrl: params.containerUrl,
+    instanceId: params.instanceId ?? null,
     viewport: params.viewport ?? { width: 1280, height: 720 },
     createdAt: now,
     lastActivityAt: now,
@@ -379,7 +385,6 @@ async function lookupSessionByRunner(
 export async function getStreamUrlForRunner(runnerId: string): Promise<{
   streamUrl: string | null;
   sessionId: string | null;
-  streamAuthToken: string | null;
 } | null> {
   const authed = await requireTeamAccess();
   const session = await lookupSessionByRunner(runnerId);
@@ -388,8 +393,8 @@ export async function getStreamUrlForRunner(runnerId: string): Promise<{
   // Authorization: the caller's team must own the session. The one exception is
   // a shared system EB from the warm pool, which is intentionally streamable by
   // any team that claimed a slot (see listSystemEmbeddedSessions). Without this
-  // check, any authenticated user could pull another team's live CDP stream URL
-  // and the shared STREAM_AUTH_TOKEN.
+  // check, any authenticated user could mint a grant for another team's live
+  // EB and stream it.
   if (session.teamId !== authed.team.id) {
     const [runner] = await db
       .select({ isSystem: runners.isSystem })
@@ -398,11 +403,13 @@ export async function getStreamUrlForRunner(runnerId: string): Promise<{
     if (!runner?.isSystem) return null;
   }
 
-  const streamAuthToken = process.env.STREAM_AUTH_TOKEN || null;
   return {
-    streamUrl: toProxyStreamUrl(session.streamUrl, session.id),
+    streamUrl: toProxyStreamUrl(
+      session.streamUrl,
+      session.id,
+      session.instanceId,
+    ),
     sessionId: session.id,
-    streamAuthToken,
   };
 }
 
@@ -809,6 +816,21 @@ export async function processPoolQueue(): Promise<void> {
 }
 
 /**
+ * Team of the caller's session, or null outside a request scope (cron
+ * dispatch, queue workers, webhooks) where `headers()` isn't available.
+ * Best-effort: used only to pick an EB's PriorityClass, never to authorize
+ * anything — the call sites have already run their own auth guard.
+ */
+async function callerTeamId(): Promise<string | null> {
+  try {
+    const { getCurrentSession } = await import("@/lib/auth/session");
+    return (await getCurrentSession())?.team?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Claim an idle pool EB; if none is available and we're running in Kubernetes
  * mode (EB_PROVISIONER=kubernetes), provision a new Job and wait for it to
  * register, then claim it.
@@ -819,13 +841,24 @@ export async function processPoolQueue(): Promise<void> {
  *   - 'build': may use up to ebPoolMax - EB_RESERVED_INTERACTIVE_SLOTS, leaving
  *     headroom for interactive callers. Build dispatch passes this.
  *
+ * `teamId` is the tenant the browser is for. In kubernetes mode the pool
+ * service reads that team's plan and stamps the pod's PriorityClass
+ * accordingly (free tiers get a preemptible class). It only affects freshly
+ * provisioned Jobs — an EB claimed off the idle pool keeps the class it was
+ * created with. Pass it wherever a team is in scope; omitting it provisions at
+ * the restricted tier.
+ *
  * Returns null if:
  *   - not in kubernetes mode and no idle EB available
  *   - pool is at the effective cap for this purpose
  *   - provisioning timed out (pod failed to register within waitTimeoutMs)
  */
 export async function claimOrProvisionPoolEB(
-  opts: { waitTimeoutMs?: number; purpose?: "build" | "interactive" } = {},
+  opts: {
+    waitTimeoutMs?: number;
+    purpose?: "build" | "interactive";
+    teamId?: string | null;
+  } = {},
 ): Promise<{ runnerId: string; sessionId: string | null } | null> {
   // Fast path: an idle EB is already online. Claiming an existing EB doesn't
   // change pool size so reservation does not apply here — interactive callers
@@ -836,12 +869,18 @@ export async function claimOrProvisionPoolEB(
 
   if (!isDynamicPoolMode()) return null;
 
+  // Tenant for the new pod's PriorityClass. Interactive callers (recording,
+  // debug, AI agents, setup scripts) run under a session, so the team is
+  // already in scope and they don't have to thread it down; background
+  // contexts (build dispatch) have no session and pass `teamId` explicitly.
+  const teamId = opts.teamId ?? (await callerTeamId());
+
   // Ask the pool service for a fresh Job. Cap enforcement (global cap +
   // build/interactive reservation), the in-flight provision counter and the
   // CNI launch throttle all live service-side — they need singleton state.
   // Null covers at-capacity, provisioning-disabled and service-unreachable;
   // the service logs the specific reason.
-  const jobInfo = await provisionEB(opts.purpose ?? "interactive");
+  const jobInfo = await provisionEB(opts.purpose ?? "interactive", { teamId });
   if (!jobInfo) return null;
 
   // Wait for the new EB to auto-register and reach `online`

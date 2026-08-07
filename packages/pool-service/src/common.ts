@@ -184,3 +184,47 @@ export function verifyBootstrapToken(
   if (typeof payload?.e !== "number" || Date.now() > payload.e) return null;
   return payload;
 }
+
+// ── Per-EB stream auth tokens ───────────────────────────────────────────────
+//
+// The credential the front proxy presents to an EB's WebSocket stream port.
+// Same doctrine as the bootstrap token above: derived per instance, never
+// fleet-wide, and never handed to a browser.
+//
+//     STREAM_AUTH_TOKEN = base64url(HMAC-SHA256(streamAuthKey, instanceId))
+//
+// The pool service injects it at provision time; the EB compares incoming
+// connections against it. The front proxy re-derives it from the instanceId in
+// the signed stream grant, so the value itself never crosses the network — the
+// browser only ever holds an opaque grant, which is a capability for one pod
+// and expires with it.
+//
+// This is DUPLICATED in scripts/front-proxy.js (a dependency-free script with
+// no TS loader) — keep the two byte-compatible; src/lib/eb/stream-grant.test.ts
+// cross-checks them in a child process.
+
+const STREAM_AUTH_KEY_INFO = "eb-stream-auth-v1";
+
+/** Null when ENCRYPTION_KEY is absent/malformed — callers MUST fail closed. */
+export function getStreamAuthKey(): Buffer | null {
+  const hex = process.env.ENCRYPTION_KEY?.trim();
+  if (!hex || !ENCRYPTION_KEY_RE.test(hex)) return null;
+  return crypto
+    .createHmac("sha256", Buffer.from(hex, "hex"))
+    .update(STREAM_AUTH_KEY_INFO)
+    .digest();
+}
+
+/**
+ * The stream credential for one EB instance. Returns null when no key is
+ * configured — the provisioner then leaves STREAM_AUTH_TOKEN unset and the EB
+ * refuses every upgrade, which is the correct fail-closed outcome.
+ */
+export function deriveStreamAuthToken(instanceId: string): string | null {
+  const key = getStreamAuthKey();
+  if (!key || !instanceId) return null;
+  return crypto
+    .createHmac("sha256", key)
+    .update(instanceId)
+    .digest("base64url");
+}

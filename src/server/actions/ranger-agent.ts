@@ -10,7 +10,6 @@ import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
 import { claimEmbeddedBrowserForAgent } from "./ai";
 import { releasePoolEB } from "./embedded-sessions";
 import { toProxyStreamUrl } from "@/lib/eb/stream-url";
-import { appendStreamToken } from "@/lib/eb/stream-token";
 import { browsePageMap } from "@/lib/playwright/ranger";
 import type {
   AgentSession,
@@ -28,11 +27,12 @@ import type {
  * (no in-product AI) and persists a rendered page map for the calling agent.
  */
 
-function proxiedStream(raw: string | null | undefined): string | undefined {
+function proxiedStream(
+  raw: string | null | undefined,
+  instanceId?: string | null,
+): string | undefined {
   if (!raw) return undefined;
-  const proxied = toProxyStreamUrl(raw);
-  if (!proxied) return undefined;
-  return appendStreamToken(proxied, process.env.STREAM_AUTH_TOKEN) || undefined;
+  return toProxyStreamUrl(raw, "", instanceId) || undefined;
 }
 
 function emit(
@@ -158,7 +158,7 @@ async function executeRanger(
     runnerId = eb.runnerId;
     await mergeMetadata(sessionId, {
       queuedForBrowser: false,
-      streamUrl: proxiedStream(eb.streamUrl),
+      streamUrl: proxiedStream(eb.streamUrl, eb.instanceId),
     });
     await patchStep(sessionId, "ranger_provision", {
       status: "completed",

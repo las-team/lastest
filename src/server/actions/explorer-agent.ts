@@ -13,7 +13,6 @@ import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
 import { claimEmbeddedBrowserForAgent } from "./ai";
 import { releasePoolEB } from "./embedded-sessions";
 import { toProxyStreamUrl } from "@/lib/eb/stream-url";
-import { appendStreamToken } from "@/lib/eb/stream-token";
 import { injectStorageStateIntoEb } from "@/lib/eb/inject-storage-state";
 import {
   findExistingAuthSetup,
@@ -288,10 +287,12 @@ async function mergeMetadata(
   });
 }
 
-function proxiedStream(raw: string | null | undefined): string | undefined {
+function proxiedStream(
+  raw: string | null | undefined,
+  instanceId?: string | null,
+): string | undefined {
   if (!raw) return undefined;
-  const proxied = toProxyStreamUrl(raw) ?? raw;
-  return appendStreamToken(proxied, process.env.STREAM_AUTH_TOKEN) || undefined;
+  return toProxyStreamUrl(raw, "", instanceId) || undefined;
 }
 
 async function isStopped(
@@ -338,7 +339,7 @@ async function claimSessionEb(
   }).catch(() => undefined);
   await mergeMetadata(sessionId, {
     queuedForBrowser: false,
-    ...(eb ? { streamUrl: proxiedStream(eb.streamUrl) } : {}),
+    ...(eb ? { streamUrl: proxiedStream(eb.streamUrl, eb.instanceId) } : {}),
   });
   if (!eb) return null;
   const entry = {

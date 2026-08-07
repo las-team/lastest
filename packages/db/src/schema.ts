@@ -2204,6 +2204,11 @@ export const embeddedSessions = pgTable("embedded_sessions", {
     .references(() => teams.id),
   runnerId: text("runner_id").references(() => runners.id),
   status: text("status").notNull().default("starting"), // EmbeddedSessionStatus
+  // Provisioner instanceId (`eb-<ts>-<rand>`) reported at auto-register and
+  // bound to the pod's EB_BOOTSTRAP_TOKEN. The front proxy derives this EB's
+  // STREAM_AUTH_TOKEN from it, so it must round-trip into the stream grant.
+  // Null for static-fleet EBs, which have no provisioner-assigned identity.
+  instanceId: text("instance_id"),
   streamUrl: text("stream_url"), // ws://host:9223
   cdpUrl: text("cdp_url"), // http://host:9222 (CDP endpoint for MCP)
   containerUrl: text("container_url"), // http://host:port (for health checks)

@@ -33,8 +33,12 @@
  *   FRONT_PROXY_HOST      public bind address          (default 0.0.0.0)
  *   UPSTREAM_PORT         Next's loopback port         (default 3001)
  *   FRONT_PROXY_DEBUG=1   verbose logging (WS_PROXY_DEBUG also honored)
- *   ENCRYPTION_KEY        grant verification key — filled from .env.local at
- *                         startup when not already in the environment
+ *   ENCRYPTION_KEY        grant verification key, and the key each EB's stream
+ *                         credential is derived from — filled from .env.local
+ *                         at startup when not already in the environment
+ *   STREAM_AUTH_TOKEN     static-fleet fallback credential only; dynamically
+ *                         provisioned EBs get a per-instance one derived from
+ *                         ENCRYPTION_KEY, so leave this unset for them
  */
 
 const http = require("http");
@@ -108,6 +112,33 @@ function streamGrantKey() {
     .digest();
 }
 
+/**
+ * Per-EB stream credential. MIRRORS deriveStreamAuthToken() in
+ * packages/pool-service/src/common.ts — the pool service injects the same value
+ * as STREAM_AUTH_TOKEN when it provisions the pod. Deriving it here is what
+ * lets the browser hold nothing but an opaque grant: the credential is
+ * reconstructed proxy-side and never leaves the trusted hop.
+ */
+const STREAM_AUTH_KEY_INFO = "eb-stream-auth-v1";
+
+function streamAuthKey() {
+  const hex = (process.env.ENCRYPTION_KEY || "").trim();
+  if (!hex || !ENCRYPTION_KEY_RE.test(hex)) return null;
+  return crypto
+    .createHmac("sha256", Buffer.from(hex, "hex"))
+    .update(STREAM_AUTH_KEY_INFO)
+    .digest();
+}
+
+function deriveStreamAuthToken(instanceId) {
+  const key = streamAuthKey();
+  if (!key || !instanceId) return null;
+  return crypto
+    .createHmac("sha256", key)
+    .update(instanceId)
+    .digest("base64url");
+}
+
 function verifyStreamGrant(grant) {
   if (!grant) return null;
   const key = streamGrantKey();
@@ -141,6 +172,9 @@ function verifyStreamGrant(grant) {
   return payload;
 }
 
+/** Printable ASCII only — no CR/LF, no control chars, no header splicing. */
+const SAFE_HEADER_VALUE_RE = /^[\x20-\x7e]+$/;
+
 function parseTarget(url) {
   if (url.startsWith("/api/embedded/stream/ws")) {
     const qi = url.indexOf("?");
@@ -162,11 +196,30 @@ function parseTarget(url) {
     }
 
     sp.delete("g");
+
+    // The EB's stream credential is reconstructed HERE, never carried by the
+    // client. Precedence:
+    //   1. derived from the instanceId in the grant — dynamically provisioned
+    //      pods, where the pool service injected the identical value;
+    //   2. the proxy's own STREAM_AUTH_TOKEN — static fleets (compose replicas)
+    //      have no provisioner to mint per-instance secrets;
+    //   3. a ?token= on the upgrade URL — legacy clients only.
+    // It travels upstream as x-stream-token, and the query form is stripped
+    // from the forwarded request line either way: the request line is what
+    // lands in the pod's and any intermediary's access logs.
+    const legacyToken = sp.get("token");
+    sp.delete("token");
+    const streamToken =
+      deriveStreamAuthToken(payload.i) ||
+      process.env.STREAM_AUTH_TOKEN ||
+      legacyToken;
+
     const qs = sp.toString();
     return {
       host: payload.h,
       port: payload.p,
       path: "/" + (qs ? "?" + qs : ""),
+      streamToken: streamToken || "",
       label: "embedded-stream",
       sessionId: payload.s || "",
     };
@@ -309,6 +362,13 @@ function forwardUpgrade(req, socket, head, cfg) {
       "Sec-WebSocket-Version: " +
         (req.headers["sec-websocket-version"] || "13"),
     ];
+    // Query params are URL-decoded, so a hostile token could carry CRLF and
+    // splice extra headers into this hand-built request. Only forward a token
+    // that is safe as a header value; anything else is dropped and the EB
+    // answers 401 on its own.
+    if (cfg.streamToken && SAFE_HEADER_VALUE_RE.test(cfg.streamToken)) {
+      lines.push("X-Stream-Token: " + cfg.streamToken);
+    }
     if (req.headers["sec-websocket-protocol"]) {
       lines.push(
         "Sec-WebSocket-Protocol: " + req.headers["sec-websocket-protocol"],

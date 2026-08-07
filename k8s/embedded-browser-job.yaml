@@ -12,9 +12,9 @@
 #   - /dev/shm is mounted as a 512Mi memory emptyDir — Chromium crashes under
 #     load on the default 64Mi /dev/shm.
 #
-# Replace INSTANCE_ID + EB_BOOTSTRAP_TOKEN placeholders before applying manually
-# (mint a token via the pool service, or use a static-fleet SYSTEM_EB_TOKEN env
-# instead when no pool service exists).
+# Replace INSTANCE_ID + EB_BOOTSTRAP_TOKEN + STREAM_AUTH_TOKEN placeholders
+# before applying manually (mint them via the pool service, or use a
+# static-fleet SYSTEM_EB_TOKEN env instead when no pool service exists).
 # LASTEST_URL points at the host's pnpm dev via the k3d CoreDNS pin installed
 # by scripts/k3d-up.sh — change it to a Service DNS name in production
 # (Olares) where the app runs in-cluster.
@@ -38,6 +38,16 @@ spec:
         lastest.dev/eb-instance: INSTANCE_ID
     spec:
       restartPolicy: Never
+      # Mirror the image's non-root pwuser (uid 1001) at the orchestrator layer.
+      # The EB image's Dockerfile sets USER pwuser; this locks it down so a
+      # misconfigured image rebuild can't silently run untrusted web content
+      # + user test code as root with Chromium un-sandboxed.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
       volumes:
         - name: dshm
           emptyDir:
@@ -47,6 +57,17 @@ spec:
         - name: embedded-browser
           image: lastest-embedded-browser:latest
           imagePullPolicy: IfNotPresent
+          # Forbid privilege escalation and drop all capabilities. pwuser
+          # already can't gain root; making it explicit keeps the EB locked
+          # down even if the namespace SA is over-permissioned.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           env:
             - name: LASTEST_URL
               value: "http://host.k3d.internal:3000"
@@ -54,6 +75,12 @@ spec:
             # time (packages/pool-service/src/common.ts). Dynamic pods never
             # receive the fleet-wide SYSTEM_EB_TOKEN.
             - name: EB_BOOTSTRAP_TOKEN
+              value: "REPLACE_ME"
+            # Credential for the WebSocket stream port, derived per instance
+            # from ENCRYPTION_KEY (deriveStreamAuthToken in
+            # packages/pool-service/src/common.ts). The front proxy re-derives
+            # it from the signed grant, so it never crosses the network.
+            - name: STREAM_AUTH_TOKEN
               value: "REPLACE_ME"
             - name: INSTANCE_ID
               value: "INSTANCE_ID"
