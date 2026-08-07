@@ -28,6 +28,15 @@ async function updateEarlyAdopterMode(enabled: boolean): Promise<void>;
 - Toast feedback on success/error
 - Located in Settings → Features card
 
+### Server-side Gates
+
+Not every gated feature is a nav item. Server components read
+`session.team.earlyAdopterMode` through a small flag module and pass a boolean
+down, so the gated code degrades by omission rather than by branching:
+
+- `isInteractivePlaybackEnabled()` (`src/lib/playback/feature-flag.ts`) — the
+  spec-28 annotated player. Env override: `INTERACTIVE_PLAYBACK_ENABLED=1`.
+
 ### Sidebar Filtering
 
 - **File**: `src/components/layout/sidebar.tsx`
@@ -37,8 +46,9 @@ async function updateEarlyAdopterMode(enabled: boolean): Promise<void>;
 
 ## Gated Features
 
-| Feature | Purpose                                          |
-| ------- | ------------------------------------------------ |
-| Compose | Build composition with test selection per branch |
-| Suites  | Ordered test suite management                    |
-| Compare | Side-by-side branch comparison                   |
+| Feature              | Purpose                                                          |
+| -------------------- | ---------------------------------------------------------------- |
+| Compose              | Build composition with test selection per branch                  |
+| Suites               | Ordered test suite management                                 |
+| Compare              | Side-by-side branch comparison                                |
+| Interactive playback | Spec-28 annotated player (step scrubber, playback↔evidence sync) |

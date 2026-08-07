@@ -6,6 +6,7 @@ import {
   getPublicShareContext,
   getPublicShareStats,
   getShareDataBySlug,
+  getShareOwnerTeamFlags,
   type PublicShareContext,
   type ShareVisualDiff,
   type ShareTestResult,
@@ -41,6 +42,7 @@ import { buildXrayElements, buildXrayFromDomDiff } from "@/lib/share/xray";
 import type { XrayElement } from "@/lib/share/xray";
 import { ShareVideoPlayer } from "./share-video-player";
 import { resolveStepSegments } from "@/lib/playback/step-timings";
+import { isInteractivePlaybackEnabled } from "@/lib/playback/feature-flag";
 import { ShareWcagPanel } from "@/components/share/share-wcag-panel";
 import { AwardBadgeRow } from "@/components/awards/award-badge-row";
 import { MobileDiffGallery } from "@/components/diff/mobile-diff-gallery-client";
@@ -415,6 +417,13 @@ export default async function PublicSharePage({ params }: PageProps) {
     : null;
   const showAwardBadges = !!award && award.currentTier !== "none";
 
+  // Spec-28 annotated player (step ticks on the scrubber + chapter-rail
+  // follow) is Early Adopter only. Viewers here are anonymous, so the gate
+  // reads the flag of the team that published the share.
+  const interactivePlayback = isInteractivePlaybackEnabled(
+    await getShareOwnerTeamFlags(repoIdForNotes),
+  );
+
   // Platform-wide activity numbers for the social-proof strip near the claim
   // CTA. Rendering is threshold-gated inside SocialProofStrip so early-days
   // counts never read as embarrassing.
@@ -480,19 +489,25 @@ export default async function PublicSharePage({ params }: PageProps) {
               <ShareVideoPlayer
                 clips={clips}
                 tracks={captionTracks}
-                segments={resolveStepSegments({
-                  stepTimings: primaryResult?.stepTimings,
-                  screenshots: primaryResult?.screenshots,
-                  durationMs:
-                    clips[0]?.durationMs ?? primaryResult?.durationMs ?? null,
-                }).map((t) => ({
-                  index: t.stepIndex,
-                  label: t.label,
-                  stepType: t.stepType,
-                  status: t.status,
-                  startMs: t.startMs,
-                  endMs: t.endMs,
-                }))}
+                segments={
+                  interactivePlayback
+                    ? resolveStepSegments({
+                        stepTimings: primaryResult?.stepTimings,
+                        screenshots: primaryResult?.screenshots,
+                        durationMs:
+                          clips[0]?.durationMs ??
+                          primaryResult?.durationMs ??
+                          null,
+                      }).map((t) => ({
+                        index: t.stepIndex,
+                        label: t.label,
+                        stepType: t.stepType,
+                        status: t.status,
+                        startMs: t.startMs,
+                        endMs: t.endMs,
+                      }))
+                    : undefined
+                }
               />
               <figcaption className="text-sm text-muted-foreground">
                 Recording of the visual regression run on {displayDomain}

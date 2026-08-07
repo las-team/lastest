@@ -1965,7 +1965,9 @@ export const teams = pgTable("teams", {
    *  This is the dedicated gate; it replaces inferring availability from whether
    *  an AI key/provider happens to be configured. */
   builtInAiEnabled: boolean("built_in_ai_enabled").default(false),
-  gamificationEnabled: boolean("gamification_enabled").default(true),
+  /** Leaderboard / seasons / Bug Blitz. Opt-in — new teams start with it off
+   *  and enable it in Settings → Features. */
+  gamificationEnabled: boolean("gamification_enabled").default(false),
   /** Verify phase (v1.14+) — when true, /verify is the primary surface and
    *  appears as the first sidebar entry. /run and /review are demoted. */
   verifyPhaseEnabled: boolean("verify_phase_enabled").default(true),

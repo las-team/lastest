@@ -206,6 +206,10 @@ interface BoardFocusClientProps {
    *  review panel can render every token tile, not just those that
    *  appear in violations. */
   repoDesignSystem: import("@/lib/db/schema").DesignSystemConfig | null;
+  /** Early Adopter gate for the spec-28 annotated player (see
+   *  `@/lib/playback/feature-flag`). When false the Run pane renders no
+   *  recording card at all — its pre-spec-28 state. */
+  interactivePlayback?: boolean;
 }
 
 type Mode = "board" | "focus";
@@ -1267,6 +1271,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
             violations: props.designSystemViolations,
             config: props.repoDesignSystem,
           }}
+          interactivePlayback={props.interactivePlayback ?? false}
         />
       )}
 

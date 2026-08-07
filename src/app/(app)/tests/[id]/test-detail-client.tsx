@@ -229,6 +229,11 @@ interface TestDetailClientProps {
   stabilizationDefaults?: StabilizationSettings | null;
   banAiMode?: boolean;
   earlyAdopterMode?: boolean;
+  /** Early Adopter gate for the spec-28 annotated player. Off → recordings
+   *  render with the plain scrubber (pre-spec-28 behaviour). Kept separate
+   *  from `earlyAdopterMode` because the definitions-page embed forces that
+   *  one on. See `@/lib/playback/feature-flag`. */
+  interactivePlayback?: boolean;
   diffDefaults?: DiffSensitivitySettings | null;
   playwrightDefaults?: PlaywrightSettingsForDefaults | null;
   envBaseUrl?: string | null;
@@ -438,6 +443,7 @@ export function TestDetailClient({
   googleSheetsAccount = null,
   stabilizationDefaults,
   earlyAdopterMode = false,
+  interactivePlayback = false,
   diffDefaults,
   playwrightDefaults,
   envBaseUrl,
@@ -2220,18 +2226,24 @@ export function TestDetailClient({
                                 durationMs: result.durationMs,
                               },
                             ]}
-                            segments={resolveStepSegments({
-                              stepTimings: result.stepTimings,
-                              screenshots: result.screenshots,
-                              durationMs: result.durationMs,
-                            }).map((t) => ({
-                              index: t.stepIndex,
-                              label: t.label,
-                              stepType: t.stepType,
-                              status: t.status,
-                              startMs: t.startMs,
-                              endMs: t.endMs,
-                            }))}
+                            // Annotated scrubber is Early Adopter only —
+                            // omitting `segments` yields the plain player.
+                            segments={
+                              interactivePlayback
+                                ? resolveStepSegments({
+                                    stepTimings: result.stepTimings,
+                                    screenshots: result.screenshots,
+                                    durationMs: result.durationMs,
+                                  }).map((t) => ({
+                                    index: t.stepIndex,
+                                    label: t.label,
+                                    stepType: t.stepType,
+                                    status: t.status,
+                                    startMs: t.startMs,
+                                    endMs: t.endMs,
+                                  }))
+                                : undefined
+                            }
                           />
                         </div>
                       ))}

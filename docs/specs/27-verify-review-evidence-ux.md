@@ -113,6 +113,12 @@ Deviations from the sections above, chosen during implementation:
   capture-side work first. The storage layer emits `low` signal and can
   never flip a verdict — it is informational by design, mode default `log`
   with a `storage_mode` settings column + per-test override.
+- **Run-pane recording is Early Adopter gated** — the player itself is
+  spec 28's, so `RunPlaybackCard` renders only when
+  `isInteractivePlaybackEnabled(team)` (see
+  `docs/specs/28-interactive-test-playback.md`). Everything else in this
+  spec (step detail header, tab counts/cycling, network + perf panes, State
+  tab and the `storage` check layer) is ungated.
 - **Perf chart** overlays the baseline as dashed per-metric reference lines
   from `step_comparisons.layers.perf.deltas` (metric-level, not per-step —
   per-step baseline samples aren't in the verify payload). CLS renders as

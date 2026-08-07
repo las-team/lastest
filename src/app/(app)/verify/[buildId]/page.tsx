@@ -14,6 +14,7 @@ import {
 } from "@/lib/db/queries";
 import { getCurrentSession, requireRepoAccess } from "@/lib/auth";
 import { isVerifyPhaseEnabled } from "@/lib/verify/feature-flag";
+import { isInteractivePlaybackEnabled } from "@/lib/playback/feature-flag";
 import { fetchRepoBranches } from "@/server/actions/repos";
 import { BoardFocusClient } from "./board-focus-client";
 
@@ -102,6 +103,7 @@ export default async function VerifyBuildPage({
       designSystemTrend={designSystemTrend}
       designSystemViolations={designSystemViolations}
       repoDesignSystem={pwSettings?.designSystem ?? null}
+      interactivePlayback={isInteractivePlaybackEnabled(session?.team)}
     />
   );
 }

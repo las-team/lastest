@@ -84,8 +84,11 @@ export function ReplayPlayer({
   }, []);
 
   // Broadcast the primary clip's position so sibling islands (chapter rail,
-  // step strips) can highlight along without a shared React context.
+  // step strips) can highlight along without a shared React context. Tied to
+  // `segments` — that prop IS the spec-28 Early Adopter gate, so a gated page
+  // emits no time events and its chapter rail stays static, as before.
   useEffect(() => {
+    if (!segments || segments.length === 0) return;
     const el = handlesRef.current[0]?.getElement();
     if (!el) return;
     let lastDispatch = 0;
@@ -101,7 +104,7 @@ export function ReplayPlayer({
     };
     el.addEventListener("timeupdate", onTimeUpdate);
     return () => el.removeEventListener("timeupdate", onTimeUpdate);
-  }, [clips.length]);
+  }, [clips.length, segments]);
 
   return (
     <>
