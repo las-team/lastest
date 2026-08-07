@@ -11,6 +11,7 @@ import { syncReposIfStale, fetchRepoBranches } from "@/server/actions/repos";
 import { getEnvironmentConfig } from "@/server/actions/environment";
 import { listSystemEmbeddedSessions } from "@/server/actions/embedded-sessions";
 import { isVerifyPhaseEnabled } from "@/lib/verify/feature-flag";
+import { isBillingEnabled } from "@/lib/billing/enabled";
 import { Sidebar } from "./sidebar";
 
 export async function SidebarServer({
@@ -25,6 +26,7 @@ export async function SidebarServer({
         selectedRepo={null}
         currentUser={null}
         team={null}
+        billingEnabled={isBillingEnabled()}
         className={className}
       />
     );
@@ -79,6 +81,7 @@ export async function SidebarServer({
       ebSessions={ebSessions}
       verifyPendingCount={verifyBadge.unsortedCount}
       verifyHasNewerCommit={verifyBadge.hasNewerCommit}
+      billingEnabled={isBillingEnabled()}
       className={className}
     />
   );

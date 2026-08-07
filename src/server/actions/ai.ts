@@ -1,6 +1,7 @@
 "use server";
 
 import * as queries from "@/lib/db/queries";
+import { beginAgentEbUsage } from "@/lib/billing/agent-eb-usage";
 import { validateTestCode } from "@lastest/shared";
 import { requireRepoAccess } from "@/lib/auth";
 import {
@@ -67,10 +68,17 @@ async function isCdpReachable(cdpUrl: string): Promise<boolean> {
  * Waits (polls) until an EB becomes available, up to maxWaitMs.
  * Returns CDP + stream URLs and the runnerId for release.
  * Caller MUST call releasePoolEB(runnerId) when done.
+ *
+ * Pass `billTeamId` to meter the browser time this claim consumes: the
+ * claim→release window is billed to that team's monthly run-minutes when the
+ * EB is released. Pool runners belong to the internal system team, so the
+ * caller is the only place that knows who to attribute it to. Omit it for
+ * paths that meter separately (the test executor) to avoid double-counting.
  */
 export async function claimEmbeddedBrowserForAgent(
   maxWaitMs = 5 * 60 * 1000,
   onQueued?: () => void,
+  billTeamId?: string,
 ): Promise<
   | {
       cdpUrl: string;
@@ -106,6 +114,7 @@ export async function claimEmbeddedBrowserForAgent(
 
       if (session?.cdpUrl && session?.streamUrl) {
         if (await isCdpReachable(session.cdpUrl)) {
+          if (billTeamId) beginAgentEbUsage(poolEB.runnerId, billTeamId);
           return {
             cdpUrl: session.cdpUrl,
             streamUrl: session.streamUrl,

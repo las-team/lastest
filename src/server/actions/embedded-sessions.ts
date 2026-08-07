@@ -1,6 +1,7 @@
 "use server";
 
 import { db } from "@/lib/db";
+import { endAgentEbUsage } from "@/lib/billing/agent-eb-usage";
 import {
   embeddedSessions,
   runners,
@@ -590,6 +591,10 @@ export async function claimPoolEB(): Promise<{
  * Internal function — no requireTeamAccess (called from executor).
  */
 export async function releasePoolEB(runnerId: string): Promise<void> {
+  // Settle metered agent browser time before anything can early-return below
+  // (an unknown runner is a no-op, so this is safe for every release path).
+  await endAgentEbUsage(runnerId);
+
   const [runner] = await db
     .select({
       status: runners.status,

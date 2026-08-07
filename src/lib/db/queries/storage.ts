@@ -127,6 +127,33 @@ export async function recordTeamRunCompletion(
 }
 
 /**
+ * Atomically add metered browser time for an AGENT session (QA agent, Explorer,
+ * App Map "Explore" swarm) to a team's monthly run-minutes.
+ *
+ * Separate from {@link recordTeamRunCompletion} because agent browser time is
+ * not a test run: the quota it consumes is denominated in minutes, but bumping
+ * `runs_this_month` too would inflate the run COUNT shown in Settings → Billing
+ * with sessions the user never started as runs. Same month-rollover semantics
+ * and the same CASE-on-usage_month concurrency safety.
+ */
+export async function recordTeamAgentMinutes(
+  teamId: string,
+  durationMs: number,
+): Promise<void> {
+  const minutes = Math.max(0, durationMs) / 60_000;
+  if (minutes <= 0) return;
+  const month = currentUsageMonth();
+  await db
+    .update(teams)
+    .set({
+      runMinutesThisMonth: sql`CASE WHEN ${teams.usageMonth} = ${month} THEN COALESCE(${teams.runMinutesThisMonth}, 0) + ${minutes} ELSE ${minutes} END`,
+      usageMonth: month,
+      runUsageLastCalculatedAt: new Date(),
+    })
+    .where(eq(teams.id, teamId));
+}
+
+/**
  * PRIVILEGED: sets a team's monthly run quota with no auth check of its
  * own. Same contract as {@link updateTeamStorageQuota} — only call from
  * behind `requireCapability('team:admin')` or a trusted billing/webhook

@@ -7,6 +7,8 @@ import {
   assertQaAgentAccess,
   hasQaAgentAccess,
 } from "@/lib/billing/feature-access";
+import { isBillingEnabled } from "@/lib/billing/enabled";
+import { assertAgentRunMinutesAvailable } from "@/lib/billing/agent-eb-usage";
 import { getNextRunTime, isValidCron } from "@/lib/scheduling/cron";
 import {
   assertSafeOutboundUrl,
@@ -659,9 +661,13 @@ async function runQaLogin(
     // Unavailability is NOT fatal: resolution degrades and discovery (which
     // claims its own EB later) picks up the deferred validation.
     let cdpUrl: string | undefined;
-    const eb = await claimEmbeddedBrowserForAgent(EB_CLAIM_TIMEOUT_MS, () => {
-      mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
-    }).catch(() => undefined);
+    const eb = await claimEmbeddedBrowserForAgent(
+      EB_CLAIM_TIMEOUT_MS,
+      () => {
+        mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+      },
+      teamId,
+    ).catch(() => undefined);
     await mergeMetadata(sessionId, {
       queuedForBrowser: false,
       ...(eb ? { streamUrl: proxiedStream(eb.streamUrl, eb.instanceId) } : {}),
@@ -1173,6 +1179,7 @@ async function runQaDiscoverSwarm(args: {
       () => {
         mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
       },
+      teamId,
     );
     if (!first) throw new Error("No embedded browser available");
     ebs.push(first);
@@ -1180,9 +1187,11 @@ async function runQaDiscoverSwarm(args: {
     // #2..K best-effort, 30s each, in parallel — run with whoever arrives.
     const extras = await Promise.all(
       Array.from({ length: want - 1 }, () =>
-        claimEmbeddedBrowserForAgent(SWARM_EXTRA_CLAIM_TIMEOUT_MS).catch(
-          () => undefined,
-        ),
+        claimEmbeddedBrowserForAgent(
+          SWARM_EXTRA_CLAIM_TIMEOUT_MS,
+          undefined,
+          teamId,
+        ).catch(() => undefined),
       ),
     );
     for (const eb of extras) if (eb) ebs.push(eb);
@@ -1612,9 +1621,13 @@ async function runQaDiscover(
       };
       await updateSubsteps(sessionId, "qa_discover", substeps);
     } else {
-      const eb = await claimEmbeddedBrowserForAgent(EB_CLAIM_TIMEOUT_MS, () => {
-        mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
-      });
+      const eb = await claimEmbeddedBrowserForAgent(
+        EB_CLAIM_TIMEOUT_MS,
+        () => {
+          mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+        },
+        teamId,
+      );
       if (!eb) {
         substeps[2] = {
           ...substeps[2],
@@ -2272,9 +2285,13 @@ async function runQaGenerate(
   let runnerId: string | undefined;
   try {
     if (browserItems.length > 0) {
-      const eb = await claimEmbeddedBrowserForAgent(EB_CLAIM_TIMEOUT_MS, () => {
-        mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
-      });
+      const eb = await claimEmbeddedBrowserForAgent(
+        EB_CLAIM_TIMEOUT_MS,
+        () => {
+          mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+        },
+        teamId,
+      );
       if (!eb) {
         await setStepFailed(
           sessionId,
@@ -2661,9 +2678,13 @@ async function runQaHeal(
   let runnerId: string | undefined;
   const healedTestIds: string[] = [];
   try {
-    const eb = await claimEmbeddedBrowserForAgent(EB_CLAIM_TIMEOUT_MS, () => {
-      mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
-    });
+    const eb = await claimEmbeddedBrowserForAgent(
+      EB_CLAIM_TIMEOUT_MS,
+      () => {
+        mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+      },
+      teamId,
+    );
     if (eb) {
       runnerId = eb.runnerId;
       await mergeMetadata(sessionId, {
@@ -3018,7 +3039,11 @@ export async function startQaAgent(
   input: StartQaAgentInput,
 ): Promise<{ sessionId: string }> {
   const { team } = await requireRepoAccess(input.repositoryId);
-  assertQaAgentAccess(team.plan);
+  assertQaAgentAccess(team.plan, isBillingEnabled());
+  // Agent sessions hold embedded browsers for their whole run — metered
+  // against the same run-minute quota as test runs. Covers the App Map
+  // "Explore" launcher too, which funnels through here.
+  await assertAgentRunMinutesAvailable(team.id);
 
   const targetUrl = input.targetUrl.trim().replace(/\/+$/, "");
   if (!/^https?:\/\//i.test(targetUrl)) {
@@ -3173,7 +3198,7 @@ async function requireQaSession(sessionId: string): Promise<{
   teamId: string;
 }> {
   const { team } = await requireTeamAccess();
-  assertQaAgentAccess(team.plan);
+  assertQaAgentAccess(team.plan, isBillingEnabled());
   const session = await queries.getAgentSession(sessionId);
   if (!session || session.kind !== "qa") {
     throw new Error("QA session not found");
@@ -4057,7 +4082,7 @@ async function requireQaTask(
   taskId: string,
 ): Promise<{ task: QaTask; teamId: string }> {
   const { team } = await requireTeamAccess();
-  assertQaAgentAccess(team.plan);
+  assertQaAgentAccess(team.plan, isBillingEnabled());
   const task = await queries.getQaTask(taskId);
   if (!task || task.teamId !== team.id) {
     throw new Error("Task not found");
@@ -4076,7 +4101,7 @@ export async function addQaTask(input: {
   source?: QaTaskSource;
 }): Promise<{ taskId: string }> {
   const { team, user } = await requireRepoAccess(input.repositoryId);
-  assertQaAgentAccess(team.plan);
+  assertQaAgentAccess(team.plan, isBillingEnabled());
   const title = input.title.trim().slice(0, MAX_TASK_TITLE);
   if (!title) throw new Error("The task needs a title");
   const actorName = user.name || user.email || null;
@@ -4209,8 +4234,15 @@ export async function startQaAgentFromTrigger(opts: {
 
   // Triggers respect the same plan gate as the UI.
   const team = await queries.getTeam(teamId);
-  if (!team || !hasQaAgentAccess(team.plan)) {
+  if (!team || !hasQaAgentAccess(team.plan, isBillingEnabled())) {
     return { skipped: "QA agent not available on the team's plan" };
+  }
+
+  // ...and the same run-minute ceiling as a manual start.
+  try {
+    await assertAgentRunMinutesAvailable(teamId);
+  } catch {
+    return { skipped: "Monthly run-minute quota exceeded" };
   }
 
   const active = await queries.getActiveAgentSession(repositoryId, "qa");
@@ -4319,7 +4351,7 @@ export async function updateQaTriggerConfig(
   input: QaTriggerConfigInput,
 ) {
   const { team } = await requireRepoAccess(repositoryId);
-  assertQaAgentAccess(team.plan);
+  assertQaAgentAccess(team.plan, isBillingEnabled());
 
   const patch: Parameters<typeof queries.upsertQaAgentTrigger>[2] = {};
   if (input.scheduleEnabled !== undefined) {

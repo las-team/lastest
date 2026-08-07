@@ -4,6 +4,7 @@ import { getSelectedRepository, getRepositoriesByTeam } from "@/lib/db/queries";
 import { getCurrentSession } from "@/lib/auth";
 import { getAppMap, getActiveExploration } from "@/server/actions/app-map";
 import { hasQaAgentAccess } from "@/lib/billing/feature-access";
+import { isBillingEnabled } from "@/lib/billing/enabled";
 import { planConfig } from "@/lib/billing/plans";
 
 export default async function AppMapPage() {
@@ -24,7 +25,7 @@ export default async function AppMapPage() {
   }
 
   const qaAgentEnabled = session?.team
-    ? hasQaAgentAccess(session.team.plan)
+    ? hasQaAgentAccess(session.team.plan, isBillingEnabled())
     : false;
   const [result, activeExploration] = await Promise.all([
     getAppMap(),
