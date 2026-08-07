@@ -2,6 +2,7 @@ import { chromium, type Page } from "playwright";
 import { generateWithAI } from "@/lib/ai";
 import type { AIProviderConfig } from "@/lib/ai";
 import { parseAiJson } from "@/lib/ai/json-parse";
+import { applyCrawlerIdentity } from "@/lib/qa-agent/politeness";
 import type {
   ExplorerActionLog,
   ExplorerActionStep,
@@ -269,6 +270,12 @@ async function runScenarioOnPage(
 
   try {
     const baseOrigin = new URL(input.targetUrl).origin;
+
+    // Same identity the discovery crawlers use: automated traffic must never
+    // present as stock Chromium (`@/lib/qa-agent/politeness`). Scenarios are
+    // user-directed acts on the app under test, so no robots gate here — only
+    // the crawlers, which choose their own URLs, are gated.
+    await applyCrawlerIdentity(page);
 
     page.on("console", (msg) => {
       if (msg.type() !== "error" || consoleErrors.length >= 15) return;

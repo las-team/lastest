@@ -1,6 +1,11 @@
 import { chromium, type Page } from "playwright";
 import type { QaPageSnapshot } from "@/lib/db/schema";
 import { isAuthLink } from "@/lib/qa-agent/auth-links";
+import {
+  applyCrawlerIdentity,
+  fetchRobotsPolicy,
+  pacerFor,
+} from "@/lib/qa-agent/politeness";
 
 /**
  * QA Agent live discovery crawl. Connects to a provisioned Embedded Browser
@@ -10,6 +15,10 @@ import { isAuthLink } from "@/lib/qa-agent/auth-links";
  * responses are recorded so the planner can ground API-group tests in real
  * endpoints. Deterministic — no AI involved. Driving the EB's page makes the
  * crawl watchable via the EB screencast.
+ *
+ * Politeness (`@/lib/qa-agent/politeness`): identifying User-Agent, robots.txt
+ * respected for every navigation, and a paced request rate — same rules the
+ * explorer swarm follows.
  */
 
 const PAGE_NAV_TIMEOUT_MS = 30_000;
@@ -283,12 +292,20 @@ export async function crawlTargetApp(
     const context = browser.contexts()[0] ?? (await browser.newContext());
     const page = context.pages()[0] ?? (await context.newPage());
     const base = new URL(targetUrl);
+    await applyCrawlerIdentity(page);
+    const robots = await fetchRobotsPolicy(page, base.origin);
+    const pacer = pacerFor(robots);
     const observers = attachPageObservers(page, base.origin);
 
     // With a known login page, authenticate BEFORE the crawl starts so every
     // mapped page reflects the post-login state.
-    if (options.credentials && options.loginUrl) {
+    if (
+      options.credentials &&
+      options.loginUrl &&
+      robots.isAllowed(options.loginUrl)
+    ) {
       try {
+        await pacer.wait();
         await page.goto(options.loginUrl, {
           waitUntil: "domcontentloaded",
           timeout: PAGE_NAV_TIMEOUT_MS,
@@ -313,8 +330,14 @@ export async function crawlTargetApp(
       const { url, depth } = queue.shift()!;
       if (visited.has(url)) continue;
       visited.add(url);
+      if (!robots.isAllowed(url)) {
+        console.warn(`[QaCrawl] robots.txt disallows ${url} — skipping`);
+        continue;
+      }
       observers.reset();
       try {
+        await pacer.wait();
+        if (options.signal?.aborted) break;
         await page.goto(url, {
           waitUntil: "domcontentloaded",
           timeout: PAGE_NAV_TIMEOUT_MS,

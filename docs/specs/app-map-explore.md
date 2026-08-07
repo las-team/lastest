@@ -94,6 +94,19 @@ session per repo preserved.
   concrete URLs per canonical path so `/orders/1..999` doesn't burn budget).
 - **Progressive claim**: explorer #1 gets the full 5-min claim timeout (must
   succeed); #2..K get 30s each — run with however many arrive.
+- **Politeness** (`src/lib/qa-agent/politeness.ts`), decided once and shared by
+  the whole swarm, since N explorers hit one origin:
+  - **Identity**: every explorer's UA carries `LastestBot/1.0
+    (+https://lastest.cloud/bot)` (CDP `Emulation.setUserAgentOverride`, appended
+    to the real Chromium UA) so a target can identify and block us.
+  - **robots.txt**: fetched once per run through an EB (never a host-side
+    `fetch` — that would be an SSRF primitive) and enforced at the frontier, so
+    a disallowed URL is never requested even once. Blocked URLs surface as
+    `robots_txt` rows in the progress panel. `LASTEST_IGNORE_ROBOTS=1` is the
+    escape hatch for own-app staging targets that ship `Disallow: /`.
+  - **Pace**: one shared `CrawlPacer` serializes navigations swarm-wide at
+    `max(500ms, robots Crawl-delay)` — 10 explorers still produce one page
+    request per slot, not ten.
 
 ### 1.6 Live exploration progress
 

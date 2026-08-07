@@ -170,7 +170,11 @@ export function ExploreProgressPanel({
               >
                 <AlertTriangle className="h-3 w-3 shrink-0" />
                 <span className="font-medium uppercase">
-                  {b.reason === "auth_wall" ? "Auth wall" : "Dead end"}
+                  {b.reason === "auth_wall"
+                    ? "Auth wall"
+                    : b.reason === "robots_txt"
+                      ? "robots.txt"
+                      : "Dead end"}
                 </span>
                 <span
                   className="min-w-0 flex-1 truncate font-mono"
