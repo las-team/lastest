@@ -184,6 +184,10 @@ interface FocusViewProps {
     }>;
     violations?: BuildA11yViolationRow[];
   };
+  /** Early Adopter gate for the spec-28 annotated player. Off → the Run pane
+   *  renders no recording card (its pre-spec-28 state). See
+   *  `@/lib/playback/feature-flag`. */
+  interactivePlayback?: boolean;
 }
 
 type CompareTab = EvidenceLayer | "text" | "run";
@@ -1272,6 +1276,7 @@ export function FocusView(props: FocusViewProps) {
             buildDesignSystem={props.buildDesignSystem}
             buildId={props.buildId}
             repositoryId={props.repositoryId}
+            interactivePlayback={props.interactivePlayback ?? false}
             regionsCtx={{
               showRegions,
               setShowRegions,
@@ -2008,6 +2013,8 @@ interface ComparePaneProps {
   buildId: string;
   /** Repo forwarded so the Network pane can seed a new API test from a row. */
   repositoryId: string | null;
+  /** Early Adopter gate for the spec-28 annotated player (Run pane). */
+  interactivePlayback: boolean;
 }
 
 function ComparePane({
@@ -2024,6 +2031,7 @@ function ComparePane({
   buildDesignSystem,
   buildId,
   repositoryId,
+  interactivePlayback,
 }: ComparePaneProps) {
   if (!step) {
     return (
@@ -2105,6 +2113,7 @@ function ComparePane({
         activeStepId={activeStepId}
         onSelectStep={onSelectStep}
         buildId={buildId}
+        interactivePlayback={interactivePlayback}
       />
     );
   if (tab === "visual")
@@ -2565,6 +2574,7 @@ function RunPane({
   activeStepId,
   onSelectStep,
   buildId,
+  interactivePlayback,
 }: {
   result: TestResultLite | null;
   failed: boolean;
@@ -2572,6 +2582,7 @@ function RunPane({
   activeStepId: string | null;
   onSelectStep: (stepId: string) => void;
   buildId: string;
+  interactivePlayback: boolean;
 }) {
   if (!result) {
     return (
@@ -2691,8 +2702,9 @@ function RunPane({
       {/* Step-synced recording (spec 28). Segment ticks come from persisted
           stepTimings; clicking a segment seeks AND selects that step in the
           case rail. "Follow playback" (opt-in) keeps the rail selection on
-          the step currently playing. */}
-      {result.videoPath && (
+          the step currently playing. Early Adopter only — before spec 28 the
+          Run pane had no player at all, so gated teams get no card. */}
+      {interactivePlayback && result.videoPath && (
         <RunPlaybackCard
           result={result}
           stepCells={stepCells}

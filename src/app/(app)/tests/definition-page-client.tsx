@@ -208,6 +208,7 @@ export function DefinitionPageClient({
   repositoryId,
   selectedBranch,
   banAiMode,
+  earlyAdopterMode,
   areas,
   tests,
   routes,
@@ -1513,6 +1514,7 @@ export function DefinitionPageClient({
                     }
                     banAiMode={banAiMode}
                     earlyAdopterMode={true}
+                    interactivePlayback={earlyAdopterMode ?? false}
                     diffDefaults={openTestDetailData.diffDefaults}
                     playwrightDefaults={openTestDetailData.playwrightDefaults}
                     envBaseUrl={openTestDetailData.envBaseUrl}

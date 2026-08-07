@@ -8,6 +8,8 @@ import {
   visualDiffs,
   testResults,
   stepComparisons,
+  repositories,
+  teams,
 } from "../schema";
 import type {
   NewPublicShare,
@@ -296,6 +298,25 @@ export interface PublicShareContext {
   build: typeof builds.$inferSelect;
   test: typeof tests.$inferSelect | null;
   testRun: typeof testRuns.$inferSelect | null;
+}
+
+/**
+ * Feature flags of the team that owns a share's repository. A public share
+ * page has no session, so per-team gating (e.g. the spec-28 annotated player)
+ * reads the OWNER's flags instead of the anonymous viewer's. One join —
+ * the share page is server-rendered on every request.
+ */
+export async function getShareOwnerTeamFlags(
+  repositoryId: string | null | undefined,
+): Promise<{ earlyAdopterMode: boolean } | null> {
+  if (!repositoryId) return null;
+  const [row] = await db
+    .select({ earlyAdopterMode: teams.earlyAdopterMode })
+    .from(repositories)
+    .innerJoin(teams, eq(repositories.teamId, teams.id))
+    .where(eq(repositories.id, repositoryId))
+    .limit(1);
+  return row ? { earlyAdopterMode: row.earlyAdopterMode ?? false } : null;
 }
 
 export async function getActiveBaselinesForTest(

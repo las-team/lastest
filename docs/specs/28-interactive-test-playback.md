@@ -121,6 +121,22 @@ Deviations from the sections above, chosen during implementation:
   `lastest:playback-time` document event that `ChapterRail` consumes.
 - The timing ladder helper is `resolveStepSegments`
   (`src/lib/playback/step-timings.ts`).
+- **Ships behind Early Adopter mode** (`docs/specs/12-early-adopter-mode.md`)
+  via `isInteractivePlaybackEnabled()`
+  (`src/lib/playback/feature-flag.ts`, env override
+  `INTERACTIVE_PLAYBACK_ENABLED=1`). The gate is the `segments` prop: each
+  surface passes it only when enabled, and `<VideoPlayer>` without segments
+  renders exactly the pre-spec-28 scrubber. `ReplayPlayer` likewise only
+  broadcasts `lastest:playback-time` when it has segments, so the chapter
+  rail's follow-highlight is gated by the same switch. Verify's Run pane had
+  no player before this spec, so it renders no recording card when gated.
+  Capture (step timings, rebased clocks) is **not** gated — data keeps
+  accruing so promoting the flag needs no backfill.
+  Gate call sites: `src/app/(app)/verify/[buildId]/page.tsx`,
+  `src/app/(app)/tests/definition-page-client.tsx` (the only renderer of
+  `TestDetailClient`), and `src/app/(public)/r/[slug]/page.tsx` — the share
+  page is anonymous, so it reads the *publishing* team's flag through
+  `getShareOwnerTeamFlags()`.
 
 ## Out of scope
 
