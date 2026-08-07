@@ -261,7 +261,8 @@ export async function agentHealTests(
   let fixed = 0;
   let failed = 0;
 
-  const { claimEmbeddedBrowserForAgent } = await import("@/server/actions/ai");
+  const { claimEmbeddedBrowserForAgent } =
+    await import("@/lib/eb/claim-for-agent");
   const { releasePoolEB } = await import("@/server/actions/embedded-sessions");
 
   // Process with concurrency limit of 3. Each concurrent heal claims its OWN

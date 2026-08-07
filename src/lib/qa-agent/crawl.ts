@@ -1,11 +1,7 @@
 import { chromium, type Page } from "playwright";
 import type { QaPageSnapshot } from "@/lib/db/schema";
 import { isAuthLink } from "@/lib/qa-agent/auth-links";
-import {
-  applyCrawlerIdentity,
-  fetchRobotsPolicy,
-  pacerFor,
-} from "@/lib/qa-agent/politeness";
+import { applyUserAgentOverride, CrawlPacer } from "@/lib/qa-agent/politeness";
 
 /**
  * QA Agent live discovery crawl. Connects to a provisioned Embedded Browser
@@ -16,9 +12,9 @@ import {
  * endpoints. Deterministic — no AI involved. Driving the EB's page makes the
  * crawl watchable via the EB screencast.
  *
- * Politeness (`@/lib/qa-agent/politeness`): identifying User-Agent, robots.txt
- * respected for every navigation, and a paced request rate — same rules the
- * explorer swarm follows.
+ * Pacing (`@/lib/qa-agent/politeness`): navigations are rate-limited at the
+ * same floor the explorer swarm uses, so a discovery crawl can't burst the
+ * target regardless of how many pages it maps.
  */
 
 const PAGE_NAV_TIMEOUT_MS = 30_000;
@@ -46,6 +42,9 @@ export interface QaCrawlOptions {
   /** Rank login/signup/register links first when picking pages to follow, so
    *  public-only discovery reliably maps the auth surface within maxPages. */
   prioritizeAuthLinks?: boolean;
+  /** Repo's `playwright_settings.userAgentOverride`. Unset = stock browser UA,
+   *  same as an executor run with the setting empty. */
+  userAgentOverride?: string | null;
   signal?: AbortSignal;
 }
 
@@ -292,18 +291,13 @@ export async function crawlTargetApp(
     const context = browser.contexts()[0] ?? (await browser.newContext());
     const page = context.pages()[0] ?? (await context.newPage());
     const base = new URL(targetUrl);
-    await applyCrawlerIdentity(page);
-    const robots = await fetchRobotsPolicy(page, base.origin);
-    const pacer = pacerFor(robots);
+    await applyUserAgentOverride(page, options.userAgentOverride);
+    const pacer = new CrawlPacer();
     const observers = attachPageObservers(page, base.origin);
 
     // With a known login page, authenticate BEFORE the crawl starts so every
     // mapped page reflects the post-login state.
-    if (
-      options.credentials &&
-      options.loginUrl &&
-      robots.isAllowed(options.loginUrl)
-    ) {
+    if (options.credentials && options.loginUrl) {
       try {
         await pacer.wait();
         await page.goto(options.loginUrl, {
@@ -330,10 +324,6 @@ export async function crawlTargetApp(
       const { url, depth } = queue.shift()!;
       if (visited.has(url)) continue;
       visited.add(url);
-      if (!robots.isAllowed(url)) {
-        console.warn(`[QaCrawl] robots.txt disallows ${url} — skipping`);
-        continue;
-      }
       observers.reset();
       try {
         await pacer.wait();

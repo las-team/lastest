@@ -7,7 +7,7 @@ import {
   SsrfBlockedError,
 } from "@/lib/security/outbound-url";
 import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
-import { claimEmbeddedBrowserForAgent } from "./ai";
+import { claimEmbeddedBrowserForAgent } from "@/lib/eb/claim-for-agent";
 import { releasePoolEB } from "./embedded-sessions";
 import { toProxyStreamUrl } from "@/lib/eb/stream-url";
 import { browsePageMap } from "@/lib/playwright/ranger";

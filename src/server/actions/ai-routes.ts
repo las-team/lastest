@@ -22,7 +22,7 @@ import {
 } from "@/lib/github/content";
 import { createJob, completeJob, failJob } from "./jobs";
 import { requireRepoAccess } from "@/lib/auth";
-import { claimEmbeddedBrowserForAgent } from "./ai";
+import { claimEmbeddedBrowserForAgent } from "@/lib/eb/claim-for-agent";
 import { releasePoolEB } from "./embedded-sessions";
 
 /** Extract first valid JSON array from text, handling nested brackets correctly */

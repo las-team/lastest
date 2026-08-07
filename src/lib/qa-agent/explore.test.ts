@@ -31,37 +31,6 @@ function snapshot(overrides: Partial<QaPageSnapshot> = {}): QaPageSnapshot {
   };
 }
 
-describe("SharedFrontier robots gate", () => {
-  it("never enqueues a URL the robots policy disallows", () => {
-    const disallowed: string[] = [];
-    const f = frontier({
-      isAllowed: (url: string) => !url.includes("/admin"),
-      onDisallowed: (url: string) => disallowed.push(url),
-    });
-    expect(f.add(`${ORIGIN}/dashboard`, 1)).toBe(true);
-    expect(f.add(`${ORIGIN}/admin/users`, 1)).toBe(false);
-    expect(f.pendingCount).toBe(1);
-    expect(disallowed).toEqual([`${ORIGIN}/admin/users`]);
-  });
-
-  it("reports a disallowed URL once no matter how many pages link to it", () => {
-    const disallowed: string[] = [];
-    const f = frontier({
-      isAllowed: (url: string) => !url.includes("/admin"),
-      onDisallowed: (url: string) => disallowed.push(url),
-    });
-    f.add(`${ORIGIN}/admin`, 1);
-    f.add(`${ORIGIN}/admin`, 2);
-    f.add(`${ORIGIN}/admin#top`, 1);
-    expect(disallowed).toEqual([`${ORIGIN}/admin`]);
-  });
-
-  it("allows everything when no policy is supplied", () => {
-    const f = frontier();
-    expect(f.add(`${ORIGIN}/admin`, 1)).toBe(true);
-  });
-});
-
 describe("SharedFrontier", () => {
   it("dedupes on normalized href — the same URL never enqueues twice", () => {
     const f = frontier();

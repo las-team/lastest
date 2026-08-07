@@ -18,7 +18,7 @@ import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
 import { generateWithAI } from "@/lib/ai";
 import { parseAiJson } from "@/lib/ai/json-parse";
 import { getAIConfig } from "@/lib/playwright/agent-context";
-import { claimEmbeddedBrowserForAgent } from "./ai";
+import { claimEmbeddedBrowserForAgent } from "@/lib/eb/claim-for-agent";
 import { releasePoolEB } from "./embedded-sessions";
 import { runTestsCore } from "./runs";
 import { toProxyStreamUrl } from "@/lib/eb/stream-url";
@@ -1243,6 +1243,12 @@ async function runQaDiscoverSwarm(args: {
       storageStateJson: args.storageStateJson,
       credentials: args.credentials,
       loginUrl: args.loginUrl,
+      // Same UA the executor would use for this repo — these crawls attach to
+      // an existing EB context, so newContext() never applies it for them.
+      userAgentOverride: await queries
+        .getPlaywrightSettings(repositoryId)
+        .then((s) => s.userAgentOverride)
+        .catch(() => null),
       signal,
       onPage: (snapshot, explorerIndex, totalMapped) => {
         livePages.push(snapshot);
@@ -1697,6 +1703,12 @@ async function runQaDiscover(
           // No injected session and no creds to try → make sure the crawl at
           // least maps the login/signup surface itself.
           prioritizeAuthLinks: !preAuthed && !credentials,
+          // Same UA the executor would use for this repo — this crawl attaches
+          // to an existing EB context, so newContext() never applies it here.
+          userAgentOverride: await queries
+            .getPlaywrightSettings(repositoryId)
+            .then((s) => s.userAgentOverride)
+            .catch(() => null),
           signal,
           onPage: (snapshot, index) => {
             substeps[2] = {

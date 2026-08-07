@@ -33,7 +33,7 @@ async function claimEB(): Promise<
 > {
   try {
     const { claimEmbeddedBrowserForAgent } =
-      await import("@/server/actions/ai");
+      await import("@/lib/eb/claim-for-agent");
     return (await claimEmbeddedBrowserForAgent(5 * 60 * 1000)) ?? undefined;
   } catch {
     return undefined;

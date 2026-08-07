@@ -38,7 +38,7 @@ import {
 import { createAndRunBuildCore, getBuildSummary } from "./builds";
 import { approveAllDiffs } from "./diffs";
 import { publishBuildShare } from "./public-shares";
-import { claimEmbeddedBrowserForAgent } from "./ai";
+import { claimEmbeddedBrowserForAgent } from "@/lib/eb/claim-for-agent";
 import { releasePoolEB, getEbPoolHealth } from "./embedded-sessions";
 import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
 import { db } from "@/lib/db";

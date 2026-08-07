@@ -3015,11 +3015,10 @@ export interface QaExplorerState {
   detail?: string;
 }
 
-/** A frontier entry the exploration could not get past. `robots_txt` means the
- *  target's robots.txt disallows it, so the crawler never requested it. */
+/** A frontier entry the exploration could not get past. */
 export interface QaExploreBlocked {
   url: string;
-  reason: "auth_wall" | "dead_end" | "robots_txt";
+  reason: "auth_wall" | "dead_end";
 }
 
 /** Aggregate live explore state (metadata.qaExplore) — written throttled

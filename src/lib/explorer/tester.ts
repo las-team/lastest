@@ -2,7 +2,7 @@ import { chromium, type Page } from "playwright";
 import { generateWithAI } from "@/lib/ai";
 import type { AIProviderConfig } from "@/lib/ai";
 import { parseAiJson } from "@/lib/ai/json-parse";
-import { applyCrawlerIdentity } from "@/lib/qa-agent/politeness";
+import { applyUserAgentOverride } from "@/lib/qa-agent/politeness";
 import type {
   ExplorerActionLog,
   ExplorerActionStep,
@@ -236,6 +236,9 @@ export interface RunScenarioInput {
   repositoryId: string;
   knowledgeBlock: string;
   pageAutomation: KnowledgePageAutomationStep[];
+  /** Repo's `playwright_settings.userAgentOverride`. Unset = stock browser UA,
+   *  same as an executor run with the setting empty. */
+  userAgentOverride?: string | null;
   signal?: AbortSignal;
   onStep?: (step: ExplorerActionStep, index: number) => void;
 }
@@ -271,11 +274,10 @@ async function runScenarioOnPage(
   try {
     const baseOrigin = new URL(input.targetUrl).origin;
 
-    // Same identity the discovery crawlers use: automated traffic must never
-    // present as stock Chromium (`@/lib/qa-agent/politeness`). Scenarios are
-    // user-directed acts on the app under test, so no robots gate here — only
-    // the crawlers, which choose their own URLs, are gated.
-    await applyCrawlerIdentity(page);
+    // Same UA an executor run would use for this repo — scenarios drive the
+    // app under test over an existing EB context, so `newContext()` never
+    // applies the setting for them (`@/lib/qa-agent/politeness`).
+    await applyUserAgentOverride(page, input.userAgentOverride);
 
     page.on("console", (msg) => {
       if (msg.type() !== "error" || consoleErrors.length >= 15) return;

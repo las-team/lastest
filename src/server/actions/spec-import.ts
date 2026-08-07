@@ -31,7 +31,7 @@ import { extractText } from "unpdf";
 import mammoth from "mammoth";
 import { PLACEHOLDER_CODE } from "@/lib/constants/placeholder";
 import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
-import { claimEmbeddedBrowserForAgent } from "./ai";
+import { claimEmbeddedBrowserForAgent } from "@/lib/eb/claim-for-agent";
 import { releasePoolEB } from "./embedded-sessions";
 
 // ============================================

@@ -28,7 +28,7 @@ import { chromium } from "playwright";
 import { executeSetupViaRunner } from "@/lib/execution/executor";
 import { classifyTemplate } from "@/lib/templates/classifier";
 import { gatherCodebaseIntelligence } from "@/lib/ai/codebase-intelligence";
-import { claimEmbeddedBrowserForAgent } from "@/server/actions/ai";
+import { claimEmbeddedBrowserForAgent } from "@/lib/eb/claim-for-agent";
 import { releasePoolEB } from "@/server/actions/embedded-sessions";
 import type { CodebaseIntelligence } from "@/lib/ai/codebase-intelligence";
 import type { CodebaseIntelligenceContext } from "@/lib/ai/types";

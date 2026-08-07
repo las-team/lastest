@@ -15,7 +15,7 @@ import {
   SsrfBlockedError,
 } from "@/lib/security/outbound-url";
 import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
-import { claimEmbeddedBrowserForAgent } from "./ai";
+import { claimEmbeddedBrowserForAgent } from "@/lib/eb/claim-for-agent";
 import { releasePoolEB } from "./embedded-sessions";
 import { toProxyStreamUrl } from "@/lib/eb/stream-url";
 import { injectStorageStateIntoEb } from "@/lib/eb/inject-storage-state";
@@ -836,6 +836,12 @@ async function runExplorerAct(
   let passed = 0;
   let failed = 0;
 
+  // Same UA the executor would use for this repo (null = stock browser UA).
+  const userAgentOverride = await queries
+    .getPlaywrightSettings(repositoryId)
+    .then((s) => s.userAgentOverride)
+    .catch(() => null);
+
   // Scenario execution runs concurrently (the AI round-trips are the cost);
   // the per-scenario bookkeeping below is serialized on one chain so the
   // shared substeps array + session-metadata read-modify-write never race.
@@ -850,6 +856,7 @@ async function runExplorerAct(
       repositoryId,
       knowledgeBlock,
       pageAutomation,
+      userAgentOverride,
       signal,
     })),
     {

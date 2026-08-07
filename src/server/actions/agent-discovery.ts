@@ -5,7 +5,7 @@ import { requireRepoAccess } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { agentDiscoverAreas as runAgentDiscovery } from "@/lib/playwright/planner-agent";
 import { aiScanRoutes, type DiscoveredArea } from "./ai-routes";
-import { claimEmbeddedBrowserForAgent } from "./ai";
+import { claimEmbeddedBrowserForAgent } from "@/lib/eb/claim-for-agent";
 import { releasePoolEB } from "./embedded-sessions";
 
 /**

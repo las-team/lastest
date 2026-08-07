@@ -15,10 +15,9 @@
  * browser work (CDP connect per EB, storage-state inject or login, loop
  * frontier → goto → extract → add).
  *
- * Politeness is swarm-wide, not per-explorer (`@/lib/qa-agent/politeness`):
- * one robots.txt fetch gates every enqueue, one shared pacer serializes
- * navigations across all N explorers, and each explorer's UA carries our
- * product token so a target can identify and block us.
+ * Pacing is swarm-wide, not per-explorer (`@/lib/qa-agent/politeness`): one
+ * shared pacer serializes navigations across all N explorers, so the target
+ * sees one request per slot no matter how many are running.
  */
 
 import { chromium, type Page } from "playwright";
@@ -31,13 +30,7 @@ import { canonicalPath } from "@/lib/app-map/canonical";
 import { injectStorageStateIntoEb } from "@/lib/eb/inject-storage-state";
 import { isAuthLink } from "./auth-links";
 import { attachPageObservers, attemptLogin, extractDom } from "./crawl";
-import {
-  applyCrawlerIdentity,
-  fetchRobotsPolicy,
-  pacerFor,
-  type CrawlPacer,
-  type RobotsPolicy,
-} from "./politeness";
+import { applyUserAgentOverride, CrawlPacer } from "./politeness";
 
 const PAGE_NAV_TIMEOUT_MS = 30_000;
 const PAGE_SETTLE_TIMEOUT_MS = 8_000;
@@ -63,11 +56,6 @@ export interface SharedFrontierOptions {
   explorers: number;
   /** Concrete URLs allowed per canonical path (default 2). */
   maxPerCanonicalPath?: number;
-  /** robots.txt gate — a URL it rejects never enters the frontier, so no
-   *  explorer can request it. Omitted = allow all (unit tests, no robots). */
-  isAllowed?: (url: string) => boolean;
-  /** Called once per URL turned away by `isAllowed` (deduped by `seen`). */
-  onDisallowed?: (url: string) => void;
 }
 
 /**
@@ -88,8 +76,6 @@ export class SharedFrontier {
   constructor(options: SharedFrontierOptions) {
     this.opts = {
       maxPerCanonicalPath: 2,
-      isAllowed: () => true,
-      onDisallowed: () => {},
       ...options,
     };
     this.queues = Array.from({ length: options.explorers }, () => []);
@@ -123,19 +109,13 @@ export class SharedFrontier {
 
   /**
    * Enqueue a discovered URL. Returns true when it entered the frontier —
-   * false for duplicates, foreign origins, over-depth, robots.txt-disallowed
-   * paths, or canonical-path-cap rejections.
+   * false for duplicates, foreign origins, over-depth, or canonical-path-cap
+   * rejections.
    */
   add(rawUrl: string, depth: number, base?: string): boolean {
     if (depth > this.opts.maxDepth) return false;
     const url = this.normalize(rawUrl, base);
     if (!url || this.seen.has(url)) return false;
-    if (!this.opts.isAllowed(url)) {
-      // Mark seen so a URL linked from 20 pages reports once, not 20 times.
-      this.seen.add(url);
-      this.opts.onDisallowed(url);
-      return false;
-    }
     const cp = canonicalPath(url, this.opts.origin, null) ?? url;
     const count = this.canonicalCounts.get(cp) ?? 0;
     if (count >= this.opts.maxPerCanonicalPath) return false;
@@ -251,6 +231,9 @@ export interface ExploreTargetAppOptions {
   /** Fallback login when no storage state: each explorer logs in itself. */
   credentials?: { email: string; password: string };
   loginUrl?: string;
+  /** Repo's `playwright_settings.userAgentOverride`. Unset = stock browser UA,
+   *  same as an executor run with the setting empty. */
+  userAgentOverride?: string | null;
   signal?: AbortSignal;
   onPage?: (
     snapshot: QaPageSnapshot,
@@ -270,38 +253,6 @@ function pathnameOf(url: string): string {
     return new URL(url).pathname;
   } catch {
     return "";
-  }
-}
-
-/**
- * Read the target's robots.txt once, through one of the swarm's EBs, on a
- * throwaway page so no explorer's crawl page is disturbed. Any failure yields
- * the allow-all policy `fetchRobotsPolicy` returns — pacing still applies.
- */
-async function readRobotsOnce(
-  cdpUrl: string | undefined,
-  origin: string,
-): Promise<RobotsPolicy> {
-  if (!cdpUrl) {
-    return { isAllowed: () => true, crawlDelayMs: null, source: "unreachable" };
-  }
-  const browser = await chromium.connectOverCDP(cdpUrl).catch(() => null);
-  if (!browser) {
-    return { isAllowed: () => true, crawlDelayMs: null, source: "unreachable" };
-  }
-  try {
-    const context = browser.contexts()[0] ?? (await browser.newContext());
-    const page = await context.newPage();
-    try {
-      await applyCrawlerIdentity(page);
-      return await fetchRobotsPolicy(page, origin);
-    } finally {
-      await page.close().catch(() => {});
-    }
-  } catch {
-    return { isAllowed: () => true, crawlDelayMs: null, source: "unreachable" };
-  } finally {
-    await browser.close().catch(() => {});
   }
 }
 
@@ -333,10 +284,9 @@ export async function exploreTargetApp(opts: ExploreTargetAppOptions): Promise<{
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-  // One robots.txt read for the whole swarm, before any explorer starts, so
-  // no worker can request a disallowed path even once.
-  const robots = await readRobotsOnce(opts.ebs[0]?.cdpUrl, origin);
-  const pacer: CrawlPacer = pacerFor(robots);
+  // One pacer for the whole swarm: N explorers still issue one navigation per
+  // interval between them, not N.
+  const pacer = new CrawlPacer();
 
   const frontier = new SharedFrontier({
     origin,
@@ -344,16 +294,8 @@ export async function exploreTargetApp(opts: ExploreTargetAppOptions): Promise<{
     maxDepth: opts.maxDepth,
     pageBudget: opts.pageBudget,
     explorers: opts.ebs.length,
-    isAllowed: (url) => robots.isAllowed(url),
-    onDisallowed: (url) => pushBlocked({ url, reason: "robots_txt" }),
   });
-  if (!frontier.add(opts.targetUrl, 0)) {
-    // Entry URL itself disallowed → nothing to explore; `onDisallowed` already
-    // recorded it, so the panel explains why the run mapped nothing.
-    if (!robots.isAllowed(opts.targetUrl)) {
-      return { pages: [], blocked, loginAttempted };
-    }
-  }
+  frontier.add(opts.targetUrl, 0);
 
   async function runExplorer(index: number, cdpUrl: string): Promise<void> {
     try {
@@ -367,17 +309,12 @@ export async function exploreTargetApp(opts: ExploreTargetAppOptions): Promise<{
       try {
         const context = browser.contexts()[0] ?? (await browser.newContext());
         const page: Page = context.pages()[0] ?? (await context.newPage());
-        await applyCrawlerIdentity(page);
+        await applyUserAgentOverride(page, opts.userAgentOverride);
         const observers = attachPageObservers(page, origin);
 
         // No storage state but creds → every explorer logs itself in (each
         // EB is its own browser).
-        if (
-          !opts.storageStateJson &&
-          opts.credentials &&
-          opts.loginUrl &&
-          robots.isAllowed(opts.loginUrl)
-        ) {
+        if (!opts.storageStateJson && opts.credentials && opts.loginUrl) {
           try {
             await pacer.wait();
             await page.goto(opts.loginUrl, {
@@ -394,15 +331,6 @@ export async function exploreTargetApp(opts: ExploreTargetAppOptions): Promise<{
           } catch {
             // Best-effort — the crawl still maps the public surface.
           }
-        } else if (
-          !opts.storageStateJson &&
-          opts.credentials &&
-          opts.loginUrl &&
-          !robots.isAllowed(opts.loginUrl)
-        ) {
-          // The login hop we WOULD have made is off-limits — say so instead of
-          // silently mapping only the public surface.
-          pushBlocked({ url: opts.loginUrl, reason: "robots_txt" });
         }
 
         opts.onExplorerStatus?.(index, "exploring");
