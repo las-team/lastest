@@ -2,6 +2,7 @@ import * as queries from "@/lib/db/queries";
 import { compareBranches } from "@/lib/github/content";
 import { findAffectedTests } from "@/lib/smart-selection/file-matcher";
 import { analyzeChangeMap } from "@/lib/ai/change-map-analyzer";
+import { agentSdkReadiness } from "@/lib/ai/availability";
 import type {
   ChangeMap,
   ChangeMapArea,
@@ -347,6 +348,15 @@ async function runChangeMapAI(input: RunAIInput): Promise<AIResult> {
 
   if (provider !== "claude-agent-sdk" && provider !== "ollama" && !apiKey) {
     return { kind: "skipped", reason: "Missing API key" };
+  }
+
+  // Deployment ships no credentials for the Agent SDK: skip instead of
+  // surfacing a throw from the analyzer.
+  if (provider === "claude-agent-sdk") {
+    const readiness = agentSdkReadiness();
+    if (!readiness.runnable) {
+      return { kind: "skipped", reason: readiness.reason };
+    }
   }
 
   try {

@@ -1,5 +1,6 @@
 import { db } from "../index";
 import { encryptField, decryptField } from "@/lib/crypto";
+import { defaultAiProvider } from "@/lib/ai/availability";
 import {
   playwrightSettings,
   environmentConfigs,
@@ -212,39 +213,46 @@ export async function deletePlaywrightSettings(id: string) {
   await db.delete(playwrightSettings).where(eq(playwrightSettings.id, id));
 }
 
-// Cluster-wide EB pool limits — read from the global (repositoryId IS NULL) row.
-// Per-repo overrides are ignored on purpose: the pool is a shared cluster resource.
-export async function getGlobalPoolLimits(): Promise<{
-  ebPoolMax: number;
-  ebIdleTTLSeconds: number;
-} | null> {
-  const [row] = await db
-    .select({
-      ebPoolMax: playwrightSettings.ebPoolMax,
-      ebIdleTTLSeconds: playwrightSettings.ebIdleTTLSeconds,
-    })
-    .from(playwrightSettings)
-    .where(isNull(playwrightSettings.repositoryId));
-  if (!row) return null;
-  return {
-    ebPoolMax: row.ebPoolMax ?? 30,
-    ebIdleTTLSeconds: row.ebIdleTTLSeconds ?? 90,
-  };
-}
+// Global pool-limit helpers moved to @lastest/db (`packages/db/src/settings.ts`)
+// — the pool service needs them too. Re-exported so app callers keep importing
+// from this module.
+export {
+  getGlobalPoolLimits,
+  ensureGlobalPlaywrightSettings,
+} from "@lastest/db/settings";
 
-// Idempotent seeder — inserts the global playwright_settings row with schema
-// defaults if missing. Callers (app boot) rely on this so poolMax() / ebIdleTTLMs()
-// always find a row and never have to fall back to env vars.
-export async function ensureGlobalPlaywrightSettings(): Promise<void> {
-  const [existing] = await db
-    .select({ id: playwrightSettings.id })
-    .from(playwrightSettings)
-    .where(isNull(playwrightSettings.repositoryId));
-  if (existing) return;
-  await createPlaywrightSettings({ repositoryId: null });
+/**
+ * Resolve a base URL from the repo's `branchBaseUrls` map: default branch
+ * first, then `main`, then any other named branch. The legacy repo-wide
+ * "default" key is ignored (stale write-once fallback — see pickRepoBaseUrl
+ * in `src/lib/quickstart/gating.ts`).
+ */
+async function repoBranchBaseUrl(
+  repositoryId: string,
+): Promise<string | undefined> {
+  const [repo] = await db
+    .select({
+      defaultBranch: repositories.defaultBranch,
+      branchBaseUrls: repositories.branchBaseUrls,
+    })
+    .from(repositories)
+    .where(eq(repositories.id, repositoryId));
+  const map = repo?.branchBaseUrls ?? {};
+  const branches = [
+    ...(repo?.defaultBranch ? [repo.defaultBranch] : []),
+    "main",
+    ...Object.keys(map),
+  ];
+  for (const branch of branches) {
+    if (branch === "default") continue;
+    const url = map[branch];
+    if (typeof url === "string" && url.length > 0) return url;
+  }
+  return undefined;
 }
 
 // Environment Configs
+
 export async function getEnvironmentConfig(repositoryId?: string | null) {
   if (repositoryId) {
     const [config] = await db
@@ -255,13 +263,20 @@ export async function getEnvironmentConfig(repositoryId?: string | null) {
       return { ...config, baseUrl: config.baseUrl.replace(/\/+$/, "") };
   }
 
-  // Synthetic default when no repository row exists. The team-level
+  // Synthetic default when no environment config row exists. The team-level
   // (repositoryId IS NULL) row has no UI writer and is intentionally ignored.
+  // Before hardcoding localhost, honor the repo's branch base URLs — set by
+  // onboarding/QuickStart (e.g. the TodoMVC sandbox) and the sidebar — so a
+  // fresh repo runs against the URL the user actually pointed it at instead
+  // of localhost:3000.
+  const branchUrl = repositoryId
+    ? await repoBranchBaseUrl(repositoryId)
+    : undefined;
   return {
     id: "default",
     repositoryId: repositoryId ?? null,
     mode: "manual" as const,
-    baseUrl: "http://localhost:3000",
+    baseUrl: (branchUrl ?? "http://localhost:3000").replace(/\/+$/, ""),
     startCommand: null,
     healthCheckUrl: null,
     healthCheckTimeout: 60000,
@@ -447,7 +462,9 @@ export async function getAISettings(repositoryId?: string | null) {
   return {
     id: "",
     repositoryId: null,
-    provider: DEFAULT_AI_SETTINGS.provider as AIProvider,
+    // Deployment-aware: images that ship no credentials for the Agent SDK must
+    // not default fresh teams to a provider whose first call would fail.
+    provider: defaultAiProvider() as AIProvider,
     openrouterApiKey: null,
     openrouterModel: DEFAULT_AI_SETTINGS.openrouterModel,
     agentSdkPermissionMode: DEFAULT_AI_SETTINGS.agentSdkPermissionMode,

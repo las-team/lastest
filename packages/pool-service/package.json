@@ -1,0 +1,28 @@
+{
+  "name": "@lastest/pool-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "EB pool service — standalone singleton process owning the browser-capacity plane (k8s Job provisioning, pool caps, warm pool, EB reapers). The app consumes only ./client and ./common.",
+  "type": "module",
+  "exports": {
+    "./client": "./src/client.ts",
+    "./common": "./src/common.ts",
+    "./reapers": "./src/reapers.ts"
+  },
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "esbuild src/main.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/main.mjs --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\" --log-level=warning",
+    "start": "node dist/main.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lastest/db": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "esbuild": ">=0.25.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.3.0"
+  },
+  "license": "FSL-1.1-ALv2"
+}

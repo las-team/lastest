@@ -1,6 +1,7 @@
 "use server";
 
 import { db } from "@/lib/db";
+import { endAgentEbUsage } from "@/lib/billing/agent-eb-usage";
 import {
   embeddedSessions,
   runners,
@@ -15,18 +16,16 @@ import { requireTeamAccess, requireTeamAdmin } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { emitRunnerStatusChange } from "@/lib/ws/runner-events";
 import {
-  isKubernetesMode,
-  launchEBJob,
-  terminateEBJob,
+  isDynamicPoolMode,
   jobNameForRunnerName,
+} from "@lastest/pool-service/common";
+import {
+  getPoolStatus,
+  provisionEB,
+  terminatePoolJob,
   listEBJobNames,
-  poolMax,
-  warmPoolMin,
-  interactiveReservedSlots,
-  currentPoolSize,
-  incInFlightProvisions,
-  decInFlightProvisions,
-} from "@/lib/eb/provisioner";
+  ensureWarmPool,
+} from "@lastest/pool-service/client";
 import { toProxyStreamUrl } from "@/lib/eb/stream-url";
 import { stopDevPortForward } from "@/lib/eb/dev-port-forward";
 
@@ -202,6 +201,8 @@ export async function upsertEmbeddedSession(
     cdpUrl?: string;
     containerUrl: string;
     viewport?: { width: number; height: number };
+    /** Provisioner instanceId; absent for static-fleet EBs. */
+    instanceId?: string;
   },
   tx?: DBExecutor,
 ): Promise<EmbeddedSession> {
@@ -233,6 +234,7 @@ export async function upsertEmbeddedSession(
         streamUrl: params.streamUrl,
         cdpUrl: params.cdpUrl ?? null,
         containerUrl: params.containerUrl,
+        instanceId: params.instanceId ?? null,
         viewport: params.viewport ?? { width: 1280, height: 720 },
         ...(preserveBusy ? {} : { status: "ready", userId: null }),
         lastActivityAt: now,
@@ -272,6 +274,8 @@ export async function createEmbeddedSession(
     cdpUrl?: string;
     containerUrl: string;
     viewport?: { width: number; height: number };
+    /** Provisioner instanceId; absent for static-fleet EBs. */
+    instanceId?: string;
   },
   tx?: DBExecutor,
 ): Promise<EmbeddedSession> {
@@ -290,6 +294,7 @@ export async function createEmbeddedSession(
     streamUrl: params.streamUrl,
     cdpUrl: params.cdpUrl ?? null,
     containerUrl: params.containerUrl,
+    instanceId: params.instanceId ?? null,
     viewport: params.viewport ?? { width: 1280, height: 720 },
     createdAt: now,
     lastActivityAt: now,
@@ -381,7 +386,6 @@ async function lookupSessionByRunner(
 export async function getStreamUrlForRunner(runnerId: string): Promise<{
   streamUrl: string | null;
   sessionId: string | null;
-  streamAuthToken: string | null;
 } | null> {
   const authed = await requireTeamAccess();
   const session = await lookupSessionByRunner(runnerId);
@@ -390,8 +394,8 @@ export async function getStreamUrlForRunner(runnerId: string): Promise<{
   // Authorization: the caller's team must own the session. The one exception is
   // a shared system EB from the warm pool, which is intentionally streamable by
   // any team that claimed a slot (see listSystemEmbeddedSessions). Without this
-  // check, any authenticated user could pull another team's live CDP stream URL
-  // and the shared STREAM_AUTH_TOKEN.
+  // check, any authenticated user could mint a grant for another team's live
+  // EB and stream it.
   if (session.teamId !== authed.team.id) {
     const [runner] = await db
       .select({ isSystem: runners.isSystem })
@@ -400,11 +404,13 @@ export async function getStreamUrlForRunner(runnerId: string): Promise<{
     if (!runner?.isSystem) return null;
   }
 
-  const streamAuthToken = process.env.STREAM_AUTH_TOKEN || null;
   return {
-    streamUrl: toProxyStreamUrl(session.streamUrl),
+    streamUrl: toProxyStreamUrl(
+      session.streamUrl,
+      session.id,
+      session.instanceId,
+    ),
     sessionId: session.id,
-    streamAuthToken,
   };
 }
 
@@ -457,10 +463,12 @@ export async function isPoolBusy(): Promise<boolean> {
   // No idle EB right now — but in kubernetes mode we can provision a new one.
   // Only consider the pool "busy" (and queue the job) when we're ALSO at the
   // cluster cap. Otherwise let the caller proceed; claimOrProvisionPoolEB will
-  // spin up a fresh EB.
-  if (!isKubernetesMode()) return true;
-  const size = await currentPoolSize();
-  return size >= (await poolMax());
+  // spin up a fresh EB. Pool-service unreachable reads as busy (conservative:
+  // queue rather than dispatch into a claim that cannot provision).
+  if (!isDynamicPoolMode()) return true;
+  const status = await getPoolStatus();
+  if (!status) return true;
+  return status.size >= status.max;
 }
 
 /**
@@ -476,6 +484,10 @@ export async function getEbPoolHealth(): Promise<{
   size: number;
   max: number;
 }> {
+  const status = await getPoolStatus();
+  if (status) return status;
+  // Pool service unreachable — fall back to what the DB alone can answer
+  // (idle count; no cap / in-flight visibility).
   const onlineRows = await db
     .select({ id: runners.id })
     .from(runners)
@@ -486,8 +498,7 @@ export async function getEbPoolHealth(): Promise<{
         eq(runners.type, "embedded"),
       ),
     );
-  const [size, max] = await Promise.all([currentPoolSize(), poolMax()]);
-  return { online: onlineRows.length, size, max };
+  return { online: onlineRows.length, size: onlineRows.length, max: 0 };
 }
 
 /**
@@ -580,6 +591,10 @@ export async function claimPoolEB(): Promise<{
  * Internal function — no requireTeamAccess (called from executor).
  */
 export async function releasePoolEB(runnerId: string): Promise<void> {
+  // Settle metered agent browser time before anything can early-return below
+  // (an unknown runner is a no-op, so this is safe for every release path).
+  await endAgentEbUsage(runnerId);
+
   const [runner] = await db
     .select({
       status: runners.status,
@@ -602,7 +617,7 @@ export async function releasePoolEB(runnerId: string): Promise<void> {
   // claimOrProvisionPoolEB launches fresh EBs on demand, and warm-pool
   // refill is handled by ensureWarmPool, so we don't need to recycle here.
   const isPoolEB =
-    isKubernetesMode() &&
+    isDynamicPoolMode() &&
     runner.isSystem === true &&
     runner.type === "embedded";
   if (isPoolEB) {
@@ -655,7 +670,6 @@ export async function releasePoolEB(runnerId: string): Promise<void> {
     // loaded by an EB heartbeat — but if the pool drains to 0, no heartbeats
     // fire and the loop never starts. Pulling the refill here breaks that
     // dead state without depending on any external timer.
-    const { ensureWarmPool } = await import("@/lib/eb/provisioner");
     ensureWarmPool().catch((err) => {
       console.error("[Pool] ensureWarmPool after release failed:", err);
     });
@@ -751,7 +765,7 @@ async function teardownPoolEB(
     if (pendingOrClaimed.length === 0) break;
   }
 
-  await terminateEBJob(jobName);
+  await terminatePoolJob(jobName);
   stopDevPortForward(jobName);
 }
 
@@ -807,6 +821,21 @@ export async function processPoolQueue(): Promise<void> {
 }
 
 /**
+ * Team of the caller's session, or null outside a request scope (cron
+ * dispatch, queue workers, webhooks) where `headers()` isn't available.
+ * Best-effort: used only to pick an EB's PriorityClass, never to authorize
+ * anything — the call sites have already run their own auth guard.
+ */
+async function callerTeamId(): Promise<string | null> {
+  try {
+    const { getCurrentSession } = await import("@/lib/auth/session");
+    return (await getCurrentSession())?.team?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Claim an idle pool EB; if none is available and we're running in Kubernetes
  * mode (EB_PROVISIONER=kubernetes), provision a new Job and wait for it to
  * register, then claim it.
@@ -817,13 +846,24 @@ export async function processPoolQueue(): Promise<void> {
  *   - 'build': may use up to ebPoolMax - EB_RESERVED_INTERACTIVE_SLOTS, leaving
  *     headroom for interactive callers. Build dispatch passes this.
  *
+ * `teamId` is the tenant the browser is for. In kubernetes mode the pool
+ * service reads that team's plan and stamps the pod's PriorityClass
+ * accordingly (free tiers get a preemptible class). It only affects freshly
+ * provisioned Jobs — an EB claimed off the idle pool keeps the class it was
+ * created with. Pass it wherever a team is in scope; omitting it provisions at
+ * the restricted tier.
+ *
  * Returns null if:
  *   - not in kubernetes mode and no idle EB available
  *   - pool is at the effective cap for this purpose
  *   - provisioning timed out (pod failed to register within waitTimeoutMs)
  */
 export async function claimOrProvisionPoolEB(
-  opts: { waitTimeoutMs?: number; purpose?: "build" | "interactive" } = {},
+  opts: {
+    waitTimeoutMs?: number;
+    purpose?: "build" | "interactive";
+    teamId?: string | null;
+  } = {},
 ): Promise<{ runnerId: string; sessionId: string | null } | null> {
   // Fast path: an idle EB is already online. Claiming an existing EB doesn't
   // change pool size so reservation does not apply here — interactive callers
@@ -832,50 +872,21 @@ export async function claimOrProvisionPoolEB(
   const claimed = await claimPoolEB();
   if (claimed) return claimed;
 
-  if (!isKubernetesMode()) return null;
+  if (!isDynamicPoolMode()) return null;
 
-  // Enforce global cap (currentPoolSize now includes in-flight provisions so
-  // concurrent callers during an app restart or burst claim can't collectively
-  // blow past the cap). Build dispatch is throttled below the interactive cap
-  // to leave provisioning headroom for recording/debug.
-  const size = await currentPoolSize();
-  const cap = await poolMax();
-  const reserved = opts.purpose === "build" ? interactiveReservedSlots() : 0;
-  const effectiveCap = Math.max(0, cap - reserved);
-  if (size >= effectiveCap) {
-    if (reserved > 0) {
-      console.warn(
-        `[Pool] At build cap (${size}/${effectiveCap}, hard cap ${cap}, reserved ${reserved} for interactive) — cannot provision new EB for build`,
-      );
-    } else {
-      console.warn(
-        `[Pool] At capacity (${size}/${cap}) — cannot provision new EB`,
-      );
-    }
-    return null;
-  }
+  // Tenant for the new pod's PriorityClass. Interactive callers (recording,
+  // debug, AI agents, setup scripts) run under a session, so the team is
+  // already in scope and they don't have to thread it down; background
+  // contexts (build dispatch) have no session and pass `teamId` explicitly.
+  const teamId = opts.teamId ?? (await callerTeamId());
 
-  // Reserve a slot in the in-flight counter BEFORE launching. Decrement in
-  // the success branch (after the runner row is inserted by register) or in
-  // any early-return / timeout / error branch below.
-  incInFlightProvisions();
-  let provisionReserved = true;
-  const releaseReservation = () => {
-    if (provisionReserved) {
-      decInFlightProvisions();
-      provisionReserved = false;
-    }
-  };
-
-  // Provision a new Job
-  let jobInfo: { jobName: string; instanceId: string };
-  try {
-    jobInfo = await launchEBJob();
-  } catch (err) {
-    console.error("[Pool] launchEBJob failed:", err);
-    releaseReservation();
-    return null;
-  }
+  // Ask the pool service for a fresh Job. Cap enforcement (global cap +
+  // build/interactive reservation), the in-flight provision counter and the
+  // CNI launch throttle all live service-side — they need singleton state.
+  // Null covers at-capacity, provisioning-disabled and service-unreachable;
+  // the service logs the specific reason.
+  const jobInfo = await provisionEB(opts.purpose ?? "interactive", { teamId });
+  if (!jobInfo) return null;
 
   // Wait for the new EB to auto-register and reach `online`
   const waitTimeoutMs = opts.waitTimeoutMs ?? 90_000;
@@ -958,10 +969,7 @@ export async function claimOrProvisionPoolEB(
       // generic claim (may pick this very same row once its lock releases,
       // or a different idle one).
       const fallback = await claimPoolEB();
-      if (fallback) {
-        releaseReservation();
-        return fallback;
-      }
+      if (fallback) return fallback;
       continue;
     }
 
@@ -976,8 +984,8 @@ export async function claimOrProvisionPoolEB(
     console.log(
       `[Pool] Provisioned + claimed new EB ${claimResult.runnerId.slice(0, 8)} (${jobInfo.jobName})`,
     );
-    // Runner row now exists; currentPoolSize() will see it normally.
-    releaseReservation();
+    // The service's registration watcher releases its in-flight reservation
+    // now that the runner row exists.
     return { runnerId: claimResult.runnerId, sessionId: claimResult.sessionId };
   }
 
@@ -985,87 +993,9 @@ export async function claimOrProvisionPoolEB(
   console.warn(
     `[Pool] Provisioned Job ${jobInfo.jobName} did not register within ${waitTimeoutMs}ms; terminating`,
   );
-  terminateEBJob(jobInfo.jobName).catch(() => {});
+  void terminatePoolJob(jobInfo.jobName);
   stopDevPortForward(jobInfo.jobName);
-  releaseReservation();
   return null;
-}
-
-/**
- * Reaper: terminate Jobs for system EB runners that are offline or have
- * been idle (online & unclaimed) for longer than the idle TTL. Keeps the
- * configured warm-pool minimum alive.
- *
- * Call alongside reapStalePoolEBs() from the periodic cleanup interval.
- */
-export async function reapIdleEBJobs(idleTtlMs: number): Promise<number> {
-  if (!isKubernetesMode()) return 0;
-
-  // currentPoolSize now excludes offline rows; they count as already-dead slots.
-  // Offline reaping is always safe (we aren't burning capacity by tearing them down).
-  // Idle-online reaping is bounded by warmPoolMin so we preserve the warm pool.
-  const activeSize = await currentPoolSize();
-  const minKeep = warmPoolMin();
-
-  const cutoff = new Date(Date.now() - idleTtlMs);
-  // Join sessions to get lastActivityAt (bumped on claim/release/register —
-  // NOT on heartbeat). Using runners.lastSeen instead would never trigger:
-  // a healthy idle EB heartbeats every few seconds, so lastSeen stays fresh
-  // and the reaper never finds anything to clean up. Symptom seen in prod:
-  // a build that bursts the pool to 50 leaves the surplus online-idle EBs
-  // sitting forever (they only get claimed if another build runs).
-  const candidates = await db
-    .select({
-      id: runners.id,
-      name: runners.name,
-      status: runners.status,
-      lastActivityAt: embeddedSessions.lastActivityAt,
-    })
-    .from(runners)
-    .leftJoin(embeddedSessions, eq(embeddedSessions.runnerId, runners.id))
-    .where(and(eq(runners.isSystem, true), eq(runners.type, "embedded")));
-
-  let terminated = 0;
-  let onlineReaped = 0;
-  for (const row of candidates) {
-    const isOffline = row.status === "offline";
-    const isIdle =
-      row.status === "online" &&
-      (!row.lastActivityAt || row.lastActivityAt < cutoff);
-    if (!isOffline && !isIdle) continue;
-
-    // Protect warm pool: only reap an idle-online row if doing so would still
-    // leave at least minKeep non-offline rows alive. Offline rows are unconditional.
-    if (isIdle && activeSize - onlineReaped <= minKeep) continue;
-
-    const jobName = jobNameForRunnerName(row.name);
-    if (!jobName) continue; // docker-compose EB — don't touch
-
-    try {
-      // FK-order-respecting cleanup: children before parent.
-      await db.transaction(async (tx) => {
-        await tx
-          .delete(embeddedSessions)
-          .where(eq(embeddedSessions.runnerId, row.id));
-        await tx
-          .delete(runnerCommandResults)
-          .where(eq(runnerCommandResults.runnerId, row.id));
-        await tx
-          .delete(runnerCommands)
-          .where(eq(runnerCommands.runnerId, row.id));
-        await tx.delete(runners).where(eq(runners.id, row.id));
-      });
-      await terminateEBJob(jobName);
-      stopDevPortForward(jobName);
-      terminated++;
-      if (!isOffline) onlineReaped++;
-    } catch (err) {
-      console.error(`[Pool] Failed to reap ${row.name}:`, err);
-    }
-  }
-
-  if (terminated > 0) console.log(`[Pool] Reaped ${terminated} idle EB Job(s)`);
-  return terminated;
 }
 
 /**
@@ -1129,9 +1059,19 @@ export async function reconcileOrphanedPoolEBs(): Promise<number> {
   // runner and start_debug commands pile up in `runner_commands` with nothing
   // to consume them — symptom: UI stuck on "Launching browser..." forever.
   let phantoms = 0;
-  if (isKubernetesMode()) {
+  if (isDynamicPoolMode()) {
     try {
       const liveJobs = await listEBJobNames();
+      if (liveJobs === null) {
+        // Pool service (or the cluster behind it) unreachable — the live-Job
+        // set is UNKNOWN, not empty. Pruning against an empty set would
+        // classify every live EB as a phantom and delete its rows, so skip;
+        // the next boot (or a manual retry) reconciles once the service is up.
+        console.warn(
+          "[Boot] phantom reconciliation skipped — pool service unreachable",
+        );
+        return orphaned.length;
+      }
       const poolRows = await db
         .select({ id: runners.id, name: runners.name })
         .from(runners)
@@ -1172,49 +1112,4 @@ export async function reconcileOrphanedPoolEBs(): Promise<number> {
   }
 
   return orphaned.length + phantoms;
-}
-
-/**
- * Reaper: release EBs whose runner has stopped heartbeating.
- * Heartbeat is the authoritative liveness signal — a healthy long-running test
- * keeps the runner heartbeating, so this won't kill legitimate work. Per-test
- * timeouts are enforced separately by the executor.
- * Wire this into the periodic cleanup interval (alongside markStaleRunnersOffline).
- */
-export async function reapStalePoolEBs(
-  heartbeatTimeoutMs = 90_000,
-): Promise<number> {
-  const heartbeatCutoff = new Date(Date.now() - heartbeatTimeoutMs);
-
-  const stale = await db
-    .select({
-      sessionId: embeddedSessions.id,
-      runnerId: runners.id,
-      busySince: embeddedSessions.busySince,
-      lastSeen: runners.lastSeen,
-    })
-    .from(embeddedSessions)
-    .innerJoin(runners, eq(embeddedSessions.runnerId, runners.id))
-    .where(
-      and(eq(runners.isSystem, true), eq(embeddedSessions.status, "busy")),
-    );
-
-  let reaped = 0;
-  for (const row of stale) {
-    if (!row.lastSeen || row.lastSeen < heartbeatCutoff) {
-      await db
-        .update(runners)
-        .set({ status: "offline" })
-        .where(eq(runners.id, row.runnerId));
-      await db
-        .update(embeddedSessions)
-        .set({ status: "stopped", busySince: null, userId: null })
-        .where(eq(embeddedSessions.id, row.sessionId));
-      reaped++;
-      console.warn(
-        `[Reaper] Force-released stale EB ${row.runnerId.slice(0, 8)} (lastSeen ${row.lastSeen?.toISOString() ?? "never"}, busy since ${row.busySince?.toISOString() ?? "unknown"})`,
-      );
-    }
-  }
-  return reaped;
 }

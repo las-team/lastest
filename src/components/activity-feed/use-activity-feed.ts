@@ -11,21 +11,17 @@ interface UseActivityFeedOpts {
   enabled?: boolean;
 }
 
-function buildWsUrl(path: string): string {
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${window.location.host}${path}`;
-}
-
 export function useActivityFeed(opts: UseActivityFeedOpts = {}) {
   const { repoId, sourceType, enabled = true } = opts;
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [activeSessionCount, setActiveSessionCount] = useState(0);
-  const wsRef = useRef<WebSocket | null>(null);
+  const esRef = useRef<EventSource | null>(null);
 
   const clearEvents = useCallback(() => setEvents([]), []);
 
-  // WebSocket connection for live feed
+  // Live feed via SSE — EventSource auto-reconnects (including across the
+  // endpoint's 90s lifetime-cap close).
   useEffect(() => {
     if (!enabled) return;
 
@@ -34,12 +30,12 @@ export function useActivityFeed(opts: UseActivityFeedOpts = {}) {
     if (sourceType) params.set("source", sourceType);
 
     const qs = params.toString() ? `?${params}` : "";
-    const ws = new WebSocket(buildWsUrl(`/api/activity-feed/ws${qs}`));
-    wsRef.current = ws;
+    const es = new EventSource(`/api/activity-feed${qs}`);
+    esRef.current = es;
 
-    ws.onopen = () => setIsConnected(true);
+    es.onopen = () => setIsConnected(true);
 
-    ws.onmessage = (e) => {
+    es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
         if (data.type === "connected") return;
@@ -64,13 +60,14 @@ export function useActivityFeed(opts: UseActivityFeedOpts = {}) {
       }
     };
 
-    ws.onclose = () => {
+    es.onerror = () => {
+      // EventSource retries automatically; just reflect the gap in the UI.
       setIsConnected(false);
     };
 
     return () => {
-      ws.close();
-      wsRef.current = null;
+      es.close();
+      esRef.current = null;
       setIsConnected(false);
     };
   }, [enabled, repoId, sourceType]);

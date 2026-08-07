@@ -10,7 +10,7 @@
  * goes blank for a few seconds.
  */
 
-import type { StepEventPayload } from "./protocol";
+import type { StepEventPayload } from "@lastest/eb-protocol";
 
 export type StepStatus = "started" | "passed" | "failed";
 

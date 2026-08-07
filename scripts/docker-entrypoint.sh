@@ -40,5 +40,15 @@ elif [ -f "/app/drizzle.config.ts" ]; then
   ./node_modules/.bin/drizzle-kit push --force 2>&1 || echo "Warning: Migration had issues (app may still work)"
 fi
 
+# Start the EB pool service as its own process (single-container deployments:
+# Zima/self-host). It owns provisioning, pool caps and the EB reapers; the app
+# reaches it on loopback :9500 (EB_POOL_SERVICE_URL). On k8s, prefer running
+# it as a dedicated single-replica Deployment and set EB_POOL_SERVICE_DISABLED=1
+# here so only that Deployment holds Job-create RBAC.
+if [ "${EB_POOL_SERVICE_DISABLED:-0}" != "1" ] && [ -f /app/dist-pool/main.mjs ]; then
+  echo "Starting EB pool service..."
+  node /app/dist-pool/main.mjs &
+fi
+
 # Execute the main command
 exec "$@"

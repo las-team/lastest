@@ -23,6 +23,13 @@ pnpm db:studio                  # Drizzle Studio
 # Host postgres (persists in `lastest-pgdata` named volume; defined in ./docker-compose.yml)
 docker compose up -d
 
+# OCR service container (packages/ocr-service) — REQUIRED for OCR features
+# (ocr-text selectors, text-region-aware diffing); the app has no in-process
+# Tesseract. Part of the default compose stack; set
+# OCR_SERVICE_URL=http://localhost:8891 in .env.local.
+pnpm ocr:up                     # docker compose up -d --build ocr
+pnpm ocr:down
+
 # k3d cluster — hosts dynamically-provisioned EB Job pods only (no app, no db)
 pnpm stack                      # create k3d cluster + build/import EB image
 pnpm stack:refresh              # rebuild EB image + import (alias of stack:refresh:eb)
@@ -41,20 +48,24 @@ pnpm deploy:all                 # zima + olares + npm
 
 ## Local Dev (host app + k3d EB provisioning)
 
-The dev architecture is: **`pnpm dev` on the host**, postgres on the host (docker), and **EB pods provisioned dynamically into a local k3d cluster**.
+The dev architecture is: **`pnpm dev` on the host**, postgres on the host (docker), and **EBs provisioned dynamically as local child processes of the pool service** (the default; a k3d-cluster mode exists for parity testing).
 
-- Manifests in `k8s/` (`namespace.yaml`, `embedded-browser-rbac.yaml`, `embedded-browser-job.yaml` reference). Scripts in `scripts/k3d-*.sh`.
-- The EB provisioner (`src/lib/eb/provisioner.ts:127-168`) detects host mode: when `KUBERNETES_SERVICE_HOST` is unset, it shells out to `kubectl config view --raw --minify -o json` and uses the current kubeconfig context (`k3d-lastest`) to talk to the cluster. No in-pod ServiceAccount required.
-- EB pods reach the host app via `host.k3d.internal:3000` — `k3d-up.sh` installs a CoreDNS override that pins the name to the Docker bridge gateway, so the resolution works on Linux without Docker Desktop.
-- The provisioner inlines `SYSTEM_EB_TOKEN` / `LASTEST_URL` / `EB_IMAGE` into each Job spec from the host process env, so no in-cluster Secret is needed for EB lifecycle.
-- Required `.env.local` keys for the host dev flow:
-  - `EB_PROVISIONER=kubernetes`
-  - `EB_NAMESPACE=lastest`
-  - `EB_IMAGE=lastest-embedded-browser:latest`
-  - `LASTEST_URL=http://host.k3d.internal:3000`
-  - `SYSTEM_EB_TOKEN=<random hex>` (single token, or comma-list with the EB-facing token first)
+- **EB pool service** (`packages/pool-service/`): a standalone singleton process owning the browser-capacity plane — EB provisioning, pool caps/warm pool/launch throttle, idle+stale EB reapers. The app calls it over HTTP via `@lastest/pool-service/client` (defaults `http://127.0.0.1:9500`, optional `EB_POOL_SERVICE_TOKEN` bearer auth). **In dev, run `pnpm dev:pool` in a second terminal alongside `pnpm dev`** — without it, provisioning-dependent flows degrade to "no browser available". In Docker the entrypoint starts it automatically (`EB_POOL_SERVICE_DISABLED=1` to opt out when running it as its own k8s Deployment). Capacity accounting has no in-memory counter: the ledger is the backend itself (live k8s Jobs labeled `app=lastest-eb` / live child processes), read fresh under a provision lock in `provisionOneEB()` — so it survives service restarts and can't overshoot `ebPoolMax`.
+- **Provisioner modes** (`provisionerMode()` in `packages/pool-service/src/common.ts`, env `EB_PROVISIONER`):
+  - `process` — **default in a dev checkout** (when `EB_PROVISIONER` is unset or `none`): the pool service spawns `packages/embedded-browser` as local child processes (`src/process-provisioner.ts`) via tsx. No cluster, no Docker, no extra env needed beyond `ENCRYPTION_KEY` + `DATABASE_URL`. Each EB gets a port block from `EB_PROCESS_PORT_BASE` (default 9300, stride 20: stream=P, health=P+1, cdp=P+2, cdp-proxy=P+12) and registers back over `127.0.0.1`. Effective pool cap is `min(ebPoolMax, EB_PROCESS_POOL_MAX=4)`; warm pool defaults to 0, and builds never prewarm (`prewarmForBuild` is a service-side no-op in this mode) — each claim spawns exactly one EB on demand (~2-5s). Requires Playwright Chromium on the host (`pnpm --filter @lastest/embedded-browser exec playwright install chromium`).
+  - `kubernetes` — set `EB_PROVISIONER=kubernetes` explicitly: one k8s Job per EB into a local k3d cluster (`pnpm stack`; manifests in `k8s/`, scripts in `scripts/k3d-*.sh`). When `KUBERNETES_SERVICE_HOST` is unset the provisioner shells out to `kubectl config view` and uses the current kubeconfig context (`k3d-lastest`). EB pods reach the host app via `host.k3d.internal:3000` (CoreDNS override installed by `k3d-up.sh`). Also needs `EB_NAMESPACE=lastest`, `EB_IMAGE=lastest-embedded-browser:latest`, `LASTEST_URL=http://host.k3d.internal:3000`.
+  - `none` — no dynamic provisioning (static EB fleets only, e.g. Zima compose replicas). The default outside a dev checkout; force with `EB_PROVISIONER=disabled`.
+- **Tenant priority classes (kubernetes mode):** EB Jobs can carry a per-tenant `priorityClassName` — `lastest-eb-restricted` for free tiers (`free`/`demo`/`trial`), `lastest-eb-unrestricted` for paying ones (`starter`/`growth`/`pro`). The pool service reads `teams.plan` fresh at provision time from the `teamId` the caller passes (`provisionEB`/`prewarmForBuild`/`claimOrProvisionPoolEB`); every unknown (no teamId, unknown team, DB error, warm-pool launch) falls back to restricted. **Off unless enabled** with `EB_PRIORITY_CLASSES=1` (or by setting `EB_PRIORITY_CLASS_RESTRICTED`/`EB_PRIORITY_CLASS_UNRESTRICTED`) — the API server rejects a Job naming a PriorityClass the cluster doesn't have, and the classes are created by the cluster repo, not here.
+- Both dynamic modes inject a **per-session `EB_BOOTSTRAP_TOKEN`** (HMAC-signed with `ENCRYPTION_KEY`, bound to the EB's instanceId, TTL = its deadline) — dynamic EBs never receive a fleet-wide secret (process mode also withholds `DATABASE_URL`/`ENCRYPTION_KEY` from child env). `SYSTEM_EB_TOKEN` remains accepted at auto-register ONLY for static fleets. The pool service therefore needs the same `ENCRYPTION_KEY` as the app.
+- Required `.env.local` keys for the host dev flow (process mode):
+  - `ENCRYPTION_KEY=<64 hex chars>` (shared by app + pool service; signs stream grants and EB bootstrap tokens)
+  - `OCR_SERVICE_URL=http://localhost:8891` (OCR container from docker-compose; without it OCR features are disabled)
   - `DATABASE_URL=postgresql://lastest:lastest@localhost:5432/lastest`
+  - `SYSTEM_EB_TOKEN` only for static-fleet EBs; dynamic EBs use per-session bootstrap tokens
 - All built images + cluster containers carry `com.docker.compose.project=lastest` so Docker Desktop groups them as one stack.
+- **EB stream proxy:** `scripts/front-proxy.js` owns the public port (:3000) in every deployment; it spawns Next on 127.0.0.1:3001 (the command after `--`) and reverse-proxies HTTP to it. WebSocket upgrades for `/api/embedded/stream/ws` are terminated by the front proxy itself (Next never sees them — no upgrade-listener races); all other upgrades (dev HMR) tunnel through untouched. The upstream EB pod address is dynamic per-session, so this can never be a static ingress route. It authorizes upgrades with an HMAC-signed grant carrying the upstream pod address (`src/lib/eb/stream-grant.ts`), minted by `toProxyStreamUrl()` behind `requireAuth()`. Never key it on an EB-held credential (`EB_BOOTSTRAP_TOKEN` / legacy `SYSTEM_EB_TOKEN`): every EB pod holds one. The verifier is duplicated in the front proxy (a dependency-free script with no TS loader) — change both together; `src/lib/eb/stream-grant.test.ts` cross-checks them in a child process, and `src/lib/eb/front-proxy.test.ts` exercises the proxy end-to-end.
+- **EB stream credential:** the browser holds NO stream credential — only the opaque grant, which is a capability for one pod that expires with it. The EB's stream port is guarded by `STREAM_AUTH_TOKEN`, derived per instance as `HMAC(ENCRYPTION_KEY→"eb-stream-auth-v1", instanceId)` (`deriveStreamAuthToken()` in `packages/pool-service/src/common.ts`, duplicated in the front proxy). The pool service injects it at provision time; the front proxy re-derives it from the `i` (instanceId) field of the grant and presents it as an `x-stream-token` **header**, so it appears in no request line or access log. `embedded_sessions.instanceId` carries it from auto-register (where it is bound to the pod's `EB_BOOTSTRAP_TOKEN`) into the grant — it is only persisted when a bootstrap token vouched for it, never when self-asserted under a static-fleet `SYSTEM_EB_TOKEN`. Static fleets have no provisioner and fall back to a fleet-wide `STREAM_AUTH_TOKEN` env var set on both the proxy and every EB. An EB with no token configured refuses all upgrades (500) — fail closed, since a NetworkPolicy is only enforced by some CNIs and must never be the sole guard on the stream port.
+- **EB isolation:** `k8s/embedded-browser-netpol.yaml` holds two policies for `app=lastest-eb` pods. `lastest-eb-ingress` is default-deny inbound, admitting only the app pod on 9223 (stream), 9224 (health) and 9232 (CDP proxy) — never 9222 (Chromium's own localhost CDP). Enforcing inter-EB isolation on the *ingress* side is deliberate: the destination EB refuses the connection, so it holds regardless of the cluster's pod CIDR. `lastest-eb-egress` allows DNS, the in-cluster app on :3000, and the public internet minus the metadata range and the cluster CIDRs. Caveats in the file header: it is a no-op under non-enforcing CNIs (k3d/flannel — `scripts/k3d-up.sh` does not apply it), the `except` CIDRs are k3s defaults that need changing per cluster, and kubelet probes plus `kubectl port-forward` originate off-pod.
 
 ## Architecture
 
@@ -64,7 +75,7 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 
 **Key paths:**
 
-- `src/lib/db/schema.ts` — all tables (~3700 lines)
+- `packages/db/src/schema.ts` — all tables (~3700 lines; `@/lib/db/schema` re-exports)
 - `src/lib/db/queries.ts` — barrel re-export of all query modules
 - `src/lib/db/queries/` — domain-focused query modules:
   - `tests.ts` — tests, test runs, results, versions, assertions
@@ -108,10 +119,14 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 - `src/lib/a11y/` — WCAG 2.2 AA compliance scoring (wcag-score.ts)
 - `src/lib/scheduling/` — cron parser + scheduler for automated test runs
 - `src/server/actions/` — server actions for all domain ops
-- `src/lib/ws/` — WebSocket protocol for remote runners
+- `src/lib/ws/` — runner-channel server plumbing (registry, event fan-out, step state)
+- `packages/db/` — drizzle schema + Postgres client (`@lastest/db`), shared by app and pool service; `src/lib/db/{index,schema}.ts` are re-export shims
+- `packages/pool-service/` — EB pool service (separate process, `pnpm dev:pool`): k8s/process provisioning, pool caps, warm pool, EB reapers; app consumes `@lastest/pool-service/client`
+- `packages/eb-protocol/` — canonical wire protocol app ↔ runners (`@lastest/eb-protocol`): command/response messages, stream messages, persisted jsonb payload shapes (schema.ts re-exports these)
 - `packages/runner/` — remote runner CLI (npm package via tsup)
 - `packages/mcp-server/` — MCP server for AI agent integration (`@lastest/mcp-server`)
 - `packages/embedded-browser/` — containerized browser with CDP live streaming
+- `packages/ocr-service/` — Tesseract OCR container, the ONLY OCR backend (no in-process Tesseract in the app); app-side facade in `src/lib/ocr/` requires `OCR_SERVICE_URL` — unset means OCR features are disabled. The service wakes on demand and auto-sleeps after idle
 - `packages/vscode-extension/` — VS Code extension (esbuild)
 
 ## Billing (Stripe)
@@ -126,7 +141,7 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 
 ## Schema Changes
 
-1. Edit `src/lib/db/schema.ts`
+1. Edit `packages/db/src/schema.ts` (`src/lib/db/schema.ts` is a re-export shim)
 2. Update `DEFAULT_*` constants at top of schema for new settings fields
 3. Run `pnpm db:push`
 4. Update queries in the relevant `src/lib/db/queries/*.ts` module (barrel re-exported from `queries.ts`)
@@ -143,6 +158,7 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 - **Password hashing:** `@node-rs/argon2` (not bcrypt)
 - **Settings auto-save:** 500ms debounce — when adding fields, update `originalValues`, `hasChanges`, `doSave`, and `useEffect` deps
 - **AI settings:** `getAISettings()` returns `DEFAULT_AI_SETTINGS` when no DB record — all new fields must be in the default
+- **Logging:** `import { getLogger } from "@/lib/logger"` (pino) in server code — `const log = getLogger("GC"); log.warn({ runnerId }, "stale runner")`. Production writes newline-delimited JSON to stdout; dev renders short readable lines. `LOG_LEVEL` overrides the level. Server-only — never import it from a `*-client.tsx`. Existing bare `console.*` calls still work: `src/lib/logger-console-bridge.ts` patches console onto pino at boot (production only, from `src/instrumentation.ts`), lifting a leading `[Prefix]` into `scope` and `Error` args into `err`.
 - **Schema types:** use `$inferSelect` / `$inferInsert` patterns
 - **Monorepo:** pnpm workspaces, pnpm 10.x
 - **pnpm config:** `overrides` / `onlyBuiltDependencies` live in `pnpm-workspace.yaml` — never in a `package.json` `pnpm` block (deprecated)
@@ -152,4 +168,5 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 
 - `VisualDiffWithTestStatus` type must stay in sync with `getVisualDiffsWithTestStatus` query select
 - Test code signature: `export async function test(page, baseUrl, screenshotPath, stepLogger)` — runner strips TS annotations
+- OCR always goes through the `src/lib/ocr` facade, which talks HTTP to `packages/ocr-service` (`OCR_SERVICE_URL` required; no in-process tesseract.js in the app). tesseract.js v6+ only returns `text` by default; bbox/word data needs the explicit `{ blocks: true }` output option (handled inside the service).
 - Docker entrypoint runs `drizzle-kit push --force` on startup

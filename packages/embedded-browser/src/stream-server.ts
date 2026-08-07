@@ -6,6 +6,7 @@
  */
 
 import { WebSocketServer, WebSocket } from "ws";
+import { createHash, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "http";
 import type { ScreencastManager } from "./screencast.js";
 import type { InputHandler, InputEvent } from "./input-handler.js";
@@ -20,6 +21,37 @@ interface StreamClient {
   id: string;
   connectedAt: number;
   alive: boolean;
+  /** Client opted into binary frame transport via `?bin=1` on the upgrade
+   *  URL. Legacy clients (older app deploys) keep receiving JSON frames. */
+  binaryFrames: boolean;
+}
+
+/** First byte of every binary WS message — identifies a JPEG frame. The rest
+ *  of the buffer is the raw JPEG. Control messages stay JSON text frames. */
+const BINARY_FRAME_TAG = 0x01;
+
+function encodeBinaryFrame(base64Data: string): Buffer {
+  const jpeg = Buffer.from(base64Data, "base64");
+  const out = Buffer.allocUnsafe(jpeg.length + 1);
+  out[0] = BINARY_FRAME_TAG;
+  jpeg.copy(out, 1);
+  return out;
+}
+
+/**
+ * Constant-time token comparison. `===` on strings short-circuits at the first
+ * differing byte and leaks the match length to anyone who can time the 401,
+ * which is every stream client. Hashing first gives both sides a fixed 32-byte
+ * width, so timingSafeEqual never throws on a length mismatch either.
+ */
+function tokensMatch(
+  candidate: string | null | undefined,
+  expected: string,
+): boolean {
+  if (!candidate) return false;
+  const a = createHash("sha256").update(candidate, "utf8").digest();
+  const b = createHash("sha256").update(expected, "utf8").digest();
+  return timingSafeEqual(a, b);
 }
 
 export interface ActionProgressPayload {
@@ -85,19 +117,28 @@ export class StreamServer {
       port: this.options.port,
       verifyClient: (info, callback) => {
         if (!this.authToken) {
-          callback(true);
+          callback(
+            false,
+            500,
+            "Missing auth token on server; set `authToken` in StreamServerOptions",
+          );
           return;
         }
 
-        // Check token from query string or header
+        // Prefer the header: the front proxy moves the token there so it never
+        // appears in this server's (or any intermediary's) request line. The
+        // query form stays as a fallback for clients that connect directly —
+        // a browser cannot set headers on a WS handshake.
+        const headerToken = info.req.headers["x-stream-token"];
         const url = new URL(
           info.req.url ?? "",
           `http://localhost:${this.options.port}`,
         );
         const token =
-          url.searchParams.get("token") ?? info.req.headers["x-stream-token"];
+          (Array.isArray(headerToken) ? headerToken[0] : headerToken) ??
+          url.searchParams.get("token");
 
-        if (token === this.authToken) {
+        if (tokensMatch(token, this.authToken)) {
           callback(true);
         } else {
           callback(false, 401, "Unauthorized");
@@ -105,13 +146,18 @@ export class StreamServer {
       },
     });
 
-    this.wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
+    this.wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       const clientId = crypto.randomUUID();
+      const reqUrl = new URL(
+        req.url ?? "",
+        `http://localhost:${this.options.port}`,
+      );
       const client: StreamClient = {
         ws,
         id: clientId,
         connectedAt: Date.now(),
         alive: true,
+        binaryFrames: reqUrl.searchParams.get("bin") === "1",
       };
       this.clients.set(clientId, client);
 
@@ -134,12 +180,18 @@ export class StreamServer {
       // Replay the most recent frame so the canvas paints immediately
       // instead of staying blank until the page next repaints.
       if (this.lastFrame) {
-        this.sendToClient(ws, {
-          type: "stream:frame",
-          id: crypto.randomUUID(),
-          timestamp: Date.now(),
-          payload: this.lastFrame,
-        });
+        if (client.binaryFrames) {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(encodeBinaryFrame(this.lastFrame.data));
+          }
+        } else {
+          this.sendToClient(ws, {
+            type: "stream:frame",
+            id: crypto.randomUUID(),
+            timestamp: Date.now(),
+            payload: this.lastFrame,
+          });
+        }
       }
 
       // Replay any in-flight action countdown with the remaining (not the
@@ -250,18 +302,28 @@ export class StreamServer {
   ): void {
     this.lastBroadcastTime = Date.now();
     this.lastFrame = { data, width, height, timestamp };
-    const message = JSON.stringify({
-      type: "stream:frame",
-      id: crypto.randomUUID(),
-      timestamp: Date.now(),
-      payload: { data, width, height, timestamp },
-    });
+    // Binary transport for opted-in clients (1-byte tag + raw JPEG): ~25%
+    // less bandwidth than base64 and no client-side JSON.parse per frame.
+    // The legacy JSON envelope is only built if a legacy client is connected.
+    let binaryMessage: Buffer | null = null;
+    let jsonMessage: string | null = null;
 
     for (const [clientId, client] of this.clients) {
-      if (client.ws.readyState === WebSocket.OPEN) {
-        client.ws.send(message);
-      } else {
+      if (client.ws.readyState !== WebSocket.OPEN) {
         this.clients.delete(clientId);
+        continue;
+      }
+      if (client.binaryFrames) {
+        binaryMessage ??= encodeBinaryFrame(data);
+        client.ws.send(binaryMessage);
+      } else {
+        jsonMessage ??= JSON.stringify({
+          type: "stream:frame",
+          id: crypto.randomUUID(),
+          timestamp: Date.now(),
+          payload: { data, width, height, timestamp },
+        });
+        client.ws.send(jsonMessage);
       }
     }
   }

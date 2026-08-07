@@ -24,6 +24,8 @@ import { toast } from "sonner";
 import { runVerifyBuild } from "@/server/actions/smart-run";
 import { decideLayer } from "@/server/actions/layer-feedback";
 import { confirmCase, type ConfirmKind } from "@/server/actions/verify-issues";
+import { GITHUB_NOT_CONNECTED } from "@/lib/verify/github-connection";
+import { connectGithub } from "@/components/settings/connect-github-button";
 import { coverArea } from "@/server/actions/cover-area";
 import { updateRepoSelectedBranch } from "@/server/actions/repos";
 import type {
@@ -986,6 +988,24 @@ function BoardFocusInner(props: BoardFocusClientProps) {
             });
           } else if (result.ticketChanged && confirmKind === "done") {
             toast.success("Closed linked ticket");
+          } else if (result.ticketError) {
+            // The case is confirmed, but no ticket exists behind it. Say so —
+            // and when the cause is a missing GitHub connection, make the fix
+            // reachable without leaving the board for good.
+            toast.warning("Case confirmed, but no ticket was filed", {
+              description: result.ticketError,
+              ...(result.ticketErrorCode === GITHUB_NOT_CONNECTED
+                ? {
+                    action: {
+                      label: "Connect GitHub",
+                      onClick: () =>
+                        connectGithub(
+                          window.location.pathname + window.location.search,
+                        ),
+                    },
+                  }
+                : {}),
+            });
           }
         }
       }

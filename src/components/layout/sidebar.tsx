@@ -21,6 +21,7 @@ import {
   Bot,
   Compass,
   Lock,
+  Waypoints,
 } from "lucide-react";
 import Image from "next/image";
 import {
@@ -50,6 +51,11 @@ interface SidebarProps {
   /** When pending=0 but the active branch has a newer commit since the last
    *  build, surface a small icon hinting that there's something new to verify. */
   verifyHasNewerCommit?: boolean;
+  /** Whether this deployment has billing configured at all. Server-resolved
+   *  (`isBillingEnabled()`) and passed down because `STRIPE_SECRET_KEY` is not
+   *  readable in the browser — without it the client would gate self-hosted
+   *  installs differently from the server actions. */
+  billingEnabled?: boolean;
   /** Layout-supplied wrapper classes (e.g. `hidden md:flex` for the desktop
    *  rail vs no class inside the mobile drawer). Kept here so the layout
    *  doesn't need its own wrapper `<div>` around the `<aside>` — that wrapper
@@ -73,6 +79,7 @@ const EARLY_ADOPTER_ITEMS = new Set([
 
 const definitionNav = [
   { name: "Tests", href: "/tests", icon: FileCode },
+  { name: "App Map", href: "/app-map", icon: Waypoints },
   { name: "Setup", href: "/setup", icon: Wrench },
   { name: "Compose", href: "/compose", icon: Layers },
 ];
@@ -100,6 +107,7 @@ export function Sidebar({
   ebSessions,
   verifyPendingCount = 0,
   verifyHasNewerCommit = false,
+  billingEnabled = true,
   className,
 }: SidebarProps) {
   const pathname = usePathname();
@@ -118,7 +126,9 @@ export function Sidebar({
   const verifyPhaseEnabled = team?.verifyPhaseEnabled ?? false;
   // QA Agent is a Pro-tier feature — surface a lock on the nav item so the
   // gated destination doesn't look identical to unlocked pages.
-  const qaAgentLocked = team ? !hasQaAgentAccess(team.plan) : false;
+  const qaAgentLocked = team
+    ? !hasQaAgentAccess(team.plan, billingEnabled)
+    : false;
 
   const filteredDefinitionNav = earlyAdopter
     ? definitionNav

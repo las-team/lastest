@@ -1,0 +1,26 @@
+{
+  "name": "@lastest/ocr-service",
+  "version": "0.1.0",
+  "description": "Tesseract OCR microservice for Lastest — offloads OCR work from the app process",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "tsup": "^8.0.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "Dexilion Team",
+  "license": "FSL-1.1-ALv2"
+}

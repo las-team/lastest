@@ -11,6 +11,7 @@ import { createOpenRouterProvider } from "./openrouter";
 import { createAnthropicDirectProvider } from "./anthropic-direct";
 import { ClaudeAgentSDKProvider } from "./claude-agent-sdk";
 import { createOllamaProvider } from "./ollama";
+import { agentSdkReadiness } from "./availability";
 import type { AIProvider } from "./types";
 
 function extractJsonObject(text: string): string | null {
@@ -77,6 +78,10 @@ function readImageAsBase64(imagePath: string): {
 
 function createDiffingProvider(config: DiffingProviderConfig): AIProvider {
   if (config.provider === "claude-agent-sdk") {
+    const readiness = agentSdkReadiness();
+    if (!readiness.runnable) {
+      throw new Error(readiness.reason);
+    }
     // SDK expects bare model IDs (e.g. "claude-sonnet-4-5-20250929"), strip vendor prefix
     const sdkModel = config.model?.replace(/^anthropic\//, "") || undefined;
     return new ClaudeAgentSDKProvider({

@@ -22,15 +22,6 @@ import {
   markStaleRunnersOffline,
   deleteStaleSystemRunners,
 } from "@/server/actions/runners";
-import {
-  reapStalePoolEBs,
-  reapIdleEBJobs,
-} from "@/server/actions/embedded-sessions";
-import {
-  ensureWarmPool,
-  isKubernetesMode,
-  ebIdleTTLMs,
-} from "@/lib/eb/provisioner";
 import { ensureGlobalPlaywrightSettings } from "@/lib/db/queries/settings";
 import { cleanupOldCommands, timeoutStaleCommands } from "@/lib/db/queries";
 import { cleanupExpiredUrlDiffs } from "@/lib/url-diff/cleanup";
@@ -58,10 +49,11 @@ if (!globalState.__runnerActiveSessions) {
 export const activeRunnerSessions = globalState.__runnerActiveSessions;
 
 /**
- * Start the periodic cleanup + reaper loop. Idempotent — repeated calls no-op.
+ * Start the periodic cleanup loop. Idempotent — repeated calls no-op.
  *
- * Schedules `markStaleRunnersOffline`, `cleanupOldCommands`, `timeoutStaleCommands`,
- * `reapStalePoolEBs`, `reapIdleEBJobs`, and `ensureWarmPool` every 60s.
+ * Schedules `markStaleRunnersOffline`, `cleanupOldCommands` and
+ * `timeoutStaleCommands` every 60s. EB pool maintenance (stale/idle reapers,
+ * warm pool) moved to the pool service's own loop (`packages/pool-service/src/reapers.ts`).
  */
 export function startCleanupLoop(): void {
   if (globalState.__cleanupLoopStarted) return;
@@ -78,18 +70,9 @@ export function startCleanupLoop(): void {
       console.error("[Startup] Failed to mark stale runners offline:", error);
     });
 
-  ensureGlobalPlaywrightSettings()
-    .then(() => {
-      if (isKubernetesMode()) {
-        return ensureWarmPool();
-      }
-    })
-    .catch((error) => {
-      console.error(
-        "[Startup] ensureGlobalPlaywrightSettings / warm pool init failed:",
-        error,
-      );
-    });
+  ensureGlobalPlaywrightSettings().catch((error) => {
+    console.error("[Startup] ensureGlobalPlaywrightSettings failed:", error);
+  });
 
   globalState.__cleanupLoopHandle = setInterval(async () => {
     const now = Date.now();
@@ -146,32 +129,6 @@ export function startCleanupLoop(): void {
       await timeoutStaleCommands(30 * 60 * 1000, 30 * 60 * 1000);
     } catch (error) {
       console.error("[GC] Failed to timeout stale commands:", error);
-    }
-
-    try {
-      const heartbeatTimeoutMs = parseInt(
-        process.env.EB_HEARTBEAT_TIMEOUT_MS || "300000",
-        10,
-      );
-      const reaped = await reapStalePoolEBs(heartbeatTimeoutMs);
-      if (reaped > 0) {
-        console.log(`[Reaper] Released ${reaped} stale pool EB(s)`);
-      }
-    } catch (error) {
-      console.error("[Reaper] Failed to reap stale pool EBs:", error);
-    }
-
-    try {
-      const idleTtlMs = await ebIdleTTLMs();
-      await reapIdleEBJobs(idleTtlMs);
-    } catch (error) {
-      console.error("[Reaper] Failed to reap idle EB Jobs:", error);
-    }
-
-    try {
-      await ensureWarmPool();
-    } catch (error) {
-      console.error("[WarmPool] ensureWarmPool failed:", error);
     }
 
     // URL-Diff artefacts are stateless with a 1h TTL. Run on the same

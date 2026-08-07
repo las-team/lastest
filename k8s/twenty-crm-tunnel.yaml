@@ -1,0 +1,68 @@
+# Cloudflare Tunnel for Twenty CRM -> sales.lastest.cloud
+#
+# Lives INSIDE twenty-ewyctorlab because the namespace NetworkPolicy (app-np)
+# only admits ingress from user-internal / system / user-space-bfl / itself.
+# The cloudflared in lastest-www cannot reach twentyingress (verified: timeout).
+#
+# Uses its OWN tunnel (not the lastest-www token): replicas of a shared tunnel
+# are round-robined by Cloudflare, so requests could land on a pod with no route
+# to Twenty. Both replicas here are in-namespace, so HA is safe.
+#
+# Twenty is a market-installed app; the Olares app controller may reconcile this
+# away on upgrade/reinstall. Re-apply from this file if the tunnel disappears.
+#
+# Secret is created out-of-band (token is not committed):
+#   kubectl create secret generic cloudflared-crm \
+#     --namespace twenty-ewyctorlab \
+#     --from-literal=token='<TUNNEL_TOKEN>'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared-crm
+  namespace: twenty-ewyctorlab
+  labels:
+    app: cloudflared-crm
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cloudflared-crm
+  template:
+    metadata:
+      labels:
+        app: cloudflared-crm
+    spec:
+      containers:
+        - name: cloudflared
+          image: cloudflare/cloudflared:2025.2.0
+          args:
+            - tunnel
+            - --no-autoupdate
+            - --metrics
+            - 0.0.0.0:2000
+            - run
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cloudflared-crm
+                  key: token
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

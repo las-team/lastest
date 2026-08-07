@@ -1,7 +1,29 @@
 /**
- * Embedded Browser Provisioner
+ * Embedded Browser Provisioner — runs INSIDE THE POOL SERVICE process only.
  *
- * On-demand Kubernetes Job provisioning for system EB pods.
+ * On-demand EB provisioning behind two interchangeable backends:
+ *   - kubernetes: one k8s Job per EB (this file's k8s client). The only code
+ *     in the repo that talks to the Kubernetes API; the app reaches it through
+ *     the HTTP surface in `packages/pool-service/src/main.ts` via
+ *     `@lastest/pool-service/client`, and holds no cluster credentials itself.
+ *   - process: one local child process per EB (`./process-provisioner.ts`) —
+ *     the zero-config default in a dev checkout. Same pool caps, throttle,
+ *     reapers and per-session bootstrap tokens; "Job" in the exported API
+ *     names just means "one provisioned EB" there.
+ *
+ * Capacity accounting has no in-memory counter: the ledger is the backend
+ * itself. A k8s Job exists in the API the instant creation returns (no
+ * create→register gap to bridge), and a process-mode child is in the process
+ * map synchronously at spawn — so `livePoolCount()` is authoritative in both
+ * modes, survives pool-service restarts, and counts crashed-but-unreaped
+ * units for exactly as long as they hold real resources. Provision decisions
+ * are serialized through `withProvisionLock` so a fresh ledger read + create
+ * is atomic.
+ *
+ * The remaining in-memory state (provision lock, launch throttle chain,
+ * build-dispatch flag) is correct because the pool service is a singleton by
+ * design — do NOT import this from app code, where multiple replicas would
+ * each get their own copies (the bug that motivated the extraction).
  *
  * Model:
  *   - One Job = one browser = one test (1 test per EB).
@@ -11,7 +33,9 @@
  *     deleted (subject to a small idle-TTL to absorb back-to-back tests).
  *
  * Controlled via env (deployment topology / infra):
- *   EB_PROVISIONER     = 'kubernetes' | 'none'    (default: 'none')
+ *   EB_PROVISIONER     = 'kubernetes' | 'process' | 'disabled'
+ *                        (default: 'process' in a dev checkout, else disabled —
+ *                        see provisionerMode() in ./common.ts)
  *   EB_NAMESPACE       = k8s namespace (default: 'lastest')
  *   EB_IMAGE           = container image for the EB
  *   EB_WARM_POOL_MIN   = min EBs to keep alive while idle (default: 2)
@@ -22,35 +46,44 @@
  *   EB_ACTIVE_DEADLINE_SECONDS (default: 1800)
  *   EB_TTL_SECONDS_AFTER_FINISHED (default: 60)
  *   LASTEST_URL        = URL the EB calls back to (default: in-cluster service DNS)
- *   SYSTEM_EB_TOKEN    = shared secret passed to spawned EB
+ *   ENCRYPTION_KEY     = signs the per-Job EB_BOOTSTRAP_TOKEN (required in
+ *                        kubernetes mode; must match the app's key)
+ *   EB_PRIORITY_CLASSES = '1' to stamp a per-tenant PriorityClass on EB Jobs
+ *                        (kubernetes mode only; off by default — see the
+ *                        "tenant priority classes" section below)
+ *   EB_PRIORITY_CLASS_RESTRICTED / EB_PRIORITY_CLASS_UNRESTRICTED
+ *                      = override the class names (defaults
+ *                        'lastest-eb-restricted' / 'lastest-eb-unrestricted');
+ *                        setting either one also turns the feature on
  *
  * Controlled via the global `playwright_settings` row (cluster-wide, DB):
  *   ebPoolMax          = hard cap on concurrent EBs (schema default: 30)
  *   ebIdleTTLSeconds   = idle timeout before a released EB Job is torn down
+ *                        (process mode caps the effective max at
+ *                        EB_PROCESS_POOL_MAX, default 4 — local Chromiums are
+ *                        expensive)
  *
- * The provisioner is a no-op unless EB_PROVISIONER === 'kubernetes'.
+ * The provisioner is a no-op when provisioning is disabled (mode 'none').
  */
 
 import { execFileSync } from "child_process";
 import { readFileSync } from "fs";
 import https from "https";
-import { db } from "@/lib/db";
-import { runners } from "@/lib/db/schema";
-import { and, eq, ne } from "drizzle-orm";
+import {
+  deriveStreamAuthToken,
+  isDynamicPoolMode,
+  isKubernetesMode,
+  mintBootstrapToken,
+  provisionerMode,
+} from "./common";
+import {
+  getEBProcessInfo,
+  launchEBProcess,
+  listEBProcessNames,
+  terminateEBProcess,
+} from "./process-provisioner";
 
 const SA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount";
-
-type Mode = "kubernetes" | "none";
-
-function provisionerMode(): Mode {
-  const m = (process.env.EB_PROVISIONER || "none").toLowerCase();
-  if (m === "kubernetes") return m;
-  return "none";
-}
-
-export function isKubernetesMode(): boolean {
-  return provisionerMode() === "kubernetes";
-}
 
 // Cluster-wide EB pool limits live in the global `playwright_settings` row.
 // Short in-process cache so hot paths (isPoolBusy, claimOrProvisionPoolEB) don't
@@ -67,7 +100,7 @@ async function readPoolLimits(): Promise<{
 }> {
   if (_limitsCache && Date.now() < _limitsCache.expiresAt)
     return _limitsCache.value;
-  const { getGlobalPoolLimits } = await import("@/lib/db/queries/settings");
+  const { getGlobalPoolLimits } = await import("@lastest/db/settings");
   const row = await getGlobalPoolLimits();
   if (!row) {
     throw new Error(
@@ -79,7 +112,13 @@ async function readPoolLimits(): Promise<{
 }
 
 export async function poolMax(): Promise<number> {
-  return (await readPoolLimits()).ebPoolMax;
+  const dbMax = (await readPoolLimits()).ebPoolMax;
+  if (provisionerMode() !== "process") return dbMax;
+  // Every process-mode EB is a full local Chromium; the cluster-sized DB cap
+  // (default 30) would let one build melt a laptop.
+  const n = parseInt(process.env.EB_PROCESS_POOL_MAX || "4", 10);
+  const processMax = Number.isFinite(n) && n > 0 ? n : 4;
+  return Math.min(dbMax, processMax);
 }
 
 export async function ebIdleTTLMs(): Promise<number> {
@@ -87,18 +126,111 @@ export async function ebIdleTTLMs(): Promise<number> {
 }
 
 export function warmPoolMin(): number {
-  const n = parseInt(process.env.EB_WARM_POOL_MIN || "2", 10);
-  return Number.isFinite(n) && n >= 0 ? n : 2;
+  // Process mode defaults to a cold pool: idle warm EBs are whole Chromium
+  // processes on the dev machine, and local spawn latency (~2-5s) is cheap
+  // enough to pay per test. Opt back in with EB_WARM_POOL_MIN.
+  const fallback = provisionerMode() === "process" ? 0 : 2;
+  const n = parseInt(process.env.EB_WARM_POOL_MIN || String(fallback), 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
 // Pool slots held back from build dispatch so interactive callers
 // (recording, debug, AI) can always provision a fresh EB even when builds
 // have saturated the cluster. Recurring "Live-stream canvas never mounted"
-// failures traced to bursty cron-build overlap pushing currentPoolSize() to
+// failures traced to bursty cron-build overlap pushing the pool size to
 // ebPoolMax before a recording test could provision its target EB.
 export function interactiveReservedSlots(): number {
   const n = parseInt(process.env.EB_RESERVED_INTERACTIVE_SLOTS || "2", 10);
   return Number.isFinite(n) && n >= 0 ? n : 2;
+}
+
+// ── Tenant priority classes (kubernetes mode only) ──────────────────────────
+//
+// Free tenants run their EB pods at a preemptible priority so a paying
+// tenant's pod can evict them when the cluster is full; paid tenants run
+// unrestricted. Both PriorityClass objects are created by the cluster repo,
+// NOT here — this side only stamps the name onto the Job's pod spec.
+//
+// Off unless configured. A Job naming a PriorityClass the cluster doesn't have
+// is REJECTED by the API server, so defaulting this on would break every
+// cluster that hasn't installed the classes (k3d dev, self-hosted Olares).
+// Turn it on with EB_PRIORITY_CLASSES=1, or implicitly by naming either class.
+//
+// The tier is derived from `teams.plan` read fresh from the DB at provision
+// time — never from a value the caller asserts, and never cached: a plan
+// upgrade takes effect on the tenant's next EB. Every failure path (no
+// teamId, unknown team, DB error) lands on 'restricted': the wrong answer
+// costs a paid tenant a preemptible pod, while the opposite would hand free
+// tenants cluster priority.
+
+const DEFAULT_RESTRICTED_CLASS = "lastest-eb-restricted";
+const DEFAULT_UNRESTRICTED_CLASS = "lastest-eb-unrestricted";
+
+/** Plans that get an unrestricted EB. Mirrors the purchasable tiers in
+ *  `src/lib/billing/plans.ts` — 'demo'/'trial'/'free' don't pay, so they don't
+ *  outrank anyone. Anything unrecognized is treated as free. */
+const PAID_PLANS = new Set(["starter", "growth", "pro"]);
+
+export type EBPriorityTier = "restricted" | "unrestricted";
+
+export function tierForPlan(plan: string | null | undefined): EBPriorityTier {
+  return plan && PAID_PLANS.has(plan) ? "unrestricted" : "restricted";
+}
+
+/**
+ * PriorityClass name for a tier, or undefined when the feature is off (then
+ * the Job carries no `priorityClassName` and k8s applies the cluster default).
+ */
+export function priorityClassNameFor(tier: EBPriorityTier): string | undefined {
+  const restricted = (process.env.EB_PRIORITY_CLASS_RESTRICTED || "").trim();
+  const unrestricted = (
+    process.env.EB_PRIORITY_CLASS_UNRESTRICTED || ""
+  ).trim();
+  const flag = (process.env.EB_PRIORITY_CLASSES || "").trim().toLowerCase();
+  if (flag === "0" || flag === "false" || flag === "off") return undefined;
+  const enabled =
+    flag === "1" ||
+    flag === "true" ||
+    flag === "on" ||
+    !!restricted ||
+    !!unrestricted;
+  if (!enabled) return undefined;
+  return tier === "unrestricted"
+    ? unrestricted || DEFAULT_UNRESTRICTED_CLASS
+    : restricted || DEFAULT_RESTRICTED_CLASS;
+}
+
+/**
+ * Look up the tenant's plan and map it to a tier. Best-effort by design:
+ * a DB hiccup must not fail a provision, it just yields 'restricted'.
+ */
+export async function resolvePriorityTier(
+  teamId?: string | null,
+): Promise<EBPriorityTier> {
+  if (!teamId) return "restricted";
+  try {
+    const { db } = await import("@lastest/db");
+    const { teams } = await import("@lastest/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const [row] = await db
+      .select({ plan: teams.plan })
+      .from(teams)
+      .where(eq(teams.id, teamId))
+      .limit(1);
+    if (!row) {
+      console.warn(
+        `[EB Provisioner] Unknown teamId ${teamId} — provisioning as restricted`,
+      );
+      return "restricted";
+    }
+    return tierForPlan(row.plan);
+  } catch (err) {
+    console.warn(
+      `[EB Provisioner] Plan lookup for team ${teamId} failed — provisioning as restricted:`,
+      err instanceof Error ? err.message : err,
+    );
+    return "restricted";
+  }
 }
 
 interface ClusterCreds {
@@ -175,7 +307,14 @@ function loadKubeconfigCreds(): ClusterCreds {
         `Ensure kubectl is on PATH and the current kube-context points at the target cluster (e.g. 'kubectl config use-context k3d-lastest').`,
     );
   }
-  const cfg = JSON.parse(raw) as KubectlConfigView;
+  let cfg: KubectlConfigView;
+  try {
+    cfg = JSON.parse(raw) as KubectlConfigView;
+  } catch (err) {
+    throw new Error(
+      `kubectl config view did not return valid JSON: ${(err as Error).message}`,
+    );
+  }
   const cluster = cfg.clusters?.[0]?.cluster;
   const user = cfg.users?.[0]?.user;
   const ctx = cfg.contexts?.[0]?.context;
@@ -184,7 +323,14 @@ function loadKubeconfigCreds(): ClusterCreds {
       "kubeconfig has no current cluster.server — check `kubectl config current-context`",
     );
   }
-  const url = new URL(cluster.server);
+  let url: URL;
+  try {
+    url = new URL(cluster.server);
+  } catch (err) {
+    throw new Error(
+      `kubeconfig cluster.server '${cluster.server}' is not a valid URL: ${(err as Error).message}`,
+    );
+  }
   const host = url.hostname;
   const kcPort = url.port || (url.protocol === "https:" ? "443" : "80");
   const ca = cluster["certificate-authority-data"]
@@ -268,48 +414,92 @@ async function k8sRequest(
   });
 }
 
-// In-flight provision counter: the window between `launchEBJob()` creating a
-// k8s Job and the pod's `registerAsSystem` callback inserting a runner row is
-// 5–30s (image pull, Chromium startup, first heartbeat). During that window
-// `currentPoolSize()` used to return a low count because it only sees
-// registered runners — so concurrent callers could each think "pool is small,
-// safe to provision" and collectively blow past the cap. Observed in prod as
-// 29 EB pods created while app was restarting (pool size log stayed at 3/30).
-let _inFlightProvisions = 0;
-export function incInFlightProvisions(): void {
-  _inFlightProvisions++;
-}
-export function decInFlightProvisions(): void {
-  _inFlightProvisions = Math.max(0, _inFlightProvisions - 1);
-}
-export function inFlightProvisions(): number {
-  return _inFlightProvisions;
+/** Minimal slice of a k8s Job object needed to decide liveness. */
+export interface K8sJobLike {
+  metadata?: { name?: string; deletionTimestamp?: string };
+  status?: { succeeded?: number; failed?: number; completionTime?: string };
 }
 
 /**
- * Count currently-known system EB runners (online + busy) — proxy for pool size.
- * Offline rows are excluded: they represent dying/dead Jobs awaiting GC and shouldn't
- * block new provisioning. Also includes `_inFlightProvisions` — Jobs that were
- * created but haven't registered yet. Without that, app restarts + burst
- * claims cause runaway provisioning. Used to enforce the global ebPoolMax
- * before provisioning and to decide whether `maybeTerminateReleasedEB` can
- * tear down past warmPoolMin.
+ * A Job counts against pool capacity iff it is not terminal and not being
+ * deleted. A just-created Job has an empty status — that counts as live
+ * (which is exactly why the k8s API works as the capacity ledger: the Job is
+ * visible before its pod registers, so there is no accounting gap and no
+ * need for an in-flight counter). Completed/Failed Jobs linger up to
+ * `ttlSecondsAfterFinished` (600s, kept long for forensics) and must NOT
+ * count — their pod has exited, they hold no resources.
  */
-export async function currentPoolSize(): Promise<number> {
-  const rows = await db
-    .select({ id: runners.id })
-    .from(runners)
-    .where(
-      and(
-        eq(runners.isSystem, true),
-        eq(runners.type, "embedded"),
-        ne(runners.status, "offline"),
-      ),
-    );
-  return rows.length + _inFlightProvisions;
+export function isLiveEBJob(job: K8sJobLike): boolean {
+  if (job.metadata?.deletionTimestamp) return false;
+  const s = job.status;
+  if (!s) return true;
+  if ((s.succeeded ?? 0) > 0 || (s.failed ?? 0) > 0 || s.completionTime) {
+    return false;
+  }
+  return true;
 }
 
-function jobSpec(name: string, instanceId: string): Record<string, unknown> {
+/**
+ * Authoritative pool occupancy — the backend IS the ledger:
+ *   kubernetes: count of live EB Jobs in the API (visible at creation time)
+ *   process:    live children in the provisioner's process map
+ * Throws when the k8s list fails: capacity decisions must fail closed, never
+ * fall back to a DB count (registered runners lag Job creation by 5–30s —
+ * counting them let concurrent callers blow past the cap; observed in prod as
+ * 29 EB pods created while the app was restarting).
+ *
+ * Static-fleet EBs (SYSTEM_EB_TOKEN compose replicas) exist only in mode
+ * 'none' where provisioning is disabled, so counting provisioner-owned units
+ * only is correct.
+ */
+export async function livePoolCount(): Promise<number> {
+  return (await listEBJobNames()).size;
+}
+
+// Non-authoritative cache of livePoolCount for display reads (`GET /v1/pool`).
+// Provision decisions always read fresh inside the provision lock.
+let _liveCountCache: { value: number; expiresAt: number } | null = null;
+const LIVE_COUNT_CACHE_TTL_MS = 3000;
+
+/**
+ * Pool size for display. Serves stale-if-available when the ledger is
+ * unreachable, `null` when there's nothing cached either — the caller
+ * degrades gracefully. NEVER use for provision decisions.
+ */
+export async function cachedLivePoolCount(): Promise<number | null> {
+  if (_liveCountCache && Date.now() < _liveCountCache.expiresAt) {
+    return _liveCountCache.value;
+  }
+  try {
+    const value = await livePoolCount();
+    _liveCountCache = {
+      value,
+      expiresAt: Date.now() + LIVE_COUNT_CACHE_TTL_MS,
+    };
+    return value;
+  } catch {
+    return _liveCountCache?.value ?? null;
+  }
+}
+
+/** Keep the display cache responsive across provision/terminate without an
+ *  extra ledger round-trip. `value` when the caller knows the new size. */
+function refreshLiveCountCache(value?: number): void {
+  if (value === undefined) {
+    _liveCountCache = null;
+  } else {
+    _liveCountCache = {
+      value,
+      expiresAt: Date.now() + LIVE_COUNT_CACHE_TTL_MS,
+    };
+  }
+}
+
+export function jobSpec(
+  name: string,
+  instanceId: string,
+  priorityClassName?: string,
+): Record<string, unknown> {
   const creds = (() => {
     try {
       return loadClusterCreds();
@@ -327,11 +517,6 @@ function jobSpec(name: string, instanceId: string): Record<string, unknown> {
   // (Olares: internal cluster DNS vs. external envoy hostname). Optional;
   // when unset the bypass falls back to LASTEST_URL only.
   const lastestPublicUrl = process.env.LASTEST_PUBLIC_URL || "";
-  // `SYSTEM_EB_TOKEN` may hold a comma-separated rotation list on the app side
-  // (auto-register validates by splitting on `,`). Each EB sends the env var
-  // verbatim as its Bearer token, so it must be a SINGLE token or the app 401s
-  // every register attempt. Take the first entry — the one the app prefers.
-  const systemToken = (process.env.SYSTEM_EB_TOKEN || "").split(",")[0].trim();
   const cpuRequest = process.env.EB_CPU_REQUEST || "1000m";
   const cpuLimit = process.env.EB_CPU_LIMIT || "2000m";
   const memRequest = process.env.EB_MEM_REQUEST || "2Gi";
@@ -352,6 +537,29 @@ function jobSpec(name: string, instanceId: string): Record<string, unknown> {
     10,
   );
 
+  // Per-session bootstrap token — the ONLY credential the pod receives.
+  // TTL = the Job's own deadline + grace, so the token cannot outlive the EB.
+  // See the primitive in ./common.ts. Fail closed: without a signing key the
+  // pod could never register, so refuse to create a Job at all.
+  const bootstrapToken = mintBootstrapToken(
+    instanceId,
+    activeDeadline * 1000 + 300_000,
+  );
+  if (!bootstrapToken) {
+    throw new Error(
+      "Cannot mint EB_BOOTSTRAP_TOKEN — ENCRYPTION_KEY is unset or not 64 hex chars in the pool service env. It must match the app's ENCRYPTION_KEY.",
+    );
+  }
+
+  // The stream port's credential, derived from the same key. Fail closed for
+  // the same reason: an EB with no STREAM_AUTH_TOKEN refuses every viewer.
+  const streamAuthToken = deriveStreamAuthToken(instanceId);
+  if (!streamAuthToken) {
+    throw new Error(
+      "Cannot derive STREAM_AUTH_TOKEN — ENCRYPTION_KEY is unset or not 64 hex chars in the pool service env. It must match the app's ENCRYPTION_KEY.",
+    );
+  }
+
   return {
     apiVersion: "batch/v1",
     kind: "Job",
@@ -370,10 +578,25 @@ function jobSpec(name: string, instanceId: string): Record<string, unknown> {
         },
         spec: {
           restartPolicy: "Never",
+          // Per-tenant scheduling priority. Omitted (cluster default applies)
+          // unless the deployment configured the classes — see
+          // `priorityClassNameFor`.
+          ...(priorityClassName ? { priorityClassName } : {}),
           // Allow enough time for runnerClient.drain() to flush pending
           // test_result / screenshot / network_bodies POSTs after SIGTERM.
           // Must be ≥ drain timeout in index.ts shutdown() (15s) plus headroom.
           terminationGracePeriodSeconds: 60,
+          // Pod runs as the non-root pwuser (uid 1001) shipped by the EB
+          // image's Playwright base. The image's Dockerfile sets USER pwuser;
+          // this mirrors that at the orchestrator layer so a misconfigured
+          // image (or a future rebuild that drops USER) can't silently run
+          // untrusted web content + user test code as root.
+          securityContext: {
+            runAsNonRoot: true,
+            runAsUser: 1001,
+            runAsGroup: 1001,
+            seccompProfile: { type: "RuntimeDefault" },
+          },
           // `/dev/shm` size ≥512Mi is required — default 64Mi crashes Chromium under load
           volumes: [
             {
@@ -386,12 +609,24 @@ function jobSpec(name: string, instanceId: string): Record<string, unknown> {
               name: "embedded-browser",
               image,
               imagePullPolicy: "IfNotPresent",
+              // Container-level hardening: forbid privilege escalation and
+              // drop every Linux capability. pwuser already can't gain root,
+              // but making it explicit keeps the EB locked down even if the
+              // namespace's default service account is over-permissioned.
+              securityContext: {
+                runAsNonRoot: true,
+                runAsUser: 1001,
+                runAsGroup: 1001,
+                allowPrivilegeEscalation: false,
+                capabilities: { drop: ["ALL"] },
+              },
               env: [
                 { name: "LASTEST_URL", value: lastestUrl },
                 ...(lastestPublicUrl
                   ? [{ name: "LASTEST_PUBLIC_URL", value: lastestPublicUrl }]
                   : []),
-                { name: "SYSTEM_EB_TOKEN", value: systemToken },
+                { name: "EB_BOOTSTRAP_TOKEN", value: bootstrapToken },
+                { name: "STREAM_AUTH_TOKEN", value: streamAuthToken },
                 { name: "INSTANCE_ID", value: instanceId },
                 { name: "STREAM_PORT", value: "9223" },
                 { name: "CDP_PORT", value: "9222" },
@@ -465,26 +700,29 @@ async function awaitLaunchSlot(): Promise<void> {
   }
 }
 
-export async function launchEBJob(): Promise<{
+async function launchEBJob(opts: { priorityClassName?: string } = {}): Promise<{
   jobName: string;
   instanceId: string;
 }> {
-  if (!isKubernetesMode()) {
-    throw new Error('launchEBJob called but EB_PROVISIONER !== "kubernetes"');
-  }
-
-  const poolSize = await currentPoolSize();
-  const cap = await poolMax();
-  if (poolSize >= cap) {
-    throw new Error(`EB pool at capacity (${poolSize}/${cap})`);
+  const mode = provisionerMode();
+  if (mode === "none") {
+    throw new Error("launchEBJob called but EB provisioning is disabled");
   }
 
   await awaitLaunchSlot();
 
   const instanceId = generateInstanceId();
   const jobName = instanceId; // instanceId is short enough to use as job name
+
+  if (mode === "process") {
+    // Priority classes are a k8s scheduling concept — nothing to apply to a
+    // local child process.
+    await launchEBProcess(instanceId);
+    return { jobName, instanceId };
+  }
+
   const creds = loadClusterCreds();
-  const spec = jobSpec(jobName, instanceId);
+  const spec = jobSpec(jobName, instanceId, opts.priorityClassName);
 
   const { status, data } = await k8sRequest(
     "POST",
@@ -497,10 +735,91 @@ export async function launchEBJob(): Promise<{
     );
   }
 
-  console.log(
-    `[EB Provisioner] Created Job ${jobName} (pool size ${poolSize + 1}/${cap})`,
-  );
   return { jobName, instanceId };
+}
+
+/** Thrown by `provisionOneEB` when the (purpose-effective) cap is reached.
+ *  Carries the numbers so the HTTP layer can render the 409 body. */
+export class AtCapacityError extends Error {
+  constructor(
+    public readonly size: number,
+    public readonly cap: number,
+  ) {
+    super(`EB pool at capacity (${size}/${cap})`);
+    this.name = "AtCapacityError";
+  }
+}
+
+// Serializes decide+create: the next capacity decision must not run until the
+// previous Job/child is visible in the ledger (k8s API / process map). This
+// is what makes the fresh `livePoolCount()` read race-free — two concurrent
+// provisions can't both observe the pre-create count.
+let _provisionChain: Promise<void> = Promise.resolve();
+async function withProvisionLock<T>(fn: () => Promise<T>): Promise<T> {
+  const prev = _provisionChain;
+  let release!: () => void;
+  _provisionChain = new Promise<void>((r) => {
+    release = r;
+  });
+  await prev;
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
+export type ProvisionPurpose = "build" | "interactive" | "warm";
+
+/**
+ * The single choke point for creating an EB: fresh ledger read → cap check →
+ * create, atomic under the provision lock.
+ *
+ * `purpose` picks the effective cap:
+ *   - 'build':  ebPoolMax − EB_RESERVED_INTERACTIVE_SLOTS, so recording/debug/
+ *               AI can always provision even when builds saturate the pool
+ *   - 'interactive' / 'warm': the full ebPoolMax
+ *
+ * `opts.teamId` is the tenant the EB is being provisioned for. In kubernetes
+ * mode its plan decides the pod's PriorityClass (see `resolvePriorityTier`).
+ * Omitting it — warm-pool launches, which belong to no tenant until claimed —
+ * provisions restricted.
+ *
+ * Throws `AtCapacityError` at the cap; anything else (k8s list/create
+ * failure) propagates — capacity decisions fail closed. Note the ledger read
+ * excludes the caller's own not-yet-created unit, so the last pool slot is
+ * usable (the old counter double-counted the caller's reservation and
+ * self-blocked it).
+ */
+export async function provisionOneEB(
+  purpose: ProvisionPurpose,
+  opts: { teamId?: string | null } = {},
+): Promise<{ jobName: string; instanceId: string }> {
+  // Resolved OUTSIDE the provision lock: it's a DB round-trip, and the lock
+  // serializes every provision in the process — holding it across the plan
+  // lookup would add that latency to each queued launch.
+  const priorityClassName = isKubernetesMode()
+    ? priorityClassNameFor(await resolvePriorityTier(opts.teamId))
+    : undefined;
+
+  return withProvisionLock(async () => {
+    const cap = await poolMax();
+    const reserved = purpose === "build" ? interactiveReservedSlots() : 0;
+    const effectiveCap = Math.max(0, cap - reserved);
+    const size = await livePoolCount();
+    if (size >= effectiveCap) {
+      throw new AtCapacityError(size, cap);
+    }
+
+    const jobInfo = await launchEBJob({ priorityClassName });
+    refreshLiveCountCache(size + 1);
+    console.log(
+      `[EB Provisioner] Provisioned ${jobInfo.jobName} (pool size ${size + 1}/${cap}, purpose=${purpose}` +
+        `${opts.teamId ? `, team=${opts.teamId}` : ""}` +
+        `${priorityClassName ? `, priorityClass=${priorityClassName}` : ""})`,
+    );
+    return jobInfo;
+  });
 }
 
 /**
@@ -508,6 +827,11 @@ export async function launchEBJob(): Promise<{
  * Background propagation so the call returns immediately; kubelet cleans up.
  */
 export async function terminateEBJob(jobName: string): Promise<void> {
+  refreshLiveCountCache(); // display cache only — next /v1/pool re-reads the ledger
+  if (provisionerMode() === "process") {
+    await terminateEBProcess(jobName);
+    return;
+  }
   if (!isKubernetesMode()) return;
   const creds = loadClusterCreds();
   const { status } = await k8sRequest(
@@ -548,6 +872,9 @@ export async function getEBPodInfo(
   jobName: string,
   tailLines = 80,
 ): Promise<EBPodInfo | null> {
+  if (provisionerMode() === "process") {
+    return getEBProcessInfo(jobName, tailLines);
+  }
   if (!isKubernetesMode()) return null;
   try {
     const creds = loadClusterCreds();
@@ -627,23 +954,21 @@ export async function getEBPodInfo(
 }
 
 /**
- * Derive the Job name for a runner row. Only matches runners created by
- * `generateInstanceId()` — `eb-<base36-ts>-<6-char-rand>` — so static
- * sidecar EBs (`eb1`, `eb2`, ...) are NOT misidentified as dynamic Jobs
- * and reaped by `reapIdleEBJobs`.
- */
-export function jobNameForRunnerName(runnerName: string): string | null {
-  const m = runnerName.match(/^System EB-(eb-[a-z0-9]+-[a-z0-9]+)$/);
-  return m ? m[1]! : null;
-}
-
-/**
- * List the names of currently-existing EB Jobs in the cluster.
- * Used by boot-time reconciliation to detect "phantom" runner rows whose
- * backing Job has been deleted (e.g. TTL expiry during an app restart when
- * no reaper was running) so we don't hand them out to claimers.
+ * List the names of currently-LIVE EB Jobs (terminal and deleting Jobs
+ * excluded — see `isLiveEBJob`; the process backend already only lists
+ * un-exited children). Doubles as the capacity ledger via `livePoolCount()`
+ * and feeds boot-time reconciliation of "phantom" runner rows whose backing
+ * Job is gone (e.g. TTL expiry during an app restart when no reaper was
+ * running) so we don't hand them out to claimers.
+ *
+ * THROWS on k8s API failure instead of returning an empty set: an empty set
+ * means "no jobs exist" and would make the app-side phantom pruner delete
+ * every live runner's rows, and would let capacity checks provision without
+ * bound. The HTTP layer turns the throw into a 500, which the app client
+ * maps to `null` = "unknown, skip pruning".
  */
 export async function listEBJobNames(): Promise<Set<string>> {
+  if (provisionerMode() === "process") return listEBProcessNames();
   if (!isKubernetesMode()) return new Set();
   const creds = loadClusterCreds();
   const { status, data } = await k8sRequest(
@@ -651,14 +976,14 @@ export async function listEBJobNames(): Promise<Set<string>> {
     `/apis/batch/v1/namespaces/${encodeURIComponent(creds.namespace)}/jobs?labelSelector=${encodeURIComponent("app=lastest-eb")}`,
   );
   if (status < 200 || status >= 300) {
-    console.warn(`[EB Provisioner] listEBJobNames failed: ${status}`);
-    return new Set();
+    throw new Error(`k8s Job list failed: ${status}`);
   }
-  const items =
-    (data as { items?: Array<{ metadata?: { name?: string } }> } | null)
-      ?.items ?? [];
+  const items = (data as { items?: K8sJobLike[] } | null)?.items ?? [];
   return new Set(
-    items.map((j) => j.metadata?.name).filter((n): n is string => !!n),
+    items
+      .filter(isLiveEBJob)
+      .map((j) => j.metadata?.name)
+      .filter((n): n is string => !!n),
   );
 }
 
@@ -689,16 +1014,21 @@ export function inBuildDispatch(): number {
  *
  * No-op while a build is dispatching (see `_buildDispatchInFlight`): warm-pool
  * refill that races with on-demand provisioning just wastes pods.
+ *
+ * Warm EBs belong to no tenant until someone claims them, so they carry the
+ * restricted PriorityClass — a paid tenant that claims one runs at free-tier
+ * priority for that test, whereas the reverse would let free tenants inherit
+ * paid priority just by winning the race for an idle pod.
  */
 export async function ensureWarmPool(): Promise<number> {
-  if (!isKubernetesMode()) return 0;
+  if (!isDynamicPoolMode()) return 0;
   if (_buildDispatchInFlight > 0) return 0;
   const want = warmPoolMin();
   if (want <= 0) return 0;
 
   // Count EBs currently online and idle (ready for immediate claim)
-  const { db } = await import("@/lib/db");
-  const { runners, embeddedSessions } = await import("@/lib/db/schema");
+  const { db } = await import("@lastest/db");
+  const { runners, embeddedSessions } = await import("@lastest/db/schema");
   const { and, eq } = await import("drizzle-orm");
 
   const idle = await db
@@ -717,23 +1047,17 @@ export async function ensureWarmPool(): Promise<number> {
   const deficit = want - idle.length;
   if (deficit <= 0) return 0;
 
-  const cap = await poolMax();
-  const size = await currentPoolSize();
-  const canLaunch = Math.min(deficit, Math.max(0, cap - size));
-  if (canLaunch <= 0) return 0;
-
+  // Per-call cap enforcement lives inside provisionOneEB (fresh ledger read
+  // under the provision lock) — no racy `cap - size` precompute needed.
   let launched = 0;
-  for (let i = 0; i < canLaunch; i++) {
-    incInFlightProvisions();
+  for (let i = 0; i < deficit; i++) {
     try {
-      await launchEBJob();
+      await provisionOneEB("warm");
       launched++;
-      // Decrement scheduled after a grace period: the pod should have
-      // registered as a runner by then, so it counts via the DB row instead.
-      setTimeout(() => decInFlightProvisions(), 120_000);
     } catch (err) {
-      decInFlightProvisions();
-      console.warn("[EB Provisioner] ensureWarmPool launch failed:", err);
+      if (!(err instanceof AtCapacityError)) {
+        console.warn("[EB Provisioner] ensureWarmPool launch failed:", err);
+      }
       break;
     }
   }
@@ -756,31 +1080,38 @@ export async function ensureWarmPool(): Promise<number> {
  *
  * Returns the number actually launched (may be less than requested if pool is
  * near cap or any launch throws).
+ *
+ * `opts.teamId` is the build's tenant — it selects the pods' PriorityClass in
+ * kubernetes mode, exactly as in `provisionOneEB`.
  */
-export async function prewarmForBuild(targetCount: number): Promise<number> {
-  if (!isKubernetesMode()) return 0;
+export async function prewarmForBuild(
+  targetCount: number,
+  opts: { teamId?: string | null } = {},
+): Promise<number> {
+  if (!isDynamicPoolMode()) return 0;
+  // Process mode: no prewarm, ever. Each claim provisions on demand, so a
+  // 1-test build spawns exactly 1 local Chromium instead of 2 (prewarm racing
+  // the on-demand claim while the prewarmed EB was still registering). N
+  // parallel workers still get N processes via their own claims, capped by
+  // EB_PROCESS_POOL_MAX. Local spawn latency (~2-5s) is the accepted cost —
+  // prewarm exists to hide k8s pod cold start (image pull, 5-30s), which
+  // local child processes don't have.
+  if (provisionerMode() === "process") return 0;
   if (targetCount <= 0) return 0;
 
-  // Builds must respect the interactive reservation here too —
-  // claimOrProvisionPoolEB({purpose:'build'}) enforces it on demand-provision,
-  // but prewarming to the full hard cap let a build occupy the slots reserved
-  // for recording/debug before any interactive caller could claim one.
-  const cap = await poolMax();
-  const size = await currentPoolSize();
-  const effectiveCap = Math.max(0, cap - interactiveReservedSlots());
-  const canLaunch = Math.min(targetCount, Math.max(0, effectiveCap - size));
-  if (canLaunch <= 0) return 0;
-
+  // Builds must respect the interactive reservation here too — prewarming to
+  // the full hard cap would let a build occupy the slots reserved for
+  // recording/debug before any interactive caller could claim one.
+  // provisionOneEB('build') enforces exactly that cap per launch.
   let launched = 0;
-  for (let i = 0; i < canLaunch; i++) {
-    incInFlightProvisions();
+  for (let i = 0; i < targetCount; i++) {
     try {
-      await launchEBJob();
+      await provisionOneEB("build", { teamId: opts.teamId });
       launched++;
-      setTimeout(() => decInFlightProvisions(), 120_000);
     } catch (err) {
-      decInFlightProvisions();
-      console.warn("[EB Provisioner] prewarmForBuild launch failed:", err);
+      if (!(err instanceof AtCapacityError)) {
+        console.warn("[EB Provisioner] prewarmForBuild launch failed:", err);
+      }
       break;
     }
   }

@@ -1,8 +1,206 @@
 /**
- * WebSocket Protocol Types for Agent Communication
+ * @lastest/eb-protocol — the wire protocol between the Lastest app and its
+ * browser runners (embedded browser pods + remote runners).
  *
- * Defines the message format and types for server <-> agent communication.
+ * Single source of truth for:
+ *   - command / response / status messages exchanged over the runner channel
+ *     (`/api/ws/runner` long-poll: commands dispatched in heartbeat responses,
+ *     results POSTed back)
+ *   - the HTTP envelope shapes of the register/connect/heartbeat endpoints
+ *   - embedded-browser stream messages (screencast frames, input forwarding)
+ *   - JSON payload shapes that cross the wire AND are persisted verbatim into
+ *     jsonb columns (DOM snapshots, a11y/design-system violations, assertion
+ *     results) — `src/lib/db/schema.ts` re-exports these so app code keeps
+ *     importing them alongside the row types they are stored in.
+ *
+ * Consumed as TypeScript source (no build step), same as `@lastest/shared`:
+ * the app transpiles it via `transpilePackages`, the embedded browser bundles
+ * it via tsup `noExternal`.
  */
+
+import type {
+  CoreStabilizationSettings,
+  SelectorOutcome,
+  SelectorStatRow,
+} from "@lastest/shared";
+
+export type StabilizationPayload = CoreStabilizationSettings;
+export type { SelectorOutcome, SelectorStatRow };
+
+// ============================================
+// Shared Wire Data Types
+// ============================================
+// Produced by the runner, consumed AND persisted by the app (jsonb columns).
+
+// DOM snapshot element captured during recording or test execution
+export interface DomSnapshotElement {
+  tag: string;
+  id?: string;
+  textContent?: string;
+  boundingBox: { x: number; y: number; width: number; height: number };
+  selectors: Array<{ type: string; value: string }>;
+  // Curated computed styles (color, padding, font, …), captured by the
+  // embedded browser only when style capture is enabled. Drives RCA CSS-delta
+  // drill-down; absent on snapshots predating the feature.
+  styles?: Record<string, string>;
+}
+
+// Full DOM snapshot with page context
+export interface DomSnapshotData {
+  elements: DomSnapshotElement[];
+  url: string;
+  timestamp: number;
+}
+
+// Accessibility violation from axe-core.
+// `nodes` is a count (preserved for back-compat with the wcag-score severity ×
+// min(nodes, 3) formula). `sampleNodes` carries up to a handful of the actual
+// offending nodes from axe so the build/test drill-in UI can surface a real
+// selector + failureSummary alongside each rule — the previous shape stored
+// only the count and lost the per-node context.
+export interface A11yViolationSampleNode {
+  target: string[];
+  failureSummary?: string;
+  html?: string;
+}
+export interface A11yViolation {
+  id: string;
+  impact: "critical" | "serious" | "moderate" | "minor";
+  description: string;
+  help: string;
+  helpUrl: string;
+  nodes: number;
+  tags?: string[];
+  wcagLevel?: "A" | "AA" | "AAA";
+  sampleNodes?: A11yViolationSampleNode[];
+}
+
+export type DesignTokenCategory =
+  | "color" // any color computed property (color, background-color, border-color, fill, stroke)
+  | "border-radius" // border-*-radius
+  | "font-family" // font-family (first family in stack)
+  | "font-size" // font-size (px)
+  | "spacing"; // margin-*, padding-*, gap (px)
+
+export interface DesignToken {
+  /** Display name — typically the CSS custom property (`--c-red`) or a
+   *  human label ("Brand Red"). Used in violation messages. */
+  name: string;
+  /** Resolved value — normalized: hex for colors ("#e03e36"), int+"px"
+   *  for radii/sizes/spacing, lowercase family name for font. */
+  value: string;
+}
+
+export interface DesignSystemViolation {
+  /** Stable id used for rule grouping in the violations card.
+   *  Format: `${category}:${normalizedValue}` so the same rogue value
+   *  on N elements collapses into one row. */
+  id: string;
+  category: DesignTokenCategory;
+  /** CSS property the value was sampled from (e.g. "background-color",
+   *  "border-radius", "padding-left"). */
+  property: string;
+  /** Normalized off-token value the comparator saw on the page. */
+  actual: string;
+  /** Nearest allowed value, when the comparator can suggest one.
+   *  For colors this is the closest token in ΔE; for sizes/spacing the
+   *  closest absolute value. */
+  expected?: string;
+  /** Display label for `expected` (the token name). */
+  expectedName?: string;
+  /** "critical" used by the score formula for color/font-family (brand
+   *  identity); "moderate" for radii; "minor" for spacing. */
+  impact: "critical" | "serious" | "moderate" | "minor";
+  /** Count of DOM nodes that hit this rule on this screenshot. */
+  nodes: number;
+  /** Up to N sample selectors + the offending element snippets. */
+  sampleNodes?: A11yViolationSampleNode[];
+}
+
+export interface AssertionResult {
+  assertionId: string;
+  status: "passed" | "failed" | "skipped";
+  actualValue?: string;
+  errorMessage?: string;
+  durationMs?: number;
+}
+
+/** Per-category, per-value usage counter — `usage.color['#e03e36'] = 12`
+ *  means twelve elements rendered with that color across the captured DOM.
+ *  Used by the verify Design review panel to light up tokens that were
+ *  actually used and dim tokens the page never rendered. */
+export type DesignSystemTokenUsage = Partial<
+  Record<DesignTokenCategory, Record<string, number>>
+>;
+
+export interface UrlTrajectoryStep {
+  stepIndex: number;
+  stepLabel?: string;
+  finalUrl: string;
+  /** Each redirect target in order. Empty for non-navigating steps. */
+  redirectChain: string[];
+  /** Wall-clock ms from test start when this step's URL was sampled. */
+  capturedAtMs?: number;
+}
+
+/** Web Vitals captured per page-state. Sampled at screenshot points and at
+ *  end-of-test. Values mirror the standard web-vitals library names. */
+export interface WebVitalsSample {
+  stepIndex?: number;
+  stepLabel?: string;
+  url: string;
+  /** Largest Contentful Paint (ms) */
+  lcp?: number;
+  /** Cumulative Layout Shift (unitless score) */
+  cls?: number;
+  /** Interaction to Next Paint (ms) */
+  inp?: number;
+  /** First Contentful Paint (ms) */
+  fcp?: number;
+  /** Total Blocking Time (ms) */
+  tbt?: number;
+  /** Time to First Byte (ms) */
+  ttfb?: number;
+}
+
+/** Per-request summary shipped inline on the test result. Full headers/bodies
+ *  travel separately via `response:network_bodies` (they can be megabytes). */
+export interface NetworkRequestSummary {
+  url: string;
+  method: string;
+  status: number;
+  duration: number;
+  resourceType: string;
+  startTime?: number;
+  failed?: boolean;
+  errorText?: string;
+  responseSize?: number;
+}
+
+/** Redacted capture of the page's cookies + localStorage taken after the test
+ *  body ran. Values are hashed (never raw) unless parseable as inert JSON. */
+export interface StorageStateSnapshot {
+  cookies: Array<{
+    name: string;
+    domain: string;
+    path: string;
+    httpOnly: boolean;
+    secure: boolean;
+    sameSite?: "Strict" | "Lax" | "None";
+    /** SHA-256 hash of the value (truncated to 16 hex chars). Never the raw value. */
+    valueHash?: string;
+    /** True if this cookie name matched a token denylist (token/sid/csrf/etc.) */
+    redacted?: boolean;
+  }>;
+  localStorage: Array<{
+    origin: string;
+    name: string;
+    /** Either a parsed JSON value (for diff-engine consumption) or a hash for opaque values. */
+    value?: unknown;
+    valueHash?: string;
+    redacted?: boolean;
+  }>;
+}
 
 // ============================================
 // Base Message Types
@@ -73,15 +271,6 @@ export interface ServerConfig {
   healthCheckTimeout: number;
 }
 
-import type {
-  CoreStabilizationSettings,
-  SelectorOutcome,
-  SelectorStatRow,
-} from "@lastest/shared";
-
-export type StabilizationPayload = CoreStabilizationSettings;
-export type { SelectorOutcome, SelectorStatRow };
-
 export interface RunTestCommandPayload {
   testId: string;
   testRunId: string;
@@ -131,15 +320,8 @@ export interface RunTestCommandPayload {
    *  the live DOM after the test body and returns `designSystemViolations`
    *  + `designSystemRulesChecked` on the test result. */
   designSystem?: {
-    tokens: Partial<
-      Record<
-        "color" | "border-radius" | "font-family" | "font-size" | "spacing",
-        Array<{ name: string; value: string }>
-      >
-    >;
-    ignoredCategories?: Array<
-      "color" | "border-radius" | "font-family" | "font-size" | "spacing"
-    >;
+    tokens: Partial<Record<DesignTokenCategory, DesignToken[]>>;
+    ignoredCategories?: DesignTokenCategory[];
     maxViolationsPerScreenshot?: number;
   };
   // Extract-mode TestVariables — runner reads these page fields after the test body runs.
@@ -352,6 +534,8 @@ export interface TestResultPayload {
   correlationId: string;
   testId: string;
   testRunId: string;
+  /** Echo of the run command's repositoryId (screenshot storage routing). */
+  repositoryId?: string;
   status: "passed" | "failed" | "error" | "timeout" | "cancelled";
   durationMs: number;
   screenshotCount?: number; // Number of screenshots to expect (for early completion detection)
@@ -361,29 +545,45 @@ export interface TestResultPayload {
     screenshot?: string; // Base64 error screenshot
   };
   logs: LogEntry[];
+  /** Console errors surfaced during the run (post third-party filtering). */
+  consoleErrors?: string[];
+  /** Per-request summaries; full bodies arrive via `response:network_bodies`. */
+  networkRequests?: NetworkRequestSummary[];
   softErrors?: string[];
   /** Per-`expect()` outcome rows produced by the runner's assertion tracker.
    *  `assertionId` matches one of the `assertions[].id` sent in the run
    *  command. The criteria evaluator keys on these to fail the test when a
    *  user-pinned assertion failed. */
-  assertionResults?: import("@/lib/db/schema").AssertionResult[];
+  assertionResults?: AssertionResult[];
   videoData?: string; // base64-encoded video file
   videoFilename?: string;
   lastReachedStep?: number;
   totalSteps?: number;
-  domSnapshot?: import("@/lib/db/schema").DomSnapshotData; // DOM state captured after test body ran
+  domSnapshot?: DomSnapshotData; // DOM state captured after test body ran
   /** axe-core violations harvested from the page (URL-Diff feature). Only
    *  populated when the run command sets `enableA11y: true`. */
-  a11yViolations?: import("@/lib/db/schema").A11yViolation[];
+  a11yViolations?: A11yViolation[];
   a11yPassesCount?: number;
   /** Playwright `page.accessibility.snapshot()` output (URL-Diff feature).
    *  May be `{ _truncated: true, byteLength }` if the EB capped the payload. */
   accessibilityTree?: unknown;
+  /** Off-token computed-CSS values found by the design-system walk. Only
+   *  populated when the run command carried a `designSystem` config with a
+   *  non-empty token set. */
+  designSystemViolations?: DesignSystemViolation[];
+  designSystemRulesChecked?: number;
+  designSystemTokenUsage?: DesignSystemTokenUsage;
+  /** Per-step URL trajectory + Web Vitals (multi-layer capture, v1.13) —
+   *  the only source of `layers.url` / `layers.perf` evidence on the host. */
+  urlTrajectory?: UrlTrajectoryStep[];
+  webVitals?: WebVitalsSample[];
   extractedVariables?: Record<string, string>; // Values pulled from page fields by extract-mode TestVariables
   /** Per-attempt selector outcomes from `locateWithFallback`. The host
    *  ingests these into `selector_stats` so the next run can promote the
    *  winning candidate. Best-effort — failures swallowed on the host. */
   selectorOutcomes?: SelectorOutcome[];
+  /** Redacted cookies/localStorage capture taken after the test body ran. */
+  storageStateSnapshot?: StorageStateSnapshot;
 }
 
 export interface TestResultResponse extends BaseMessage {
@@ -447,7 +647,7 @@ export interface RecordingEventResponse extends BaseMessage {
 export interface RecordingStoppedPayload {
   sessionId: string;
   generatedCode: string;
-  domSnapshot?: import("@/lib/db/schema").DomSnapshotData; // DOM state captured on the recording page before stop
+  domSnapshot?: DomSnapshotData; // DOM state captured on the recording page before stop
 }
 
 export interface RecordingStoppedResponse extends BaseMessage {
@@ -677,12 +877,26 @@ export interface ScreenshotUploadPayload {
   title?: string;
   // Per-step DOM snapshot captured at this screenshot's moment, so the host can
   // compute a per-step DOM diff aligned with this screenshot. Optional.
-  domSnapshot?: import("@/lib/db/schema").DomSnapshotData;
+  domSnapshot?: DomSnapshotData;
+}
+
+/** Ad-hoc capture result (`command:capture_screenshot` during a recording or
+ *  debug session). Unlike run screenshots there is no testRunId — the capture
+ *  is keyed to the command's correlationId only. Success carries the image
+ *  inline; failure carries `error` and nothing else. */
+export interface AdHocScreenshotPayload {
+  correlationId: string;
+  filename?: string;
+  data?: string; // Base64 PNG
+  width?: number;
+  height?: number;
+  capturedAt?: number;
+  error?: string;
 }
 
 export interface ScreenshotUploadResponse extends BaseMessage {
   type: "response:screenshot";
-  payload: ScreenshotUploadPayload;
+  payload: ScreenshotUploadPayload | AdHocScreenshotPayload;
 }
 
 export interface ScreenshotTextUploadPayload {
@@ -848,6 +1062,42 @@ export type Message =
   | ScreenshotAckResponse
   | DebugStateResponse
   | ConnectionEstablishedMessage;
+
+// ============================================
+// HTTP Transport Envelope
+// ============================================
+// Response shapes of the app's runner endpoints. The runner channel is plain
+// HTTP: GET /api/ws/runner to connect, POST /api/ws/runner for heartbeats and
+// responses (commands ride back on heartbeat responses), and the two register
+// endpoints for embedded browsers.
+
+/** GET /api/ws/runner */
+export interface RunnerConnectResponse {
+  runnerId: string;
+  teamId: string;
+  sessionId: string;
+  capabilities?: string[];
+  commands?: ServerCommand[];
+}
+
+/** POST /api/ws/runner (status:heartbeat) */
+export interface RunnerHeartbeatResponse {
+  commands?: ServerCommand[];
+}
+
+/** POST /api/embedded/register — pre-issued runner token auth */
+export interface EmbeddedRegisterResponse {
+  sessionId: string;
+  runnerId: string;
+}
+
+/** POST /api/embedded/auto-register — SYSTEM_EB_TOKEN auth; `token` is the
+ *  per-runner token the EB must use for all subsequent runner-channel calls. */
+export interface EmbeddedAutoRegisterResponse {
+  runnerId: string;
+  token: string;
+  sessionId: string;
+}
 
 // ============================================
 // Helper Functions

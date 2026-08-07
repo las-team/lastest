@@ -13,11 +13,17 @@ export const LAUNCH_SCOPE = DEFAULT_LAUNCH.scope; // 'launch:vote launch:submit'
 export const PLAYGROUND_CLIENT_ID = "playground-www";
 export const PLAYGROUND_SCOPE = "playground:score";
 
+// Site-wide header login on lastest.cloud (presence detection only — the token
+// never calls a scoped API, so it gets no launch/playground scopes).
+export const WWW_CLIENT_ID = "www";
+export const WWW_SCOPE = "openid";
+
 // clientId → the full scope string that client may be granted. Requested
 // scopes are intersected with this in /oauth/authorize.
 const CLIENT_SCOPES: Record<string, string> = {
   [LAUNCH_CLIENT_ID]: LAUNCH_SCOPE,
   [PLAYGROUND_CLIENT_ID]: PLAYGROUND_SCOPE,
+  [WWW_CLIENT_ID]: WWW_SCOPE,
 };
 
 /** Allowed origins a token may be returned to. Configurable via env for staging. */

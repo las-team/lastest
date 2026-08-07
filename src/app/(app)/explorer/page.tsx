@@ -16,6 +16,7 @@ import {
   hasQaAgentAccess,
   qaAgentMinPlanName,
 } from "@/lib/billing/feature-access";
+import { isBillingEnabled } from "@/lib/billing/enabled";
 import { planConfig } from "@/lib/billing/plans";
 import { Compass } from "lucide-react";
 
@@ -28,7 +29,7 @@ export default async function ExplorerPage() {
   const userId = session?.user?.id;
 
   // Explorer shares the QA agent's plan tier.
-  if (team && !hasQaAgentAccess(team.plan)) {
+  if (team && !hasQaAgentAccess(team.plan, isBillingEnabled())) {
     return (
       <QaAgentUpgradeGate
         currentPlanName={planConfig(team.plan).name}

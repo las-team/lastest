@@ -38,7 +38,7 @@ import {
   claimOrProvisionPoolEB,
   releasePoolEB,
 } from "@/server/actions/embedded-sessions";
-import type { Message } from "@/lib/ws/protocol";
+import type { Message } from "@lastest/eb-protocol";
 
 // Confirm the debug session's repository belongs to the caller's team. Used
 // to gate getDebugState / sendDebugCommand / stopDebugSession against

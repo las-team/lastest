@@ -108,7 +108,6 @@ import {
 } from "@/lib/recording/timeline-events";
 import { track } from "@/lib/analytics/umami";
 import { Events } from "@/lib/analytics/events";
-import { appendStreamToken } from "@/lib/eb/stream-token";
 
 interface SetupStepInfo {
   id: string;
@@ -785,12 +784,7 @@ export function RecordingClient({
                         s.runnerId === resolvedTarget,
                     );
                     if (session?.streamUrl) {
-                      setEmbeddedStreamUrl(
-                        appendStreamToken(
-                          session.streamUrl,
-                          data.streamAuthToken,
-                        ),
-                      );
+                      setEmbeddedStreamUrl(session.streamUrl);
                       return;
                     }
                   }
@@ -932,6 +926,16 @@ export function RecordingClient({
     try {
       const session = await stopRecording(repositoryId);
       if (session) {
+        // Replace the polled timeline with the server's final events —
+        // stop-time OCR appends ocr-text selectors to clicks the live view
+        // showed as "coords only".
+        if (session.events?.length) {
+          setEvents(
+            (session.events as RecordingEvent[]).filter(
+              (e) => e.type !== "cursor-move",
+            ),
+          );
+        }
         setGeneratedCode(session.generatedCode);
         setRequiredCapabilities(session.requiredCapabilities ?? null);
         setCapturedStorageState(session.capturedStorageState ?? null);
@@ -1126,9 +1130,7 @@ export function RecordingClient({
               (s: { runnerId: string }) => s.runnerId === runnerId,
             );
             if (session?.streamUrl) {
-              setPlaybackStreamUrl(
-                appendStreamToken(session.streamUrl, data.streamAuthToken),
-              );
+              setPlaybackStreamUrl(session.streamUrl);
               return;
             }
           }

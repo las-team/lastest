@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import type {
   QaGeneratedTest,
@@ -286,6 +287,12 @@ export function QaSummaryPanel({
   onRequestCoverage?: (hint: CoverageRequestHint) => void;
   requestPending?: boolean;
 }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    // Hydration guard: timeAgo() drifts between server render and client mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
   const groupRows = QA_GROUPS.filter((g) => summary.byGroup[g.id]);
   const gaps = Math.max(
     0,
@@ -301,7 +308,7 @@ export function QaSummaryPanel({
             <CheckCircle2 className="h-4 w-4" />
           )}
           {persistent ? "Coverage dashboard" : "Coverage summary"}
-          {persistent && updatedAt && (
+          {persistent && updatedAt && mounted && (
             <span className="text-xs font-normal text-muted-foreground">
               — updated {timeAgo(new Date(updatedAt))}
             </span>
@@ -520,11 +527,15 @@ export function QaSummaryPanel({
           <div className="space-y-1">
             <h4 className="text-sm font-medium">Journey traceability</h4>
             <div className="rounded-md border divide-y">
-              {plan.journeys.map((journey) => {
+              {plan.journeys.map((journey, idx) => {
                 const testIds = summary.journeyCoverage[journey.id] ?? [];
                 return (
                   <div
-                    key={journey.id}
+                    // Index-suffixed so a legacy plan carrying duplicate journey
+                    // ids (minted by a since-fixed bug) still renders without a
+                    // React key collision; journey.id stays the coverage lookup
+                    // key. Fresh plans have unique ids, so idx is inert there.
+                    key={`${journey.id}-${idx}`}
                     className="flex items-center justify-between px-3 py-1.5 text-sm gap-2"
                   >
                     <span className="truncate">{journey.title}</span>

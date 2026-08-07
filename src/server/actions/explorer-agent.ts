@@ -3,7 +3,12 @@
 import { revalidatePath } from "next/cache";
 import * as queries from "@/lib/db/queries";
 import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
-import { assertQaAgentAccess } from "@/lib/billing/feature-access";
+import {
+  assertQaAgentAccess,
+  hasQaAgentAccess,
+} from "@/lib/billing/feature-access";
+import { isBillingEnabled } from "@/lib/billing/enabled";
+import { assertAgentRunMinutesAvailable } from "@/lib/billing/agent-eb-usage";
 import { getNextRunTime, isValidCron } from "@/lib/scheduling/cron";
 import {
   assertSafeOutboundUrl,
@@ -13,7 +18,6 @@ import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
 import { claimEmbeddedBrowserForAgent } from "./ai";
 import { releasePoolEB } from "./embedded-sessions";
 import { toProxyStreamUrl } from "@/lib/eb/stream-url";
-import { appendStreamToken } from "@/lib/eb/stream-token";
 import { injectStorageStateIntoEb } from "@/lib/eb/inject-storage-state";
 import {
   findExistingAuthSetup,
@@ -288,10 +292,12 @@ async function mergeMetadata(
   });
 }
 
-function proxiedStream(raw: string | null | undefined): string | undefined {
+function proxiedStream(
+  raw: string | null | undefined,
+  instanceId?: string | null,
+): string | undefined {
   if (!raw) return undefined;
-  const proxied = toProxyStreamUrl(raw) ?? raw;
-  return appendStreamToken(proxied, process.env.STREAM_AUTH_TOKEN) || undefined;
+  return toProxyStreamUrl(raw, "", instanceId) || undefined;
 }
 
 async function isStopped(
@@ -330,15 +336,22 @@ function credentialsFrom(
 
 async function claimSessionEb(
   sessionId: string,
+  teamId: string,
 ): Promise<{ runnerId: string; cdpUrl: string; authApplied: boolean } | null> {
   const held = sessionEbs.get(sessionId);
   if (held) return held;
-  const eb = await claimEmbeddedBrowserForAgent(EB_CLAIM_TIMEOUT_MS, () => {
-    mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
-  }).catch(() => undefined);
+  // Browser time on this claim is metered to the team (see agent-eb-usage);
+  // the release in releaseSessionEb settles it.
+  const eb = await claimEmbeddedBrowserForAgent(
+    EB_CLAIM_TIMEOUT_MS,
+    () => {
+      mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+    },
+    teamId,
+  ).catch(() => undefined);
   await mergeMetadata(sessionId, {
     queuedForBrowser: false,
-    ...(eb ? { streamUrl: proxiedStream(eb.streamUrl) } : {}),
+    ...(eb ? { streamUrl: proxiedStream(eb.streamUrl, eb.instanceId) } : {}),
   });
   if (!eb) return null;
   const entry = {
@@ -574,7 +587,7 @@ async function runExplorerResearch(
     { stepId: "explorer_research" },
   );
 
-  const eb = await claimSessionEb(sessionId);
+  const eb = await claimSessionEb(sessionId, teamId);
   if (!eb) {
     await setStepFailedAt(
       sessionId,
@@ -784,7 +797,7 @@ async function runExplorerAct(
     { stepId: "explorer_act" },
   );
 
-  const eb = await claimSessionEb(sessionId);
+  const eb = await claimSessionEb(sessionId, teamId);
   if (!eb) {
     await setStepFailedAt(
       sessionId,
@@ -1473,7 +1486,10 @@ export async function startExplorerAgent(
   input: StartExplorerInput,
 ): Promise<{ sessionId: string }> {
   const { team } = await requireRepoAccess(input.repositoryId);
-  assertQaAgentAccess(team.plan);
+  assertQaAgentAccess(team.plan, isBillingEnabled());
+  // An explorer session holds an embedded browser for its whole run, which is
+  // metered against the same run-minute quota as test runs.
+  await assertAgentRunMinutesAvailable(team.id);
   const result = await startExplorerCore(team.id, input, "manual");
   revalidatePath("/explorer");
   return result;
@@ -1697,7 +1713,7 @@ export async function updateExplorerTriggerConfig(
   input: ExplorerTriggerConfigInput,
 ): Promise<{ success: boolean }> {
   const { team } = await requireRepoAccess(input.repositoryId);
-  assertQaAgentAccess(team.plan);
+  assertQaAgentAccess(team.plan, isBillingEnabled());
 
   let nextRunAt: Date | null = null;
   if (input.scheduleEnabled) {
@@ -1741,6 +1757,25 @@ export async function dispatchDueExplorerTriggers(): Promise<number> {
         await queries.markExplorerTriggerFired(trigger.id, { nextRunAt });
         continue;
       }
+      // Triggers respect the same plan gate as the UI. A team that armed a
+      // trigger while on Pro must stop getting scheduled runs once it drops
+      // below it — re-arm (so the trigger resumes if they upgrade again)
+      // rather than firing. Mirrors startQaAgentFromTrigger.
+      const team = await queries.getTeam(trigger.teamId);
+      if (!team || !hasQaAgentAccess(team.plan, isBillingEnabled())) {
+        await queries.markExplorerTriggerFired(trigger.id, { nextRunAt });
+        continue;
+      }
+
+      // Same run-minute ceiling as a manual start — a cron trigger must not be
+      // a way around the quota. Re-arm so it resumes next cycle/month.
+      try {
+        await assertAgentRunMinutesAvailable(trigger.teamId);
+      } catch {
+        await queries.markExplorerTriggerFired(trigger.id, { nextRunAt });
+        continue;
+      }
+
       const repo = await queries.getRepository(trigger.repositoryId);
       const branchBaseUrls = (repo?.branchBaseUrls ?? {}) as Record<
         string,

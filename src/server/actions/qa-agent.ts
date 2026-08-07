@@ -7,6 +7,8 @@ import {
   assertQaAgentAccess,
   hasQaAgentAccess,
 } from "@/lib/billing/feature-access";
+import { isBillingEnabled } from "@/lib/billing/enabled";
+import { assertAgentRunMinutesAvailable } from "@/lib/billing/agent-eb-usage";
 import { getNextRunTime, isValidCron } from "@/lib/scheduling/cron";
 import {
   assertSafeOutboundUrl,
@@ -20,8 +22,9 @@ import { claimEmbeddedBrowserForAgent } from "./ai";
 import { releasePoolEB } from "./embedded-sessions";
 import { runTestsCore } from "./runs";
 import { toProxyStreamUrl } from "@/lib/eb/stream-url";
-import { appendStreamToken } from "@/lib/eb/stream-token";
 import { crawlTargetApp } from "@/lib/qa-agent/crawl";
+import { exploreTargetApp } from "@/lib/qa-agent/explore";
+import { getGlobalPoolLimits } from "@/lib/db/queries/settings";
 import {
   findAuthLinksOnEb,
   findExistingAuthSetup,
@@ -66,6 +69,15 @@ import {
   type ExistingTestSummary,
   type RefinedJourneys,
 } from "@/lib/qa-agent/plan";
+import {
+  buildTaskPlanFromTriage,
+  buildTaskTriageSystemPrompt,
+  buildTaskTriageUserPrompt,
+  explainInvalidTaskTriage,
+  isTaskTriageResult,
+  triageTestsToPlanItems,
+  type TaskTriageResult,
+} from "@/lib/qa-agent/task-triage";
 import type {
   ActivityEventType,
   AgentSession,
@@ -75,12 +87,19 @@ import type {
   PwAgentType,
   QaAuthState,
   QaDiscovery,
+  QaExploreBlocked,
+  QaExploreConfig,
+  QaExploreState,
+  QaExplorerState,
   QaGeneratedTest,
+  QaPageSnapshot,
   QaPlanItem,
   QaRunMode,
   QaSessionTrigger,
   QaTask,
   QaTaskSource,
+  QaTaskTestRef,
+  QaTaskTriage,
   QaTestGroup,
   QaTestPlan,
   TestSetupOverrides,
@@ -202,6 +221,9 @@ function emitActivity(
     artifactId?: string;
     artifactLabel?: string;
     durationMs?: number;
+    /** ai_prompt_logs id when this event was produced by an AI call — links
+     *  the event to the exact prompt + response for debugging. */
+    promptLogId?: string;
   },
 ) {
   emitAndPersistActivityEvent({
@@ -218,7 +240,7 @@ function emitActivity(
     artifactId: opts?.artifactId ?? null,
     artifactLabel: opts?.artifactLabel ?? null,
     durationMs: opts?.durationMs ?? null,
-    promptLogId: null,
+    promptLogId: opts?.promptLogId ?? null,
   }).catch((err) => console.error("[QaAgent] activity emit error:", err));
 }
 
@@ -312,10 +334,12 @@ async function mergeMetadata(
   });
 }
 
-function proxiedStream(raw: string | null | undefined): string | undefined {
+function proxiedStream(
+  raw: string | null | undefined,
+  instanceId?: string | null,
+): string | undefined {
   if (!raw) return undefined;
-  const proxied = toProxyStreamUrl(raw) ?? raw;
-  return appendStreamToken(proxied, process.env.STREAM_AUTH_TOKEN) || undefined;
+  return toProxyStreamUrl(raw, "", instanceId) || undefined;
 }
 
 /** True when the session was cancelled in the DB or aborted in-process. */
@@ -489,6 +513,64 @@ async function upsertQaLoginSetupTest(
   }
 }
 
+interface ExtractedAuthContext {
+  email?: string;
+  password?: string;
+  loginUrl?: string;
+}
+
+function isExtractedAuthContext(v: unknown): v is ExtractedAuthContext {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  return ["email", "password", "loginUrl"].every(
+    (k) => o[k] == null || typeof o[k] === "string",
+  );
+}
+
+/**
+ * AI-extract structured {email, password, loginUrl} from Explore's free-text
+ * sign-in instructions ("Log in with demo@acme.com / hunter2, then tap
+ * Continue"). Extraction only — values must be literally present in the
+ * prose; interactive prose-following (SSO buttons, OTP) is a documented
+ * non-goal for v1. Best-effort: null when nothing extractable.
+ */
+async function extractCredsFromAuthContext(
+  repositoryId: string,
+  authContext: string,
+): Promise<ExtractedAuthContext | null> {
+  try {
+    const settings = await queries.getAISettings(repositoryId);
+    const config = getAIConfig(settings);
+    const raw = await generateWithAI(
+      config,
+      `Extract sign-in details from these instructions:\n\n${authContext.slice(0, 4000)}\n\nReturn a JSON object: {"email": string|null, "password": string|null, "loginUrl": string|null}. "email" may also be a username. Use null for anything not literally present — NEVER invent values.`,
+      "You extract structured login credentials from user-provided sign-in instructions for an automated browser. Respond with a single JSON object and nothing else.",
+      {
+        repositoryId,
+        actionType: "qa_auth_extract",
+        responseFormat: "json_object",
+        signal: AbortSignal.timeout(60_000),
+      },
+    );
+    const parsed = parseAiJson(raw, isExtractedAuthContext);
+    if (!parsed) return null;
+    const clean = (s: unknown): string | undefined =>
+      typeof s === "string" && s.trim() ? s.trim() : undefined;
+    const out: ExtractedAuthContext = {
+      email: clean(parsed.email),
+      password: clean(parsed.password),
+      loginUrl: clean(parsed.loginUrl),
+    };
+    if (out.loginUrl && !/^https?:\/\//i.test(out.loginUrl)) {
+      out.loginUrl = undefined;
+    }
+    return out.email || out.password || out.loginUrl ? out : null;
+  } catch (err) {
+    console.warn("[QaAgent] auth-context extraction failed:", err);
+    return null;
+  }
+}
+
 /**
  * Resolve how this run authenticates, cheapest-and-safest option first:
  *   1. existing repo setup (default setup steps / storage states), validated
@@ -510,8 +592,31 @@ async function runQaLogin(
   const session = await queries.getAgentSession(sessionId);
   if (!session?.metadata.qaTargetUrl) return false;
   const targetUrl = session.metadata.qaTargetUrl;
-  const credentials = credentialsFrom(session.metadata);
-  const allowRegistration = session.metadata.qaAllowRegistration !== false;
+
+  // Explore auth context: AI-extract structured creds/login URL from the
+  // user's sign-in prose, then feed the existing cascade below exactly as if
+  // the creds had been typed into the form (creds_untested path included).
+  let metadata = session.metadata;
+  let extractedLoginUrl: string | undefined;
+  if (metadata.qaAuthContext && !credentialsFrom(metadata)) {
+    const extracted = await extractCredsFromAuthContext(
+      repositoryId,
+      metadata.qaAuthContext,
+    );
+    extractedLoginUrl = extracted?.loginUrl;
+    if (extracted?.email && extracted.password) {
+      const patch: Partial<AgentSessionMetadata> = {
+        quickstartEmail: extracted.email,
+        quickstartPassword: extracted.password,
+        credsProvided: true,
+      };
+      await mergeMetadata(sessionId, patch);
+      metadata = { ...metadata, ...patch };
+    }
+  }
+
+  const credentials = credentialsFrom(metadata);
+  const allowRegistration = metadata.qaAllowRegistration !== false;
 
   const SUB_EXISTING = 0;
   const SUB_SETUP_RUN = 1;
@@ -544,7 +649,11 @@ async function runQaLogin(
   );
 
   let auth: QaAuthState | null = null;
-  let authLinks: { loginUrl?: string; signupUrl?: string } = {};
+  // A login URL named in the auth-context prose is authoritative over the
+  // DOM-discovered one.
+  let authLinks: { loginUrl?: string; signupUrl?: string } = {
+    loginUrl: extractedLoginUrl,
+  };
   let runnerId: string | undefined;
 
   try {
@@ -552,12 +661,16 @@ async function runQaLogin(
     // Unavailability is NOT fatal: resolution degrades and discovery (which
     // claims its own EB later) picks up the deferred validation.
     let cdpUrl: string | undefined;
-    const eb = await claimEmbeddedBrowserForAgent(EB_CLAIM_TIMEOUT_MS, () => {
-      mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
-    }).catch(() => undefined);
+    const eb = await claimEmbeddedBrowserForAgent(
+      EB_CLAIM_TIMEOUT_MS,
+      () => {
+        mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+      },
+      teamId,
+    ).catch(() => undefined);
     await mergeMetadata(sessionId, {
       queuedForBrowser: false,
-      ...(eb ? { streamUrl: proxiedStream(eb.streamUrl) } : {}),
+      ...(eb ? { streamUrl: proxiedStream(eb.streamUrl, eb.instanceId) } : {}),
     });
     if (eb) {
       runnerId = eb.runnerId;
@@ -752,7 +865,11 @@ async function runQaLogin(
       cdpUrl &&
       (credentials || (allowRegistration && !defaultSetupCoversAuth))
     ) {
-      authLinks = await findAuthLinksOnEb(cdpUrl, targetUrl);
+      const domLinks = await findAuthLinksOnEb(cdpUrl, targetUrl);
+      authLinks = {
+        ...domLinks,
+        loginUrl: extractedLoginUrl ?? domLinks.loginUrl,
+      };
     }
 
     // 2) User-provided credentials — verify with a real login and capture the
@@ -962,6 +1079,268 @@ async function runQaLogin(
   }
 }
 
+// ── Explore swarm (mode = "explore", explorers > 1) ──────────────────────────
+
+const SWARM_EXTRA_CLAIM_TIMEOUT_MS = 30_000;
+/** Pool slots always left free for builds/other agents when sizing a swarm. */
+const SWARM_POOL_HEADROOM = 5;
+
+/**
+ * Multi-EB exploration: progressive claim (explorer #1 gets the full claim
+ * timeout and must succeed; #2..K get 30s each — run with however many
+ * arrive), one shared frontier in this process, a single serialized throttled
+ * flush for all metadata writes (mergeMetadata is read-merge-rewrite — it
+ * must never run concurrently), and ALL EBs released in `finally`.
+ * `metadata.streamUrl` stays explorer 0's stream for /qa-agent page compat;
+ * per-explorer streams live on `qaExplore.explorers[i].streamUrl`.
+ */
+async function runQaDiscoverSwarm(args: {
+  sessionId: string;
+  teamId: string;
+  repositoryId: string;
+  targetUrl: string;
+  signal: AbortSignal;
+  initialExplore: QaExploreState;
+  storageStateJson?: string;
+  credentials?: { email: string; password: string };
+  loginUrl?: string;
+  staticRoutes: Array<{ path: string; type: string }>;
+  framework?: string;
+  githubConnected: boolean;
+  onDetail: (detail: string) => void;
+}): Promise<{
+  pages: QaPageSnapshot[];
+  blocked: QaExploreBlocked[];
+  loginAttempted: boolean;
+  finalExplore: QaExploreState;
+}> {
+  const { sessionId, teamId, repositoryId, targetUrl, signal } = args;
+  const config = args.initialExplore.config;
+
+  // Cap the swarm so builds keep pool headroom: min(requested, poolMax − 5).
+  const max = await getGlobalPoolLimits()
+    .then(
+      (limits) => limits?.ebPoolMax ?? config.explorers + SWARM_POOL_HEADROOM,
+    )
+    .catch(() => config.explorers + SWARM_POOL_HEADROOM);
+  const want = Math.max(
+    1,
+    Math.min(config.explorers, max - SWARM_POOL_HEADROOM),
+  );
+
+  // Single-writer live state; every metadata write goes through one
+  // serialized, ≥3s-throttled chain.
+  let explore: QaExploreState = {
+    ...args.initialExplore,
+    explorers: args.initialExplore.explorers.map((e) => ({ ...e })),
+  };
+  const livePages: QaPageSnapshot[] = [];
+  let lastFlushAt = 0;
+  let flushChain: Promise<void> = Promise.resolve();
+  const flushState = (force = false) => {
+    const now = Date.now();
+    if (!force && now - lastFlushAt < 3000) return;
+    lastFlushAt = now;
+    const patch: Partial<AgentSessionMetadata> = {
+      qaExplore: explore,
+      qaDiscovery: {
+        targetUrl,
+        crawledPages: [...livePages],
+        staticRoutes:
+          args.staticRoutes.length > 0 ? args.staticRoutes : undefined,
+        framework: args.framework,
+        githubConnected: args.githubConnected,
+      },
+    };
+    flushChain = flushChain
+      .then(() => mergeMetadata(sessionId, patch))
+      .catch((err) => console.warn("[QaAgent] swarm flush failed:", err));
+  };
+  const setExplorer = (index: number, patch: Partial<QaExplorerState>) => {
+    explore = {
+      ...explore,
+      pagesDiscovered: livePages.length,
+      explorers: explore.explorers.map((e) =>
+        e.index === index ? { ...e, ...patch } : e,
+      ),
+    };
+  };
+
+  const ebs: Array<{
+    cdpUrl: string;
+    streamUrl: string;
+    runnerId: string;
+    instanceId?: string | null;
+  }> = [];
+  try {
+    // Explorer #1 must succeed — full claim timeout.
+    const first = await claimEmbeddedBrowserForAgent(
+      EB_CLAIM_TIMEOUT_MS,
+      () => {
+        mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+      },
+      teamId,
+    );
+    if (!first) throw new Error("No embedded browser available");
+    ebs.push(first);
+
+    // #2..K best-effort, 30s each, in parallel — run with whoever arrives.
+    const extras = await Promise.all(
+      Array.from({ length: want - 1 }, () =>
+        claimEmbeddedBrowserForAgent(
+          SWARM_EXTRA_CLAIM_TIMEOUT_MS,
+          undefined,
+          teamId,
+        ).catch(() => undefined),
+      ),
+    );
+    for (const eb of extras) if (eb) ebs.push(eb);
+
+    for (const e of explore.explorers) {
+      if (e.index < ebs.length) {
+        setExplorer(e.index, {
+          status: "exploring",
+          streamUrl: proxiedStream(
+            ebs[e.index]!.streamUrl,
+            ebs[e.index]!.instanceId,
+          ),
+        });
+      } else {
+        setExplorer(e.index, {
+          status: "failed",
+          detail:
+            e.index < want
+              ? "no browser available"
+              : "capped to keep pool headroom for builds",
+        });
+      }
+    }
+    await mergeMetadata(sessionId, {
+      queuedForBrowser: false,
+      streamUrl: proxiedStream(first.streamUrl, first.instanceId),
+      qaExplore: explore,
+    });
+    emitActivity(
+      teamId,
+      repositoryId,
+      sessionId,
+      "map:explorer_status",
+      `Explorer swarm: ${ebs.length} of ${config.explorers} browsers claimed`,
+      {
+        stepId: "qa_discover",
+        agentType: "ranger",
+        detail: { claimed: ebs.length, requested: config.explorers },
+      },
+    );
+
+    const result = await exploreTargetApp({
+      ebs: ebs.map((e) => ({ cdpUrl: e.cdpUrl })),
+      targetUrl,
+      strategy: config.strategy,
+      maxDepth: config.depth,
+      pageBudget: config.pageBudget,
+      deadline: new Date(explore.deadlineAt).getTime(),
+      storageStateJson: args.storageStateJson,
+      credentials: args.credentials,
+      loginUrl: args.loginUrl,
+      signal,
+      onPage: (snapshot, explorerIndex, totalMapped) => {
+        livePages.push(snapshot);
+        const prev =
+          explore.explorers.find((e) => e.index === explorerIndex)
+            ?.pagesMapped ?? 0;
+        setExplorer(explorerIndex, {
+          status: "exploring",
+          pagesMapped: prev + 1,
+          currentUrl: snapshot.finalUrl,
+        });
+        flushState();
+        args.onDetail(`${totalMapped} pages mapped — ${snapshot.finalUrl}`);
+        emitActivity(
+          teamId,
+          repositoryId,
+          sessionId,
+          "map:page_discovered",
+          `Discovered ${snapshot.finalUrl}`,
+          {
+            stepId: "qa_discover",
+            agentType: "ranger",
+            detail: {
+              url: snapshot.finalUrl,
+              title: snapshot.title,
+              explorer: explorerIndex,
+            },
+          },
+        );
+      },
+      onExplorerStatus: (index, status, detail) => {
+        setExplorer(index, {
+          status,
+          detail,
+          ...(status === "done" || status === "failed"
+            ? { currentUrl: undefined, streamUrl: undefined }
+            : {}),
+        });
+        flushState();
+        emitActivity(
+          teamId,
+          repositoryId,
+          sessionId,
+          "map:explorer_status",
+          `Explorer ${index + 1} ${status}${detail ? ` — ${detail}` : ""}`,
+          {
+            stepId: "qa_discover",
+            agentType: "ranger",
+            detail: { index, status },
+          },
+        );
+      },
+      onBlocked: (b) => {
+        explore = { ...explore, blocked: [...explore.blocked, b] };
+        flushState();
+        emitActivity(
+          teamId,
+          repositoryId,
+          sessionId,
+          "map:blocked",
+          `Blocked at ${b.url} (${b.reason.replace("_", " ")})`,
+          {
+            stepId: "qa_discover",
+            agentType: "ranger",
+            detail: { url: b.url, reason: b.reason },
+          },
+        );
+      },
+    });
+
+    // Settle in-flight flushes, then finalize every explorer row.
+    await flushChain.catch(() => {});
+    explore = {
+      ...explore,
+      pagesDiscovered: result.pages.length,
+      blocked: result.blocked,
+      explorers: explore.explorers.map((e) => ({
+        ...e,
+        status:
+          e.status === "exploring" || e.status === "blocked"
+            ? "done"
+            : e.status === "claiming"
+              ? "failed"
+              : e.status,
+        currentUrl: undefined,
+        streamUrl: undefined,
+      })),
+    };
+    return { ...result, finalExplore: explore };
+  } finally {
+    await mergeMetadata(sessionId, { streamUrl: undefined }).catch(() => {});
+    // ALL claimed EBs go back — on success, failure, AND cancel.
+    for (const eb of ebs) {
+      await releasePoolEB(eb.runnerId).catch(() => {});
+    }
+  }
+}
+
 // ── Step: qa_discover ────────────────────────────────────────────────────────
 
 async function runQaDiscover(
@@ -1144,108 +1523,261 @@ async function runQaDiscover(
   substeps[2] = { ...substeps[2], status: "running" };
   await updateSubsteps(sessionId, "qa_discover", substeps);
 
+  // Explore runs get depth/budget/deadline from the dialog config and flush
+  // crawled pages incrementally (throttled ≥3s) so buildAppMap — computed on
+  // read from qaDiscovery — picks up new nodes while the crawl is running.
+  // This flush is what makes the map grow live.
+  const isExplore = session.metadata.qaMode === "explore";
+  let exploreState = isExplore ? session.metadata.qaExplore : undefined;
+  const livePages: QaPageSnapshot[] = [];
+  let lastFlushAt = 0;
+  let flushChain: Promise<void> = Promise.resolve();
+  const flushLive = () => {
+    const now = Date.now();
+    if (now - lastFlushAt < 3000) return;
+    lastFlushAt = now;
+    const patch: Partial<AgentSessionMetadata> = {
+      qaDiscovery: {
+        targetUrl,
+        crawledPages: [...livePages],
+        staticRoutes: staticRoutes.length > 0 ? staticRoutes : undefined,
+        framework,
+        githubConnected,
+      },
+      ...(exploreState ? { qaExplore: exploreState } : {}),
+    };
+    // Serialized: mergeMetadata is read-merge-rewrite — concurrent flushes
+    // would clobber each other.
+    flushChain = flushChain
+      .then(() => mergeMetadata(sessionId, patch))
+      .catch((err) => console.warn("[QaAgent] explore flush failed:", err));
+  };
+  const setExplorerState = (
+    patch: Partial<QaExploreState["explorers"][number]>,
+  ) => {
+    if (!exploreState) return;
+    exploreState = {
+      ...exploreState,
+      pagesDiscovered: livePages.length,
+      explorers: exploreState.explorers.map((e, i) =>
+        i === 0 ? { ...e, ...patch } : e,
+      ),
+    };
+  };
+
   let runnerId: string | undefined;
+  let swarmRan = false;
   let crawled: Awaited<ReturnType<typeof crawlTargetApp>> = {
     pages: [],
     loginAttempted: false,
   };
   try {
-    const eb = await claimEmbeddedBrowserForAgent(EB_CLAIM_TIMEOUT_MS, () => {
-      mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
-    });
-    if (!eb) {
-      substeps[2] = {
-        ...substeps[2],
-        status: "error",
-        detail: "No embedded browser available",
-      };
-      await updateSubsteps(sessionId, "qa_discover", substeps);
-    } else {
-      runnerId = eb.runnerId;
-      await mergeMetadata(sessionId, {
-        queuedForBrowser: false,
-        streamUrl: proxiedStream(eb.streamUrl),
-      });
-
-      // Start the crawl from the post-login state when qa_login resolved a
-      // storage state; otherwise fall back to the inline first-page login
-      // ("creds tested during discovery"). Unresolved auth also prioritizes
-      // login/signup links so the auth surface itself gets mapped.
+    if (exploreState && exploreState.config.explorers > 1) {
+      // Swarm path — claims and releases its own EBs.
+      swarmRan = true;
       const qaAuth = session.metadata.qaAuth;
-      let preAuthed = false;
+      let storageStateJson: string | undefined;
       if (qaAuth?.storageStateId) {
         const state = await queries
           .getStorageState(qaAuth.storageStateId)
           .catch(() => null);
-        if (state?.storageStateJson) {
-          preAuthed = await injectStorageStateIntoEb(
-            eb.cdpUrl,
-            state.storageStateJson,
-          );
-        }
+        storageStateJson = state?.storageStateJson ?? undefined;
       }
-      const credentials = preAuthed
-        ? undefined
-        : credentialsFrom(session.metadata);
-      crawled = await crawlTargetApp(eb.cdpUrl, targetUrl, {
-        maxPages: MAX_CRAWL_PAGES,
-        credentials,
-        loginUrl: qaAuth?.loginUrl,
-        // No injected session and no creds to try → make sure the crawl at
-        // least maps the login/signup surface itself.
-        prioritizeAuthLinks: !preAuthed && !credentials,
+      const result = await runQaDiscoverSwarm({
+        sessionId,
+        teamId,
+        repositoryId,
+        targetUrl,
         signal,
-        onPage: (snapshot, index) => {
-          substeps[2] = {
-            ...substeps[2],
-            detail: `${index + 1} pages mapped — ${snapshot.finalUrl}`,
-          };
+        initialExplore: exploreState,
+        storageStateJson,
+        credentials: storageStateJson
+          ? undefined
+          : credentialsFrom(session.metadata),
+        loginUrl: qaAuth?.loginUrl,
+        staticRoutes,
+        framework,
+        githubConnected,
+        onDetail: (detail) => {
+          substeps[2] = { ...substeps[2], detail };
           updateSubsteps(sessionId, "qa_discover", substeps).catch(() => {});
-          emitActivity(
-            teamId,
-            repositoryId,
-            sessionId,
-            "substep:update",
-            `Mapped ${snapshot.finalUrl}: ${snapshot.links.length} links, ${snapshot.forms.length} forms, ${snapshot.apiEndpoints.length} API calls`,
-            { stepId: "qa_discover", agentType: "ranger" },
-          );
         },
       });
+      crawled = {
+        pages: result.pages,
+        loginAttempted: result.loginAttempted,
+      };
+      exploreState = result.finalExplore;
+      const doneCount = result.finalExplore.explorers.filter(
+        (e) => e.status === "done",
+      ).length;
       substeps[2] = {
         ...substeps[2],
         status: crawled.pages.length > 0 ? "done" : "error",
         detail:
           crawled.pages.length > 0
-            ? `${crawled.pages.length} pages, ${crawled.pages.reduce((n, p) => n + p.apiEndpoints.length, 0)} API calls observed${preAuthed ? ", pre-authenticated" : crawled.loginAttempted ? ", logged in" : ""}`
+            ? `${crawled.pages.length} pages via ${doneCount} explorer${doneCount === 1 ? "" : "s"}${result.blocked.length > 0 ? `, ${result.blocked.length} blocked` : ""}`
             : "No pages could be mapped",
       };
       await updateSubsteps(sessionId, "qa_discover", substeps);
+    } else {
+      const eb = await claimEmbeddedBrowserForAgent(
+        EB_CLAIM_TIMEOUT_MS,
+        () => {
+          mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+        },
+        teamId,
+      );
+      if (!eb) {
+        substeps[2] = {
+          ...substeps[2],
+          status: "error",
+          detail: "No embedded browser available",
+        };
+        await updateSubsteps(sessionId, "qa_discover", substeps);
+      } else {
+        runnerId = eb.runnerId;
+        if (exploreState) {
+          setExplorerState({
+            status: "exploring",
+            streamUrl: proxiedStream(eb.streamUrl, eb.instanceId),
+          });
+          emitActivity(
+            teamId,
+            repositoryId,
+            sessionId,
+            "map:explorer_status",
+            "Explorer 1 started",
+            {
+              stepId: "qa_discover",
+              agentType: "ranger",
+              detail: { index: 0, status: "exploring" },
+            },
+          );
+        }
+        await mergeMetadata(sessionId, {
+          queuedForBrowser: false,
+          streamUrl: proxiedStream(eb.streamUrl, eb.instanceId),
+          ...(exploreState ? { qaExplore: exploreState } : {}),
+        });
 
-      // Post-crawl auth bookkeeping while we still hold the EB: upgrade a
-      // creds_untested resolution whose inline login worked (capture the
-      // session for generation), and settle deferred validation.
-      if (
-        qaAuth &&
-        ((qaAuth.strategy === "creds_untested" && crawled.loginAttempted) ||
-          (preAuthed && !qaAuth.validated))
-      ) {
-        const probe = await probeAndCaptureOnEb(eb.cdpUrl, targetUrl);
-        if (probe.authed) {
-          let upgraded = { ...qaAuth, validated: true };
-          if (qaAuth.strategy === "creds_untested" && probe.storageStateJson) {
-            const persisted = await queries.createStorageState({
-              repositoryId,
-              name: `QA agent login ${utcStamp()}`,
-              storageStateJson: probe.storageStateJson,
-            });
-            upgraded = {
-              ...upgraded,
-              strategy: "user_creds",
-              storageStateId: persisted.id,
-              notes: "Credentials verified during discovery",
-            };
+        // Start the crawl from the post-login state when qa_login resolved a
+        // storage state; otherwise fall back to the inline first-page login
+        // ("creds tested during discovery"). Unresolved auth also prioritizes
+        // login/signup links so the auth surface itself gets mapped.
+        const qaAuth = session.metadata.qaAuth;
+        let preAuthed = false;
+        if (qaAuth?.storageStateId) {
+          const state = await queries
+            .getStorageState(qaAuth.storageStateId)
+            .catch(() => null);
+          if (state?.storageStateJson) {
+            preAuthed = await injectStorageStateIntoEb(
+              eb.cdpUrl,
+              state.storageStateJson,
+            );
           }
-          await mergeMetadata(sessionId, { qaAuth: upgraded });
+        }
+        const credentials = preAuthed
+          ? undefined
+          : credentialsFrom(session.metadata);
+        crawled = await crawlTargetApp(eb.cdpUrl, targetUrl, {
+          maxPages: exploreState
+            ? exploreState.config.pageBudget
+            : MAX_CRAWL_PAGES,
+          ...(exploreState
+            ? {
+                maxPagesHardCap: 40,
+                maxDepth: exploreState.config.depth,
+                deadline: new Date(exploreState.deadlineAt).getTime(),
+              }
+            : {}),
+          credentials,
+          loginUrl: qaAuth?.loginUrl,
+          // No injected session and no creds to try → make sure the crawl at
+          // least maps the login/signup surface itself.
+          prioritizeAuthLinks: !preAuthed && !credentials,
+          signal,
+          onPage: (snapshot, index) => {
+            substeps[2] = {
+              ...substeps[2],
+              detail: `${index + 1} pages mapped — ${snapshot.finalUrl}`,
+            };
+            updateSubsteps(sessionId, "qa_discover", substeps).catch(() => {});
+            if (isExplore) {
+              livePages.push(snapshot);
+              setExplorerState({
+                status: "exploring",
+                pagesMapped: livePages.length,
+                currentUrl: snapshot.finalUrl,
+              });
+              flushLive();
+              emitActivity(
+                teamId,
+                repositoryId,
+                sessionId,
+                "map:page_discovered",
+                `Discovered ${snapshot.finalUrl}`,
+                {
+                  stepId: "qa_discover",
+                  agentType: "ranger",
+                  detail: {
+                    url: snapshot.finalUrl,
+                    title: snapshot.title,
+                    index,
+                  },
+                },
+              );
+            }
+            emitActivity(
+              teamId,
+              repositoryId,
+              sessionId,
+              "substep:update",
+              `Mapped ${snapshot.finalUrl}: ${snapshot.links.length} links, ${snapshot.forms.length} forms, ${snapshot.apiEndpoints.length} API calls`,
+              { stepId: "qa_discover", agentType: "ranger" },
+            );
+          },
+        });
+        substeps[2] = {
+          ...substeps[2],
+          status: crawled.pages.length > 0 ? "done" : "error",
+          detail:
+            crawled.pages.length > 0
+              ? `${crawled.pages.length} pages, ${crawled.pages.reduce((n, p) => n + p.apiEndpoints.length, 0)} API calls observed${preAuthed ? ", pre-authenticated" : crawled.loginAttempted ? ", logged in" : ""}`
+              : "No pages could be mapped",
+        };
+        await updateSubsteps(sessionId, "qa_discover", substeps);
+
+        // Post-crawl auth bookkeeping while we still hold the EB: upgrade a
+        // creds_untested resolution whose inline login worked (capture the
+        // session for generation), and settle deferred validation.
+        if (
+          qaAuth &&
+          ((qaAuth.strategy === "creds_untested" && crawled.loginAttempted) ||
+            (preAuthed && !qaAuth.validated))
+        ) {
+          const probe = await probeAndCaptureOnEb(eb.cdpUrl, targetUrl);
+          if (probe.authed) {
+            let upgraded = { ...qaAuth, validated: true };
+            if (
+              qaAuth.strategy === "creds_untested" &&
+              probe.storageStateJson
+            ) {
+              const persisted = await queries.createStorageState({
+                repositoryId,
+                name: `QA agent login ${utcStamp()}`,
+                storageStateJson: probe.storageStateJson,
+              });
+              upgraded = {
+                ...upgraded,
+                strategy: "user_creds",
+                storageStateId: persisted.id,
+                notes: "Credentials verified during discovery",
+              };
+            }
+            await mergeMetadata(sessionId, { qaAuth: upgraded });
+          }
         }
       }
     }
@@ -1256,6 +1788,12 @@ async function runQaDiscover(
       detail: err instanceof Error ? err.message : "crawl failed",
     };
     await updateSubsteps(sessionId, "qa_discover", substeps);
+    if (exploreState) {
+      setExplorerState({
+        status: "failed",
+        detail: err instanceof Error ? err.message : "crawl failed",
+      });
+    }
   } finally {
     await mergeMetadata(sessionId, { streamUrl: undefined }).catch(() => {});
     if (runnerId) await releasePoolEB(runnerId).catch(() => {});
@@ -1280,7 +1818,38 @@ async function runQaDiscover(
     codeCheck,
     prChanges,
   };
-  await mergeMetadata(sessionId, { qaDiscovery: discovery });
+  // Settle any in-flight incremental flush before the authoritative final
+  // write, then mark the explorer finished. (The swarm path finalizes its
+  // explorer rows itself — exploreState already holds its final form.)
+  await flushChain.catch(() => {});
+  if (exploreState && !swarmRan) {
+    setExplorerState({
+      status:
+        exploreState.explorers[0]?.status === "failed" ? "failed" : "done",
+      currentUrl: undefined,
+      streamUrl: undefined,
+    });
+    exploreState = {
+      ...exploreState,
+      pagesDiscovered: crawled.pages.length,
+    };
+    emitActivity(
+      teamId,
+      repositoryId,
+      sessionId,
+      "map:explorer_status",
+      `Explorer 1 finished — ${crawled.pages.length} pages mapped`,
+      {
+        stepId: "qa_discover",
+        agentType: "ranger",
+        detail: { index: 0, status: "done", pages: crawled.pages.length },
+      },
+    );
+  }
+  await mergeMetadata(sessionId, {
+    qaDiscovery: discovery,
+    ...(exploreState ? { qaExplore: exploreState } : {}),
+  });
   await setStepCompleted(sessionId, "qa_discover", {
     pagesCrawled: crawled.pages.length,
     staticRoutes: staticRoutes.length,
@@ -1559,7 +2128,14 @@ async function runQaGenerate(
           ],
         }
       : undefined;
-  const items = enabledPlanItems(plan);
+  // Task-scoped runs (Direct the agent): only the items the directive
+  // resolved to are work — the rest of the stored plan is context. Scoping
+  // here keeps the ledger, and therefore execute/heal/reply, on-directive.
+  const allItems = enabledPlanItems(plan);
+  const taskItemIds = session.metadata.qaTaskItemIds;
+  const items = taskItemIds?.length
+    ? allItems.filter((i) => taskItemIds.includes(i.id))
+    : allItems;
   // Resume-safe: skip items that already produced a test in a prior attempt.
   const ledger: QaGeneratedTest[] = [
     ...(session.metadata.qaGeneratedTests ?? []),
@@ -1709,9 +2285,13 @@ async function runQaGenerate(
   let runnerId: string | undefined;
   try {
     if (browserItems.length > 0) {
-      const eb = await claimEmbeddedBrowserForAgent(EB_CLAIM_TIMEOUT_MS, () => {
-        mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
-      });
+      const eb = await claimEmbeddedBrowserForAgent(
+        EB_CLAIM_TIMEOUT_MS,
+        () => {
+          mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+        },
+        teamId,
+      );
       if (!eb) {
         await setStepFailed(
           sessionId,
@@ -1723,7 +2303,7 @@ async function runQaGenerate(
       runnerId = eb.runnerId;
       await mergeMetadata(sessionId, {
         queuedForBrowser: false,
-        streamUrl: proxiedStream(eb.streamUrl),
+        streamUrl: proxiedStream(eb.streamUrl, eb.instanceId),
       });
 
       // Pre-authenticate the generation EB too, so the generator verifies
@@ -2098,14 +2678,18 @@ async function runQaHeal(
   let runnerId: string | undefined;
   const healedTestIds: string[] = [];
   try {
-    const eb = await claimEmbeddedBrowserForAgent(EB_CLAIM_TIMEOUT_MS, () => {
-      mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
-    });
+    const eb = await claimEmbeddedBrowserForAgent(
+      EB_CLAIM_TIMEOUT_MS,
+      () => {
+        mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+      },
+      teamId,
+    );
     if (eb) {
       runnerId = eb.runnerId;
       await mergeMetadata(sessionId, {
         queuedForBrowser: false,
-        streamUrl: proxiedStream(eb.streamUrl),
+        streamUrl: proxiedStream(eb.streamUrl, eb.instanceId),
       });
       const { agentHealTestCore } =
         await import("@/lib/playwright/healer-agent");
@@ -2206,22 +2790,27 @@ async function runQaSummary(
     return false;
   }
 
-  // Spec-refresh runs skip generation, so their ledger is empty — build it
-  // here from existing-coverage matches so the summary shows exactly which
-  // plan items the current suite covers and which are gaps (fill_gaps input).
+  // The ledger only contains items this session actually worked — task-scoped
+  // runs carry just the directive's items, and spec-refresh runs none at all.
+  // Coverage is a whole-plan statement, so backfill "covered" entries for
+  // every enabled item the run didn't touch but an existing test already
+  // satisfies. Without this, a scoped run's summary reports the untouched
+  // majority of the plan as gaps and the dashboard "loses" coverage even
+  // though no test was deleted and no plan item added.
   let ledger = session.metadata.qaGeneratedTests ?? [];
-  if (ledger.length === 0) {
+  const inLedger = new Set(ledger.map((g) => g.planItemId));
+  const untouched = enabledPlanItems(plan).filter((i) => !inLedger.has(i.id));
+  if (untouched.length > 0) {
     const [existingTests, priorLedger] = await Promise.all([
       loadExistingTests(repositoryId).catch(() => []),
       loadPriorLedger(session).catch(() => undefined),
     ]);
-    const items = enabledPlanItems(plan);
     const coveredBy = matchPlanToExistingTests(
-      items,
+      untouched,
       existingTests,
       priorLedger,
     );
-    ledger = items
+    const backfilled = untouched
       .filter((i) => coveredBy.has(i.id))
       .map((i) => ({
         planItemId: i.id,
@@ -2231,7 +2820,10 @@ async function runQaSummary(
         name: i.title,
         status: "covered" as const,
       }));
-    await mergeMetadata(sessionId, { qaGeneratedTests: ledger });
+    if (backfilled.length > 0) {
+      ledger = [...ledger, ...backfilled];
+      await mergeMetadata(sessionId, { qaGeneratedTests: ledger });
+    }
   }
 
   const summary = computeQaSummary(plan, ledger);
@@ -2296,6 +2888,11 @@ const MODE_PIPELINES: Record<QaRunMode, AgentStepId[]> = {
     "qa_heal",
     "qa_summary",
   ],
+  // App Map exploration: map the app, nothing else. No plan, no generation —
+  // the map is computed-on-read from qaDiscovery, which discover flushes
+  // incrementally so the map grows live. Finalized at the end of
+  // executeQaPipeline (no qa_summary step to mark the session completed).
+  explore: ["qa_setup", "qa_login", "qa_discover"],
 };
 
 function buildStepsForMode(mode: QaRunMode): AgentStepState[] {
@@ -2361,6 +2958,30 @@ async function executeQaPipeline(
       }
       if (!ok) return;
     }
+
+    // Explore pipelines end at qa_discover — no summary step marks the
+    // session terminal, so finalize here once every step succeeded.
+    const finished = await queries.getAgentSession(sessionId);
+    if (
+      finished?.metadata.qaMode === "explore" &&
+      finished.status === "active"
+    ) {
+      await queries.updateAgentSession(sessionId, {
+        status: "completed",
+        completedAt: new Date(),
+      });
+      const discovered =
+        finished.metadata.qaExplore?.pagesDiscovered ??
+        finished.metadata.qaDiscovery?.crawledPages.length ??
+        0;
+      emitActivity(
+        teamId,
+        repositoryId,
+        sessionId,
+        "session:complete",
+        `Exploration complete: ${discovered} screens mapped`,
+      );
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[QaAgent] pipeline error:", err);
@@ -2401,13 +3022,28 @@ export interface StartQaAgentInput {
   /** Allow the qa_login step to self-register a throwaway account when no
    *  creds/setup exist and a signup link is found in the DOM. Default true. */
   allowRegistration?: boolean;
+  /** Explore-mode parameters (mode = "explore" only). */
+  explore?: Omit<QaExploreConfig, "pageBudget">;
+  /** Free-text sign-in instructions for explore runs — qa_login AI-extracts
+   *  structured creds/loginUrl from the prose. Encrypted at rest. */
+  authContext?: string;
+}
+
+/** Page budget an explore run gets for its chosen depth (spec: 6 + depth*5,
+ *  capped at 40 pages). */
+function explorePageBudget(depth: number): number {
+  return Math.min(6 + depth * 5, 40);
 }
 
 export async function startQaAgent(
   input: StartQaAgentInput,
 ): Promise<{ sessionId: string }> {
   const { team } = await requireRepoAccess(input.repositoryId);
-  assertQaAgentAccess(team.plan);
+  assertQaAgentAccess(team.plan, isBillingEnabled());
+  // Agent sessions hold embedded browsers for their whole run — metered
+  // against the same run-minute quota as test runs. Covers the App Map
+  // "Explore" launcher too, which funnels through here.
+  await assertAgentRunMinutesAvailable(team.id);
 
   const targetUrl = input.targetUrl.trim().replace(/\/+$/, "");
   if (!/^https?:\/\//i.test(targetUrl)) {
@@ -2438,6 +3074,47 @@ export async function startQaAgent(
   const mode: QaRunMode = input.mode ?? "full";
   const credsProvided = Boolean(input.email?.trim() && input.password);
   const steps = buildStepsForMode(mode);
+
+  // Explore runs carry their swarm config + live progress skeleton so the App
+  // Map progress UI has state to poll from the first second.
+  let exploreSeed: Partial<AgentSessionMetadata> = {};
+  if (mode === "explore") {
+    const requested = input.explore ?? {
+      explorers: 1,
+      depth: 2,
+      strategy: "balanced" as const,
+      maxMinutes: 5,
+    };
+    const depth = Math.max(1, Math.min(Math.floor(requested.depth), 6));
+    const config: QaExploreConfig = {
+      explorers: Math.max(1, Math.min(Math.floor(requested.explorers), 10)),
+      depth,
+      strategy: requested.strategy,
+      maxMinutes: Math.max(1, Math.min(requested.maxMinutes, 20)),
+      pageBudget: explorePageBudget(depth),
+    };
+    const startedAt = new Date();
+    const exploreState: QaExploreState = {
+      config,
+      explorers: Array.from({ length: config.explorers }, (_, index) => ({
+        index,
+        status: "claiming",
+        pagesMapped: 0,
+      })),
+      pagesDiscovered: 0,
+      blocked: [],
+      startedAt: startedAt.toISOString(),
+      deadlineAt: new Date(
+        startedAt.getTime() + config.maxMinutes * 60_000,
+      ).toISOString(),
+    };
+    exploreSeed = {
+      qaExplore: exploreState,
+      ...(input.authContext?.trim()
+        ? { qaAuthContext: input.authContext.trim().slice(0, 4000) }
+        : {}),
+    };
+  }
 
   // Decode uploaded product docs into the planner's documentation digest.
   // Only the digest + per-file summaries persist — never the raw upload.
@@ -2490,6 +3167,7 @@ export async function startQaAgent(
       authMode: credsProvided ? "login" : "public_only",
       ...planSeed,
       ...docsSeed,
+      ...exploreSeed,
       ...(credsProvided
         ? {
             quickstartEmail: input.email!.trim(),
@@ -2520,7 +3198,7 @@ async function requireQaSession(sessionId: string): Promise<{
   teamId: string;
 }> {
   const { team } = await requireTeamAccess();
-  assertQaAgentAccess(team.plan);
+  assertQaAgentAccess(team.plan, isBillingEnabled());
   const session = await queries.getAgentSession(sessionId);
   if (!session || session.kind !== "qa") {
     throw new Error("QA session not found");
@@ -2634,6 +3312,9 @@ async function refineAndMergeJourneysIntoPlan(
   success: boolean;
   addedJourneys?: number;
   addedItems?: number;
+  /** Ids of the plan items the merge added — task runs scope generation to
+   *  exactly these. */
+  addedItemIds?: string[];
   error?: string;
 }> {
   const sessionId = session.id;
@@ -2720,6 +3401,7 @@ async function refineAndMergeJourneysIntoPlan(
     success: true,
     addedJourneys: merged.addedJourneys,
     addedItems: merged.addedItems,
+    addedItemIds: merged.addedItemIds,
   };
 }
 
@@ -2896,12 +3578,35 @@ export async function rerunQaSession(
 
 // ── Direction queue (qa_tasks) ───────────────────────────────────────────────
 //
-// The team (and later, external agents via MCP) drops directives into a queue;
-// whenever no QA session is active the dispatcher claims the oldest queued
-// task, selects the protocol (fill-gaps against the stored plan when one
-// exists, else a full run with the directive fed to the planner), runs it with
-// the review gate auto-approved, and writes the agent's reply back onto the
-// task card.
+// The team (and external agents via MCP) drops directives into a queue; when
+// no QA session is active the dispatcher claims the oldest queued task and
+// TRIAGES it with a small logged AI call (see qa-agent/task-triage.ts):
+//
+//   targeted + stored plan   fill_gaps scoped to the directive — the journey
+//                            refiner merges it into the plan and ONLY the
+//                            items it adds are generated, run, and healed
+//   targeted + no plan       fill_gaps against a minimal plan synthesized
+//                            from the triage's own tests — straight to the
+//                            generator, no discovery pass
+//   explore                  full pipeline — the scout re-discovers the app,
+//                            the planner must cover the directive, then
+//                            generate → execute → heal as usual
+//
+// EVERY task is triaged, including coverage_gap ones: the App Map files
+// route-specific "Cover /path" tasks (targeted — the route is usually NOT a
+// stored-plan item, so a plain gap-fill would generate nothing), while the
+// dashboard's "increase overall coverage" asks are broad. The one source-based
+// nuance: a broad (explore-scoped) coverage_gap directive with a stored plan
+// runs gap_fill — generate that plan's uncovered items — instead of paying for
+// a full re-discovery.
+//
+// Auth is reused from run history (storage state / verified creds) — by the
+// time a directive lands here, login is a solved problem, so qa_login resolves
+// in seconds instead of re-registering. Runs are autonomous (review gate
+// auto-approved) and the agent's reply is written back onto the task card.
+// The triage prompt/response is logged to ai_prompt_logs (qa_task_triage) and
+// linked from a task:triaged activity event + the session's qaTaskTriage
+// metadata, so routing decisions can be debugged and improved later.
 
 const TERMINAL_SESSION_STATUSES: AgentSession["status"][] = [
   "completed",
@@ -2911,14 +3616,44 @@ const TERMINAL_SESSION_STATUSES: AgentSession["status"][] = [
 
 const MAX_TASK_TITLE = 200;
 const MAX_TASK_DESCRIPTION = 2000;
+const TRIAGE_TIMEOUT_MS = 2 * 60 * 1000;
 
 /** The agent's reply for a completed task run — the card's "done" comment. */
 function buildTaskReply(session: AgentSession): string {
+  // Targeted run: report only the directive's own items, not the whole plan.
+  const taskItemIds = session.metadata.qaTaskItemIds;
+  if (taskItemIds?.length) {
+    const scoped = (session.metadata.qaGeneratedTests ?? []).filter((g) =>
+      taskItemIds.includes(g.planItemId),
+    );
+    const generated = scoped.filter(
+      (g) => g.testId && g.status !== "covered",
+    ).length;
+    const covered = scoped.filter((g) => g.status === "covered").length;
+    const passed = scoped.filter(
+      (g) => g.status === "passed" || g.status === "healed",
+    ).length;
+    const healed = scoped.filter((g) => g.status === "healed").length;
+    const stillFailing = scoped.filter((g) => g.status === "failed").length;
+    const genFailed = scoped.filter(
+      (g) => g.status === "generation_failed",
+    ).length;
+    const parts = [`generated ${generated}`, `${passed} passing`];
+    if (covered > 0) parts.push(`${covered} already covered`);
+    if (healed > 0) parts.push(`${healed} healed`);
+    if (stillFailing > 0) parts.push(`${stillFailing} still failing`);
+    if (genFailed > 0) parts.push(`${genFailed} could not be generated`);
+    return `Done — ${parts.join(", ")} for this directive.`;
+  }
   const s = session.metadata.qaSummary;
   if (!s) return "Run completed. Coverage dashboard updated.";
   const genFailed = (session.metadata.qaGeneratedTests ?? []).filter(
     (t) => t.status === "generation_failed",
   ).length;
+  if (s.generated === 0 && s.covered > 0 && s.failed === 0 && genFailed === 0) {
+    // Gap-fill that found no gaps — say so instead of "0 generated, 0 passing".
+    return `Done — all ${s.covered} of the plan's ${s.planned} runnable items are already covered by existing tests; nothing new to generate. Coverage dashboard updated.`;
+  }
   const parts = [
     `planned ${s.planned}`,
     `${s.covered} already covered`,
@@ -2929,6 +3664,18 @@ function buildTaskReply(session: AgentSession): string {
   if (s.failed > 0) parts.push(`${s.failed} still failing`);
   if (genFailed > 0) parts.push(`${genFailed} could not be generated`);
   return `Done — ${parts.join(", ")}. Coverage dashboard updated.`;
+}
+
+/** Tests the session's run touched for THIS task — the card's linked chips.
+ *  Targeted runs list exactly the directive's items; unscoped runs list every
+ *  ledger entry that produced or matched a test. */
+function buildTaskTestRefs(session: AgentSession | null): QaTaskTestRef[] {
+  if (!session) return [];
+  const taskItemIds = session.metadata.qaTaskItemIds;
+  return (session.metadata.qaGeneratedTests ?? [])
+    .filter((g) => g.testId)
+    .filter((g) => !taskItemIds?.length || taskItemIds.includes(g.planItemId))
+    .map((g) => ({ testId: g.testId!, name: g.name, status: g.status }));
 }
 
 /** Write a terminal session's outcome back onto its task card. */
@@ -2942,6 +3689,7 @@ async function finalizeTask(
     await queries.updateQaTask(task.id, {
       status: "done",
       agentReply: buildTaskReply(session),
+      tests: buildTaskTestRefs(session),
       completedAt: new Date(),
     });
     emitActivity(
@@ -2964,6 +3712,8 @@ async function finalizeTask(
   await queries.updateQaTask(task.id, {
     status: "needs_input",
     agentReply: reply,
+    // Partial progress still links: tests generated before the failure.
+    tests: buildTaskTestRefs(session),
     completedAt: new Date(),
   });
   emitActivity(
@@ -3033,7 +3783,103 @@ async function resolveQaRunSeed(repositoryId: string): Promise<{
   };
 }
 
-/** Claim the oldest queued task and run a task-scoped session for it. */
+/** Park a task as needs_input with an actionable reply, before or instead of
+ *  a run. The human retries (→ queued) or drops it. */
+async function parkTask(
+  task: QaTask,
+  teamId: string,
+  repositoryId: string,
+  reply: string,
+  sessionId?: string,
+): Promise<void> {
+  await queries.updateQaTask(task.id, {
+    status: "needs_input",
+    agentReply: reply,
+    completedAt: new Date(),
+  });
+  emitActivity(
+    teamId,
+    repositoryId,
+    sessionId ?? task.id,
+    "task:failed",
+    `Task needs input: ${task.title}`,
+  );
+}
+
+/** Scope a directive with one small AI call — "targeted" (generate the named
+ *  coverage directly) vs "explore" (broad; scout + planner first). The prompt
+ *  and response land in ai_prompt_logs under qa_task_triage; the returned
+ *  promptLogId links the decision back to that row. Throws when the model
+ *  can't produce a valid decision — the caller parks the task, never guesses. */
+async function triageQaTask(
+  repositoryId: string,
+  directive: string,
+  seed: Awaited<ReturnType<typeof resolveQaRunSeed>>,
+): Promise<TaskTriageResult & { promptLogId?: string }> {
+  const settings = await queries.getAISettings(repositoryId);
+  const config = getAIConfig(settings);
+  const plan = seed.planSource?.metadata.qaPlan;
+  const knownPagePaths = plan
+    ? [
+        ...new Set(
+          plan.items
+            .map((i) => i.pagePath)
+            .filter((p): p is string => Boolean(p)),
+        ),
+      ]
+    : undefined;
+  const systemPrompt = buildTaskTriageSystemPrompt();
+  const userPrompt = buildTaskTriageUserPrompt({
+    directive,
+    groups: seed.groups,
+    existingPlanDigest: plan ? buildExistingPlanDigest(plan) : undefined,
+    knownPagePaths,
+    authenticated: Boolean(seed.creds),
+  });
+
+  let promptLogId: string | undefined;
+  const call = (extra?: string): Promise<string> =>
+    generateWithAI(
+      config,
+      extra ? `${userPrompt}\n\n${extra}` : userPrompt,
+      systemPrompt,
+      {
+        repositoryId,
+        actionType: "qa_task_triage",
+        responseFormat: "json_object",
+        signal: AbortSignal.timeout(TRIAGE_TIMEOUT_MS),
+        onLogCreated: (id) => {
+          promptLogId = id;
+        },
+      },
+    );
+
+  const raw = await call();
+  let triage = parseAiJson(raw, isTaskTriageResult, {
+    source: "qa-task-triage",
+  });
+  if (!triage) {
+    const shape = parseAiJson(raw, (x): x is unknown => true, {
+      source: "qa-task-triage-explain",
+    });
+    const reason = explainInvalidTaskTriage(shape) ?? "the JSON was invalid";
+    const retry = await call(
+      `Your previous response was not valid: ${reason}. Respond with ONLY the JSON object described in the system prompt.`,
+    );
+    triage = parseAiJson(retry, isTaskTriageResult, {
+      source: "qa-task-triage-retry",
+    });
+  }
+  if (!triage) {
+    throw new Error(
+      "The AI could not turn this directive into a routing decision",
+    );
+  }
+  return { ...triage, promptLogId };
+}
+
+/** Claim the oldest queued task, triage its directive, and run the matching
+ *  task-scoped session (see the section comment above for the protocols). */
 async function dispatchNextQaTask(
   teamId: string,
   repositoryId: string,
@@ -3047,32 +3893,65 @@ async function dispatchNextQaTask(
     const task = await queries.getNextQueuedQaTask(repositoryId);
     if (!task) return;
 
-    const { targetUrl, planSource, groups, creds, allowRegistration } =
-      await resolveQaRunSeed(repositoryId);
+    const seed = await resolveQaRunSeed(repositoryId);
+    const { targetUrl, planSource, groups, creds, allowRegistration } = seed;
     if (!targetUrl) {
-      await queries.updateQaTask(task.id, {
-        status: "needs_input",
-        agentReply:
-          "I don't have a target URL yet — start one QA run from the form first, then retry this task.",
-        completedAt: new Date(),
-      });
-      emitActivity(
+      await parkTask(
+        task,
         teamId,
         repositoryId,
-        task.id,
-        "task:failed",
-        `Task needs input: ${task.title}`,
+        "I don't have a target URL yet — start one QA run from the form first, then retry this task.",
       );
       return;
     }
 
-    // Protocol selection: with a stored plan the task becomes a targeted
-    // fill-gaps run (directive merged into the plan below); without one it's
-    // a full run with the directive fed straight to the planner.
-    const mode: QaRunMode = planSource ? "fill_gaps" : "full";
     const directive = [task.title, task.description ?? ""]
       .filter(Boolean)
       .join("\n");
+    const storedPlan = planSource?.metadata.qaPlan;
+    const storedDiscovery = planSource?.metadata.qaDiscovery;
+
+    // Route the directive. The task stays "queued" while triaging so a crash
+    // here leaves it claimable.
+    let triage: TaskTriageResult & { promptLogId?: string };
+    try {
+      triage = await triageQaTask(repositoryId, directive, seed);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await parkTask(
+        task,
+        teamId,
+        repositoryId,
+        `I couldn't scope this directive: ${msg}. Reword it or retry.`,
+      );
+      return;
+    }
+
+    const protocol:
+      | "gap_fill" // unscoped fill_gaps against the stored plan
+      | "explore" // full pipeline, directive fed to the planner
+      | "targeted_refine" // fill_gaps scoped to refiner-merged items
+      | "targeted_direct" = // fill_gaps against a synthesized mini plan
+      triage.scope === "explore"
+        ? task.source === "coverage_gap" && storedPlan
+          ? "gap_fill" // broad "close the gaps" ask — the plan already knows them
+          : "explore"
+        : storedPlan && storedDiscovery
+          ? "targeted_refine"
+          : triage.tests.length > 0
+            ? "targeted_direct"
+            : "explore"; // targeted, but nothing concrete to target against
+
+    const directItems =
+      protocol === "targeted_direct"
+        ? triageTestsToPlanItems(triage.tests, groups)
+        : [];
+    const mode: QaRunMode = protocol === "explore" ? "full" : "fill_gaps";
+    const qaTaskTriage: QaTaskTriage = {
+      scope: triage.scope,
+      reason: triage.reason,
+      promptLogId: triage.promptLogId,
+    };
 
     const session = await queries.createAgentSession({
       repositoryId,
@@ -3096,15 +3975,21 @@ async function dispatchNextQaTask(
               quickstartPassword: creds.password,
             }
           : {}),
-        ...(planSource
+        ...(protocol === "gap_fill" || protocol === "targeted_refine"
           ? {
-              qaPlan: planSource.metadata.qaPlan,
-              qaDiscovery: planSource.metadata.qaDiscovery,
-              qaPlanSourceSessionId: planSource.id,
+              qaPlan: planSource!.metadata.qaPlan,
+              qaDiscovery: planSource!.metadata.qaDiscovery,
+              qaPlanSourceSessionId: planSource!.id,
             }
-          : {
-              qaPlannerFeedback: `Directive from the team's task queue — the plan must cover it:\n${directive}`,
-            }),
+          : protocol === "targeted_direct"
+            ? {
+                qaPlan: buildTaskPlanFromTriage(directive, directItems),
+                qaTaskItemIds: directItems.map((i) => i.id),
+              }
+            : {
+                qaPlannerFeedback: `Directive from the team's task queue — the plan must cover it:\n${directive}`,
+              }),
+        qaTaskTriage,
         qaTaskId: task.id,
         qaTrigger: "task",
       },
@@ -3122,26 +4007,68 @@ async function dispatchNextQaTask(
       "task:started",
       `QA agent picked up task: ${task.title}`,
     );
+    emitActivity(
+      teamId,
+      repositoryId,
+      session.id,
+      "task:triaged",
+      `Directive scoped as ${qaTaskTriage.scope}: ${qaTaskTriage.reason}`,
+      {
+        detail: {
+          protocol,
+          scope: qaTaskTriage.scope,
+          reason: qaTaskTriage.reason,
+        },
+        promptLogId: qaTaskTriage.promptLogId,
+      },
+    );
 
-    // Merge the directive into the reused plan so fill-gaps generates the
-    // asked-for work, not just leftover gaps. Best-effort: plain fill-gaps IS
-    // the protocol for coverage_gap tasks, and still runs if the refiner fails.
-    if (mode === "fill_gaps" && task.source !== "coverage_gap") {
+    // targeted_refine: merge the directive into the reused plan and scope the
+    // run to exactly the items it adds. This is a hard gate — a failed merge
+    // parks the task instead of silently running an unrelated gap-fill.
+    let workingNote: string;
+    if (protocol === "targeted_refine") {
       const fresh = await queries.getAgentSession(session.id);
-      if (fresh) {
-        const merged = await refineAndMergeJourneysIntoPlan(
-          fresh,
+      // One task card = ONE ask: pass the directive as a single journey so the
+      // refiner doesn't treat title and description as two separate journeys.
+      const merged = fresh
+        ? await refineAndMergeJourneysIntoPlan(fresh, teamId, [directive])
+        : { success: false as const, error: "Session vanished before refine" };
+      if (!merged.success) {
+        await queries.updateAgentSession(session.id, {
+          status: "failed",
+          completedAt: new Date(),
+        });
+        await parkTask(
+          task,
           teamId,
-          parseUserJourneys(directive),
+          repositoryId,
+          `I couldn't turn this directive into plan items: ${merged.error ?? "unknown error"}. Reword it or retry.`,
+          session.id,
         );
-        if (!merged.success) {
-          console.warn(
-            "[QaAgent] task directive merge failed:",
-            merged.error ?? "unknown",
-          );
-        }
+        return;
       }
+      const ids = merged.addedItemIds ?? [];
+      if (ids.length > 0) {
+        await mergeMetadata(session.id, { qaTaskItemIds: ids });
+        workingNote = `Scoped as targeted — generating ${ids.length} test${ids.length === 1 ? "" : "s"} for this directive, then running and healing them.`;
+      } else {
+        // Every refined item deduplicated against the stored plan: the
+        // directive is already planned. Run an unscoped gap-fill so the
+        // planned-but-never-generated case still produces the asked-for tests.
+        workingNote =
+          "The stored plan already covers this — filling its remaining gaps (generate, run, heal).";
+      }
+    } else if (protocol === "targeted_direct") {
+      workingNote = `Scoped as targeted — generating ${directItems.length} test${directItems.length === 1 ? "" : "s"} from the directive, then running and healing them.`;
+    } else if (protocol === "explore") {
+      workingNote =
+        "Scoped as a broader run — scouting the app, planning coverage for this directive, then generating, running, and healing.";
+    } else {
+      workingNote =
+        "Filling coverage gaps against the stored plan (generate, run, heal).";
     }
+    await queries.updateQaTask(task.id, { agentReply: workingNote });
 
     executeQaPipeline(session.id, teamId, repositoryId, "qa_setup").catch(
       (err) => console.error("[QaAgent] unhandled:", err),
@@ -3155,7 +4082,7 @@ async function requireQaTask(
   taskId: string,
 ): Promise<{ task: QaTask; teamId: string }> {
   const { team } = await requireTeamAccess();
-  assertQaAgentAccess(team.plan);
+  assertQaAgentAccess(team.plan, isBillingEnabled());
   const task = await queries.getQaTask(taskId);
   if (!task || task.teamId !== team.id) {
     throw new Error("Task not found");
@@ -3174,7 +4101,7 @@ export async function addQaTask(input: {
   source?: QaTaskSource;
 }): Promise<{ taskId: string }> {
   const { team, user } = await requireRepoAccess(input.repositoryId);
-  assertQaAgentAccess(team.plan);
+  assertQaAgentAccess(team.plan, isBillingEnabled());
   const title = input.title.trim().slice(0, MAX_TASK_TITLE);
   if (!title) throw new Error("The task needs a title");
   const actorName = user.name || user.email || null;
@@ -3217,6 +4144,7 @@ export async function retryQaTask(
     status: "queued",
     sessionId: null,
     agentReply: null,
+    tests: null,
     startedAt: null,
     completedAt: null,
   });
@@ -3306,8 +4234,15 @@ export async function startQaAgentFromTrigger(opts: {
 
   // Triggers respect the same plan gate as the UI.
   const team = await queries.getTeam(teamId);
-  if (!team || !hasQaAgentAccess(team.plan)) {
+  if (!team || !hasQaAgentAccess(team.plan, isBillingEnabled())) {
     return { skipped: "QA agent not available on the team's plan" };
+  }
+
+  // ...and the same run-minute ceiling as a manual start.
+  try {
+    await assertAgentRunMinutesAvailable(teamId);
+  } catch {
+    return { skipped: "Monthly run-minute quota exceeded" };
   }
 
   const active = await queries.getActiveAgentSession(repositoryId, "qa");
@@ -3416,7 +4351,7 @@ export async function updateQaTriggerConfig(
   input: QaTriggerConfigInput,
 ) {
   const { team } = await requireRepoAccess(repositoryId);
-  assertQaAgentAccess(team.plan);
+  assertQaAgentAccess(team.plan, isBillingEnabled());
 
   const patch: Parameters<typeof queries.upsertQaAgentTrigger>[2] = {};
   if (input.scheduleEnabled !== undefined) {

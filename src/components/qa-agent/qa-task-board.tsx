@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import type { QaTask, QaTaskStatus } from "@/lib/db/schema";
+import Link from "next/link";
+import type { QaTask, QaTaskStatus, QaTaskTestRef } from "@/lib/db/schema";
 import { timeAgo } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ import {
   CheckCircle2,
   CircleDashed,
   Crosshair,
+  FlaskConical,
   ListTodo,
   Loader2,
   Plug,
@@ -86,6 +88,46 @@ function SourceChip({ task }: { task: QaTask }) {
   );
 }
 
+// Chip tone by the test's outcome at settle time.
+const TEST_REF_CLASSES: Record<QaTaskTestRef["status"], string> = {
+  passed: "bg-success/10 text-success border-success/30",
+  healed: "bg-success/10 text-success border-success/30",
+  failed: "bg-destructive/10 text-destructive border-destructive/30",
+  covered: "text-muted-foreground",
+  generated: "bg-info/10 text-info border-info/30",
+  generating: "bg-info/10 text-info border-info/30",
+  generation_failed: "bg-destructive/10 text-destructive border-destructive/30",
+};
+
+function TestRefChips({ refs }: { refs: QaTaskTestRef[] }) {
+  return (
+    <div className="flex min-w-0 flex-wrap gap-1">
+      {refs.map((ref) => (
+        // Badge's base classes pin it to its content width (w-fit shrink-0
+        // whitespace-nowrap); long test names must shrink + truncate inside
+        // the narrow kanban card instead, so both the link wrapper and the
+        // badge get a min-w-0/max-w-full shrink chain.
+        <Link
+          key={ref.testId}
+          href={`/tests/${ref.testId}`}
+          className="inline-flex min-w-0 max-w-full"
+        >
+          <Badge
+            variant="outline"
+            className={`min-w-0 max-w-full shrink gap-1 px-1.5 text-[10px] hover:opacity-80 ${
+              TEST_REF_CLASSES[ref.status] ?? "text-muted-foreground"
+            }`}
+            title={`${ref.name} — ${ref.status.replace("_", " ")}`}
+          >
+            <FlaskConical className="h-3 w-3 shrink-0" />
+            <span className="truncate">{ref.name}</span>
+          </Badge>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
 function TaskCard({
   task,
   pending,
@@ -152,6 +194,9 @@ function TaskCard({
           <Bot className="h-3.5 w-3.5 mt-0.5 shrink-0 text-primary" />
           <span className="min-w-0">{task.agentReply}</span>
         </div>
+      )}
+      {task.tests && task.tests.length > 0 && (
+        <TestRefChips refs={task.tests} />
       )}
       {task.status === "needs_input" && (
         <Button
