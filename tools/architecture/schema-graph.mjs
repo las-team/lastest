@@ -17,13 +17,106 @@
  * not see a relationship that exists only by convention (an `xId` column with no
  * `.references()`), which is itself worth knowing.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..");
-const SCHEMA = join(ROOT, "packages/db/src/schema.ts");
+
+/**
+ * Read every schema source. `packages/db/src/schema.ts` used to hold all 98
+ * tables; it is now a barrel over `packages/db/src/schema/*.ts`. Both shapes are
+ * handled so the tool works before and after the split — and so it keeps
+ * working if some tables stay in the barrel.
+ *
+ * Concatenating the modules is sound here because the analysis is per-table and
+ * lexical: table spans are delimited by the next `pgTable` declaration, and a
+ * file boundary is just another delimiter.
+ */
+function readSchemaSources() {
+  /** @type {Array<{ module: string | null, text: string }>} */
+  const parts = [];
+  const barrel = join(ROOT, "packages/db/src/schema.ts");
+  if (existsSync(barrel)) {
+    parts.push({ module: null, text: readFileSync(barrel, "utf8") });
+  }
+
+  const dir = join(ROOT, "packages/db/src/schema");
+  if (existsSync(dir)) {
+    for (const f of readdirSync(dir).sort()) {
+      if (f.endsWith(".ts") && !f.endsWith(".test.ts")) {
+        parts.push({
+          module: f.replace(/\.ts$/, ""),
+          text: readFileSync(join(dir, f), "utf8"),
+        });
+      }
+    }
+  }
+
+  // Plugin-owned schemas, once features start moving out (core-scope.md §7).
+  const plugins = join(ROOT, "plugins");
+  if (existsSync(plugins)) {
+    for (const p of readdirSync(plugins).sort()) {
+      const f = join(plugins, p, "src/schema.ts");
+      if (existsSync(f)) {
+        parts.push({ module: `plugin:${p}`, text: readFileSync(f, "utf8") });
+      }
+    }
+  }
+
+  if (parts.length === 0) {
+    throw new Error("No schema sources found under packages/db/src");
+  }
+  return parts;
+}
+
+/**
+ * Import edges between the schema modules themselves.
+ *
+ * Distinct from the FK graph: this is what actually decides whether the split is
+ * legal ESM. Circular imports happen to work for drizzle — `.references(() => x)`
+ * defers the dereference and type imports erase — but they are fragile enough
+ * to be worth failing a test over rather than discovering later.
+ */
+export function schemaModuleImports() {
+  const dir = join(ROOT, "packages/db/src/schema");
+  /** @type {Map<string, string[]>} */
+  const graph = new Map();
+  if (!existsSync(dir)) return graph;
+
+  for (const f of readdirSync(dir).sort()) {
+    if (!f.endsWith(".ts") || f.endsWith(".test.ts")) continue;
+    const text = readFileSync(join(dir, f), "utf8");
+    const deps = new Set();
+    for (const m of text.matchAll(/from\s+["']\.\/([a-z0-9-]+)["']/g)) {
+      deps.add(m[1]);
+    }
+    graph.set(f.replace(/\.ts$/, ""), [...deps].sort());
+  }
+  return graph;
+}
+
+/** Cycles in the module import graph, as paths. Empty when acyclic. */
+export function schemaModuleCycles() {
+  const graph = schemaModuleImports();
+  const cycles = [];
+  const state = new Map(); // 0 = visiting, 1 = done
+
+  const walk = (node, path) => {
+    if (state.get(node) === 1) return;
+    if (state.get(node) === 0) {
+      cycles.push([...path.slice(path.indexOf(node)), node].join(" → "));
+      return;
+    }
+    state.set(node, 0);
+    for (const dep of graph.get(node) ?? []) walk(dep, [...path, node]);
+    state.set(node, 1);
+  };
+
+  for (const node of graph.keys()) walk(node, []);
+  return [...new Set(cycles)];
+}
 
 /**
  * Proposed module boundaries. A table not matched by any rule lands in
@@ -65,32 +158,40 @@ function domainOf(table) {
   return "unassigned";
 }
 
-const src = readFileSync(SCHEMA, "utf8");
+const parts = readSchemaSources();
 
-// ── Parse: exportName -> sqlName, and the source span of each table ──────────
-const tables = new Map(); // exportName -> { sql, start, end, domain }
+// ── Parse: exportName -> sqlName, per source file ────────────────────────────
+// Once the schema is split, a table's module IS its domain — no guessing. The
+// `DOMAINS` regex is only the fallback for tables still sitting in one big file.
+const tables = new Map(); // exportName -> { sql, module, domain, span }
 const declRe = /export const (\w+)\s*=\s*pgTable\(\s*["'`]([^"'`]+)["'`]/g;
-const decls = [...src.matchAll(declRe)];
 
-decls.forEach((m, i) => {
-  const start = m.index;
-  const end = i + 1 < decls.length ? decls[i + 1].index : src.length;
-  tables.set(m[1], { sql: m[2], start, end, domain: domainOf(m[2]) });
-});
+/** @type {Array<{ table: string, text: string }>} */
+const spans = [];
 
-const byExport = new Map([...tables].map(([k, v]) => [k, v]));
+for (const { module, text } of parts) {
+  const decls = [...text.matchAll(declRe)];
+  decls.forEach((m, i) => {
+    const end = i + 1 < decls.length ? decls[i + 1].index : text.length;
+    tables.set(m[1], {
+      sql: m[2],
+      module,
+      domain: module ?? domainOf(m[2]),
+    });
+    spans.push({ table: m[1], text: text.slice(m.index, end) });
+  });
+}
+
+const byExport = tables;
 
 // ── Parse: FK edges, attributed to the table whose span contains them ────────
 const edges = [];
 const refRe = /\.references\(\s*\(\s*\)\s*=>\s*(\w+)\.(\w+)/g;
-for (const m of src.matchAll(refRe)) {
-  const from = [...tables].find(
-    ([, v]) => m.index >= v.start && m.index < v.end,
-  );
-  if (!from) continue;
-  const target = byExport.get(m[1]);
-  if (!target) continue;
-  edges.push({ fromTable: from[0], to: m[1] });
+for (const { table, text } of spans) {
+  for (const m of text.matchAll(refRe)) {
+    if (!byExport.has(m[1])) continue;
+    edges.push({ fromTable: table, to: m[1] });
+  }
 }
 
 const fkEdges = edges.map((e) => ({
@@ -103,21 +204,27 @@ const fkEdges = edges.map((e) => ({
 }));
 
 // ── Also flag convention-only relationships: an `xId` column with no FK ───────
+// These are invisible to drizzle and to any FK-based tooling, so nobody can tell
+// a deliberate soft reference from a forgotten constraint. 104 of them is the
+// real reason the schema feels unknowable — see core-scope.md §7.
 const softRefs = [];
 const colRe =
   /(\w+):\s*(?:uuid|text|varchar)\(\s*["'`]([a-z0-9_]*_id)["'`]\s*\)([^,]*)/g;
-for (const m of src.matchAll(colRe)) {
-  const owner = [...tables].find(
-    ([, v]) => m.index >= v.start && m.index < v.end,
-  );
-  if (!owner) continue;
-  if (m[3].includes("references")) continue;
-  softRefs.push({ table: owner[0], column: m[2] });
+for (const { table, text } of spans) {
+  for (const m of text.matchAll(colRe)) {
+    if (m[3].includes("references")) continue;
+    softRefs.push({ table, column: m[2] });
+  }
 }
 
+// Only print when run as a script — `boundaries.test.ts` imports the cycle
+// helpers above and must not get a report dumped into the test output.
+const isMain = process.argv[1] && process.argv[1].endsWith("schema-graph.mjs");
 const json = process.argv.includes("--json");
 
-if (json) {
+if (!isMain) {
+  // nothing to do on import
+} else if (json) {
   console.log(
     JSON.stringify(
       {

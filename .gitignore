@@ -68,6 +68,9 @@ screenshot-*.png
 
 # Claude / agent tooling
 .claude/settings.local.json
+# Claude agent worktrees are full repo copies with their own .git — never commit
+# them (git would add each as a gitlink/embedded repo).
+.claude/worktrees/
 .claude/scheduled_tasks.lock
 .auto-claude/
 .worktrees/

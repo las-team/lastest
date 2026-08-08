@@ -33,6 +33,7 @@ import {
   tallyByPluginRule,
 } from "./graph.mjs";
 import { classify } from "./check-split-pr.mjs";
+import { schemaModuleCycles, schemaModuleImports } from "./schema-graph.mjs";
 
 type Violation = {
   rule: string;
@@ -218,6 +219,28 @@ describe("split-PR check", () => {
     const z = classify(["src/lib/database-notes.md", "coreutils/x.ts"]);
     expect(z.todayCore).toEqual([]);
     expect(z.targetCore).toEqual([]);
+  });
+});
+
+describe("schema modules", () => {
+  it("has an acyclic import graph", () => {
+    // The 5,810-line schema.ts was split into per-domain modules. Circular
+    // imports between them happen to work for drizzle — `.references(() => x)`
+    // defers the dereference and type imports erase — but they are fragile, and
+    // the split was designed to avoid them: `scm` exists as its own module
+    // precisely because leaving GitHub/GitLab config in `repos` creates
+    // identity ⇄ repos and repos ⇄ runs. Without this test that reverts silently
+    // the first time someone adds an import.
+    expect(schemaModuleCycles() as string[]).toEqual([]);
+  });
+
+  it("keeps `shared` and `eb-protocol` as sinks", () => {
+    // These are the leaves that make the graph acyclic: a type needed by two
+    // domains goes in `shared` instead of one domain importing another
+    // sideways. If they grow imports, the layout has started to rot.
+    const graph = schemaModuleImports() as Map<string, string[]>;
+    expect(graph.get("shared")).toEqual([]);
+    expect(graph.get("eb-protocol")).toEqual([]);
   });
 });
 
