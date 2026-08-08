@@ -1,0 +1,33 @@
+{
+  "$comment": "Burndown ratchet for docs/architecture/core-plugin-refactor.md §7. Counts may only decrease. Regenerate with: pnpm arch:baseline",
+  "total": 42,
+  "byRule": {
+    "browser": 8,
+    "cross-plugin": 25,
+    "db": 8,
+    "pool-service": 1
+  },
+  "byPluginRule": {
+    "api-test::cross-plugin": 1,
+    "authoring-ai::cross-plugin": 2,
+    "data-sources::cross-plugin": 1,
+    "demo::cross-plugin": 1,
+    "demo::db": 2,
+    "design-system::db": 1,
+    "explorer::browser": 1,
+    "explorer::cross-plugin": 4,
+    "gamification::db": 1,
+    "qa-agent::browser": 3,
+    "qa-agent::cross-plugin": 10,
+    "quickstart::browser": 1,
+    "quickstart::cross-plugin": 1,
+    "quickstart::db": 1,
+    "quickstart::pool-service": 1,
+    "ranger::browser": 1,
+    "rca::db": 1,
+    "recorder::browser": 2,
+    "recorder::db": 2,
+    "scheduling::cross-plugin": 4,
+    "url-diff::cross-plugin": 1
+  }
+}

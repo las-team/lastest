@@ -1,0 +1,28 @@
+name: Architecture
+# §7.2 of docs/architecture/core-plugin-refactor.md — core and plugin changes
+# must be separate PRs.
+#
+# The import-boundary rules (§7.3/§7.5) are NOT run here: they live in
+# `pnpm lint` and `pnpm test`, which the CI workflow already runs. This job only
+# exists because the split-PR rule needs the PR's diff and labels, which the
+# other checks have no reason to fetch.
+env:
+  CI: true
+  HUSKY: 0
+on:
+  pull_request:
+    branches: [main]
+    # Re-run when labels change, so adding `core-and-plugin` clears the failure
+    # without needing an empty push.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+jobs:
+  split-pr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The check diffs against the base branch, so it needs history.
+          fetch-depth: 0
+      - name: Core / plugin split-PR check
+        run: node tools/architecture/check-split-pr.mjs "origin/${{ github.base_ref }}"
