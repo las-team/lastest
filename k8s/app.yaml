@@ -110,6 +110,26 @@ spec:
             # drop, production defaults secure) behind a TLS ingress.
             - name: BETTER_AUTH_COOKIE_SECURE
               value: "false"
+            # --- OpenTelemetry tracing (src/otel.ts) ---------------------
+            # OTLP over HTTP/protobuf. Unsetting OTEL_EXPORTER_OTLP_ENDPOINT
+            # disables tracing entirely — nothing else here has any effect on
+            # its own. CHANGE THIS to your collector's in-cluster Service DNS.
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector.observability.svc.cluster.local:4318"
+            - name: OTEL_SERVICE_NAME
+              value: "lastest-app"
+            # Kubelet probes /api/health 4×/min forever. Excluded in the
+            # sampler, not just in the HTTP instrumentation, because Next
+            # emits its own spans per request that would otherwise survive as
+            # orphan roots.
+            - name: OTEL_EXCLUDE_PATHS
+              value: "/api/health"
+            # Head-sampling ratio for traces that START here (cron loops, boot
+            # work). Requests arriving from Traefik carry a traceparent and
+            # honour ITS decision instead — Traefik's sampleRate is therefore
+            # the effective ceiling for anything through the ingress.
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "1"
           ports:
             - containerPort: 3000
               name: http

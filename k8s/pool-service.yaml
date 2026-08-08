@@ -105,6 +105,20 @@ spec:
                   name: lastest-secrets
                   key: eb-pool-service-token
                   optional: true
+            # --- OpenTelemetry tracing (packages/pool-service/src/otel.ts) ---
+            # Must point at the SAME collector as k8s/app.yaml, or the
+            # app→pool→k8s-API waterfall arrives split across two backends.
+            # Unsetting the endpoint disables tracing entirely.
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector.observability.svc.cluster.local:4318"
+            - name: OTEL_SERVICE_NAME
+              value: "lastest-pool"
+            - name: OTEL_EXCLUDE_PATHS
+              value: "/health"
+            # Nearly every span here has a remote parent (the app's fetch), so
+            # this ratio only governs the reaper loop's own root traces.
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "1"
           ports:
             - containerPort: 9500
               name: http

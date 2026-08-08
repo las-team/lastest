@@ -45,9 +45,14 @@ fi
 # reaches it on loopback :9500 (EB_POOL_SERVICE_URL). On k8s, prefer running
 # it as a dedicated single-replica Deployment and set EB_POOL_SERVICE_DISABLED=1
 # here so only that Deployment holds Job-create RBAC.
-if [ "${EB_POOL_SERVICE_DISABLED:-0}" != "1" ] && [ -f /app/dist-pool/main.mjs ]; then
+#
+# The bundle is CommonJS and the OTel preload is a separate `--require` so the
+# HTTP instrumentation is installed before the pool service's first
+# `require("https")` to the k8s API. The preload is inert when
+# OTEL_EXPORTER_OTLP_ENDPOINT is unset, so this is safe with no collector.
+if [ "${EB_POOL_SERVICE_DISABLED:-0}" != "1" ] && [ -f /app/dist-pool/main.cjs ]; then
   echo "Starting EB pool service..."
-  node /app/dist-pool/main.mjs &
+  node --require /app/dist-pool/otel-bootstrap.cjs /app/dist-pool/main.cjs &
 fi
 
 # Execute the main command

@@ -1,6 +1,7 @@
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import * as schema from "./schema";
+import { instrumentPostgresClient } from "./tracing";
 
 const connectionString =
   process.env.DATABASE_URL ||
@@ -18,5 +19,14 @@ if (process.env.NODE_ENV !== "production") {
   globalForDb.pgClient = client;
 }
 
-export const db = drizzle(client, { schema });
-export const sql = client;
+// Traced view of the pool. Wrapping here rather than at each call site is what
+// gets both consumers — the Next app and the pool service — in one place, and
+// covers reads and writes alike (Drizzle funnels everything through
+// `client.unsafe`). Returns `client` itself when tracing is off.
+//
+// The RAW client is what goes in the hot-reload global above: re-wrapping a
+// wrapped client on every reload would stack proxies.
+const tracedClient = instrumentPostgresClient(client, connectionString);
+
+export const db = drizzle(tracedClient, { schema });
+export const sql = tracedClient;

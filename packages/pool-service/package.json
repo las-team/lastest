@@ -7,16 +7,27 @@
   "exports": {
     "./client": "./src/client.ts",
     "./common": "./src/common.ts",
-    "./reapers": "./src/reapers.ts"
+    "./reapers": "./src/reapers.ts",
+    "./otel": "./src/otel.ts"
   },
   "scripts": {
     "dev": "tsx watch src/main.ts",
-    "build": "esbuild src/main.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/main.mjs --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\" --log-level=warning",
-    "start": "node dist/main.mjs",
+    "build": "pnpm build:main && pnpm build:otel",
+    "build:main": "esbuild src/main.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/main.cjs --log-level=warning",
+    "build:otel": "esbuild src/otel-bootstrap.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/otel-bootstrap.cjs --log-level=warning",
+    "start": "node --require ./dist/otel-bootstrap.cjs dist/main.cjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@lastest/db": "workspace:*"
+    "@lastest/db": "workspace:*",
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/exporter-trace-otlp-proto": "0.221.0",
+    "@opentelemetry/instrumentation-http": "0.221.0",
+    "@opentelemetry/instrumentation-undici": "0.31.0",
+    "@opentelemetry/resources": "2.10.0",
+    "@opentelemetry/sdk-node": "0.221.0",
+    "@opentelemetry/sdk-trace-node": "2.10.0",
+    "@opentelemetry/semantic-conventions": "1.43.0"
   },
   "devDependencies": {
     "@types/node": "^20",
