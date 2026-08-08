@@ -18,21 +18,20 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-// @ts-expect-error — .mjs sibling, deliberately dependency-free and untyped.
+// The `.mjs` siblings are deliberately dependency-free and plain JS; tsc infers
+// their types through `allowJs`, so these imports need no directives.
 import {
   CORE_PACKAGES,
   CORE_SRC_PATHS,
   PSEUDO_PLUGINS,
   pseudoPluginPaths,
 } from "./boundaries.mjs";
-// @ts-expect-error — see above.
 import {
   scanPseudoPlugins,
   scanTargetLayout,
   stripNonCode,
   tallyByPluginRule,
 } from "./graph.mjs";
-// @ts-expect-error — see above.
 import { classify } from "./check-split-pr.mjs";
 
 type Violation = {

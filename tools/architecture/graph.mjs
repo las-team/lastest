@@ -19,6 +19,7 @@ import {
   CORE_PACKAGES,
   CORE_SRC_PATHS,
   FORBIDDEN_CORE_IMPORTS,
+  FORBIDDEN_LIB_IMPORTS,
   FORBIDDEN_PLUGIN_IMPORTS,
   PACKAGED_PLUGIN_IMPORTS,
   PSEUDO_PLUGINS,
@@ -300,6 +301,7 @@ export function scanTargetLayout(root) {
       rules: [...FORBIDDEN_PLUGIN_IMPORTS, ...PACKAGED_PLUGIN_IMPORTS],
     },
     { zone: "core", dir: "core", rules: FORBIDDEN_CORE_IMPORTS },
+    { zone: "lib", dir: "libs", rules: FORBIDDEN_LIB_IMPORTS },
   ];
 
   for (const { zone, dir, rules } of zones) {

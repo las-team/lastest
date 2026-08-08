@@ -28,6 +28,7 @@
     "arch": "node tools/architecture/report.mjs",
     "arch:baseline": "node tools/architecture/report.mjs --baseline",
     "arch:split-pr": "node tools/architecture/check-split-pr.mjs",
+    "schema:graph": "node tools/architecture/schema-graph.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:ui": "vitest --ui",

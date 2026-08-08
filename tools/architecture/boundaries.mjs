@@ -24,6 +24,14 @@
 /** Zone globs for the target layout. */
 export const CORE_GLOB = "core/**/*.{ts,tsx}";
 export const PLUGIN_GLOB = "plugins/**/*.{ts,tsx}";
+/**
+ * The third tier (`docs/architecture/core-scope.md` §3). Shared code that is
+ * *useful to many* but guards nothing — no tenancy, capacity, money or
+ * credential boundary. Importable by core and plugins alike, with no review
+ * gate. Its existence is what stops every reusable helper from drifting into
+ * core, which is how the RFC's core got to nine modules.
+ */
+export const LIB_GLOB = "libs/**/*.{ts,tsx}";
 
 /**
  * Packages that are core by nature and stay in `packages/` (§3). Listed here so
@@ -268,6 +276,26 @@ export const FORBIDDEN_CORE_IMPORTS = [
     patterns: ["@lastest/plugin-*", "../../plugins/*", "@/lib/plugins/*"],
     message:
       "Core must not know about plugins. Invert the dependency: expose a capability and let the plugin call it.",
+  },
+];
+
+/**
+ * Libraries are shared, but they are still below both other tiers: a lib that
+ * imports a plugin would smuggle a feature into everything that uses the lib,
+ * and a lib reaching into the Next.js app is not a lib.
+ */
+export const FORBIDDEN_LIB_IMPORTS = [
+  {
+    id: "lib-to-plugin",
+    patterns: ["@lastest/plugin-*", "../../plugins/*"],
+    message:
+      "A library must not import a plugin — that would pull a feature into every consumer. Invert it: the plugin depends on the lib.",
+  },
+  {
+    id: "lib-to-app",
+    patterns: ["@/*"],
+    message:
+      "A library must not import Next.js app code. Move what it needs into the lib, or leave the code in the app.",
   },
 ];
 

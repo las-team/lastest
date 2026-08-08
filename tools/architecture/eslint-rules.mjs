@@ -23,7 +23,9 @@
 import {
   CORE_GLOB,
   FORBIDDEN_CORE_IMPORTS,
+  FORBIDDEN_LIB_IMPORTS,
   FORBIDDEN_PLUGIN_IMPORTS,
+  LIB_GLOB,
   PACKAGED_PLUGIN_IMPORTS,
   PLUGIN_GLOB,
   PSEUDO_PLUGINS,
@@ -82,6 +84,17 @@ export function architectureBoundaryRules() {
       "no-restricted-imports": [
         "error",
         { patterns: toPatterns(FORBIDDEN_CORE_IMPORTS) },
+      ],
+    },
+  });
+
+  blocks.push({
+    name: "architecture/libs",
+    files: [LIB_GLOB],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { patterns: toPatterns(FORBIDDEN_LIB_IMPORTS) },
       ],
     },
   });
