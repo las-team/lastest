@@ -1,0 +1,24 @@
+{
+  "name": "@lastest/core-data",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Plugin-owned persistence. Hands a plugin a database handle bound to its own tables and nothing else — see docs/architecture/core-scope.md §6.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lastest/contracts": "workspace:*",
+    "drizzle-orm": "^0.45.2"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "vitest": "^4.1.0"
+  },
+  "license": "FSL-1.1-ALv2"
+}

@@ -53,15 +53,35 @@ export interface SwarmOptions extends BrowserClaimOptions {
 }
 
 /**
- * The Playwright `Page`, re-exported through core rather than imported by the
+ * The Playwright `Page`, supplied through core rather than imported by the
  * plugin from `playwright` directly.
  *
- * Typed as `unknown` here because `@lastest/contracts` carries zero
- * dependencies by construction. `@lastest/core-browser` re-exports the real
- * `Page` type, so plugins get full typing from core and core keeps control of
- * the driver version — a Playwright upgrade is a core PR, not 20 plugin PRs.
+ * `@lastest/contracts` carries zero dependencies by construction, so it cannot
+ * name `Page` itself. Instead it names a *slot*, which `@lastest/core-browser`
+ * fills by declaration merging:
+ *
+ * ```ts
+ * declare module "@lastest/contracts" {
+ *   interface DrivablePageTypeMap { default: import("playwright").Page }
+ * }
+ * ```
+ *
+ * The effect is that a plugin writing `session.page.goto(url)` gets full
+ * Playwright typing with no `playwright` entry in its own manifest — while core
+ * keeps control of the driver version, so an upgrade is one core PR rather than
+ * twenty plugin PRs. Without core-browser in the program the slot stays
+ * `unknown`, which fails closed: contracts alone never hands out a typed page.
  */
-export type DrivablePage = unknown;
+// Intentionally empty. Declaration merging can only *add* members, never
+// change one, so a placeholder `default: unknown` here would make the
+// augmentation a type error rather than an override. The conditional below is
+// what supplies the fallback.
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface DrivablePageTypeMap {}
+
+export type DrivablePage = DrivablePageTypeMap extends { default: infer P }
+  ? P
+  : unknown;
 
 /**
  * A claimed EB. Everything on it is a capability core is prepared to vouch for;
@@ -91,6 +111,26 @@ export interface BrowserSession {
    * needs longer" is a metered decision core makes, not one a plugin takes.
    */
   extendDeadline(byMs: number): Promise<number>;
+
+  /**
+   * An additional page in a fresh, isolated context **inside this same EB**,
+   * seeded from the default context's current state.
+   *
+   * Added because `withBrowserSwarm` was the wrong primitive for the crawler
+   * case it was designed for. A feature exploring N scenarios behind one login
+   * wants N isolated contexts on one browser: that costs one pool slot and one
+   * stream of run-minutes, where N sessions cost N of each for identical
+   * behaviour. Charging a tenant N× for that is a money question, which makes
+   * offering the cheap shape core's business.
+   *
+   * "Seeded from the default context" matters and cannot be expressed by
+   * `storageStateId`: the state a crawler wants to share is the one produced by
+   * *this run's* login, which may never have been persisted.
+   *
+   * Context lifetime stays core's — every context minted here is closed when
+   * the `withBrowser` scope ends, so a plugin cannot leak one.
+   */
+  isolatedPage(): Promise<DrivablePage>;
 }
 
 export interface BrowserCapability {

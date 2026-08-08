@@ -55,12 +55,24 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.3)
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:core/contracts
+      '@lastest/core-browser':
+        specifier: workspace:*
+        version: link:core/browser
+      '@lastest/core-data':
+        specifier: workspace:*
+        version: link:core/data
       '@lastest/db':
         specifier: workspace:*
         version: link:packages/db
       '@lastest/eb-protocol':
         specifier: workspace:*
         version: link:packages/eb-protocol
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:core/kernel
       '@lastest/mcp-server':
         specifier: workspace:*
         version: link:packages/mcp-server
@@ -291,11 +303,43 @@ importers:
         specifier: ^4.1.0
         version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
 
+  core/browser:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      playwright:
+        specifier: ^1.57.0
+        version: 1.57.0
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
   core/contracts:
     devDependencies:
       typescript:
         specifier: ^5
         version: 5.9.3
+
+  core/data:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8)
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
 
   core/kernel:
     dependencies:

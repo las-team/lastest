@@ -14,6 +14,7 @@ export type {
   BrowserClaimOptions,
   BrowserSession,
   DrivablePage,
+  DrivablePageTypeMap,
   SwarmOptions,
   Viewport,
 } from "./browser";

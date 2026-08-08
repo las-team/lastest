@@ -17,3 +17,11 @@ export type {
   ContextScope,
   ResolvedRegistry,
 } from "./registry";
+export { createRuntime, UnknownJobTypeError } from "./runtime";
+export type {
+  JobDispatchRun,
+  PluginRuntime,
+  RuntimeOptions,
+  ScopeRequest,
+  ScopeResolver,
+} from "./runtime";
