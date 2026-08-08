@@ -179,6 +179,37 @@ That is worth fixing independently of this refactor — either promote them to
 real FKs or document them as deliberate soft references. Right now nobody can
 tell which is which, and that is the same problem in a different costume.
 
+**4. Both domain-level import cycles are caused by two tables — and they are
+tables that should leave core anyway.**
+
+Splitting the file per domain would create circular ESM imports (`identity.ts`
+imports from `repos.ts` and back). `pnpm schema:graph` reports them:
+
+```
+identity ⇄ repos
+    users → repositories
+    github_action_configs → teams
+    gitlab_pipeline_configs → teams
+repos ⇄ runs
+    github_action_configs → runners
+    gitlab_pipeline_configs → runners
+    builds → pull_requests
+    background_jobs → repositories
+    build_schedules → repositories
+```
+
+`github_action_configs` and `gitlab_pipeline_configs` are the only tables
+appearing in both. They are SCM *integration config* — the `scm` plugin under
+RFC §6.3, not core. Reclassifying just those two and re-running gives:
+
+```
+Domain-level import cycles a per-module split would create: 0
+```
+
+So the extraction and the file split help each other: pull the `scm` tables out
+first, and the remaining core schema is acyclic and can be split per domain with
+no circular imports at all. Worth doing in that order.
+
 ### Proposed decomposition
 
 `pnpm schema:graph` groups the 98 tables into 8 modules plus 17 unassigned:

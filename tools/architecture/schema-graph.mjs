@@ -191,6 +191,36 @@ if (json) {
     console.log(`    ${e.fromSql} → ${e.toSql}`);
   }
 
+  // Domain-level cycles. If `identity.ts` imports from `repos.ts` and vice
+  // versa, splitting the file that way creates a circular ESM import. It
+  // happens to work here — `.references(() => x)` defers the dereference and
+  // type imports erase — but it is fragile enough that whoever does the split
+  // should know before, not after.
+  const domainEdges = new Map();
+  for (const e of fkEdges) {
+    if (e.fromDomain === e.toDomain) continue;
+    if (!domainEdges.has(e.fromDomain))
+      domainEdges.set(e.fromDomain, new Set());
+    domainEdges.get(e.fromDomain).add(e.toDomain);
+  }
+  const cycles = [];
+  for (const [a, targets] of domainEdges) {
+    for (const b of targets) {
+      if (a < b && domainEdges.get(b)?.has(a)) cycles.push([a, b]);
+    }
+  }
+  console.log(
+    `\nDomain-level import cycles a per-module split would create: ${cycles.length}`,
+  );
+  for (const [a, b] of cycles) {
+    const ab = fkEdges.filter((e) => e.fromDomain === a && e.toDomain === b);
+    const ba = fkEdges.filter((e) => e.fromDomain === b && e.toDomain === a);
+    console.log(`    ${a} ⇄ ${b}`);
+    for (const e of [...ab, ...ba]) {
+      console.log(`        ${e.fromSql} → ${e.toSql}`);
+    }
+  }
+
   const unassigned = [...tables].filter(([, v]) => v.domain === "unassigned");
   console.log(`\nUnassigned tables (${unassigned.length}) — need a decision:`);
   for (const [, v] of unassigned) console.log(`    ${v.sql}`);
