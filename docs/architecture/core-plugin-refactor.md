@@ -1,8 +1,19 @@
 # RFC: Core + Plugins
 
-**Status:** proposed — not started
-**Author:** planning doc, no code changes in this PR
+**Status:** phase 0 landed, phase 1 (spikes) done. Phase 2 not started.
+**Author:** planning doc
 **Supersedes:** nothing
+
+> **Progress**
+>
+> - **Phase 0 — done** (`6dfa0dbe`). CODEOWNERS, the split-PR CI check, ESLint
+>   boundary rules and the graph-test ratchet are live. Baseline: **42
+>   violations**. Run `pnpm arch` for the current burndown. The map lives in
+>   `tools/architecture/boundaries.mjs`.
+> - **Phase 1 — done.** See [`core-plugin-spikes.md`](./core-plugin-spikes.md).
+>   Three results change this document: §8's codegen fallback is unnecessary
+>   (S1), §5 contradicts itself about plugin FKs (S2), and §4.2's `withRawPage`
+>   is not needed on day one (S3). Those sections are annotated inline below.
 
 ## 1. The problem
 
@@ -263,6 +274,14 @@ interface BrowserHandle {
 }
 ```
 
+> **Superseded by S3.** The premise above — that features use "a wide slice of the
+> API" — is wrong. All six direct-CDP call sites together use **14 distinct
+> Playwright operations**, half of them lifecycle calls that move into core
+> wholesale, and zero uses of `route`/`waitForEvent`/`frames`/`addInitScript`/
+> `tracing`/etc. `BrowserHandle` can be complete on day one; `withRawPage` should
+> ship as a rarely-used release valve with its counter starting at 0, not as an
+> expected default. See [`core-plugin-spikes.md`](./core-plugin-spikes.md) §S3.
+
 The honest trade: `withRawPage` means R4 is not perfectly enforced on day one. What it
 *does* buy immediately, and what makes it worth doing anyway:
 
@@ -310,6 +329,16 @@ Rules:
 - `ctx.data` gives a plugin: its own tables (read/write) + a **read-only, scoped**
   view of core entities (`ctx.data.tests.get(id)`), never a raw drizzle handle.
   `@lastest/db` stays out of plugin `dependencies`.
+
+  > **Amended by S2.** As written this contradicts the FK rule above: declaring
+  > `references(() => repositories.id)` requires importing the `repositories`
+  > table object, which lives in `@lastest/db/schema`. The ban was aimed at the
+  > wrong target — `@lastest/db` (root) constructs a live pool, but
+  > `@lastest/db/schema` is table definitions with no connection and grants a
+  > plugin nothing. Fix: **`core/data` re-exports the core tables plugins may FK
+  > to**, and plugin schemas import from there. `@lastest/db` stays out of plugin
+  > manifests, and the permitted FK targets become an explicit list in core
+  > instead of all 97 tables.
 - Cascade-on-team-delete for plugin tables is registered through core so GDPR
   deletion stays complete. This is a real correctness risk if forgotten — it needs a
   test that asserts every registered table is reachable from the team-deletion path.
@@ -465,6 +494,16 @@ walker) and asserts the §3 rules, so violations fail in `pnpm test`, not just l
 The genuine technical risk. Next.js App Router wants routes on disk under `src/app/`
 and `"use server"` files that it can analyse. Three things need to work:
 
+> **Resolved by S1 — this section is mostly moot.** A `"use server"` module inside
+> a `transpilePackages` package **does** produce a real, dispatchable server
+> action; `"use client"` components inside the package work; and a route page can
+> live in the package with a one-line re-export on the app side. No codegen is
+> needed for actions or pages — only the nav manifest below, which is a plain
+> data array. If a shim is ever needed anyway, note that
+> `export { x } from "pkg"` inside a `"use server"` file compiles to a module with
+> **no exports**; it must declare wrapper functions. See
+> [`core-plugin-spikes.md`](./core-plugin-spikes.md) §S1.
+
 **Server actions from a package.** Next.js requires the `"use server"` directive and
 does its own build-time analysis. Whether a `"use server"` module inside a
 `transpilePackages` workspace package produces a working action ID is **unverified**
@@ -514,6 +553,11 @@ If S1 fails and the codegen fallback also proves fragile, **stop and re-scope**:
 plugins as pure server-side logic packages and leave UI in `src/`. That is a smaller
 but still real win — it puts the browser/AI/data capability boundary in place, which
 is the R4 half.
+
+> **All three answered — see [`core-plugin-spikes.md`](./core-plugin-spikes.md).**
+> S1 works (the stop-and-re-scope branch is off the table), S2 works but exposed
+> a contradiction in §5, and S3 came back far better than assumed. Phase 2 is
+> unblocked and slightly cheaper than estimated here.
 
 ### Phase 2 — Kernel + first plugin (~3 weeks)
 
