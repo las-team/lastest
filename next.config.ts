@@ -15,11 +15,24 @@ const nextConfig: NextConfig = {
   // production runtime never needs `sharp` + `libvips` (~15MB+). Images still
   // get layout/lazy-loading from next/image, just at their source resolution.
   images: { unoptimized: true },
+  // Workspace packages published as raw TypeScript (`main: ./src/index.ts`).
+  // core/**, libs/** and plugins/** are all compiled by the app's own pipeline,
+  // which is what lets a plugin ship `"use server"` modules and client
+  // components without a build step of its own (spike S1).
   transpilePackages: [
     "@lastest/shared",
     "@lastest/eb-protocol",
     "@lastest/db",
     "@lastest/pool-service",
+    "@lastest/contracts",
+    "@lastest/kernel",
+    "@lastest/core-browser",
+    "@lastest/core-data",
+    "@lastest/ai-kit",
+    "@lastest/cron",
+    "@lastest/page-map",
+    "@lastest/ui",
+    "@lastest/plugin-explorer",
   ],
   outputFileTracingIncludes: {
     "/terms": ["./src/content/legal/terms.md"],

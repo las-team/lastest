@@ -11,12 +11,15 @@ import {
   type ScopeRequest,
 } from "@lastest/kernel";
 import { sql } from "@lastest/db";
+import { configureExplorer, explorerPlugin } from "@lastest/plugin-explorer";
 
 import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
 import * as queries from "@/lib/db/queries";
 import { getLogger } from "@/lib/logger";
+import { createAiFactory } from "@/lib/core/ai-capability";
 import { appBrowserHost } from "@/lib/core/browser-host";
 import { entitlementsFor } from "@/lib/core/entitlements";
+import { appExplorerHost } from "@/lib/core/explorer-host";
 
 /**
  * The composition root: where core's ports meet this app's implementations.
@@ -26,17 +29,19 @@ import { entitlementsFor } from "@/lib/core/entitlements";
  * imports (which `pnpm arch` enforces) and plugins stay free of everything
  * except `ctx`.
  *
- * **Status: compile-verified, not runtime-verified.** No plugin exists yet, so
- * nothing calls this in production. It is here because a capability with no
- * possible implementation is not a prerequisite that has been met — the first
- * plugin should find the seam already fitted, not have to invent it.
+ * `explorer` is the first plugin through it (RFC §9 phase 2). The seam held:
+ * everything explorer needs that *is* a boundary — a browser, a model, its own
+ * tables — arrives as a capability. Everything it needs that core does not
+ * offer yet arrives through `appExplorerHost`, which is deliberately ugly so it
+ * stays visible. See `plugins/explorer/src/host.ts`.
  */
 
 /**
- * Registered plugins. Empty until the first migration lands; `resolveRegistry`
- * validates whatever appears here at boot.
+ * Registered plugins. `resolveRegistry` validates the whole set at boot — ids,
+ * job-type namespacing, capability providers, and that every plugin with
+ * storage can also delete it.
  */
-const MANIFESTS: Parameters<typeof resolveRegistry>[0] = [];
+const MANIFESTS: Parameters<typeof resolveRegistry>[0] = [explorerPlugin];
 
 /**
  * Resolve the caller to a team, a repo and a logger.
@@ -125,7 +130,18 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
     factories: {
       browser: createBrowserFactory(appBrowserHost, { maxSwarm }),
       data: (pluginId) => data.capability(pluginId),
+      ai: createAiFactory(),
     },
+  });
+
+  // Hand each plugin its runtime. A plugin's `"use server"` module is imported
+  // by Next.js rather than constructed, so there is no other moment at which to
+  // pass it one — see `plugins/explorer/src/wiring.ts` for why the slot is
+  // realm-wide rather than a module-level binding.
+  configureExplorer({
+    runtime,
+    host: appExplorerHost,
+    data: data.capability("explorer"),
   });
 
   cached = { runtime, data };

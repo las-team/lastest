@@ -192,7 +192,9 @@ describe("split-PR check", () => {
       "src/lib/db/queries/tests.ts",
       "packages/pool-service/src/client.ts",
       "src/lib/qa-agent/crawl.ts",
-      "src/components/explorer/explorer-client.tsx",
+      // A `components` entry, to prove the third key is classified too. It was
+      // `src/components/explorer/…` until explorer graduated to `plugins/`.
+      "src/components/quickstart/quickstart-client.tsx",
       "src/server/actions/rca.ts",
     ]);
     expect(z.todayCore).toEqual([
@@ -201,7 +203,7 @@ describe("split-PR check", () => {
     ]);
     expect(z.todayPlugin).toEqual([
       "src/lib/qa-agent/crawl.ts",
-      "src/components/explorer/explorer-client.tsx",
+      "src/components/quickstart/quickstart-client.tsx",
       "src/server/actions/rca.ts",
     ]);
   });

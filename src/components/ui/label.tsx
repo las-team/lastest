@@ -1,18 +1,6 @@
-import * as React from "react";
-
-import { cn } from "@/lib/utils";
-
-function Label({ className, ...props }: React.ComponentProps<"label">) {
-  return (
-    <label
-      data-slot="label"
-      className={cn(
-        "text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
-export { Label };
+/**
+ * Re-export shim. The primitive moved to `libs/ui` so plugin packages can use
+ * it without importing app code (`docs/architecture/core-scope.md` §3). App
+ * callers keep the `@/components/ui/…` specifier.
+ */
+export { Label } from "@lastest/ui";

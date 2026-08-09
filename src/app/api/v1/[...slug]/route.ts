@@ -91,6 +91,7 @@ import {
   storeCaptionsForBuild,
 } from "@/lib/share/generate-captions";
 import type { VideoCaption } from "@/lib/db/schema";
+import { getPluginRuntime } from "@/lib/core/runtime";
 
 // Helper to verify API auth. `getCurrentSession` already handles both cookie
 // sessions and `Authorization: Bearer <token>` headers, so v1 and any
@@ -1301,45 +1302,48 @@ export async function GET(
 
     // Explorer session: GET /api/v1/explorer/:sessionId
     // GET /api/v1/explorer/:sessionId/findings returns the full finding rows.
+    //
+    // Tenancy is the plugin action's: `getExplorerSession` resolves scope
+    // through the kernel and returns null for another team's session, so there
+    // is no team check to duplicate (or to forget) here.
     if (resource === "explorer" && id) {
-      const sessionRow = await queries.getAgentSession(id);
-      if (!sessionRow || sessionRow.kind !== "explorer") {
+      await getPluginRuntime();
+      const { getExplorerSession, listExplorerFindings } =
+        await import("@lastest/plugin-explorer/actions");
+      const sessionRow = await getExplorerSession(id);
+      if (!sessionRow) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
-      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
-      }
+      const findings = await listExplorerFindings(id).catch(() => []);
       if (subResource === "findings") {
-        const findings = await queries.listFindingsBySession(id);
         return NextResponse.json({ findings });
       }
-      const findings = await queries.listFindingsBySession(id).catch(() => []);
       return NextResponse.json({
         id: sessionRow.id,
-        kind: sessionRow.kind,
+        kind: "explorer",
         repositoryId: sessionRow.repositoryId,
         status: sessionRow.status,
         currentStepId: sessionRow.currentStepId,
-        steps: sessionRow.steps.map((s) => ({
-          id: s.id,
-          status: s.status,
-          label: s.label,
-          iteration: s.iteration,
-          startedAt: s.startedAt,
-          completedAt: s.completedAt,
-          error: s.error,
-          result: s.result,
+        steps: sessionRow.steps.map((step) => ({
+          id: step.id,
+          status: step.status,
+          label: step.label,
+          iteration: step.iteration,
+          startedAt: step.startedAt,
+          completedAt: step.completedAt,
+          error: step.error,
+          result: step.result,
         })),
         metadata: {
-          targetUrl: sessionRow.metadata.explorerTargetUrl,
-          iteration: sessionRow.metadata.explorerIteration ?? 0,
-          maxIterations: sessionRow.metadata.explorerMaxIterations,
-          // Live EB screencast — host-routable, secret-free; watch it explore.
+          targetUrl: sessionRow.metadata.targetUrl,
+          iteration: sessionRow.metadata.iteration ?? 0,
+          maxIterations: sessionRow.metadata.maxIterations,
+          // Live EB screencast — a signed, expiring grant, never a pod address.
           streamUrl: sessionRow.metadata.streamUrl,
           queuedForBrowser: sessionRow.metadata.queuedForBrowser,
-          stuck: sessionRow.metadata.explorerStuck ?? false,
-          report: sessionRow.metadata.explorerReport ?? null,
-          keptTestIds: sessionRow.metadata.explorerKeptTestIds ?? [],
+          stuck: sessionRow.metadata.stuck ?? false,
+          report: sessionRow.metadata.report ?? null,
+          keptTestIds: sessionRow.metadata.keptTestIds ?? [],
         },
         findingsSummary: {
           total: findings.length,
@@ -2565,8 +2569,9 @@ export async function POST(
             { status: 400 },
           );
         }
+        await getPluginRuntime();
         const { startExplorerAgent } =
-          await import("@/server/actions/explorer-agent");
+          await import("@lastest/plugin-explorer/actions");
         const result = await startExplorerAgent({
           repositoryId: id,
           targetUrl,
@@ -2603,8 +2608,9 @@ export async function POST(
         );
       }
       try {
+        await getPluginRuntime();
         const { upsertExplorerKnowledge } =
-          await import("@/server/actions/explorer-agent");
+          await import("@lastest/plugin-explorer/actions");
         const result = await upsertExplorerKnowledge({
           repositoryId: id,
           title: body.title || `Note for ${body.urlPattern}`,
@@ -3372,18 +3378,19 @@ export async function DELETE(
     }
 
     // Cancel Explorer session: DELETE /api/v1/explorer/:sessionId
+    //
+    // `cancelExplorerAgent` throws "not found" for a session outside the
+    // caller's team, so the existence check and the tenancy check are the same
+    // call — one place to get right instead of three.
     if (resource === "explorer" && id) {
-      const sessionRow = await queries.getAgentSession(id);
-      if (!sessionRow || sessionRow.kind !== "explorer") {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
-      }
-      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
-      }
+      await getPluginRuntime();
       const { cancelExplorerAgent } =
-        await import("@/server/actions/explorer-agent");
-      const result = await cancelExplorerAgent(id);
-      return NextResponse.json(result);
+        await import("@lastest/plugin-explorer/actions");
+      try {
+        return NextResponse.json(await cancelExplorerAgent(id));
+      } catch {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
     }
 
     // Delete storage state: DELETE /api/v1/storage-states/:id

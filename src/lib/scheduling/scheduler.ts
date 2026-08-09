@@ -175,9 +175,13 @@ async function processDueExplorerTriggers() {
   if (explorerProcessing) return;
   explorerProcessing = true;
   try {
-    // Import dynamically to avoid circular dependencies (same as QA above).
+    // The plugin's own dispatcher. Loaded dynamically for the same reason the
+    // QA one above is, and because the plugin runtime has to be wired before
+    // any of its actions can resolve a scope.
+    const { getPluginRuntime } = await import("@/lib/core/runtime");
+    await getPluginRuntime();
     const { dispatchDueExplorerTriggers } =
-      await import("@/server/actions/explorer-agent");
+      await import("@lastest/plugin-explorer/actions");
     const fired = await dispatchDueExplorerTriggers();
     if (fired > 0) {
       console.log(`[scheduler] Started ${fired} scheduled explorer session(s)`);

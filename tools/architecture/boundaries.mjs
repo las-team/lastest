@@ -18,7 +18,9 @@
  *           violation count is ratcheted by the test so it can only go down.
  *
  * Deleting an entry from `PSEUDO_PLUGINS` is how a feature graduates: it moves to
- * `plugins/<id>/` and picks up the error-level rules instead.
+ * `plugins/<id>/` and picks up the error-level rules instead. `explorer` is the
+ * first to have done so — its entry is gone from the map below, and its five
+ * violations went with it.
  */
 
 /** Zone globs for the target layout. */
@@ -118,11 +120,6 @@ export const PSEUDO_PLUGINS = {
     lib: ["src/lib/qa-agent"],
     actions: ["qa-agent.ts"],
     components: ["src/components/qa-agent"],
-  },
-  explorer: {
-    lib: ["src/lib/explorer"],
-    actions: ["explorer-agent.ts"],
-    components: ["src/components/explorer"],
   },
   "app-map": { lib: ["src/lib/app-map"], actions: ["app-map.ts"] },
   demo: { lib: ["src/lib/demo"], actions: ["demo.ts", "demo-notes.ts"] },
@@ -230,14 +227,7 @@ export const FORBIDDEN_PLUGIN_IMPORTS = [
   },
   {
     id: "db",
-    patterns: [
-      "@lastest/db",
-      "@lastest/db/*",
-      "drizzle-orm",
-      "drizzle-orm/*",
-      "pg",
-      "postgres",
-    ],
+    patterns: ["@lastest/db", "@lastest/db/*", "pg", "postgres"],
     message: "Plugins must not open the database directly. Use `ctx.data`.",
   },
   {
@@ -250,6 +240,36 @@ export const FORBIDDEN_PLUGIN_IMPORTS = [
       "@google/generative-ai",
     ],
     message: "Plugins must not call AI providers directly. Use `ctx.ai`.",
+  },
+];
+
+/**
+ * Restrictions that only make sense for a *pseudo*-plugin — code still sitting
+ * in `src/`, sharing the app's `db` handle with all 98 tables on it.
+ *
+ * The explorer migration is what forced this split out of the `db` rule above.
+ * That rule banned `drizzle-orm` outright, which made `manifest.schema`
+ * unimplementable: declaring a table needs `pgTable` from `drizzle-orm/pg-core`
+ * and a `where` clause needs `eq` from `drizzle-orm`. Neither opens a
+ * connection — spike S2 made the same point about `@lastest/db/schema`.
+ *
+ * So the ban was aimed at the wrong noun. What a plugin must never import is a
+ * *connection* (`@lastest/db`, `pg`, `postgres`), and that stays banned
+ * everywhere. The query builder is banned only here, in the current layout,
+ * where importing it means writing raw SQL against core tables through the
+ * shared handle — which is exactly what the eight remaining violations are.
+ *
+ * A packaged plugin does not get the same carve-out for free. Its query builder
+ * is bound to a schema `core/data` validated as `<id>_`-prefixed, and it cannot
+ * import `@lastest/db` to get another one. Those two facts are the guarantee;
+ * banning `drizzle-orm` was never part of it.
+ */
+export const PSEUDO_PLUGIN_IMPORTS = [
+  {
+    id: "db",
+    patterns: ["drizzle-orm", "drizzle-orm/*"],
+    message:
+      "Feature code must not query the database directly. Use the query layer in src/lib/db/queries, or migrate to a plugin and use `ctx.data`.",
   },
 ];
 

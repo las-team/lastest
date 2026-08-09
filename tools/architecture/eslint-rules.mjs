@@ -28,6 +28,7 @@ import {
   LIB_GLOB,
   PACKAGED_PLUGIN_IMPORTS,
   PLUGIN_GLOB,
+  PSEUDO_PLUGIN_IMPORTS,
   PSEUDO_PLUGINS,
   crossPluginPatternsFor,
   pseudoPluginFiles,
@@ -117,7 +118,10 @@ export function architectureBoundaryRules() {
           "warn",
           {
             patterns: [
-              ...toPatterns(FORBIDDEN_PLUGIN_IMPORTS),
+              ...toPatterns([
+                ...FORBIDDEN_PLUGIN_IMPORTS,
+                ...PSEUDO_PLUGIN_IMPORTS,
+              ]),
               {
                 group: crossPluginPatternsFor(id).map(anchor),
                 message:

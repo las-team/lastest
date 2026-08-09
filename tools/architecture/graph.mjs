@@ -22,6 +22,7 @@ import {
   FORBIDDEN_LIB_IMPORTS,
   FORBIDDEN_PLUGIN_IMPORTS,
   PACKAGED_PLUGIN_IMPORTS,
+  PSEUDO_PLUGIN_IMPORTS,
   PSEUDO_PLUGINS,
   pseudoPluginPaths,
 } from "./boundaries.mjs";
@@ -253,7 +254,10 @@ export function scanPseudoPlugins(root) {
         if (/\.(test|spec)\.tsx?$/.test(file)) continue;
 
         for (const { specifier, line } of importsOf(root, file)) {
-          for (const rule of FORBIDDEN_PLUGIN_IMPORTS) {
+          for (const rule of [
+            ...FORBIDDEN_PLUGIN_IMPORTS,
+            ...PSEUDO_PLUGIN_IMPORTS,
+          ]) {
             if (rule.patterns.some((p) => matchesPattern(specifier, p))) {
               violations.push({
                 rule: rule.id,

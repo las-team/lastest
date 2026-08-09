@@ -2,6 +2,14 @@
 @import "tw-animate-css";
 @plugin "@tailwindcss/typography";
 
+/* Tailwind v4 auto-detects sources from the repo root, but these are also
+   reached through `node_modules/@lastest/*` symlinks — declared explicitly so
+   a plugin's or library's utility classes can never be silently tree-shaken
+   out of the stylesheet. A missing class here shows up as unstyled UI in a
+   production build only, which is the worst place to find it. */
+@source "../../libs";
+@source "../../plugins";
+
 @custom-variant dark (&:is(.dark *));
 
 :root {

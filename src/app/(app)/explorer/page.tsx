@@ -1,134 +1,93 @@
 import Link from "next/link";
-import { getCurrentSession } from "@/lib/auth";
-import {
-  getSelectedRepository,
-  getLatestAgentSession,
-  getAISettings,
-  listFindingsBySession,
-  listExperienceByRepo,
-  listKnowledgeByRepo,
-} from "@/lib/db/queries";
-import type { AgentSession } from "@/lib/db/schema";
-import { getEnvironmentConfig } from "@/server/actions/environment";
-import { ExplorerClient } from "@/components/explorer/explorer-client";
-import { QaAgentUpgradeGate } from "@/components/qa-agent/qa-agent-upgrade-gate";
-import {
-  hasQaAgentAccess,
-  qaAgentMinPlanName,
-} from "@/lib/billing/feature-access";
-import { isBillingEnabled } from "@/lib/billing/enabled";
-import { planConfig } from "@/lib/billing/plans";
 import { Compass } from "lucide-react";
+import ExplorerPage from "@lastest/plugin-explorer/page";
+
+import { getCurrentSession } from "@/lib/auth";
+import { getSelectedRepository, getAISettings } from "@/lib/db/queries";
+import { getEnvironmentConfig } from "@/server/actions/environment";
+import { ExplorerBrowserViewer } from "@/components/explorer-browser-viewer";
+import { QaAgentUpgradeGate } from "@/components/qa-agent/qa-agent-upgrade-gate";
+import { qaAgentMinPlanName } from "@/lib/billing/feature-access";
+import { planConfig } from "@/lib/billing/plans";
+import { getPluginRuntime } from "@/lib/core/runtime";
 
 export const dynamic = "force-dynamic";
 
-export default async function ExplorerPage() {
+/**
+ * The app half of the `/explorer` route.
+ *
+ * Spike S1 said this could be one line, and the *page* is — the whole render
+ * lives in `plugins/explorer`. What remains is the composition: resolve which
+ * repository the user has selected, hand over the pieces of app UI the plugin
+ * is not allowed to import, and let it do the rest.
+ *
+ * Each thing passed down is something a plugin should not be able to reach:
+ * repository *selection* is per-user state on core tables, the plan name is
+ * billing, and the EB stream viewer is core's. None of it is data the plugin
+ * could have fetched itself.
+ */
+export default async function Page() {
   const session = await getCurrentSession();
   const team = session?.team;
   const teamId = team?.id;
-  const userId = session?.user?.id;
 
-  // Explorer shares the QA agent's plan tier.
-  if (team && !hasQaAgentAccess(team.plan, isBillingEnabled())) {
-    return (
-      <QaAgentUpgradeGate
-        currentPlanName={planConfig(team.plan).name}
-        requiredPlanName={qaAgentMinPlanName()}
-      />
-    );
-  }
+  // The plugin's action modules are dispatched directly by Next, so the runtime
+  // is normally wired at boot (`src/instrumentation.ts`). Awaiting it here too
+  // makes the page resilient to a boot-time failure that has since resolved —
+  // it is memoized, so the second call is free.
+  await getPluginRuntime();
 
   const selectedRepo = teamId
-    ? await getSelectedRepository(userId, teamId)
+    ? await getSelectedRepository(session?.user?.id, teamId)
     : null;
 
-  if (!selectedRepo) {
-    return (
-      <div className="flex-1 p-6 overflow-auto">
-        <div className="max-w-4xl mx-auto space-y-6">
-          <header>
-            <h1 className="text-2xl font-semibold flex items-center gap-2">
-              <Compass className="h-6 w-6" />
-              Explorer
-            </h1>
-          </header>
-          <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
-            Connect and select a repository first — the explorer records its
-            findings and learned experience into a repo.{" "}
-            <Link href="/tests" className="underline">
-              Add a repository
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const [envConfig, aiSettings] = selectedRepo
+    ? await Promise.all([
+        getEnvironmentConfig(selectedRepo.id).catch(() => null),
+        getAISettings(selectedRepo.id).catch(() => null),
+      ])
+    : [null, null];
 
   const activeBranch =
-    selectedRepo.selectedBranch || selectedRepo.defaultBranch || "main";
-
-  const [explorerSession, knowledge, experience, envConfig, aiSettings] =
-    await Promise.all([
-      getLatestAgentSession(selectedRepo.id, "explorer").catch(() => null),
-      listKnowledgeByRepo(selectedRepo.id).catch(() => []),
-      listExperienceByRepo(selectedRepo.id, 50).catch(() => []),
-      getEnvironmentConfig(selectedRepo.id).catch(() => null),
-      getAISettings(selectedRepo.id).catch(() => null),
-    ]);
-
-  const findings = explorerSession
-    ? await listFindingsBySession(explorerSession.id).catch(() => [])
-    : [];
-
-  const defaultUrl =
-    selectedRepo.branchBaseUrls?.[activeBranch] ?? envConfig?.baseUrl ?? "";
-  const aiConfigured = Boolean(
-    aiSettings?.provider && aiSettings.provider !== "none",
-  );
-
-  // Credentials never reach the client.
-  const sanitize = (s: AgentSession): AgentSession => ({
-    ...s,
-    metadata: (({ quickstartPassword: _pw, ...rest }) => rest)(s.metadata),
-  });
-  const initialSession = explorerSession
-    ? { ...sanitize(explorerSession), findings }
-    : null;
-  const sanitizedKnowledge = knowledge.map(({ credPassword, ...rest }) => ({
-    id: rest.id,
-    title: rest.title,
-    urlPattern: rest.urlPattern,
-    matchKind: rest.matchKind,
-    body: rest.body,
-    credEmail: rest.credEmail,
-    hasCredentials: Boolean(credPassword),
-    enabled: rest.enabled,
-  }));
+    selectedRepo?.selectedBranch || selectedRepo?.defaultBranch || "main";
 
   return (
-    <div className="flex-1 p-6 overflow-auto">
-      <div className="max-w-5xl mx-auto space-y-6">
-        <header className="space-y-1">
-          <h1 className="text-2xl font-semibold flex items-center gap-2">
-            <Compass className="h-6 w-6" />
-            Explorer
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            An autonomous exploratory tester — it researches each page, plans
-            scenarios in rotating styles, drives a live browser, records defects
-            and UX findings, learns from every run, and keeps passing flows as
-            tests.
-          </p>
-        </header>
-        <ExplorerClient
-          repositoryId={selectedRepo.id}
-          defaultUrl={defaultUrl}
-          aiConfigured={aiConfigured}
-          initialSession={initialSession}
-          initialKnowledge={sanitizedKnowledge}
-          initialExperience={experience}
-        />
-      </div>
-    </div>
+    <ExplorerPage
+      repositoryId={selectedRepo?.id ?? null}
+      defaultUrl={
+        selectedRepo?.branchBaseUrls?.[activeBranch] ?? envConfig?.baseUrl ?? ""
+      }
+      aiConfigured={Boolean(
+        aiSettings?.provider && aiSettings.provider !== "none",
+      )}
+      browserViewer={ExplorerBrowserViewer}
+      upgradeGate={
+        team ? (
+          <QaAgentUpgradeGate
+            currentPlanName={planConfig(team.plan).name}
+            requiredPlanName={qaAgentMinPlanName()}
+          />
+        ) : null
+      }
+      noRepository={
+        <div className="flex-1 p-6 overflow-auto">
+          <div className="max-w-4xl mx-auto space-y-6">
+            <header>
+              <h1 className="text-2xl font-semibold flex items-center gap-2">
+                <Compass className="h-6 w-6" />
+                Explorer
+              </h1>
+            </header>
+            <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
+              Connect and select a repository first — the explorer records its
+              findings and learned experience into a repo.{" "}
+              <Link href="/tests" className="underline">
+                Add a repository
+              </Link>
+            </div>
+          </div>
+        </div>
+      }
+    />
   );
 }

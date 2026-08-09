@@ -55,6 +55,9 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.3)
+      '@lastest/ai-kit':
+        specifier: workspace:*
+        version: link:libs/ai-kit
       '@lastest/contracts':
         specifier: workspace:*
         version: link:core/contracts
@@ -64,6 +67,9 @@ importers:
       '@lastest/core-data':
         specifier: workspace:*
         version: link:core/data
+      '@lastest/cron':
+        specifier: workspace:*
+        version: link:libs/cron
       '@lastest/db':
         specifier: workspace:*
         version: link:packages/db
@@ -76,12 +82,21 @@ importers:
       '@lastest/mcp-server':
         specifier: workspace:*
         version: link:packages/mcp-server
+      '@lastest/page-map':
+        specifier: workspace:*
+        version: link:libs/page-map
+      '@lastest/plugin-explorer':
+        specifier: workspace:*
+        version: link:plugins/explorer
       '@lastest/pool-service':
         specifier: workspace:*
         version: link:packages/pool-service
       '@lastest/shared':
         specifier: workspace:*
         version: link:packages/shared
+      '@lastest/ui':
+        specifier: workspace:*
+        version: link:libs/ui
       '@modelcontextprotocol/sdk':
         specifier: ^1.28.0
         version: 1.29.0(zod@4.4.3)
@@ -354,6 +369,64 @@ importers:
         specifier: ^4.1.0
         version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
 
+  libs/ai-kit:
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  libs/cron:
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  libs/page-map:
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  libs/ui:
+    dependencies:
+      '@radix-ui/react-progress':
+        specifier: ^1.1.8
+        version: 1.1.8(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@radix-ui/react-select':
+        specifier: ^2.2.6
+        version: 2.2.6(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@radix-ui/react-slot':
+        specifier: ^1.2.4
+        version: 1.2.4(@types/react@19.2.8)(react@19.2.3)
+      '@radix-ui/react-tabs':
+        specifier: ^1.1.13
+        version: 1.1.13(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      class-variance-authority:
+        specifier: ^0.7.1
+        version: 0.7.1
+      clsx:
+        specifier: ^2.1.1
+        version: 2.1.1
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      react-dom:
+        specifier: 19.2.3
+        version: 19.2.3(react@19.2.3)
+      tailwind-merge:
+        specifier: ^3.4.0
+        version: 3.4.0
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.8
+      react:
+        specifier: 19.2.3
+        version: 19.2.3
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
   packages/db:
     dependencies:
       '@lastest/eb-protocol':
@@ -538,6 +611,52 @@ importers:
       typescript:
         specifier: ^5
         version: 5.9.3
+
+  plugins/explorer:
+    dependencies:
+      '@lastest/ai-kit':
+        specifier: workspace:*
+        version: link:../../libs/ai-kit
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/core-data':
+        specifier: workspace:*
+        version: link:../../core/data
+      '@lastest/cron':
+        specifier: workspace:*
+        version: link:../../libs/cron
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@lastest/page-map':
+        specifier: workspace:*
+        version: link:../../libs/page-map
+      '@lastest/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8)
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.8
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: 19.2.3
+        version: 19.2.3
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
 
 packages:
 
