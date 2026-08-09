@@ -25,6 +25,7 @@
     "audit:playwright-parity": "tsx scripts/audit-playwright-parity.ts",
     "test:visual": "tsx scripts/run-tests.ts",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "arch": "node tools/architecture/report.mjs",
     "arch:baseline": "node tools/architecture/report.mjs --baseline",
     "arch:split-pr": "node tools/architecture/check-split-pr.mjs",

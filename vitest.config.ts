@@ -24,6 +24,10 @@ export default defineConfig({
       // another branch as if they were failures here. `eslint.config.mjs`
       // already carries the same guard for the same reason.
       ".claude/**",
+      // Integration suites need real infrastructure (postgres, the EB pool
+      // service, a Chromium install) and would fail on a laptop with none of
+      // it running. Run them explicitly with `pnpm test:integration`.
+      "**/*.integration.test.ts",
     ],
   },
 });

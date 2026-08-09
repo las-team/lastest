@@ -368,22 +368,71 @@ and what it deliberately did not:
   a mechanical one.
 - **C1–C12 do not exist.** Building them is Core PR C.
 
+### Runtime verification
+
+Unit tests mock the host and `chromium.connectOverCDP`, which proves the
+lifecycle *logic* and nothing about whether it works. Two integration suites
+close that gap — `pnpm test:integration`, config in
+`vitest.integration.config.ts`, excluded from `pnpm test` because they need
+infrastructure.
+
+**`core/data` → real postgres** (`core/data/src/scoped-db.integration.test.ts`,
+8 tests). Verified: the scoped handle reads and writes; `db.query` exposes only
+the plugin's tables; a transaction rolls back on throw and commits on return;
+the tx handle keeps the same schema binding; a deletion hook really removes the
+right team's rows and leaves the others; hooks are idempotent. The namespace
+check is exercised against the **live** schema — a plugin re-exporting the real
+`repositories` table is rejected, and the test then confirms that table does
+exist, so the rejection is the only thing between the plugin and core's data.
+
+**`core/browser` → live EB** (`core/browser/src/browser.integration.test.ts`,
+7 tests). Runs against the real pool service in process mode, driving real
+Chromium over real CDP, through the app's own `appBrowserHost` — so the whole
+seam is covered, not a stand-in. Confirmed by DB inspection during a run: 6 real
+EB child processes were spawned, then all released (`runners.status` back to
+`online`, 0 busy, 0 live processes).
+
+Verified: a working page is handed over and the slot is released afterwards;
+released on callback throw; released on deadline expiry, with the teardown
+happening at expiry rather than when the (never-settling) callback does; the
+session exposes no `cdpUrl`, `runnerId` or pod port, and `streamUrl` is a signed
+grant path. For `isolatedPage`, the §3.2 claim is checked directly against a
+real origin: `localStorage` written in the default context **is** visible in the
+isolated one (seeding works), a write in one isolated context is **not** visible
+in the next (isolation is real), and all three pages cost **one** pool slot.
+
+**Known flake — claim-side, environmental.** Across 7 runs: 5 clean passes
+(~13s), 1 failure, 1 killed at a 10-minute limit. Both bad runs stalled in
+`claim`, not release. The mechanism: process mode is 1-job-1-EB, so
+`releasePoolEB` destroys the child process rather than recycling it, and
+teardown is fire-and-forget — a claim issued straight after a release can find
+the ledger still at its cap (4), fail to provision, and then poll out the claim
+timeout. The suite now waits for pool headroom before each test and bounds the
+claim to 60s so a stall is legible rather than an eight-minute hang, which
+reduced but did not eliminate it. This is provisioner latency, not a
+`core/browser` defect — the release path returned `runners.status` to `online`
+in every observed run. It does mean the browser suite is not yet fit for CI as
+written.
+
 ### Honest limits of what was built
 
-- **The app wiring is compile-verified, not runtime-verified.** No plugin exists,
-  so `getPluginRuntime()` has no caller. `pnpm build` proves it compiles and
-  links; it does not prove an EB is claimed correctly end-to-end.
+- **`getPluginRuntime()` still has no caller.** The composition root is
+  compile-verified only; the integration suite constructs the capability
+  directly rather than going through the kernel, because no plugin manifest
+  exists to resolve.
 - **`MAX_HOLD_MS` per plan is a guess.** The numbers are plausible, not derived
   from usage data. They are one table in `core/browser/src/host.ts`.
 - **Deadline enforcement cannot kill a running callback** — JavaScript has no
   such primitive. What expiry does is tear down the browser and release the pool
   slot, so the *capacity* is recovered immediately and the callback's next page
   call fails. The plugin's promise may still be pending; the EB is not still
-  occupied. This is stated in the code rather than papered over.
+  occupied. Verified end-to-end above.
 - **`resolveScope`'s `teamId` is trusted.** It is how a cron trigger acts for a
   team with no session. Threading it from a user request would be a tenancy
   escape. Today the only callers are core's own paths; nothing mechanically
   enforces that yet.
-- **`core/data` is not exercised against a real database.** Namespacing and the
-  deletion driver are unit-tested; `createScopedDatabase` has no integration
-  test because no plugin schema exists to point it at.
+- **Nothing exercises `applyAuth` with a real storage state.** The unit tests
+  cover the call and the degrade-on-failure path; no integration test injects a
+  real credential, because that needs a fixture with a logged-in origin.
+- **`withBrowserSwarm` was verified at `count: 2`.** Clamping above the pool cap
+  is unit-tested only.
