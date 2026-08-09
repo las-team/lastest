@@ -27,9 +27,11 @@ Seven first-class, dispatchable server references from inside the package.
 Spike S1 predicted this on a toy; it now holds for the real feature, with no
 codegen and no shim.
 
-**But read §3 before concluding the migration is finished.** The plugin still
-reaches core tables — through eight named methods on one injected port instead
-of forty scattered call sites. That is the honest state, and §3 is the
+**But read §3 before concluding the migration is finished.** The plugin
+originally still reached core tables — through eight named methods on one
+injected port instead of forty scattered call sites. Four of those eight have
+since landed as real capabilities (§3); five host methods remain. That is the
+honest state, and §3 is the
 measurement the pilot existed to produce.
 
 ---
@@ -88,21 +90,72 @@ the runner id that release needs.
 
 ## 3. The core API surface — the highest-value output
 
-**Eight methods.** Every one is a core-entity read or write explorer used to do
-by reaching into a table directly. They are declared as a typed port in
-[`plugins/explorer/src/host.ts`](../../plugins/explorer/src/host.ts) and filled
-by [`src/lib/core/explorer-host.ts`](../../src/lib/core/explorer-host.ts).
+**Eight methods, originally.** Every one was a core-entity read or write
+explorer used to do by reaching into a table directly, declared as a typed
+port in [`plugins/explorer/src/host.ts`](../../plugins/explorer/src/host.ts).
 
-| # | Method | Was | Belongs in |
+**Status: four of the eight have since landed as real capabilities and left
+the port.** `resolveTargetUrl` → `ctx.repos.baseUrl` (`core/repos`).
+`listCoverage`/`createQuarantinedTest` → `ctx.tests` (`core/tests`).
+`emitActivity` → `ctx.events`, backed by `plugins/events` — a **provider
+plugin**, not core, per §4. Explorer's manifest now declares
+`capabilities: ["browser", "ai", "data", "events", "tests", "repos"]`.
+
+| # | Method | Was | Landed as |
 | --- | --- | --- | --- |
-| 1 | `getSettings(repoId)` | `ai_settings.explorer_*` | **nowhere** — should be plugin-owned |
-| 2 | `resolveTargetUrl(repoId, branch)` | `repositories.branchBaseUrls`, `environment_settings` | `core/repos`, or a `baseUrl` on `RepoRef` |
-| 3 | `resolveExistingAuth(repoId)` | `setup_steps`, `storage_states` | `core/browser` (credentials) |
-| 4 | `listCoverage(repoId)` | `tests`, `functional_areas` | `core/tests` |
-| 5 | `createQuarantinedTest(...)` | `tests`, `functional_areas` (write) | `core/tests` |
-| 6 | `emitActivity(event)` | `activity_events` | the `events` **provider plugin** (§4) |
-| 7 | `assertSafeOutboundUrl(url)` | `src/lib/security/outbound-url` | `core/security` |
-| 8 | `encryptField` / `decryptField` | `src/lib/crypto-fields` | `core/data` |
+| 1 | `getSettings(repoId)` | `ai_settings.explorer_*` | still nothing — should be plugin-owned |
+| ~~2~~ | ~~`resolveTargetUrl`~~ | ~~`repositories.branchBaseUrls`, `environment_settings`~~ | `ctx.repos.baseUrl(repoId, branch)` |
+| 3 | `resolveExistingAuth(repoId)` | `setup_steps`, `storage_states` | still a host method — `core/browser` (credentials) |
+| ~~4~~ | ~~`listCoverage`~~ | ~~`tests`, `functional_areas`~~ | `ctx.tests.listCoverage(repoId)` |
+| ~~5~~ | ~~`createQuarantinedTest`~~ | ~~`tests`, `functional_areas` (write)~~ | `ctx.tests.createQuarantined(input)` |
+| ~~6~~ | ~~`emitActivity`~~ | ~~`activity_events`~~ | `ctx.events.emit(type, payload)` |
+| 7 | `assertSafeOutboundUrl(url)` | `src/lib/security/outbound-url` | still a host method — `core/security` |
+| 8 | `encryptField` / `decryptField` | `src/lib/crypto-fields` | still a host method — `core/data` |
+
+`ExplorerHost` is down to five methods. Three genuinely need core PRs this
+document's brief forbade bundling in (`core/browser` credentials,
+`core/security`, `core/data` field crypto); one (`getSettings`) is a table that
+should have moved and did not.
+
+### The two design questions the follow-up work settled
+
+**`core/repos`: a method, not a `baseUrl` field on `RepoRef`.** §3 originally
+offered both. The field lost: `branchBaseUrls` is a map keyed by branch (a PR
+branch and `main` deploy to different URLs), so a single `RepoRef.baseUrl`
+could only ever answer for the default branch — every caller building against
+a PR would need the method anyway. And `RepoRef` is built on *every* context
+construction for *every* plugin, while the `environment_settings` fallback
+query is only needed when the branch map is empty — paying for it unconditionally
+would tax the ~19 features that never touch a browser. See
+[`core/repos/src/repos.ts`](../../core/repos/src/repos.ts) for the full
+argument.
+
+**`core/tests`'s `createQuarantined` is a write into a core table from a
+plugin — the sharpest case in the refactor.** The input type has no `id`
+(core mints it), no `quarantined` flag (the method name is the only way to set
+it, and it is unconditional), no `teamId` (comes from the resolved scope), and
+no `functionalAreaId` (only a name, resolved or created inside the repo core
+already authorized). What a plugin can still do through it, stated rather than
+overclaimed: create an unbounded number of quarantined tests for a repo it
+legitimately owns, and accumulate near-duplicate areas by name. Neither
+crosses tenancy, which is the one thing this capability exists to hold. See
+[`core/tests/src/tests.ts`](../../core/tests/src/tests.ts).
+
+**`events` needed a host port, not its own table — decided, not assumed.**
+`activityEvents` is read by a cross-feature activity feed
+(`/api/v1/activity`, `/api/activity-feed/history`) and written by qa-agent,
+play-agent, quickstart-agent, spec-import and gamification — none of which are
+plugins yet. `plugins/events` cannot declare its own table and call the job
+done; the data is core-owned in the sense that many non-plugin features share
+it, even though core-scope.md §4 correctly keeps the *fan-out logic* out of
+core. `plugins/events/src/host.ts` says this plainly rather than pretending
+the plugin owns what it fans out.
+
+**A pre-existing coupling this surfaced, not introduced:** `activityEvents.sourceType`
+is a closed union hardcoding feature names (`explorer_agent`, `qa_agent`, …).
+The events host casts a plugin id into it rather than widening the column,
+which would be a `packages/db` schema change out of scope here — flagged, not
+fixed.
 
 ### What did *not* need a core API — and this is the more useful half
 
@@ -124,17 +177,19 @@ is the number that predicts the remaining ~19 features, and it is encouraging:
 | `agent_knowledge` / `agent_experience` / `agent_findings` | `explorer_*` via `ctx.data` |
 | `getTeam(trigger.teamId)` in cron dispatch | `contextFor({ teamId })` → `ctx.team` |
 
-**So the ratio is 8 missing to 12 already-covered.** Four of the eight
-(`resolveTargetUrl`, `listCoverage`, `createQuarantinedTest`, `emitActivity`)
-will be wanted by most of the remaining features, so they amortise. Two
-(`assertSafeOutboundUrl`, `encryptField`) are small and unambiguous. One
-(`resolveExistingAuth`) belongs to the browser-driving features specifically.
-One (`getSettings`) is not a core API at all — it is a table that should have
-moved and did not.
+**So the ratio was 8 missing to 12 already-covered, and four of the eight have
+since landed** (`resolveTargetUrl`, `listCoverage`, `createQuarantinedTest`,
+`emitActivity`) — the ones expected to be wanted by most of the remaining
+features, which is why they amortise. Two (`assertSafeOutboundUrl`,
+`encryptField`) are small and unambiguous, still pending. One
+(`resolveExistingAuth`) belongs to the browser-driving features specifically,
+still pending. One (`getSettings`) is not a core API at all — it is a table
+that should have moved and did not.
 
-Read that as: **the remaining ~19 features are closer to "a quarter of the work"
-than to "considerably more"** — provided `core/tests`, `core/repos` and the
-`events` plugin land first, because between them they cover five of the eight.
+Read that as: **the remaining ~19 features are closer to "a quarter of the
+work" than to "considerably more"** — `core/tests`, `core/repos` and the
+`events` plugin have now landed, covering five of the eight, unblocking the
+next migration.
 
 ---
 
@@ -241,17 +296,38 @@ Two smaller bends:
 
 ## 6. What is incomplete or unverified
 
-**1. No data migration — this will lose rows.** `agent_knowledge`,
-`agent_experience` and `agent_findings` become `explorer_knowledge`,
-`explorer_experience` and `explorer_findings`; explorer's slice of
-`agent_sessions` becomes `explorer_sessions`. `drizzle-kit push` will read those
-as drop-and-create, not rename. **A copy migration has to run before push, or
-existing explorer data is gone** — including encrypted credentials in
-`agent_knowledge.cred_password`, which are a re-entry burden on the user, not
-just lost rows.
+**1. ~~No data migration~~ — RESOLVED.** `agent_knowledge`, `agent_experience`
+and `agent_findings` become `explorer_knowledge`, `explorer_experience` and
+`explorer_findings`; explorer's slice of `agent_sessions` becomes
+`explorer_sessions`. `drizzle-kit push` reads those as drop-and-create, not
+rename, and the Docker entrypoint runs `push --force` on startup — so a deploy
+would have destroyed every explorer row, including the encrypted
+`cred_password` values.
 
-`explorer_triggers` is the exception: the plugin's table has the same name, so
-push sees a shape change (FK dropped, `target_url` added) and the rows survive.
+`scripts/migrate-explorer-plugin-tables.ts` now closes that. It migrates **by
+rename**, not by copy, so rows, types and ciphertext move byte-for-byte and
+`push` is left with only constraints to reconcile. `agent_sessions` is the one
+exception — it holds five agent kinds, so explorer's slice is a filtered copy
+and the source rows are left in place, which is what makes the script
+re-runnable.
+
+Required order:
+
+```
+pnpm tsx scripts/migrate-explorer-plugin-tables.ts
+pnpm db:push
+```
+
+Verified against a throwaway database seeded with the pre-migration schema:
+every branch exercised, ciphertext preserved, idempotent on re-run, a `qa`
+session correctly left behind. Two losses are reported by the script rather
+than hidden: `agent_findings.bug_report_id` has no counterpart and `push` drops
+it, and explorer sessions whose `team_id` cannot be resolved from
+`repositories` are not migrated (the destination declares it `NOT NULL`).
+
+`explorer_triggers` is the exception to all of this: the plugin's table has the
+same name, so push sees a shape change (FK dropped, `target_url` added) and the
+rows survive on their own.
 
 **2. `db:push` was not run.** `drizzle.config.ts` now globs
 `./plugins/*/src/schema.ts` — spike S2 verified that mechanism, and the plugin
@@ -310,19 +386,72 @@ deleted: src/lib/explorer/, src/server/actions/explorer-agent.ts,
          agent-knowledge,agent-experience}.ts
 ```
 
-## 8. Verification
+### 7.1 Follow-up: deletion cascade, data migration, and four core capabilities
+
+Everything in §3's "landed as" column, plus the two items §6 flagged as
+incomplete (the deletion hook had no caller; there was no data migration for
+the table renames).
 
 ```
-pnpm install --frozen-lockfile   ok
+core/repos/                          the `repos` capability + ReposHost
+core/tests/                          the `tests` capability + TestsHost
+core/jobs/                           the `jobs` capability, a worker-tick
+                                     function, and the queue's host port —
+                                     unconsumed: no plugin declares `jobs` yet
+core/storage/                        the `storage` capability + StorageHost
+plugins/events/                      provider plugin, `provides: ["events"]`
+core/contracts/src/{repos,tests}.ts  the two new capability contracts
+core/contracts/src/plugin.ts         `ProviderScope`, `ProvidedCapabilities<P>`,
+                                     `implement` on the manifest
+core/kernel/src/runtime.ts           `createRuntime` now wires `registry.providers`
+                                     into the capability factories
+core/kernel/src/registry.ts          `implement` validated when `provides` is set;
+                                     `AnyManifest` deliberately loosens `jobs`/
+                                     `implement` — see the comment there for why
+
+packages/db/src/schema/runs.ts       `pluginJobs` table (the queue; not
+                                     `background_jobs` — see the comment there)
+src/lib/db/queries/plugin-jobs.ts    enqueue/claim/complete/fail/cancel
+src/lib/db/plugin-deletion.ts        the call `deleteTeam`/`deleteRepository`
+                                     were missing — dynamically imports the
+                                     composition root to avoid a module cycle
+src/lib/core/runtime.ts              `runPluginDeletion`; the four new
+                                     capability factories; `eventsPlugin`
+                                     added to `MANIFESTS`
+src/lib/core/{repos,tests,jobs,events,storage}-host.ts   the app-side fills
+src/lib/core/storage-grant.ts        HMAC-signed grants for `signedUrl`,
+                                     reusing `@/lib/eb/stream-grant.ts`'s pattern
+src/app/api/plugin-storage/route.ts  serves a blob against a signed grant
+src/lib/db/queries/{auth,repositories}.ts   drive the deletion cascade
+scripts/migrate-explorer-plugin-tables.ts   rename-based migration; run before
+                                     `db:push` — see its header and §6 above
+plugins/explorer/src/host.ts         5 methods, down from 8
+plugins/explorer/src/{actions,pipeline}.ts   switched to `ctx.repos`/
+                                     `ctx.tests`/`ctx.events`
+```
+
+## 8. Verification
+
+Re-run after the follow-up work above, on the same working tree:
+
+```
+pnpm install                     0 new resolution/integrity lines in the lockfile
 pnpm lint                        0 errors, 35 warnings (all pre-existing pseudo-plugins)
-pnpm test                        102 files, 1585 passed, 0 failed
+pnpm test                        110 files, 1632 passed, 0 failed
 pnpm types                       clean
-pnpm build                       compiled; 7 plugin server actions in the manifest
-pnpm arch                        target layout 0; burndown 42 → 36
+pnpm build                       compiled; /explorer and /api/plugin-storage present
+pnpm arch                        target layout 0; burndown unchanged at 36
 
 git diff -- pnpm-lock.yaml | grep -cE "^\+.*(resolution:|integrity)"   → 0
 ```
 
-No new external dependency was added. Every new package is `workspace:*`, and
-every third-party range reused is byte-identical to the one already in the root
-`package.json`.
+No new external dependency was added. Every new package is `workspace:*`.
+
+**What is still unverified.** The `jobs`/`storage` capabilities are
+constructible and unit-tested but have no consumer — nothing exercises them
+against a real plugin or a real HTTP request. `core/storage`'s `signedUrl` →
+`/api/plugin-storage` round-trip was reviewed, not curl'd. The deletion cascade
+and the migration script were both verified against a throwaway Postgres
+database with seeded rows (not the dev database, which had nothing to
+migrate) — never against production data. `db:push` has not been run for the
+new `plugin_jobs` table.

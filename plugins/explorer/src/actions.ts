@@ -145,11 +145,8 @@ async function startCore(
     },
   });
 
-  host.emitActivity({
-    teamId: ctx.team.id,
-    repositoryId: input.repositoryId,
+  void ctx.events.emit("session:start", {
     sessionId: session.id,
-    type: "session:start",
     summary: `Explorer started on ${targetUrl} (${maxIterations} iterations, ${styleRotation.join("→")})`,
   });
 
@@ -260,11 +257,15 @@ export async function cancelExplorerAgent(
     status: "cancelled",
     completedAt: new Date(),
   });
-  host.emitActivity({
-    teamId: ctx.team.id,
+  // `ownedSession` only proves team access; `ctx.events.emit` attributes the
+  // event to `ctx.repo.id`, so cancellation needs a repo-scoped context to
+  // carry that attribution at all — same reason `resumeExplorerAgent` above
+  // re-scopes before it needs a repo-bound capability.
+  const scoped = (await explorerWiring().runtime.contextFor(explorerPlugin, {
     repositoryId: session.repositoryId,
+  })) as ExplorerContext;
+  void scoped.events.emit("session:error", {
     sessionId,
-    type: "session:error",
     summary: "Explorer cancelled by user",
   });
   revalidatePath("/explorer");
@@ -413,7 +414,7 @@ export interface ExplorerTriggerConfigInput {
   scheduleEnabled: boolean;
   cronExpression?: string | null;
   maxIterations?: number;
-  /** Where a scheduled run should point. See `host.resolveTargetUrl`. */
+  /** Where a scheduled run should point. See `ctx.repos.baseUrl`. */
   targetUrl?: string | null;
 }
 
@@ -473,8 +474,9 @@ export async function dispatchDueExplorerTriggers(): Promise<number> {
     // Every path below re-arms, including the ones that decline to fire: a
     // trigger that stops advancing `nextRunAt` is permanently due and gets
     // re-examined on every scheduler tick forever.
+    let ctx: ExplorerContext | undefined;
     try {
-      const ctx = (await runtime.contextFor(explorerPlugin, {
+      ctx = (await runtime.contextFor(explorerPlugin, {
         repositoryId: trigger.repositoryId,
         teamId: trigger.teamId,
       })) as ExplorerContext;
@@ -496,8 +498,8 @@ export async function dispatchDueExplorerTriggers(): Promise<number> {
 
       const targetUrl =
         trigger.targetUrl ??
-        (await host
-          .resolveTargetUrl(trigger.repositoryId, ctx.repo?.defaultBranch)
+        (await ctx.repos
+          .baseUrl(trigger.repositoryId, ctx.repo?.defaultBranch)
           .catch(() => null));
       if (!targetUrl) {
         await q.markTriggerFired(db, trigger.id, { nextRunAt });
@@ -520,7 +522,25 @@ export async function dispatchDueExplorerTriggers(): Promise<number> {
         lastSessionId: sessionId,
       });
       fired++;
-    } catch {
+    } catch (err) {
+      // Never silent. A bare `catch {}` here made a broken scheduled run
+      // indistinguishable from "nothing was due": the trigger re-arms, the next
+      // tick fails the same way, and the operator sees an explorer that simply
+      // never runs on schedule with nothing in the logs to explain it.
+      //
+      // `ctx.log` when the context was built, `console` when building it is
+      // what failed — a plugin has no logger of its own, and the app's
+      // console bridge lifts the `[explorer]` prefix into a scope in
+      // production.
+      const detail = {
+        err,
+        triggerId: trigger.id,
+        repositoryId: trigger.repositoryId,
+      };
+      const message = "scheduled explorer trigger failed — re-armed, not run";
+      if (ctx) ctx.log.error(detail, message);
+      else console.error(`[explorer] ${message}`, detail);
+
       await q
         .markTriggerFired(systemDb, trigger.id, { nextRunAt })
         .catch(() => {});

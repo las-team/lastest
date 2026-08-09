@@ -1,33 +1,30 @@
 /**
  * The core surface explorer needs and core does not have yet.
  *
- * **Read this file first if you are reviewing the migration.** It is the
- * measurement the pilot was run to produce: every method below is something the
- * feature used to do by reaching straight into a core table, and every one of
- * them is now a named, typed, reviewable call. There are eight. That number,
- * not the LOC moved, is what predicts the cost of the remaining ~19 features.
+ * **Read this file first if you are reviewing the migration.** The pilot
+ * originally measured eight methods here — every one something the feature
+ * used to do by reaching straight into a core table. Three of those have since
+ * landed as real capabilities and left this file: `listCoverage` and
+ * `createQuarantinedTest` are now `ctx.tests`, and `emitActivity` is now
+ * `ctx.events` (a provider plugin, not core — `core-scope.md` §4). `resolveTargetUrl`
+ * moved to `ctx.repos.baseUrl`, called directly from `actions.ts` where the old
+ * host method was.
  *
- * ### Why a port and not `ctx`
+ * **Five remain.** One (`getSettings`) is not a core API at all — a table that
+ * should have moved and did not. The other four are real, waiting on core PRs
+ * this migration's brief explicitly forbade bundling in (RFC §7.2: core and
+ * plugin changes are separate PRs).
  *
- * `docs/architecture/core-scope.md` §6 is unambiguous: *"To learn anything
- * about a core entity it calls a core function."* Those core functions do not
- * exist. `CapabilityMap` in `@lastest/contracts` is a closed interface, so
- * there is no honest way to add `ctx.tests` or `ctx.repos` from outside `core/`
- * — and the brief for this migration forbids touching `core/` in the same
- * change (RFC §7.2).
+ * ### Why a port and not `ctx`, for what is left
  *
- * So the gap is declared here instead, as a port the composition root fills.
- * This is the same shape `core/browser` uses for `BrowserHost`, for the same
- * stated reason: injecting the primitive keeps the package free of `@/…`
- * imports. The difference is worth being blunt about — `BrowserHost` is a
- * permanent seam between core and the app, whereas **this one is temporary
- * scaffolding**. Every method is a core PR waiting to be written, and the
- * plugin still transitively reads core tables through it. What the port buys is
- * that the reads are now *enumerable and finite* instead of scattered across
- * 1,800 lines of server action.
- *
- * Each method names the core module that should own it. When that module
- * lands, the method leaves this interface and the plugin calls `ctx` instead.
+ * `docs/architecture/core-scope.md` §6: *"To learn anything about a core
+ * entity it calls a core function."* For `resolveExistingAuth`,
+ * `assertSafeOutboundUrl` and the field-crypto pair, that function does not
+ * exist yet, so the gap is declared here as a port the composition root fills
+ * — the same shape `core/browser` uses for `BrowserHost`, for the same reason:
+ * injecting the primitive keeps this package free of `@/…` imports.
+ * `BrowserHost` is a permanent seam; this one is scaffolding that shrinks as
+ * each core PR lands.
  */
 
 export interface ExplorerExistingAuth {
@@ -38,22 +35,15 @@ export interface ExplorerExistingAuth {
   defaultSetupInUse: boolean;
 }
 
-export interface ExplorerCoverage {
-  tests: Array<{ name: string; targetUrl: string | null }>;
-  areaPlans: Array<{ name: string; plan: string }>;
-}
-
-export interface KeptTestInput {
-  repositoryId: string;
-  areaName: string;
-  name: string;
-  code: string;
-  targetUrl: string;
-}
-
+/**
+ * The shape of an explorer activity event, as it crosses into `ctx.events`.
+ *
+ * No `teamId` or `repositoryId` here — the events provider attributes those
+ * from the resolved `ProviderScope` (`ctx.team`/`ctx.repo`), not from anything
+ * the plugin says. That is the tenancy argument in `core-scope.md` §6, applied
+ * to a provider plugin instead of core itself.
+ */
 export interface ExplorerActivityEvent {
-  teamId: string;
-  repositoryId: string;
   sessionId: string;
   type:
     | "step:start"
@@ -93,19 +83,6 @@ export interface ExplorerHost {
   getSettings(repositoryId: string): Promise<ExplorerSettings>;
 
   /**
-   * **→ `core/repos` (or a `baseUrl` field on `RepoRef`).**
-   *
-   * The app's base URL for a repo/branch, for a scheduled run that has no user
-   * to ask. Used to read `repositories.branchBaseUrls` + `environment_settings`
-   * directly. `RepoRef` carries `defaultBranch` but not the URL, which is the
-   * one field a browser-driving plugin cannot do without.
-   */
-  resolveTargetUrl(
-    repositoryId: string,
-    branch?: string | null,
-  ): Promise<string | null>;
-
-  /**
    * **→ `core/browser` (credentials).**
    *
    * "Does this repo already have usable stored auth, and what is its id."
@@ -115,32 +92,6 @@ export interface ExplorerHost {
    * the only thing the answer is ever used for.
    */
   resolveExistingAuth(repositoryId: string): Promise<ExplorerExistingAuth>;
-
-  /**
-   * **→ `core/tests`.**
-   *
-   * Existing coverage, so the planner does not re-plan flows that already have
-   * tests. Names and URLs only — this is a prompt input, not a data feed.
-   */
-  listCoverage(repositoryId: string): Promise<ExplorerCoverage>;
-
-  /**
-   * **→ `core/tests`.**
-   *
-   * Persist a passing flow as a quarantined test under a named area, creating
-   * the area if needed. The single core *write* explorer performs, and the one
-   * that makes "keep as test" work at all.
-   */
-  createQuarantinedTest(input: KeptTestInput): Promise<{ id: string }>;
-
-  /**
-   * **→ the `events` provider plugin** (`core-scope.md` §4 — fan-out is a
-   * delivery mechanism, not a boundary, so it is explicitly *not* core).
-   *
-   * Fire-and-forget: an activity event that fails to persist must never fail
-   * the exploration that emitted it.
-   */
-  emitActivity(event: ExplorerActivityEvent): void;
 
   /**
    * **→ `core/security`.**

@@ -1,5 +1,6 @@
 import type {
   CapabilityName,
+  JobHandler,
   Logger,
   PluginContext,
   PluginManifest,
@@ -35,10 +36,36 @@ export const CORE_PROVIDED: readonly CapabilityName[] = [
   "jobs",
   "data",
   "storage",
+  "repos",
+  "tests",
 ];
 
+/**
+ * The registry-wide view of a manifest, deliberately loosened.
+ *
+ * `jobs` and `implement` are function-valued mapped types over `C`/`P`
+ * (`JobHandler<PluginContext<C>>`, `ProvidedCapabilities<P>`), and a function
+ * *parameter* position is checked contravariantly under `strictFunctionTypes`.
+ * Once a manifest has more than one such field, TypeScript stops taking the
+ * shortcut that let a single generic-erased `PluginManifest<any, any>` accept
+ * every concrete manifest — `PluginContext<any>` no longer satisfies "has
+ * property `browser`" for a manifest that declared `capabilities: ["browser"]`,
+ * even though at runtime this is never unsound: nothing here calls a job
+ * handler through this widened type. `createRuntime.dispatch` always looks up
+ * the concrete manifest by id first and calls its own handler with its own
+ * `PluginContext<C>` — the loosening below only affects *storage* in the
+ * registry, matching `CapabilityFactories`' own documented reason for
+ * returning `unknown` rather than a capability union.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyManifest = PluginManifest<any, any>;
+type AnyManifest = Omit<PluginManifest<any, any>, "jobs" | "implement"> & {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  readonly jobs?: Readonly<Record<string, JobHandler<any>>>;
+  readonly implement?: Readonly<
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    Record<string, (scope: any) => unknown>
+  >;
+};
 
 export interface ResolvedRegistry {
   readonly plugins: readonly AnyManifest[];
@@ -111,6 +138,15 @@ export function resolveRegistry(
         );
         continue;
       }
+      // An unimplemented `provides` entry should fail at boot, the same way an
+      // unimplemented `deletion` hook does — the alternative is a consumer
+      // discovering it at its first request, from a `ctx.<cap>` that is
+      // `undefined` despite the type system swearing otherwise.
+      if (typeof m.implement?.[cap] !== "function") {
+        problems.push(
+          `plugin "${m.id}" provides "${cap}" but has no \`implement.${cap}\``,
+        );
+      }
       const owner = providers.get(cap);
       if (owner) {
         problems.push(
@@ -169,8 +205,11 @@ export interface ContextScope {
  * drift apart — which is the only way the `ctx.browser` type error is a real
  * guarantee rather than a comment.
  */
-export function buildContext<C extends CapabilityName>(
-  manifest: PluginManifest<C, CapabilityName>,
+export function buildContext<
+  C extends CapabilityName,
+  P extends CapabilityName,
+>(
+  manifest: PluginManifest<C, P>,
   scope: ContextScope,
   factories: CapabilityFactories,
 ): PluginContext<C> {

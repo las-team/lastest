@@ -98,6 +98,7 @@ describe("resolveRegistry", () => {
         id: "events",
         title: "Events",
         provides: ["events"],
+        implement: { events: () => ({ emit: vi.fn(), subscribe: vi.fn() }) },
       });
       const explorer = definePlugin({
         id: "explorer",
@@ -118,8 +119,20 @@ describe("resolveRegistry", () => {
         id: "events",
         title: "Events",
         provides: ["events"],
+        implement: { events: () => ({ emit: vi.fn(), subscribe: vi.fn() }) },
       });
       expect(() => resolveRegistry([explorer, events])).not.toThrow();
+    });
+
+    it("rejects a provided capability with no implementation", () => {
+      // Should fail at boot, the same way a missing deletion hook does —
+      // not at the first consumer's first request against `undefined`.
+      const problems = problemsOf(() =>
+        resolveRegistry([
+          definePlugin({ id: "events", title: "Events", provides: ["events"] }),
+        ]),
+      );
+      expect(problems[0]).toContain("has no `implement.events`");
     });
 
     it("rejects a consumed capability that nobody provides", () => {
@@ -136,10 +149,23 @@ describe("resolveRegistry", () => {
     });
 
     it("rejects two plugins providing the same capability", () => {
+      const implement = {
+        events: () => ({ emit: vi.fn(), subscribe: vi.fn() }),
+      };
       const problems = problemsOf(() =>
         resolveRegistry([
-          definePlugin({ id: "events-a", title: "A", provides: ["events"] }),
-          definePlugin({ id: "events-b", title: "B", provides: ["events"] }),
+          definePlugin({
+            id: "events-a",
+            title: "A",
+            provides: ["events"],
+            implement,
+          }),
+          definePlugin({
+            id: "events-b",
+            title: "B",
+            provides: ["events"],
+            implement,
+          }),
         ]),
       );
       expect(problems[0]).toContain("provided by both");

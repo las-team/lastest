@@ -137,6 +137,53 @@ describe("dispatch", () => {
     });
   });
 
+  it("wires a provider plugin's implementation into its consumer's context", async () => {
+    const emit = vi.fn(async () => {});
+    const events = definePlugin({
+      id: "events",
+      title: "Events",
+      provides: ["events"],
+      implement: {
+        events: () => ({ emit, subscribe: vi.fn(() => () => {}) }),
+      },
+    });
+    const explorer = definePlugin({
+      id: "explorer",
+      title: "Explorer",
+      capabilities: ["events"],
+    });
+    const { runtime } = runtimeFor([events, explorer]);
+
+    const ctx = await runtime.contextFor(explorer);
+    await ctx.events.emit("session:start", { id: "s1" });
+
+    expect(emit).toHaveBeenCalledWith("session:start", { id: "s1" });
+  });
+
+  it("gives the provider the consumer's id and scope, not its own", async () => {
+    const implement = vi.fn(() => ({ emit: vi.fn(), subscribe: vi.fn() }));
+    const events = definePlugin({
+      id: "events",
+      title: "Events",
+      provides: ["events"],
+      implement: { events: implement },
+    });
+    const explorer = definePlugin({
+      id: "explorer",
+      title: "Explorer",
+      capabilities: ["events"],
+    });
+    const { runtime } = runtimeFor([events, explorer]);
+
+    await runtime.contextFor(explorer, { repositoryId: "r1" });
+
+    expect(implement).toHaveBeenCalledWith({
+      consumerId: "explorer",
+      team: { id: "t1", plan: "pro", entitlements: new Set(["ai"]) },
+      repo: undefined,
+    });
+  });
+
   it("rejects a job type no plugin claims", async () => {
     // A stale queue row after a plugin was removed.
     const { runtime } = runtimeFor([

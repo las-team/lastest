@@ -1,5 +1,6 @@
 import { db } from "../index";
 import { encryptField, decryptField } from "@/lib/crypto";
+import { cascadePluginDeletion } from "@/lib/db/plugin-deletion";
 import {
   teams,
   users,
@@ -96,9 +97,19 @@ export async function updateTeam(id: string, data: Partial<NewTeam>) {
   console.log(`[audit] team.update teamId=${id}`);
 }
 
+/**
+ * Delete a team and everything that hangs off it.
+ *
+ * The `DELETE` covers core tables via their FK cascades. Plugin tables have no
+ * FK to `teams` by rule (`core-scope.md` §6), so they are cleaned up by their
+ * registered deletion hooks instead — driven here, after the core row is gone,
+ * so a broken plugin cannot veto account deletion. See
+ * `@/lib/db/plugin-deletion` for the ordering argument.
+ */
 export async function deleteTeam(id: string) {
   await db.delete(teams).where(eq(teams.id, id));
   console.log(`[audit] team.delete teamId=${id}`);
+  await cascadePluginDeletion({ kind: "team", id });
 }
 
 export async function getTeamMembers(teamId: string) {

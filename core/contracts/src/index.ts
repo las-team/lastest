@@ -21,6 +21,15 @@ export type {
 
 export type { DataCapability, DeletionHook, PluginDatabase } from "./data";
 
+export type { ReposCapability } from "./repos";
+
+export type {
+  QuarantinedTestInput,
+  TestCoverage,
+  TestRef,
+  TestsCapability,
+} from "./tests";
+
 export type {
   EnqueueOptions,
   JobHandler,
@@ -37,6 +46,8 @@ export type {
   NavEntry,
   PluginContext,
   PluginManifest,
+  ProvidedCapabilities,
+  ProviderScope,
 } from "./plugin";
 
 export type { CheckLayer, Logger, Plan, RepoRef, TeamRef } from "./refs";

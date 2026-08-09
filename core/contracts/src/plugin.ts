@@ -10,7 +10,9 @@ import type { BrowserCapability } from "./browser";
 import type { DataCapability, DeletionHook } from "./data";
 import type { JobHandler, JobsCapability } from "./jobs";
 import type { Logger, RepoRef, TeamRef } from "./refs";
+import type { ReposCapability } from "./repos";
 import type { StorageCapability } from "./storage";
+import type { TestsCapability } from "./tests";
 
 /**
  * Capabilities the kernel can inject.
@@ -25,6 +27,8 @@ export interface CapabilityMap {
   jobs: JobsCapability;
   data: DataCapability;
   storage: StorageCapability;
+  repos: ReposCapability;
+  tests: TestsCapability;
   /**
    * Activity events + fan-out. NOT core — supplied by the `events` provider
    * plugin. See `docs/architecture/core-scope.md` §4: fan-out is a delivery
@@ -40,6 +44,47 @@ export interface EventsCapability {
   /** Returns an unsubscribe function. */
   subscribe(type: string, fn: (payload: unknown) => void): () => void;
 }
+
+/**
+ * What a *provider* plugin learns about the plugin it is building a capability
+ * for.
+ *
+ * Deliberately narrower than `PluginContext`, and narrower than the
+ * `ContextScope` core's own factories receive:
+ *
+ * - `consumerId`, `team` and `repo` are present because a provider cannot do
+ *   its job without them — an event has to be attributed to a tenant and to
+ *   whoever raised it, and a provider that had to be *told* the team by the
+ *   consumer would be trusting the consumer not to lie about it. Taking it
+ *   from the resolved scope instead is the whole tenancy argument.
+ * - `log` is absent. A provider logs under its own plugin id, wired where it
+ *   was composed; borrowing the consumer's logger would file the provider's
+ *   warnings under the wrong feature.
+ * - the consumer's *other* capabilities are absent, and there is no route to
+ *   them. A provider cannot reach the consumer's browser, data handle or AI
+ *   budget, so "plugin A provides to plugin B" never becomes "plugin A acts as
+ *   plugin B".
+ */
+export interface ProviderScope {
+  /** The plugin this capability instance is being built for. */
+  readonly consumerId: string;
+  readonly team: TeamRef;
+  readonly repo?: RepoRef;
+}
+
+/**
+ * The implementations a provider plugin supplies, keyed by capability name.
+ *
+ * A function type, so `@lastest/contracts` stays types-only — nothing here has
+ * a runtime representation, and the provider's actual code lives in the
+ * provider's own package where it belongs. The mapped type is what makes the
+ * declaration honest: `implement.events` must return an `EventsCapability`,
+ * checked at the provider's definition site rather than discovered by a
+ * consumer at runtime.
+ */
+export type ProvidedCapabilities<P extends CapabilityName> = {
+  readonly [K in P]: (scope: ProviderScope) => CapabilityMap[K];
+};
 
 /**
  * What a plugin receives. Exactly the declared capabilities and nothing else.
@@ -90,6 +135,15 @@ export interface PluginManifest<
    * no-plugin-to-plugin-import rule holds unchanged.
    */
   readonly provides?: readonly P[];
+
+  /**
+   * Required whenever `provides` is non-empty: one implementation function per
+   * provided capability. `resolveRegistry` refuses to boot a plugin that lists
+   * a capability here without one, for the same reason it refuses `schema`
+   * without `deletion` — an unimplemented promise should fail at startup, not
+   * at the first consumer's first request.
+   */
+  readonly implement?: ProvidedCapabilities<P>;
 
   /** The plugin's own tables. Core never reads them. */
   readonly schema?: () => Promise<unknown>;

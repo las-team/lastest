@@ -20,17 +20,18 @@ import { createDeletionHook } from "./deletion";
  *
  * ### What the plugin still cannot do
  *
- * Explorer needs seven things from core that core does not offer yet — repo
- * base URLs, existing auth resolution, test/area reads and writes, activity
- * events, an SSRF guard and field encryption. Those are declared in `host.ts`
- * as a port the composition root fills, and each one is a core PR waiting to be
- * written. Read that file before concluding this migration is finished.
+ * `resolveTargetUrl` (→ `ctx.repos`), `listCoverage`/`createQuarantinedTest`
+ * (→ `ctx.tests`) and `emitActivity` (→ `ctx.events`, a provider plugin) have
+ * since landed as real capabilities, declared below. Four things remain on
+ * `ExplorerHost`'s port instead of `ctx` — existing-auth resolution, an SSRF
+ * guard, field encryption, and per-repo settings that should be plugin-owned
+ * and are not. Read `host.ts` before concluding this migration is finished.
  */
 export const explorerPlugin = definePlugin({
   id: "explorer",
   title: "Explorer",
 
-  capabilities: ["browser", "ai", "data"],
+  capabilities: ["browser", "ai", "data", "events", "tests", "repos"],
 
   // Loaded once at boot by `core/data`, which validates the `explorer_` prefix
   // on every table before binding a handle to it.
@@ -49,11 +50,9 @@ export default explorerPlugin;
 
 export type {
   ExplorerActivityEvent,
-  ExplorerCoverage,
   ExplorerExistingAuth,
   ExplorerHost,
   ExplorerSettings,
-  KeptTestInput,
 } from "./host";
 export {
   configureExplorer,

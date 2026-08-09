@@ -129,7 +129,9 @@ export const DEFAULT_MAX_ITERATIONS = 4;
  */
 const ITERATION_DEADLINE_MS = 12 * 60_000;
 
-export type ExplorerContext = PluginContext<"browser" | "ai" | "data">;
+export type ExplorerContext = PluginContext<
+  "browser" | "ai" | "data" | "events" | "tests" | "repos"
+>;
 
 /** In-flight pipelines, so pause/cancel can interrupt a detached run. */
 const activeControllers = new Map<string, AbortController>();
@@ -189,20 +191,17 @@ export async function runPipeline(
   const signal = controller.signal;
   const teamId = ctx.team.id;
 
+  // `repositoryId` is kept as a parameter for readability at each call site
+  // even though it is no longer sent: `ctx.events.emit` attributes the event
+  // to `ctx.repo.id` itself, taken from the resolved scope rather than from
+  // anything the plugin says (`core-scope.md` §6's tenancy argument, applied
+  // to the events provider).
   const emit = (
-    repositoryId: string,
+    _repositoryId: string,
     type: ExplorerActivityEvent["type"],
     summary: string,
-    extra: Partial<ExplorerActivityEvent> = {},
-  ) =>
-    host.emitActivity({
-      teamId,
-      repositoryId,
-      sessionId,
-      type,
-      summary,
-      ...extra,
-    });
+    extra: Partial<Omit<ExplorerActivityEvent, "type" | "summary">> = {},
+  ) => ctx.events.emit(type, { sessionId, summary, ...extra });
 
   const load = () => q.getSession(db, sessionId);
 
@@ -644,7 +643,7 @@ export async function runPipeline(
       q
         .listExperienceByStates(db, repositoryId, meta.stateHistory ?? [])
         .catch(() => []),
-      host
+      ctx.tests
         .listCoverage(repositoryId)
         .catch(() => ({ tests: [], areaPlans: [] })),
       // Explorer's own findings — no longer a core read, just its own table.
@@ -1032,7 +1031,7 @@ export async function runPipeline(
       const scenario = scenarios.get(log.scenarioId);
       if (!scenario) continue;
       try {
-        const test = await host.createQuarantinedTest({
+        const test = await ctx.tests.createQuarantined({
           repositoryId,
           areaName: "Explorer",
           name: `Explorer: ${scenario.title.slice(0, 120)}`,
@@ -1199,8 +1198,8 @@ export async function runPipeline(
 /** Coverage digest for the planner prompt. Names and titles only, hard-capped. */
 function renderCoverage(
   coverage: {
-    tests: Array<{ name: string; targetUrl: string | null }>;
-    areaPlans: Array<{ name: string; plan: string }>;
+    tests: readonly { name: string; targetUrl: string | null }[];
+    areaPlans: readonly { name: string; plan: string }[];
   },
   knownFindings: Array<{ severity: string; title: string; url: string | null }>,
 ): string {

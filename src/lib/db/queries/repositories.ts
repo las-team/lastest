@@ -1,5 +1,6 @@
 import { db } from "../index";
 import { encryptField, decryptField } from "@/lib/crypto";
+import { cascadePluginDeletion } from "@/lib/db/plugin-deletion";
 import {
   repositories,
   pullRequests,
@@ -233,6 +234,9 @@ export async function updateRepository(
  * transaction; the final `DELETE FROM repositories` only handles the
  * subset of tables that actually declare ON DELETE CASCADE.
  *
+ * Plugin-owned tables are cleaned up by their registered deletion hooks after
+ * the transaction commits — they have no FK here to cascade through.
+ *
  * Disk storage is NOT cleaned up here — call `deleteRepoStorage(id)`
  * from `@/lib/storage/cleanup` after this returns.
  */
@@ -379,6 +383,14 @@ export async function deleteRepository(id: string) {
     //     testSpecs.
     await tx.delete(repositories).where(eq(repositories.id, id));
   });
+
+  // Plugin tables carry no FK to `repositories` by rule (`core-scope.md` §6),
+  // so nothing above touched them. Driven after the transaction commits, not
+  // inside it: a plugin's hook runs on the scoped handle `core/data` gave it,
+  // which is a different connection — enlisting it in `tx` is not possible, and
+  // letting it fail the transaction would give a broken plugin a veto over
+  // deleting a repository. See `@/lib/db/plugin-deletion`.
+  await cascadePluginDeletion({ kind: "repo", id });
 }
 
 export async function getBaselinesByRepo(repositoryId: string) {

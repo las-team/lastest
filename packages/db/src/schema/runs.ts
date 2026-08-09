@@ -164,6 +164,64 @@ export type BackgroundJob = typeof backgroundJobs.$inferSelect;
 
 export type NewBackgroundJob = typeof backgroundJobs.$inferInsert;
 
+/**
+ * The queue backing `core/jobs`'s `JobsCapability`.
+ *
+ * Deliberately not `background_jobs`: that table's shape (progress/steps for a
+ * build or test run in flight) predates plugins entirely and is read directly
+ * by build/run UI. Bending it to also carry `type`/`payload`/`dedupeKey` for
+ * arbitrary plugin work would mean two unrelated concerns sharing one table's
+ * migrations forever. This is core-owned per `core-scope.md` §2 as *capacity*
+ * — a runaway plugin enqueuing without bound starves every tenant's queue —
+ * which is why it lives here and not under any plugin's own `src/schema.ts`.
+ *
+ * `pluginId` is stored redundantly with the `<pluginId>.<name>` prefix already
+ * encoded in `type`, because `resolveRegistry` enforces that prefix at
+ * boot but a table row should not depend on parsing a string to know who owns
+ * it — a worker-loop bug that let `dispatch` throw for an unparseable type
+ * would otherwise be unable to even log whose job failed.
+ */
+export const pluginJobs = pgTable(
+  "plugin_jobs",
+  {
+    id: text("id").primaryKey(),
+    pluginId: text("plugin_id").notNull(),
+    /** `"<pluginId>.<name>"` — validated against the live registry at claim time, not here. */
+    type: text("type").notNull(),
+    payload: jsonb("payload").$type<unknown>(),
+    status: text("status")
+      .$type<"pending" | "running" | "done" | "failed" | "cancelled">()
+      .notNull()
+      .default("pending"),
+    /** Scope to resolve a `PluginContext` for the handler — see `ScopeRequest`. */
+    teamId: text("team_id"),
+    repositoryId: text("repository_id"),
+    attempts: integer("attempts").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(3),
+    runAfter: timestamp("run_after").notNull(),
+    /**
+     * Collapses duplicate enqueues while one is pending. Enforced in the query
+     * layer (check-then-insert), not as a DB constraint — a partial unique
+     * index scoped to `status IN ('pending','running')` is not a pattern used
+     * elsewhere in this schema, and the race it would close (two concurrent
+     * enqueues of the same key) is already vanishingly narrow given jobs are
+     * enqueued from request handlers, not a hot loop.
+     */
+    dedupeKey: text("dedupe_key"),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+    completedAt: timestamp("completed_at"),
+  },
+  (table) => [
+    index("idx_plugin_jobs_claim").on(table.status, table.runAfter),
+    index("idx_plugin_jobs_dedupe").on(table.dedupeKey),
+  ],
+);
+
+export type PluginJob = typeof pluginJobs.$inferSelect;
+export type NewPluginJob = typeof pluginJobs.$inferInsert;
+
 // Build schedules for recurring test runs
 export const buildSchedules = pgTable("build_schedules", {
   id: text("id").primaryKey(),

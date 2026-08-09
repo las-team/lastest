@@ -34,8 +34,8 @@ export type ExplorerScopeRequest = {
  * kernel's concrete runtime type just to be handed a context.
  */
 export interface ExplorerRuntime {
-  contextFor<C extends CapabilityName>(
-    manifest: PluginManifest<C, CapabilityName>,
+  contextFor<C extends CapabilityName, P extends CapabilityName>(
+    manifest: PluginManifest<C, P>,
     req?: ExplorerScopeRequest,
   ): Promise<PluginContext<C>>;
 }
