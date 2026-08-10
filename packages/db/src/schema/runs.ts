@@ -194,8 +194,10 @@ export const pluginJobs = pgTable(
       .notNull()
       .default("pending"),
     /** Scope to resolve a `PluginContext` for the handler — see `ScopeRequest`. */
-    teamId: text("team_id"),
-    repositoryId: text("repository_id"),
+    teamId: text("team_id").references(() => teams.id, { onDelete: "cascade" }),
+    repositoryId: text("repository_id").references(() => repositories.id, {
+      onDelete: "cascade",
+    }),
     attempts: integer("attempts").notNull().default(0),
     maxAttempts: integer("max_attempts").notNull().default(3),
     runAfter: timestamp("run_after").notNull(),
