@@ -22,8 +22,8 @@ import {
   type ScopeRequest,
 } from "@lastest/kernel";
 import { sql } from "@lastest/db";
-import { configureEvents, eventsPlugin } from "@lastest/plugin-events";
-import { configureExplorer, explorerPlugin } from "@lastest/plugin-explorer";
+import { configureEvents } from "@lastest/plugin-events";
+import { configureExplorer } from "@lastest/plugin-explorer";
 
 import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
 import * as queries from "@/lib/db/queries";
@@ -34,6 +34,7 @@ import { entitlementsFor } from "@/lib/core/entitlements";
 import { appEventsHost } from "@/lib/core/events-host";
 import { appExplorerHost } from "@/lib/core/explorer-host";
 import { createAppJobsHost } from "@/lib/core/jobs-host";
+import { MANIFESTS } from "@/lib/core/manifests";
 import { appReposHost } from "@/lib/core/repos-host";
 import { appStorageHost } from "@/lib/core/storage-host";
 import { appTestsHost } from "@/lib/core/tests-host";
@@ -52,21 +53,6 @@ import { appTestsHost } from "@/lib/core/tests-host";
  * offer yet arrives through `appExplorerHost`, which is deliberately ugly so it
  * stays visible. See `plugins/explorer/src/host.ts`.
  */
-
-/**
- * Registered plugins. `resolveRegistry` validates the whole set at boot — ids,
- * job-type namespacing, capability providers, and that every plugin with
- * storage can also delete it.
- *
- * `eventsPlugin` must be listed alongside every plugin that consumes `events`
- * — it is a *provider* plugin (`provides: ["events"]`), not a core capability,
- * per `docs/architecture/core-scope.md` §4. `resolveRegistry` would refuse to
- * boot `explorerPlugin` (which declares `capabilities: ["events"]`) without it.
- */
-const MANIFESTS: Parameters<typeof resolveRegistry>[0] = [
-  eventsPlugin,
-  explorerPlugin,
-];
 
 function toTeamRef(team: { id: string; plan: string }): ContextScope["team"] {
   return {

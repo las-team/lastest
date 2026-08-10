@@ -143,7 +143,11 @@ const QS_STEP_ORDER: AgentStepId[] = QS_STEP_DEFINITIONS.map((s) => s.id);
 const BUILD_POLL_INTERVAL_MS = 4000;
 const BUILD_POLL_TIMEOUT_MS = 8 * 60 * 1000;
 
-function buildInitialQsSteps(): AgentStepState[] {
+// Exported (visibility-only change) so integration tests can drive a
+// quickstart run without a session — `startQuickstart` gates on
+// `requireRepoAccess`, which needs `headers()`/cookies unavailable outside a
+// real Next.js request. See `quickstart.integration.test.ts`.
+export function buildInitialQsSteps(): AgentStepState[] {
   return QS_STEP_DEFINITIONS.map((def) => ({
     id: def.id,
     status: "pending" as const,
@@ -1606,7 +1610,9 @@ const QS_RUNNERS: Record<AgentStepId, QsStepRunner | undefined> = {
   QsStepRunner | undefined
 >;
 
-async function executeQuickstart(
+// Exported (visibility-only change) for the same reason as
+// `buildInitialQsSteps` above.
+export async function executeQuickstart(
   sessionId: string,
   repositoryId: string,
   teamId: string,

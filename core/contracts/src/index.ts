@@ -9,6 +9,8 @@
  */
 export type { AiCallOptions, AiCapability, AiResult } from "./ai";
 
+export type { CheckLayerDescriptor, CheckMode } from "./check-layer";
+
 export type {
   BrowserCapability,
   BrowserClaimOptions,
@@ -50,7 +52,7 @@ export type {
   ProviderScope,
 } from "./plugin";
 
-export type { CheckLayer, Logger, Plan, RepoRef, TeamRef } from "./refs";
+export type { Logger, Plan, RepoRef, TeamRef } from "./refs";
 
 export type {
   BlobRef,

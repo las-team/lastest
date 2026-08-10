@@ -1,5 +1,6 @@
 import type {
   CapabilityName,
+  CheckLayerDescriptor,
   JobHandler,
   Logger,
   PluginContext,
@@ -41,6 +42,24 @@ export const CORE_PROVIDED: readonly CapabilityName[] = [
 ];
 
 /**
+ * Check-layer ids core supplies itself (`src/lib/verify/check-modes.ts`'s
+ * bespoke derive logic — network/console's multi-axis legacy fallbacks don't
+ * reduce to a plugin-declarable shape). Anything else must come from a
+ * plugin's `checkLayers`.
+ */
+export const CORE_CHECK_LAYERS: readonly string[] = [
+  "visual",
+  "text",
+  "dom",
+  "network",
+  "console",
+  "perf",
+  "url",
+  "api",
+  "storage",
+];
+
+/**
  * The registry-wide view of a manifest, deliberately loosened.
  *
  * `jobs` and `implement` are function-valued mapped types over `C`/`P`
@@ -73,6 +92,11 @@ export interface ResolvedRegistry {
   readonly providers: ReadonlyMap<CapabilityName, string>;
   /** Job type → owning plugin id. */
   readonly jobTypes: ReadonlyMap<string, string>;
+  /** Check layer id → descriptor, for every plugin-contributed layer. */
+  readonly checkLayers: ReadonlyMap<
+    string,
+    CheckLayerDescriptor & { readonly pluginId: string }
+  >;
 }
 
 /**
@@ -89,6 +113,10 @@ export interface ResolvedRegistry {
  *   problem, and it is invisible until someone audits it. See §6 of core-scope.
  * - **Unprovided / doubly-provided capability** — a consumer would otherwise get
  *   `undefined` from a context the type system swore was populated.
+ * - **Check layer id collision** — with a core-owned id (`CORE_CHECK_LAYERS`)
+ *   or another plugin's. `CheckLayer` is an open registry (RFC §6.3); a
+ *   collision here would mean two layers silently overwriting one another's
+ *   mode/evidence in the Verify UI.
  */
 export function resolveRegistry(
   manifests: readonly AnyManifest[],
@@ -97,6 +125,10 @@ export function resolveRegistry(
   const seen = new Set<string>();
   const providers = new Map<CapabilityName, string>();
   const jobTypes = new Map<string, string>();
+  const checkLayers = new Map<
+    string,
+    CheckLayerDescriptor & { pluginId: string }
+  >();
 
   for (const m of manifests) {
     if (!PLUGIN_ID_RE.test(m.id)) {
@@ -155,6 +187,22 @@ export function resolveRegistry(
       }
       providers.set(cap, m.id);
     }
+
+    for (const layer of m.checkLayers ?? []) {
+      if (CORE_CHECK_LAYERS.includes(layer.id)) {
+        problems.push(
+          `plugin "${m.id}" contributes check layer "${layer.id}", which core already owns`,
+        );
+        continue;
+      }
+      const owner = checkLayers.get(layer.id);
+      if (owner) {
+        problems.push(
+          `check layer "${layer.id}" is contributed by both "${owner.pluginId}" and "${m.id}"`,
+        );
+      }
+      checkLayers.set(layer.id, { ...layer, pluginId: m.id });
+    }
   }
 
   // Second pass: consumers need their providers to exist. Done separately so
@@ -173,7 +221,7 @@ export function resolveRegistry(
 
   if (problems.length > 0) throw new PluginRegistryError(problems);
 
-  return { plugins: [...manifests], providers, jobTypes };
+  return { plugins: [...manifests], providers, jobTypes, checkLayers };
 }
 
 /**

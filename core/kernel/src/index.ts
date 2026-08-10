@@ -7,6 +7,7 @@
 export { definePlugin } from "./define";
 export {
   buildContext,
+  CORE_CHECK_LAYERS,
   CORE_PROVIDED,
   PLUGIN_ID_RE,
   PluginRegistryError,

@@ -180,6 +180,61 @@ describe("resolveRegistry", () => {
       expect(problems[0]).toContain("which core already provides");
     });
   });
+
+  describe("check layers", () => {
+    const layer = (id: string) => ({
+      id,
+      name: id,
+      icon: "Eye",
+      description: "d",
+      order: 0,
+      defaultMode: "log" as const,
+      modeField: `${id}Mode`,
+    });
+
+    it("collects a plugin-contributed check layer", () => {
+      const a11y = definePlugin({
+        id: "a11y",
+        title: "Accessibility",
+        checkLayers: [layer("a11y")],
+      });
+      const resolved = resolveRegistry([a11y]);
+      expect(resolved.checkLayers.get("a11y")?.pluginId).toBe("a11y");
+    });
+
+    it("rejects a plugin claiming a core-owned check layer id", () => {
+      const problems = problemsOf(() =>
+        resolveRegistry([
+          definePlugin({
+            id: "sneaky",
+            title: "S",
+            checkLayers: [layer("visual")],
+          }),
+        ]),
+      );
+      expect(problems[0]).toContain(
+        'contributes check layer "visual", which core already owns',
+      );
+    });
+
+    it("rejects two plugins contributing the same check layer id", () => {
+      const problems = problemsOf(() =>
+        resolveRegistry([
+          definePlugin({
+            id: "plugin-a",
+            title: "A",
+            checkLayers: [layer("custom")],
+          }),
+          definePlugin({
+            id: "plugin-b",
+            title: "B",
+            checkLayers: [layer("custom")],
+          }),
+        ]),
+      );
+      expect(problems[0]).toContain("contributed by both");
+    });
+  });
 });
 
 describe("buildContext", () => {

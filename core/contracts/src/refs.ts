@@ -58,24 +58,3 @@ export interface Logger {
   error(obj: object, msg?: string): void;
   error(msg: string): void;
 }
-
-/**
- * The verify check-layers (§6.3). Kept here rather than in
- * `src/lib/verify/check-modes.ts` so that plugins contributing a layer do not
- * have to import app code.
- *
- * This is still a closed union — turning it into an open registry is phase 3,
- * and doing it before the kernel exists would have nothing to register into.
- */
-export type CheckLayer =
-  | "visual"
-  | "text"
-  | "dom"
-  | "network"
-  | "console"
-  | "a11y"
-  | "design"
-  | "perf"
-  | "url"
-  | "api"
-  | "storage";

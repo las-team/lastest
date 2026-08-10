@@ -7,6 +7,7 @@
  */
 import type { AiCapability } from "./ai";
 import type { BrowserCapability } from "./browser";
+import type { CheckLayerDescriptor } from "./check-layer";
 import type { DataCapability, DeletionHook } from "./data";
 import type { JobHandler, JobsCapability } from "./jobs";
 import type { Logger, RepoRef, TeamRef } from "./refs";
@@ -157,6 +158,13 @@ export interface PluginManifest<
 
   /** Job handlers, keyed by `"<id>.<name>"`. Core owns the queue and the loop. */
   readonly jobs?: Readonly<Record<string, JobHandler<PluginContext<C>>>>;
+
+  /**
+   * Check layers this plugin contributes to the Verify pipeline (RFC §6.3).
+   * `resolveRegistry` rejects an id that collides with a core-owned layer or
+   * another plugin's — see `core/kernel/src/registry.ts`'s `CORE_CHECK_LAYERS`.
+   */
+  readonly checkLayers?: readonly CheckLayerDescriptor[];
 
   readonly ui?: {
     readonly nav?: readonly NavEntry[];
