@@ -1,6 +1,13 @@
 /**
  * Explorer plugin table migration — run this BEFORE `drizzle-kit push`.
  *
+ * **Docker deploys no longer need this run manually** — `scripts/migrate.js`
+ * (what `docker-entrypoint.sh` and `Dockerfile.migrate` actually execute)
+ * carries a plain-JS port of the same rename logic ahead of its own
+ * `drizzle-kit push --force` call. This TypeScript version stays as the tool
+ * for local development, where `pnpm db:push` calls `drizzle-kit push`
+ * directly and skips `migrate.js` entirely — run this first in that case.
+ *
  * ## Why this script has to exist
  *
  * The explorer migration (`docs/architecture/explorer-migration-result.md`)
@@ -42,10 +49,6 @@
  *
  * ## What this cannot preserve
  *
- * - `agent_findings.bug_report_id` has no counterpart in `explorer_findings`.
- *   The column survives the rename but `push` drops it in step 2. Findings that
- *   were promoted to a bug report lose the back-link. Counted and reported
- *   below so the number is known before it is lost, not after.
  * - `agent_sessions.kind` is dropped — it is the discriminator itself, and
  *   every migrated row has the same value.
  * - `explorer_sessions.team_id` is NOT NULL, while `agent_sessions.team_id` is
@@ -111,17 +114,6 @@ async function migrateByRename(from: string, to: string) {
       `  ${from} → ${to}: dropping empty destination created by push`,
     );
     await sql`drop table ${sql(to)}`;
-  }
-
-  if (from === "agent_findings") {
-    const [{ n }] = await sql<{ n: string }[]>`
-      select count(*)::text as n from agent_findings where bug_report_id is not null`;
-    if (Number(n) > 0) {
-      console.warn(
-        `  WARNING: ${n} finding(s) carry bug_report_id, which explorer_findings does not have.` +
-          ` db:push will drop that column — the promoted-bug back-link is lost.`,
-      );
-    }
   }
 
   await sql`alter table ${sql(from)} rename to ${sql(to)}`;

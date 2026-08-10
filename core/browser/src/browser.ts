@@ -130,7 +130,7 @@ export function createBrowserCapability(
         // Resolution and injection both happen host-side; the credential does
         // not pass through core, let alone through the plugin.
         await host
-          .applyAuth(claim.cdpUrl, claimOpts.storageStateId)
+          .applyAuth(claim.cdpUrl, claimOpts.storageStateId, team.id)
           .catch((err) => {
             // Degrading to an unauthenticated browser is the established
             // behaviour and is usually still useful. It must be visible.
@@ -212,6 +212,10 @@ export function createBrowserCapability(
   }
 
   return {
+    async assertRunMinutes() {
+      await host.assertRunMinutes(team.id);
+    },
+
     async withBrowser(claimOpts, fn) {
       // Checked before the claim so an out-of-budget team never occupies a pool
       // slot it is not entitled to in the first place.

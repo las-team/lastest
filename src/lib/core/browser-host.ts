@@ -53,12 +53,26 @@ export const appBrowserHost: BrowserHost = {
     return assertAgentRunMinutesAvailable(teamId);
   },
 
-  async applyAuth(cdpUrl: string, storageStateId: string): Promise<boolean> {
+  async applyAuth(
+    cdpUrl: string,
+    storageStateId: string,
+    teamId: string,
+  ): Promise<boolean> {
     // Resolution *and* injection happen here, so the decrypted storage state
     // never crosses back into core, let alone into a plugin. The plugin only
     // ever held the id.
     const row = await queries.getStorageState(storageStateId).catch(() => null);
     if (!row?.storageStateJson) return false;
+    // Ownership check: a plugin passed this id, it did not prove it may use
+    // it. A missing repositoryId or a repo owned by a different team fails
+    // the same way `applyAuth` already fails for "no such id" — degrading to
+    // an unauthenticated browser rather than injecting another tenant's
+    // session, per `core-browser`'s own comment on this call site.
+    if (!row.repositoryId) return false;
+    const repo = await queries
+      .getRepository(row.repositoryId)
+      .catch(() => null);
+    if (!repo || repo.teamId !== teamId) return false;
     return injectStorageStateIntoEb(cdpUrl, row.storageStateJson);
   },
 

@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, lte } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lte } from "drizzle-orm";
 
 import { db } from "../index";
 import { pluginJobs, type NewPluginJob, type PluginJob } from "../schema";
@@ -25,6 +25,10 @@ export async function enqueuePluginJob(
 ): Promise<PluginJob> {
   // Collapse duplicates: a pending or running row with the same key is a
   // no-op enqueue, cheaper than every plugin inventing its own debounce.
+  // Scoped by pluginId + teamId (not dedupeKey alone) — a plugin picks its own
+  // dedupeKey, often a predictable string like "daily-scan", and without this
+  // scope a team could collide with another team's in-flight job under the
+  // same plugin and get handed back its `JobRef` instead of a job of its own.
   if (input.dedupeKey) {
     const [existing] = await db
       .select()
@@ -32,6 +36,10 @@ export async function enqueuePluginJob(
       .where(
         and(
           eq(pluginJobs.dedupeKey, input.dedupeKey),
+          eq(pluginJobs.pluginId, input.pluginId),
+          input.teamId
+            ? eq(pluginJobs.teamId, input.teamId)
+            : isNull(pluginJobs.teamId),
           inArray(pluginJobs.status, ["pending", "running"]),
         ),
       )

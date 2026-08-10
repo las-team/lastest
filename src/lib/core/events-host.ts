@@ -29,20 +29,16 @@ const log = getLogger("events-host");
  * plugin id is a `packages/db` schema change and out of scope for this PR;
  * flagged here rather than silently worked around.
  */
-function summaryOf(payload: unknown, type: string): string {
-  if (payload && typeof payload === "object" && "summary" in payload) {
-    const summary = (payload as { summary?: unknown }).summary;
-    if (typeof summary === "string") return summary;
-  }
-  return type;
-}
-
 function fieldOf(payload: unknown, key: string): string | null {
   if (payload && typeof payload === "object" && key in payload) {
     const value = (payload as Record<string, unknown>)[key];
     if (typeof value === "string") return value;
   }
   return null;
+}
+
+function summaryOf(payload: unknown, type: string): string {
+  return fieldOf(payload, "summary") ?? type;
 }
 
 function artifactOf(

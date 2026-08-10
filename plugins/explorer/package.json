@@ -9,6 +9,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./actions": "./src/actions.ts",
+    "./errors": "./src/errors.ts",
     "./page": "./src/ui/page.tsx",
     "./schema": "./src/schema.ts",
     "./wiring": "./src/wiring.ts"

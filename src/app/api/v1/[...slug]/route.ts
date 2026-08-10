@@ -1314,7 +1314,11 @@ export async function GET(
       if (!sessionRow) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
-      const findings = await listExplorerFindings(id).catch(() => []);
+      // No `.catch(() => [])` here: `sessionRow` above already proved this
+      // session exists and belongs to the caller, so a failure here is a real
+      // error (DB outage, etc.), not "no findings yet" — it must reach the
+      // handler's outer catch as a 500, not read as a legitimate empty state.
+      const findings = await listExplorerFindings(id);
       if (subResource === "findings") {
         return NextResponse.json({ findings });
       }
@@ -3379,17 +3383,25 @@ export async function DELETE(
 
     // Cancel Explorer session: DELETE /api/v1/explorer/:sessionId
     //
-    // `cancelExplorerAgent` throws "not found" for a session outside the
-    // caller's team, so the existence check and the tenancy check are the same
-    // call — one place to get right instead of three.
+    // `cancelExplorerAgent` throws `ExplorerSessionNotFoundError` for a session
+    // outside the caller's team, so the existence check and the tenancy check
+    // are the same call — one place to get right instead of three. Only that
+    // specific error maps to 404; anything else (a DB error mid-cancel, an
+    // events-emit failure) must reach the outer catch as a 500, not read as
+    // "no such session".
     if (resource === "explorer" && id) {
       await getPluginRuntime();
       const { cancelExplorerAgent } =
         await import("@lastest/plugin-explorer/actions");
+      const { ExplorerSessionNotFoundError } =
+        await import("@lastest/plugin-explorer/errors");
       try {
         return NextResponse.json(await cancelExplorerAgent(id));
-      } catch {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      } catch (err) {
+        if (err instanceof ExplorerSessionNotFoundError) {
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
+        }
+        throw err;
       }
     }
 

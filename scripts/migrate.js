@@ -194,8 +194,129 @@ async function ensureUniqueIndexes() {
   }
 }
 
+// `agent_*` → `explorer_*` renames the explorer plugin split needs done BEFORE
+// `drizzle-kit push --force` below, or push reads the vanished/appeared table
+// names as DROP + CREATE and destroys every row — including
+// agent_knowledge.cred_password, an encrypted credential nobody can re-derive.
+// This is the plain-JS port of scripts/migrate-explorer-plugin-tables.ts (kept
+// for local `pnpm tsx` runs); it has to live here because this file — not that
+// one — is what Dockerfile.migrate and docker-entrypoint.sh actually run.
+const EXPLORER_RENAMES = [
+  ["agent_knowledge", "explorer_knowledge"],
+  ["agent_experience", "explorer_experience"],
+  ["agent_findings", "explorer_findings"],
+];
+
+async function migrateExplorerTables() {
+  if (!process.env.DATABASE_URL) return;
+  let sql;
+  try {
+    sql = require("postgres")(process.env.DATABASE_URL);
+
+    const tableExists = async (name) => {
+      const rows = await sql`
+        select exists (
+          select 1 from information_schema.tables
+          where table_schema = 'public' and table_name = ${name}
+        ) as exists`;
+      return rows[0]?.exists ?? false;
+    };
+    const rowCount = async (name) => {
+      const rows = await sql.unsafe(
+        `select count(*)::text as n from "${name}"`,
+      );
+      return Number(rows[0]?.n ?? 0);
+    };
+    const columnExists = async (table, column) => {
+      const rows = await sql`
+        select exists (
+          select 1 from information_schema.columns
+          where table_schema = 'public' and table_name = ${table} and column_name = ${column}
+        ) as exists`;
+      return rows[0]?.exists ?? false;
+    };
+
+    for (const [from, to] of EXPLORER_RENAMES) {
+      if (!(await tableExists(from))) continue;
+      if (await tableExists(to)) {
+        if ((await rowCount(to)) > 0) {
+          console.log(`[migrate] ${from} -> ${to}: already migrated`);
+          continue;
+        }
+        // Empty destination is what a prior `push` left behind when someone
+        // pushed before this ran. Safe to drop because it is empty.
+        await sql.unsafe(`drop table "${to}"`);
+      }
+      if (from === "agent_findings") {
+        const [{ n }] = await sql.unsafe(
+          `select count(*)::text as n from agent_findings where bug_report_id is not null`,
+        );
+        if (Number(n) > 0) {
+          console.warn(
+            `[migrate] ${n} finding(s) carry bug_report_id — preserved across the rename` +
+              ` (explorer_findings.bug_report_id exists, so push will not drop it)`,
+          );
+        }
+      }
+      await sql.unsafe(`alter table "${from}" rename to "${to}"`);
+      console.log(`[migrate] ${from} -> ${to}: renamed`);
+    }
+
+    // `agent_sessions` holds five agent kinds; only the `explorer` slice moves,
+    // as a filtered copy (source rows stay in place, re-runnable/reversible).
+    if (
+      (await tableExists("agent_sessions")) &&
+      (await columnExists("agent_sessions", "kind"))
+    ) {
+      const destExists = await tableExists("explorer_sessions");
+      const destPopulated =
+        destExists && (await rowCount("explorer_sessions")) > 0;
+      if (!destPopulated) {
+        const [{ n: total }] = await sql.unsafe(
+          `select count(*)::text as n from agent_sessions where kind = 'explorer'`,
+        );
+        if (Number(total) > 0) {
+          await sql.unsafe(`
+            update agent_sessions s
+               set team_id = r.team_id
+              from repositories r
+             where s.repository_id = r.id
+               and s.kind = 'explorer'
+               and s.team_id is null
+               and r.team_id is not null`);
+
+          const [{ n: orphaned }] = await sql.unsafe(
+            `select count(*)::text as n from agent_sessions where kind = 'explorer' and team_id is null`,
+          );
+          if (Number(orphaned) > 0) {
+            console.warn(
+              `[migrate] ${orphaned} explorer session(s) have no resolvable team_id — NOT migrated, left in agent_sessions`,
+            );
+          }
+
+          if (destExists) await sql.unsafe(`drop table explorer_sessions`);
+          await sql.unsafe(`
+            create table explorer_sessions as
+            select id, repository_id, team_id, status, current_step_id,
+                   steps, metadata, created_at, updated_at, completed_at
+              from agent_sessions
+             where kind = 'explorer' and team_id is not null`);
+          console.log(
+            `[migrate] agent_sessions -> explorer_sessions: copied explorer rows (source left in place)`,
+          );
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[migrate] explorer table migration skipped:", e.message);
+  } finally {
+    if (sql) await sql.end();
+  }
+}
+
 async function main() {
   await preCreate();
+  await migrateExplorerTables();
   await nullOrphans();
   await bumpPoolDefaults();
   await ensureUniqueIndexes();

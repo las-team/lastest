@@ -135,6 +135,18 @@ export interface BrowserSession {
 
 export interface BrowserCapability {
   /**
+   * Check the team's run-minute budget without claiming anything.
+   *
+   * `withBrowser`/`withBrowserSwarm` already run this same check before their
+   * claim, so it is not required before every call — it exists for a plugin
+   * that needs to know *before* committing to other, non-browser work (e.g.
+   * persisting a session row) whether the run it is about to start would be
+   * rejected for quota. Rejects the same way `withBrowser` does when the team
+   * is over budget; resolves otherwise.
+   */
+  assertRunMinutes(): Promise<void>;
+
+  /**
    * Claim an EB, run `fn`, release it — including on throw, on deadline, and on
    * abort.
    */

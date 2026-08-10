@@ -170,6 +170,13 @@ export const explorerFindings = pgTable(
     rootCauseCluster: text("root_cause_cluster"),
     pageStateHash: text("page_state_hash"),
     url: text("url"),
+    /** Back-link to a promoted bug report. Plain `text`, no FK to a core
+     *  table (rule 2 above) — `bug_reports` lives in core. Carried over
+     *  from `agent_findings` by the rename migration; nothing here writes
+     *  it yet (the promote-to-bug-report flow is not reimplemented as a
+     *  plugin action), but keeping the column preserves rows migrated
+     *  from before the split instead of silently dropping them. */
+    bugReportId: text("bug_report_id"),
     scenario: jsonb("scenario").$type<ExplorerScenario>(),
     evidence: jsonb("evidence").$type<ExplorerFindingEvidence>(),
     status: text("status")

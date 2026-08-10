@@ -214,6 +214,8 @@ export const FORBIDDEN_PLUGIN_IMPORTS = [
       "playwright",
       "playwright-core",
       "playwright/*",
+      "@playwright/test",
+      "@playwright/test/*",
       "chromium-bidi",
     ],
     message:
@@ -289,13 +291,19 @@ export const PACKAGED_PLUGIN_IMPORTS = [
   },
 ];
 
-/** Core must never learn that a plugin exists. */
+/** Core must never learn that a plugin exists, or that Next.js exists. */
 export const FORBIDDEN_CORE_IMPORTS = [
   {
     id: "core-to-plugin",
     patterns: ["@lastest/plugin-*", "../../plugins/*", "@/lib/plugins/*"],
     message:
       "Core must not know about plugins. Invert the dependency: expose a capability and let the plugin call it.",
+  },
+  {
+    id: "core-to-app",
+    patterns: ["@/*"],
+    message:
+      "Core must not import the Next.js app — the composition root (src/lib/core/runtime.ts) injects app primitives as host implementations instead. See src/lib/core/*-host.ts.",
   },
 ];
 
@@ -340,7 +348,7 @@ export function pseudoPluginPaths(def) {
 export function crossPluginPatternsFor(pluginId) {
   return Object.entries(PSEUDO_PLUGINS)
     .filter(([id]) => id !== pluginId)
-    .flatMap(([, def]) => [...def.lib, ...(def.files ?? [])])
+    .flatMap(([, def]) => pseudoPluginPaths(def))
     .map((p) => {
       const alias = `@/${p.replace(/^src\//, "")}`;
       // A file entry is imported without its extension; a dir entry by subpath.

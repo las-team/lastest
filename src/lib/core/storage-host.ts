@@ -111,6 +111,14 @@ async function walkKeys(dir: string): Promise<string[]> {
   return keys;
 }
 
+/** Every live (non-expired) blob ref under `prefix`. Shared by `list` and `usedBytes`. */
+async function listRefs(prefix: string): Promise<HostBlobRef[]> {
+  const dir = path.join(PLUGIN_STORAGE_ROOT, prefix);
+  const keys = await walkKeys(dir);
+  const refs = await Promise.all(keys.map((k) => blobRefFor(k)));
+  return refs.filter((r): r is HostBlobRef => r !== null);
+}
+
 export const appStorageHost: StorageHost = {
   async put(key, data, opts) {
     const target = physicalPath(key);
@@ -147,10 +155,7 @@ export const appStorageHost: StorageHost = {
   },
 
   async list(prefix) {
-    const dir = path.join(PLUGIN_STORAGE_ROOT, prefix);
-    const keys = await walkKeys(dir);
-    const refs = await Promise.all(keys.map((k) => blobRefFor(k)));
-    return refs.filter((r): r is HostBlobRef => r !== null);
+    return listRefs(prefix);
   },
 
   async delete(key) {
@@ -158,10 +163,8 @@ export const appStorageHost: StorageHost = {
   },
 
   async usedBytes(prefix) {
-    const dir = path.join(PLUGIN_STORAGE_ROOT, prefix);
-    const keys = await walkKeys(dir);
-    const refs = await Promise.all(keys.map((k) => blobRefFor(k)));
-    return refs.reduce((sum, r) => sum + (r?.bytes ?? 0), 0);
+    const refs = await listRefs(prefix);
+    return refs.reduce((sum, r) => sum + r.bytes, 0);
   },
 
   async quotaLimitBytes(teamId) {

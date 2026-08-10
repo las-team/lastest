@@ -29,46 +29,31 @@ import { explorerWiring } from "./wiring";
  * reference a session id, so removing sessions first would leave rows nothing
  * points at if the process dies mid-hook. Hooks are documented as idempotent
  * and a retry is safe, but the intermediate states should still be the
- * survivable ones.
+ * survivable ones. `TABLES_IN_DELETION_ORDER` is that order — adding a table
+ * to this plugin means adding one line here, not four.
  */
+const TABLES_IN_DELETION_ORDER = [
+  explorerFindings,
+  explorerSessions,
+  explorerExperience,
+  explorerKnowledge,
+  explorerTriggers,
+] as const;
+
 export function createDeletionHook(): DeletionHook {
   return {
     async onTeamDeleted(teamId: string): Promise<void> {
       const db = orm(explorerWiring().data);
-      await db
-        .delete(explorerFindings)
-        .where(eq(explorerFindings.teamId, teamId));
-      await db
-        .delete(explorerSessions)
-        .where(eq(explorerSessions.teamId, teamId));
-      await db
-        .delete(explorerExperience)
-        .where(eq(explorerExperience.teamId, teamId));
-      await db
-        .delete(explorerKnowledge)
-        .where(eq(explorerKnowledge.teamId, teamId));
-      await db
-        .delete(explorerTriggers)
-        .where(eq(explorerTriggers.teamId, teamId));
+      for (const table of TABLES_IN_DELETION_ORDER) {
+        await db.delete(table).where(eq(table.teamId, teamId));
+      }
     },
 
     async onRepoDeleted(repoId: string): Promise<void> {
       const db = orm(explorerWiring().data);
-      await db
-        .delete(explorerFindings)
-        .where(eq(explorerFindings.repositoryId, repoId));
-      await db
-        .delete(explorerSessions)
-        .where(eq(explorerSessions.repositoryId, repoId));
-      await db
-        .delete(explorerExperience)
-        .where(eq(explorerExperience.repositoryId, repoId));
-      await db
-        .delete(explorerKnowledge)
-        .where(eq(explorerKnowledge.repositoryId, repoId));
-      await db
-        .delete(explorerTriggers)
-        .where(eq(explorerTriggers.repositoryId, repoId));
+      for (const table of TABLES_IN_DELETION_ORDER) {
+        await db.delete(table).where(eq(table.repositoryId, repoId));
+      }
     },
   };
 }

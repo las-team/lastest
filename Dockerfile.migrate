@@ -41,6 +41,17 @@ COPY packages/db/src/schema.ts ./packages/db/src/schema.ts
 COPY drizzle.config.ts ./
 COPY scripts/migrate.js ./scripts/migrate.js
 
+# drizzle.config.ts's schema glob also covers ./plugins/*/src/schema.ts (each
+# plugin owns its own tables — see that file's own comment). Docker's COPY
+# wildcard flattens matched files into one directory instead of preserving
+# plugins/<name>/src/, so each plugin needs its own line here — add one
+# whenever a new plugin is registered in src/lib/core/runtime.ts's MANIFESTS,
+# the same way scripts/migrate.js's PRE_CREATE_SQL grows with new tables.
+# Each plugin schema's own `./types` import is type-only and erases the same
+# way the workspace imports above do, so nothing else needs to come along.
+COPY plugins/events/src/schema.ts ./plugins/events/src/schema.ts
+COPY plugins/explorer/src/schema.ts ./plugins/explorer/src/schema.ts
+
 # Non-root: migrate.js only touches the DB, no filesystem writes outside /app.
 RUN useradd --uid 1002 --shell /usr/sbin/nologin --no-create-home migrate && \
     chown -R migrate:migrate /app

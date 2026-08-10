@@ -60,9 +60,16 @@ export interface BrowserHost {
    * whether enough material was applied to consider the browser authenticated.
    *
    * The plugin passes the id; the secret is resolved and injected entirely
-   * host-side. Core never holds it either.
+   * host-side. Core never holds it either. `teamId` is the claiming team,
+   * passed so the host can refuse an id that resolves to another team's
+   * credential — the plugin supplies the id, but proving it may use it is the
+   * host's job, the same as every other tenancy check in this file.
    */
-  applyAuth(cdpUrl: string, storageStateId: string): Promise<boolean>;
+  applyAuth(
+    cdpUrl: string,
+    storageStateId: string,
+    teamId: string,
+  ): Promise<boolean>;
 
   /**
    * Turn an upstream stream URL into a signed, expiring grant safe to hand to a

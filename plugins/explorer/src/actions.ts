@@ -6,6 +6,7 @@ import { getNextRunTime, isValidCron } from "@lastest/cron";
 import { orm } from "./data/db";
 import * as q from "./data/queries";
 import { parseStyleRotation } from "./domain/styles";
+import { ExplorerSessionNotFoundError } from "./errors";
 import type { ExplorerHost } from "./host";
 import { explorerPlugin } from "./index";
 import {
@@ -98,6 +99,14 @@ async function startCore(
   // hands a tenant the metadata service.
   await host.assertSafeOutboundUrl(targetUrl);
 
+  // Checked before anything is persisted: `ctx.browser.withBrowser` (inside
+  // `runPipeline`, below) would enforce this anyway, but only once the
+  // detached pipeline reaches its first browser claim — by then a session row
+  // already exists and looks like a run that started. Failing here keeps an
+  // over-quota team from ever getting a `sessionId` back or a trigger marked
+  // fired for a run that was always going to be rejected.
+  await ctx.browser.assertRunMinutes();
+
   // One active explorer session per repo: two agents driving the same app at
   // once produce findings neither can attribute.
   const existing = await q.getActiveSession(db, input.repositoryId);
@@ -178,10 +187,8 @@ async function ownedSession(sessionId: string): Promise<{
 }> {
   const { ctx, host } = await context();
   const session = await q.getSession(dataOf(ctx, host), sessionId);
-  // Same message for "missing" and "someone else's" — the difference is itself
-  // information about another team's data.
   if (!session || session.teamId !== ctx.team.id) {
-    throw new Error("Explorer session not found");
+    throw new ExplorerSessionNotFoundError();
   }
   return { ctx, host, session };
 }
@@ -192,8 +199,9 @@ export async function getExplorerSession(
   try {
     const { session } = await ownedSession(sessionId);
     return session;
-  } catch {
-    return null;
+  } catch (err) {
+    if (err instanceof ExplorerSessionNotFoundError) return null;
+    throw err;
   }
 }
 
@@ -489,6 +497,19 @@ export async function dispatchDueExplorerTriggers(): Promise<number> {
       // must stop getting scheduled runs after downgrading — re-armed rather
       // than disabled, so it resumes if they upgrade again.
       if (!ctx.team.entitlements.has("qa-agent")) {
+        await decline();
+        continue;
+      }
+
+      // Same decline as the checks above: an out-of-budget team is an
+      // expected, quiet re-arm, not a failure — `startCore` enforces this
+      // too, but checking here keeps it out of the `catch` block's error log,
+      // which exists for genuinely unexpected failures.
+      const hasRunMinutes = await ctx.browser
+        .assertRunMinutes()
+        .then(() => true)
+        .catch(() => false);
+      if (!hasRunMinutes) {
         await decline();
         continue;
       }

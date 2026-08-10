@@ -126,6 +126,12 @@ RUN ln -sf .pnpm/playwright@1.57.0/node_modules/playwright ./node_modules/playwr
 COPY --from=builder --chown=nextjs:nodejs /app/drizzle ./drizzle
 COPY --from=builder --chown=nextjs:nodejs /app/drizzle.config.ts ./drizzle.config.ts
 COPY --from=builder --chown=nextjs:nodejs /app/packages/db/src/schema.ts ./packages/db/src/schema.ts
+# drizzle.config.ts's schema glob also covers ./plugins/*/src/schema.ts (each
+# plugin owns its own tables) — without these, push silently creates none of
+# those tables. Same erasure argument as core's schema.ts above; add a line
+# here whenever a new plugin is registered in src/lib/core/runtime.ts.
+COPY --from=builder --chown=nextjs:nodejs /app/plugins/events/src/schema.ts ./plugins/events/src/schema.ts
+COPY --from=builder --chown=nextjs:nodejs /app/plugins/explorer/src/schema.ts ./plugins/explorer/src/schema.ts
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/drizzle-kit ./node_modules/drizzle-kit
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.bin/drizzle-kit ./node_modules/.bin/drizzle-kit

@@ -69,6 +69,12 @@ function withTier(
 export function createAiFactory() {
   return (_pluginId: string, scope: ContextScope): AiCapability => {
     const repoFromScope = scope.repo?.id;
+    // `repoFromScope` cannot change for this capability's lifetime (one
+    // resolved context), so its settings are fetched once and reused —
+    // `generate()` in an agent loop can call this dozens of times per run,
+    // and every call would otherwise be a redundant round-trip for a value
+    // that was never going to change mid-run.
+    let settingsPromise: ReturnType<typeof queries.getAISettings> | undefined;
 
     async function resolve(repositoryId: string | undefined) {
       // A plugin may name a repo per call, but it can only ever name the one
@@ -85,7 +91,8 @@ export function createAiFactory() {
           "ai.generate was given a repository outside this context's scope",
         );
       }
-      const settings = await queries.getAISettings(id);
+      settingsPromise ??= queries.getAISettings(id);
+      const settings = await settingsPromise;
       return { id, settings };
     }
 
@@ -143,7 +150,8 @@ export function createAiFactory() {
         }
         const id = repoFromScope;
         if (!id) return { remainingTokens: null, enabled: true };
-        const settings = await queries.getAISettings(id).catch(() => null);
+        settingsPromise ??= queries.getAISettings(id);
+        const settings = await settingsPromise.catch(() => null);
         return {
           remainingTokens: null,
           enabled: Boolean(settings?.provider && settings.provider !== "none"),
