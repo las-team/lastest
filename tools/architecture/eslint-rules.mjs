@@ -62,9 +62,20 @@ export function architectureBoundaryRules() {
   const blocks = [];
 
   // ── Target layout: hard errors ──────────────────────────────────────────────
+  // `scanTargetLayout` in graph.mjs (the CI ratchet backing these) skips
+  // `.test.ts`/`.spec.ts` files — a feature's own tests may reach for anything
+  // to build fixtures, same carve-out the pseudo-plugin blocks below have.
+  // These blocks have to say so too, or ESLint disagrees with the ratchet it's
+  // meant to mirror on every touched test file.
+  const TARGET_LAYOUT_TEST_IGNORES = [
+    "**/*.test.{ts,tsx}",
+    "**/*.spec.{ts,tsx}",
+  ];
+
   blocks.push({
     name: "architecture/plugins",
     files: [PLUGIN_GLOB],
+    ignores: TARGET_LAYOUT_TEST_IGNORES,
     rules: {
       "no-restricted-imports": [
         "error",
@@ -81,6 +92,7 @@ export function architectureBoundaryRules() {
   blocks.push({
     name: "architecture/core",
     files: [CORE_GLOB],
+    ignores: TARGET_LAYOUT_TEST_IGNORES,
     rules: {
       "no-restricted-imports": [
         "error",
@@ -92,6 +104,7 @@ export function architectureBoundaryRules() {
   blocks.push({
     name: "architecture/libs",
     files: [LIB_GLOB],
+    ignores: TARGET_LAYOUT_TEST_IGNORES,
     rules: {
       "no-restricted-imports": [
         "error",

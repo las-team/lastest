@@ -95,31 +95,36 @@ export async function cancelPluginJob(id: string): Promise<void> {
 /**
  * Claim up to `limit` due jobs for the worker loop, oldest-`runAfter` first.
  *
- * Not `SELECT ... FOR UPDATE SKIP LOCKED` — this app runs one worker loop per
- * process today (mirroring `src/lib/scheduling/scheduler.ts`'s single-interval
- * pattern), so there is no concurrent claimant to race. If a second worker
- * process is ever introduced, this is the function that needs it.
+ * `FOR UPDATE SKIP LOCKED` inside a transaction, the same pattern already
+ * used for EB pool claims in `src/server/actions/embedded-sessions.ts`. This
+ * app runs one worker loop per process today, so there is normally no
+ * concurrent claimant to race — but the lock costs nothing when uncontended
+ * and means a second worker process (or two overlapping during a restart)
+ * cannot double-claim the same row instead of quietly corrupting it.
  */
 export async function claimDuePluginJobs(limit: number): Promise<PluginJob[]> {
-  const due = await db
-    .select()
-    .from(pluginJobs)
-    .where(
-      and(
-        eq(pluginJobs.status, "pending"),
-        lte(pluginJobs.runAfter, new Date()),
-      ),
-    )
-    .orderBy(asc(pluginJobs.runAfter))
-    .limit(limit);
-  if (due.length === 0) return [];
+  return db.transaction(async (tx) => {
+    const due = await tx
+      .select()
+      .from(pluginJobs)
+      .where(
+        and(
+          eq(pluginJobs.status, "pending"),
+          lte(pluginJobs.runAfter, new Date()),
+        ),
+      )
+      .orderBy(asc(pluginJobs.runAfter))
+      .limit(limit)
+      .for("update", { skipLocked: true });
+    if (due.length === 0) return [];
 
-  const ids = due.map((j) => j.id);
-  await db
-    .update(pluginJobs)
-    .set({ status: "running", updatedAt: new Date() })
-    .where(inArray(pluginJobs.id, ids));
-  return due.map((j) => ({ ...j, status: "running" as const }));
+    const ids = due.map((j) => j.id);
+    await tx
+      .update(pluginJobs)
+      .set({ status: "running", updatedAt: new Date() })
+      .where(inArray(pluginJobs.id, ids));
+    return due.map((j) => ({ ...j, status: "running" as const }));
+  });
 }
 
 export async function completePluginJob(id: string): Promise<void> {

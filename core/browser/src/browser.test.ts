@@ -173,6 +173,7 @@ describe("withBrowser", () => {
     expect(host.applyAuth).toHaveBeenCalledWith(
       "http://10.0.0.5:9232",
       "ss-42",
+      "t1",
     );
   });
 

@@ -24,14 +24,32 @@ function toBlobRef(host: HostBlobRef, prefix: string): BlobRef {
 }
 
 /**
- * Build the `storage` capability for one plugin's context.
+ * Serializes `put()`'s check-then-write per (team, plugin) prefix, in-process.
  *
- * **Known limitation, stated rather than hidden:** the quota check reads
- * `usedBytes` and writes in two separate steps, so two concurrent `put` calls
- * from the same plugin can both pass the check and jointly exceed quota by up
- * to one object's size. Closing that needs an atomic increment at the host's
- * storage layer, which is worth building when a real plugin's write volume
- * makes the race likely — not before, on a capability with no consumer yet.
+ * A real fix (atomic increment at the host's storage layer) would also close
+ * the race across multiple processes, but nothing here runs as more than one
+ * process today — the same assumption `claimDuePluginJobs` and the scheduler
+ * already make — so a module-level lock buys the correctness that matters now
+ * for the cost of a `Promise` chain, not a storage-layer rewrite for a
+ * capability with no consumer yet.
+ */
+const putLocks = new Map<string, Promise<unknown>>();
+
+function withPutLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prior = putLocks.get(key) ?? Promise.resolve();
+  const run = prior.then(fn, fn);
+  putLocks.set(
+    key,
+    run.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return run;
+}
+
+/**
+ * Build the `storage` capability for one plugin's context.
  */
 export function createStorageCapability(
   host: StorageHost,
@@ -41,21 +59,23 @@ export function createStorageCapability(
   const fq = (key: string) => namespacedKey(scope.teamId, scope.pluginId, key);
 
   return {
-    async put(key, data, opts?: PutOptions) {
-      const [used, limit] = await Promise.all([
-        host.usedBytes(prefix),
-        host.quotaLimitBytes(scope.teamId),
-      ]);
-      if (used + data.byteLength > limit) {
-        throw new Error(
-          `Storage quota exceeded: ${used + data.byteLength} bytes would exceed the ${limit}-byte limit`,
-        );
-      }
-      const ref = await host.put(fq(key), data, {
-        contentType: opts?.contentType,
-        ttlSeconds: opts?.ttlSeconds,
+    put(key, data, opts?: PutOptions) {
+      return withPutLock(prefix, async () => {
+        const [used, limit] = await Promise.all([
+          host.usedBytes(prefix),
+          host.quotaLimitBytes(scope.teamId),
+        ]);
+        if (used + data.byteLength > limit) {
+          throw new Error(
+            `Storage quota exceeded: ${used + data.byteLength} bytes would exceed the ${limit}-byte limit`,
+          );
+        }
+        const ref = await host.put(fq(key), data, {
+          contentType: opts?.contentType,
+          ttlSeconds: opts?.ttlSeconds,
+        });
+        return toBlobRef(ref, prefix);
       });
-      return toBlobRef(ref, prefix);
     },
 
     get(key) {
