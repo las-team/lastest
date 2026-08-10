@@ -6,7 +6,10 @@ import path from "node:path";
 import type { HostBlobRef, StorageHost } from "@lastest/core-storage";
 
 import { STORAGE_ROOT } from "@/lib/storage/paths";
-import { getTeamStorageUsage } from "@/lib/db/queries";
+import {
+  DEFAULT_STORAGE_QUOTA_BYTES,
+  getTeamStorageUsage,
+} from "@/lib/db/queries";
 import { signStorageGrant } from "@/lib/core/storage-grant";
 
 /**
@@ -163,9 +166,7 @@ export const appStorageHost: StorageHost = {
 
   async quotaLimitBytes(teamId) {
     const usage = await getTeamStorageUsage(teamId);
-    // 10 GiB default mirrors `getTeamStorageUsage`'s own fallback for a team
-    // with no quota row — see `src/lib/db/queries/storage.ts`.
-    return usage?.storageQuotaBytes ?? 10_737_418_240;
+    return usage?.storageQuotaBytes ?? DEFAULT_STORAGE_QUOTA_BYTES;
   },
 
   async signedUrl(key, opts) {

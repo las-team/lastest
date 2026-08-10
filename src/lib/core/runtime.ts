@@ -68,6 +68,26 @@ const MANIFESTS: Parameters<typeof resolveRegistry>[0] = [
   explorerPlugin,
 ];
 
+function toTeamRef(team: { id: string; plan: string }): ContextScope["team"] {
+  return {
+    id: team.id,
+    plan: team.plan as Plan,
+    entitlements: entitlementsFor(team.plan as Plan),
+  };
+}
+
+function toRepoRef(
+  teamId: string,
+  repo: { id: string; name: string; defaultBranch: string | null },
+): NonNullable<ContextScope["repo"]> {
+  return {
+    id: repo.id,
+    teamId,
+    name: repo.name,
+    defaultBranch: repo.defaultBranch ?? null,
+  };
+}
+
 /**
  * Resolve the caller to a team, a repo and a logger.
  *
@@ -101,38 +121,20 @@ async function resolveScope(req: ScopeRequest): Promise<ContextScope> {
       );
     }
     return {
-      team: {
-        id: team.id,
-        plan: team.plan as Plan,
-        entitlements: entitlementsFor(team.plan as Plan),
-      },
-      repo: {
-        id: repo.id,
-        teamId: team.id,
-        name: repo.name,
-        defaultBranch: repo.defaultBranch ?? null,
-      },
+      team: toTeamRef(team),
+      repo: toRepoRef(team.id, repo),
       log,
     };
   }
 
   if (req.repositoryId) {
     const { team, repo } = await requireRepoAccess(req.repositoryId);
+    // `repositories.teamId` is nullable in the schema, but `requireRepoAccess`
+    // has already asserted it equals the session's team — so the authorized id
+    // is both non-null and the correct one.
     return {
-      team: {
-        id: team.id,
-        plan: team.plan as Plan,
-        entitlements: entitlementsFor(team.plan as Plan),
-      },
-      repo: {
-        id: repo.id,
-        // `repositories.teamId` is nullable in the schema, but
-        // `requireRepoAccess` has already asserted it equals the session's
-        // team — so the authorized id is both non-null and the correct one.
-        teamId: team.id,
-        name: repo.name,
-        defaultBranch: repo.defaultBranch ?? null,
-      },
+      team: toTeamRef(team),
+      repo: toRepoRef(team.id, repo),
       log,
     };
   }
@@ -147,25 +149,11 @@ async function resolveScope(req: ScopeRequest): Promise<ContextScope> {
     // this whole arrangement exists to prevent.
     const team = await queries.getTeam(req.teamId);
     if (!team) throw new Error(`Unknown team "${req.teamId}"`);
-    return {
-      team: {
-        id: team.id,
-        plan: team.plan as Plan,
-        entitlements: entitlementsFor(team.plan as Plan),
-      },
-      log,
-    };
+    return { team: toTeamRef(team), log };
   }
 
   const { team } = await requireTeamAccess();
-  return {
-    team: {
-      id: team.id,
-      plan: team.plan as Plan,
-      entitlements: entitlementsFor(team.plan as Plan),
-    },
-    log,
-  };
+  return { team: toTeamRef(team), log };
 }
 
 let cached:

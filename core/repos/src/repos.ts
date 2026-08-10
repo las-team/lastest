@@ -2,10 +2,6 @@ import type { ReposCapability, TeamRef } from "@lastest/contracts";
 
 import type { ReposHost } from "./host";
 
-export interface ReposFactoryOptions {
-  readonly host: ReposHost;
-}
-
 /**
  * Build the `repos` capability, scoped to the calling plugin's team.
  *

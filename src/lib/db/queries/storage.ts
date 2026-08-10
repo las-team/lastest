@@ -10,6 +10,9 @@ import {
 import { and, eq, asc, gte, inArray, sql } from "drizzle-orm";
 import { RUN_ANALYTICS_OTHER_ID } from "@/lib/billing/run-usage";
 
+/** 10 GiB — a team's storage quota when it has no quota row. */
+export const DEFAULT_STORAGE_QUOTA_BYTES = 10_737_418_240;
+
 export async function getTeamStorageUsage(teamId: string) {
   const [team] = await db
     .select({
@@ -22,7 +25,7 @@ export async function getTeamStorageUsage(teamId: string) {
 
   if (!team) return null;
 
-  const quotaBytes = team.storageQuotaBytes ?? 10737418240;
+  const quotaBytes = team.storageQuotaBytes ?? DEFAULT_STORAGE_QUOTA_BYTES;
   const usedBytes = team.storageUsedBytes ?? 0;
 
   return {

@@ -61,11 +61,7 @@ export function createTestsCapability(
       requireInRange(input.name, MAX_TEST_NAME_LENGTH, "name");
       requireInRange(input.areaName, MAX_AREA_NAME_LENGTH, "areaName");
       requireInRange(input.targetUrl, MAX_TARGET_URL_LENGTH, "targetUrl");
-      if (input.code.length === 0 || input.code.length > MAX_TEST_CODE_LENGTH) {
-        throw new Error(
-          `"code" must be 1-${MAX_TEST_CODE_LENGTH} characters (got ${input.code.length})`,
-        );
-      }
+      requireInRange(input.code, MAX_TEST_CODE_LENGTH, "code");
 
       const area = await host.resolveOrCreateArea(
         input.repositoryId,
