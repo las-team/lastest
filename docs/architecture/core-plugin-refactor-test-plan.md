@@ -1,5 +1,13 @@
 # Test plan — core/plugin refactor (`claude/core-plugin-refactor-plan`)
 
+> **Status (2026-08-10): §0/§1 executed directly, §2 executed via four parallel
+> agents doing real runtime verification (not a re-read).** Two confirmed
+> regressions, both fixable in one line each — see §2.18 for the full
+> results, or jump straight to "Confirmed regressions" there. §3/§4 (the full
+> feature matrix and manual golden-path walkthrough) are still open — they
+> need an actual browser, which wasn't available in the environment this run
+> executed in.
+
 **Scope of "the refactor" as actually diffed against `main`:** 347 files,
 +35,974/−7,419. This is **not** the full plugin rollout in
 [`core-plugin-refactor.md`](./core-plugin-refactor.md) §9 — Phase 4 (roll out
@@ -218,11 +226,18 @@ tier means" rather than passed through.
 ### 2.6 `core/repos` / `core/tests` — `repos-host.ts`, `tests-host.ts`
 
 **Check:**
-- `ctx.repos.baseUrl(repoId, branch)` resolves correctly for (a) a repo with
-  `branchBaseUrls` set for the target branch, (b) a repo with no
-  `branchBaseUrls` entry for that branch (should fall back to
-  `environment_settings`), (c) a repo with neither. Compare against
-  pre-refactor behavior in `resolveTargetUrl` for the same three cases.
+- `ctx.repos.baseUrl(repoId, branch)` resolution order, confirmed by direct
+  test (2026-08-10): `branchBaseUrls[branch]` → `branchBaseUrls.main` →
+  *any other* entry in `branchBaseUrls` → `environment_settings`. **Correction
+  to the earlier framing here:** "no entry for that branch" does **not** fall
+  straight to `environment_settings` — it falls to any other branch entry
+  first, and only reaches `environment_settings` if `branchBaseUrls` is
+  entirely empty. This matches `core/repos/src/repos.ts`'s own docstring and
+  is byte-identical to the pre-refactor `resolveTargetUrl` logic (diffed
+  against `fb6cd661`), so it's not a behavior change — just correcting how
+  this doc described it. One net-new thing the capability adds that
+  `resolveTargetUrl` never had: a tenancy check (`repo.teamId !== team.id →
+  null`) before resolving anything — a strict improvement, not a regression.
 - `ctx.tests.createQuarantined(input)` — create one from explorer's UI and
   confirm: the new test lands under the correct repo/team (no cross-tenant
   leak — this is called out in `core-scope.md` as *the* sharpest write-into-
@@ -288,11 +303,17 @@ kind of change a missed call site breaks silently:**
 every screen. A visual or behavioral regression here shows up everywhere, not
 in one feature.
 
-- `select.tsx` shrank by ~200 lines — this is the largest single change.
-  Exercise every dropdown you can find: settings dropdowns, plan selectors,
-  check-mode selectors (`verify/check-modes-dialog.tsx`, which also changed on
-  this branch), the environment/branch pickers. Confirm keyboard nav
-  (arrow keys, Enter, Escape), not just mouse clicks.
+- **Correction (2026-08-10): the "select.tsx shrank ~200 lines" framing was
+  wrong.** Diffed `libs/ui/src/select.tsx` against `main`'s
+  `src/components/ui/select.tsx` directly — they're byte-identical (211 lines
+  both sides, same for all 9 primitives, modulo the `cn` import path). The
+  200-line shrink is entirely `src/components/ui/select.tsx` becoming a
+  17-line re-export shim, not a simplification of the implementation. Since
+  every `cva` variant map and exported symbol is untouched, this item is
+  lower-risk than originally framed — but still worth a light pass: exercise
+  a couple of dropdowns (settings dropdowns, plan selectors, check-mode
+  selectors in `verify/check-modes-dialog.tsx`) to confirm the re-export
+  wiring itself resolves correctly at runtime, not just at the type level.
 - `tabs.tsx` — click through every tabbed surface (Verify's step detail tabs,
   Settings sections, Tests detail page) and confirm the active-tab indicator
   and content-switching still work, and that deep-linking to a specific tab
@@ -327,13 +348,28 @@ sites, several inside `qa-agent`). So this isn't core-boundary risk — it's
 
 ### 2.12 `ranger.ts`, `libs/page-map`
 
-- Ranger (autonomous test-path exploration used by, e.g., the recorder/
-  authoring flow) no longer calls `chromium.connectOverCDP` directly — it
-  goes through `ctx.browser` and calls into the new `libs/page-map` for DOM
-  extraction (shared with explorer). Run Ranger against a real page and
-  confirm the page map it produces is equivalent to pre-refactor output —
-  since the extraction logic moved verbatim per the migration doc, a
-  regression here would most likely be a wiring bug (wrong page passed in),
+**Correction after running `pnpm arch` (2026-08-10): `ranger.ts` itself still
+directly imports `playwright` at line 1** — `ranger::browser: 1` is unchanged
+from `tools/architecture/baseline.json`, i.e. this specific violation was
+never in scope for this branch. What actually changed, per
+`explorer-migration-result.md` §2, is narrower: explorer's own `planner.ts`
+and `research.ts` used to call into `ranger.ts` (`@/lib/playwright/ranger`,
+a cross-plugin import) for `browsePageMap(cdpUrl, url)`; that call is gone,
+and the DOM-extraction half of it now lives verbatim in the new
+`libs/page-map`, shared by both explorer and (still) `ranger.ts` internally.
+`ranger.ts`'s own direct-CDP connect for its primary use (autoring/recorder
+flow) is untouched.
+
+- Confirm explorer no longer imports anything from `src/lib/playwright/ranger`
+  (`grep -rn "playwright/ranger" plugins/explorer` should be empty) — that's
+  the actual change to verify, not a ranger-side behavior change.
+- Run Ranger directly (its own recorder/authoring entry point) and confirm it
+  still works — it's on the same direct-CDP path as before, so this is a
+  plain regression check, not a boundary-migration check.
+- Run Explorer against a real page and confirm the page map it produces via
+  `libs/page-map` is equivalent to what `ranger.ts`'s old `browsePageMap`
+  produced — since the extraction logic moved verbatim per the migration doc,
+  a regression here would most likely be a wiring bug (wrong page passed in),
   not a logic bug.
 
 ### 2.13 Scheduling (`cron.ts` → `libs/cron` shim, `scheduler.ts`)
@@ -404,6 +440,136 @@ sites, several inside `qa-agent`). So this isn't core-boundary risk — it's
 - Check the feature flag in `playback/feature-flag.ts` — confirm both the
   flag-on and flag-off code paths render something coherent (not a half-
   migrated UI) if the flag is meant to still gate anything at this point.
+
+---
+
+## 2.18 Results — 2026-08-10 verification run
+
+§0, §1, and §2 were executed end to end: §0/§1 directly (automated gates,
+prerequisites, the EB pool + app both brought up); §2's 17 targets fanned out
+across four parallel agents, each doing real runtime verification (DB
+create/delete cycles, direct capability-function calls, curl round-trips
+against the live app) rather than a re-read of the code, with an explicit
+constraint that no browser-automation tool was available in this environment
+— items needing an actual rendered UI are marked accordingly below.
+
+### Confirmed regressions (2) — fix before this branch ships
+
+1. **`plugin_jobs` rows are orphaned on team deletion (§2.8, GDPR).**
+   `packages/db/src/schema/runs.ts:184`'s `pluginJobs` table has no FK to
+   `teams` and isn't a plugin-owned schema, so it's invisible to both
+   `deleteTeam`'s FK-cascade path and `runDeletionHooks`
+   (`core/data/src/deletion.ts:51`, which only walks plugin-registered
+   schemas). Reproduced directly: create a team, enqueue a `plugin_jobs` row
+   scoped to it, delete the team, the row survives with the deleted team's id
+   still in `team_id`. Currently masked because zero plugins call
+   `ctx.jobs.enqueue` yet (confirmed by grep and by `runtime.ts`'s own
+   comment) — will silently leak data the moment one does. **Fix:** either
+   add `.references(() => teams.id, { onDelete: "cascade" })` to
+   `plugin_jobs.team_id`, or add it to `runDeletionHooks`'s core-table sweep.
+
+2. **`/api/plugin-storage` is missing from `PUBLIC_PATHS` in `src/proxy.ts`
+   (§2.4).** The route is designed for grant-only auth (no session needed —
+   same pattern as `/api/embedded/stream/ws`, which *is* listed), but the
+   front-proxy 307-redirects any unauthenticated request there to `/login`
+   before the route handler ever runs. Verified with curl: grant + no cookie
+   → `307`; identical grant + session cookie → `200` with correct bytes. This
+   breaks the feature's actual intended usage (a caller with a grant but no
+   app session — the entire point of a signed grant). **Fix:** add
+   `"/api/plugin-storage"` to `PUBLIC_PATHS` in `src/proxy.ts` (one line, same
+   list `/api/embedded/stream/ws` is already in).
+
+Both were reproduced with concrete before/after evidence, not inferred from
+reading code, and both fall inside the sign-off checklist's escalate-
+immediately class (§8 below still applies: GDPR-class and a broken security
+boundary, respectively).
+
+### Everything else checked: no other regressions found
+
+- **§2.1 `core/browser`** — the real integration suite (`browser.integration.test.ts`,
+  `isolatedPage`/`withBrowser`/`withBrowserSwarm` against a live EB) passed
+  15/15 once the app was actually running for EBs to register against (an
+  environment-setup miss on the first attempt, not a code issue — see §1
+  above). Release-on-throw, deadline teardown, and swarm isolation all
+  confirmed working.
+- **§2.2 `core/ai`** — the `explorerModel` setting only overrides the `fast`
+  tier (tester calls), not `balanced` (planner/analyst) — confirmed
+  deliberate and documented in `plugins/explorer/src/ai/gateway.ts:13-27`,
+  just not disclosed in the Settings UI copy. Autosave wiring for the three
+  new AI settings fields confirmed present in all four required places.
+- **§2.3 `core/jobs`** — dedup and unregistered-type rejection both work
+  correctly at the host layer (`jobs-host.ts`); the raw query layer has no
+  gate of its own, harmless today since nothing calls it directly. The
+  worker loop (`processDuePluginJobs`) is correct but has zero callers
+  anywhere in `src/` — genuinely unwired, not broken.
+- **§2.5 `core/events`** — both the non-plugin and `ctx.events` paths land
+  correctly in `activity_events` and are retrievable via
+  `/api/activity-feed/history`. The `sourceType` closed-union bend is real
+  (explorer's raw id `"explorer"` isn't in the `ActivitySourceType` union)
+  but confirmed cosmetic — falls through to a generic default in the UI, not
+  a crash.
+- **§2.4 `core/storage`** (beyond the regression above) — expiry, and the
+  storage-grant/stream-grant cross-type rejection, both verified to hold at
+  the crypto layer; `teams.storageUsedBytes` confirmed independent as
+  designed.
+- **§2.6 `core/repos`/`core/tests`** — resolution order and tenancy checks
+  verified correct (see the §2.6 correction above); `createQuarantined`'s
+  near-duplicate functional-area accumulation behaves exactly as the RFC
+  predicted (nuisance, not a tenancy break); cross-tenant reads/writes both
+  correctly rejected.
+- **§2.7 schema split** — every table reachable from the barrel, no deep
+  imports anywhere, no glob collision.
+- **§2.9 billing gating** — every `hasQaAgentAccess`/`assertQaAgentAccess`
+  call site correctly threads `billingEnabled`; verified end to end with a
+  real HTTP call against a free-plan team in this (billing-disabled)
+  environment — QA Agent access was not rejected, as expected.
+- **§2.10 UI primitives** — see the correction above; all 9 primitives are
+  byte-identical to `main`, only their `src/components/ui/*` counterparts
+  became re-export shims. Lowest actual risk of anything in §2 despite
+  looking like the widest blast radius on paper.
+- **§2.11 `qa-agent`** — the 862-line action-file diff and the new 392-line
+  `explore.ts` were read in full; no accidental behavior changes found (no
+  dropped awaits, inverted conditions, or silently swallowed errors beyond
+  pre-existing patterns). Two real test-coverage gaps, not regressions:
+  `exploreTargetApp`'s browser-driving orchestration and `storage-state-diff.ts`
+  both ship with zero direct tests.
+- **§2.12 `ranger.ts`/`libs/page-map`** — see the correction above;
+  extraction logic confirmed verbatim-identical between the old inline
+  closure and the new `libs/page-map/src/scripts.ts`.
+- **§2.13 scheduling** — the `cron.ts` shim is a byte-identical re-export of
+  `libs/cron` (diffed directly, not just claimed); regular scheduled-run
+  dispatch (as opposed to explorer's trigger dispatch, which did change) is
+  byte-unchanged and was exercised at runtime — a real due schedule was
+  picked up and dispatched on the next tick.
+- **§2.14 GitHub issues / `confirm-on-green.ts`** — the `'auto'`/`'open'`
+  scope guard matches the actual query filter exactly; the function is only
+  reachable from trusted server-side build-finalization code, never a
+  client-invokable `"use server"` export.
+- **§2.15 comparison scoring** — `scorer.ts`'s new `storageState` evidence
+  entry is additive-only and can never gate a verdict on its own (only
+  `"low"` signal); `storage-state-diff.ts` correctly returns a clean result
+  for the no-differences case. No dedicated test file for the new function.
+- **§2.16 crypto-fields** — `src/lib/crypto.ts` has zero diff against `main`
+  (byte-identical `PREFIX`, algorithm, key derivation), so the "old
+  ciphertext becomes unreadable" risk doesn't apply regardless of the dev
+  DB's lack of pre-existing encrypted rows to test against.
+- **§2.17 playback** — feature flag confirmed to gate two real consumers
+  correctly on both the flag-on and flag-off paths, no half-migrated UI;
+  `resolveStepSegments`'s degradation ladder verified directly against 5
+  cases via direct execution.
+
+### What genuinely could not be verified here
+
+No browser-automation tool was available in this environment, so nothing
+requiring an actual rendered/interactive UI was exercised end to end:
+live keyboard-nav/visual inspection of the UI primitives, the EB live-stream
+viewer, the video-playback scrubber's visual sync, and any full click-through
+flow (explorer/qa-agent live runs, the golden-path walkthrough in §4 below).
+§2's code-level and API-level verification substantially de-risks these —
+particularly for the UI primitives, where "byte-identical to `main`" is
+stronger evidence than a visual click-through would have produced anyway —
+but §4's manual pass is still the right next step for anyone with a browser
+in hand.
 
 ---
 
