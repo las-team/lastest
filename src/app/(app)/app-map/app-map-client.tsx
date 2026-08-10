@@ -667,6 +667,17 @@ export function AppMapClient({
     [graph, excludePatterns],
   );
 
+  const { coveredCount, uncoveredCount } = useMemo(
+    () => ({
+      coveredCount: filtered.nodes.filter((n) => n.coverageStatus === "covered")
+        .length,
+      uncoveredCount: filtered.nodes.filter(
+        (n) => n.coverageStatus === "uncovered",
+      ).length,
+    }),
+    [filtered],
+  );
+
   const nodesById = useMemo(
     () => new Map(filtered.nodes.map((n) => [n.id, n])),
     [filtered],
@@ -814,13 +825,6 @@ export function AppMapClient({
       />
     );
   }
-
-  const coveredCount = filtered.nodes.filter(
-    (n) => n.coverageStatus === "covered",
-  ).length;
-  const uncoveredCount = filtered.nodes.filter(
-    (n) => n.coverageStatus === "uncovered",
-  ).length;
 
   return (
     <div

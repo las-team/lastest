@@ -1334,10 +1334,11 @@ async function runQaDiscoverSwarm(args: {
     return { ...result, finalExplore: explore };
   } finally {
     await mergeMetadata(sessionId, { streamUrl: undefined }).catch(() => {});
-    // ALL claimed EBs go back — on success, failure, AND cancel.
-    for (const eb of ebs) {
-      await releasePoolEB(eb.runnerId).catch(() => {});
-    }
+    // ALL claimed EBs go back — on success, failure, AND cancel. Independent
+    // releases, so they run concurrently rather than one at a time.
+    await Promise.allSettled(
+      ebs.map((eb) => releasePoolEB(eb.runnerId).catch(() => {})),
+    );
   }
 }
 

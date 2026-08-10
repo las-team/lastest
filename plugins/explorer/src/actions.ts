@@ -238,9 +238,7 @@ export async function resumeExplorerAgent(
   });
   // Re-scoped to the session's repo: the resume request only proved team
   // access, and the pipeline needs a repo-scoped context to run under.
-  const scoped = (await explorerWiring().runtime.contextFor(explorerPlugin, {
-    repositoryId: session.repositoryId,
-  })) as ExplorerContext;
+  const { ctx: scoped } = await context(session.repositoryId);
   void runPipeline(scoped, host, sessionId).catch((err) =>
     ctx.log.error({ err, sessionId }, "explorer resume crashed"),
   );
@@ -261,9 +259,7 @@ export async function cancelExplorerAgent(
   // event to `ctx.repo.id`, so cancellation needs a repo-scoped context to
   // carry that attribution at all — same reason `resumeExplorerAgent` above
   // re-scopes before it needs a repo-bound capability.
-  const scoped = (await explorerWiring().runtime.contextFor(explorerPlugin, {
-    repositoryId: session.repositoryId,
-  })) as ExplorerContext;
+  const { ctx: scoped } = await context(session.repositoryId);
   void scoped.events.emit("session:error", {
     sessionId,
     summary: "Explorer cancelled by user",
@@ -481,10 +477,11 @@ export async function dispatchDueExplorerTriggers(): Promise<number> {
         teamId: trigger.teamId,
       })) as ExplorerContext;
       const db = dataOf(ctx, host);
+      const decline = () => q.markTriggerFired(db, trigger.id, { nextRunAt });
 
       const active = await q.getActiveSession(db, trigger.repositoryId);
       if (active) {
-        await q.markTriggerFired(db, trigger.id, { nextRunAt });
+        await decline();
         continue;
       }
 
@@ -492,7 +489,7 @@ export async function dispatchDueExplorerTriggers(): Promise<number> {
       // must stop getting scheduled runs after downgrading — re-armed rather
       // than disabled, so it resumes if they upgrade again.
       if (!ctx.team.entitlements.has("qa-agent")) {
-        await q.markTriggerFired(db, trigger.id, { nextRunAt });
+        await decline();
         continue;
       }
 
@@ -502,7 +499,7 @@ export async function dispatchDueExplorerTriggers(): Promise<number> {
           .baseUrl(trigger.repositoryId, ctx.repo?.defaultBranch)
           .catch(() => null));
       if (!targetUrl) {
-        await q.markTriggerFired(db, trigger.id, { nextRunAt });
+        await decline();
         continue;
       }
 

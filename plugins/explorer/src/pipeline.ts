@@ -219,6 +219,13 @@ export async function runPipeline(
     });
   };
 
+  const startStep = (index: number): Promise<void> =>
+    patchStep(index, {
+      status: "active",
+      startedAt: new Date().toISOString(),
+      error: undefined,
+    });
+
   const mergeMeta = async (
     patch: Partial<ExplorerSessionMetadata>,
   ): Promise<void> => {
@@ -286,11 +293,7 @@ export async function runPipeline(
     index: number,
     repositoryId: string,
   ): Promise<boolean> {
-    await patchStep(index, {
-      status: "active",
-      startedAt: new Date().toISOString(),
-      error: undefined,
-    });
+    await startStep(index);
     emit(repositoryId, "step:start", "Preflight", { stepId: "explorer_setup" });
 
     const session = await load();
@@ -333,11 +336,7 @@ export async function runPipeline(
     index: number,
     repositoryId: string,
   ): Promise<boolean> {
-    await patchStep(index, {
-      status: "active",
-      startedAt: new Date().toISOString(),
-      error: undefined,
-    });
+    await startStep(index);
     emit(repositoryId, "step:start", "Resolving authentication", {
       stepId: "explorer_login",
     });
@@ -741,11 +740,7 @@ export async function runPipeline(
     state: { hash: string; url: string },
     knowledge: Awaited<ReturnType<typeof q.matchKnowledgeForUrl>>,
   ): Promise<void> {
-    await patchStep(stepIndex, {
-      status: "active",
-      startedAt: new Date().toISOString(),
-      error: undefined,
-    });
+    await startStep(stepIndex);
     emit(
       repositoryId,
       "step:start",
@@ -798,40 +793,53 @@ export async function runPipeline(
             const scenario = capped[i];
             logs[scenario.id] = log;
 
-            if (log.status === "failed") {
-              failed++;
-              const finding = await q
+            const recordFinding = (opts: {
+              severity: "low" | "medium" | "high";
+              title: string;
+              description: string;
+              evidence: Record<string, unknown>;
+            }) =>
+              q
                 .createFinding(db, {
                   repositoryId,
                   teamId,
                   sessionId,
                   kind: "defect",
-                  // A `psycho`-style scenario is *trying* to break things, so a
-                  // failure there is weaker evidence of a real defect than the
-                  // same failure on a normal user flow.
-                  severity: scenario.style === "psycho" ? "medium" : "high",
-                  title: `${scenario.title} — ${log.summary?.slice(0, 100) ?? "failed"}`,
-                  description: [
-                    `Scenario (${scenario.style}): ${scenario.title}`,
-                    scenario.expectedOutcome
-                      ? `Expected: ${scenario.expectedOutcome}`
-                      : null,
-                    `Observed: ${log.summary ?? "the flow failed"}`,
-                    `Final URL: ${log.finalUrl ?? state.url}`,
-                  ]
-                    .filter(Boolean)
-                    .join("\n"),
+                  severity: opts.severity,
+                  title: opts.title,
+                  description: opts.description,
                   pageStateHash: log.finalStateHash ?? state.hash,
                   url: log.finalUrl ?? state.url,
                   scenario,
-                  evidence: {
-                    consoleErrors: log.consoleErrors,
-                    failedRequests: log.failedRequests,
-                    actionSteps: log.steps.slice(-8),
-                  },
+                  evidence: opts.evidence,
                   status: "open",
                 })
                 .catch(() => null);
+
+            if (log.status === "failed") {
+              failed++;
+              const finding = await recordFinding({
+                // A `psycho`-style scenario is *trying* to break things, so a
+                // failure there is weaker evidence of a real defect than the
+                // same failure on a normal user flow.
+                severity: scenario.style === "psycho" ? "medium" : "high",
+                title: `${scenario.title} — ${log.summary?.slice(0, 100) ?? "failed"}`,
+                description: [
+                  `Scenario (${scenario.style}): ${scenario.title}`,
+                  scenario.expectedOutcome
+                    ? `Expected: ${scenario.expectedOutcome}`
+                    : null,
+                  `Observed: ${log.summary ?? "the flow failed"}`,
+                  `Final URL: ${log.finalUrl ?? state.url}`,
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
+                evidence: {
+                  consoleErrors: log.consoleErrors,
+                  failedRequests: log.failedRequests,
+                  actionSteps: log.steps.slice(-8),
+                },
+              });
               if (finding) {
                 findingIds.push(finding.id);
                 emit(
@@ -850,38 +858,28 @@ export async function runPipeline(
                 (log.failedRequests?.length ?? 0) > 0)
             ) {
               passed++;
-              const finding = await q
-                .createFinding(db, {
-                  repositoryId,
-                  teamId,
-                  sessionId,
-                  kind: "defect",
-                  severity: "low",
-                  title: `Console/network errors during "${scenario.title}"`,
-                  description: [
-                    "The scenario passed, but the app surfaced errors while it ran.",
-                    log.consoleErrors?.length
-                      ? `Console: ${log.consoleErrors.slice(0, 5).join(" | ")}`
-                      : null,
-                    log.failedRequests?.length
-                      ? `Failed requests: ${log.failedRequests
-                          .slice(0, 5)
-                          .map((r) => `${r.method} ${r.url} → ${r.status}`)
-                          .join(" | ")}`
-                      : null,
-                  ]
-                    .filter(Boolean)
-                    .join("\n"),
-                  pageStateHash: log.finalStateHash ?? state.hash,
-                  url: log.finalUrl ?? state.url,
-                  scenario,
-                  evidence: {
-                    consoleErrors: log.consoleErrors,
-                    failedRequests: log.failedRequests,
-                  },
-                  status: "open",
-                })
-                .catch(() => null);
+              const finding = await recordFinding({
+                severity: "low",
+                title: `Console/network errors during "${scenario.title}"`,
+                description: [
+                  "The scenario passed, but the app surfaced errors while it ran.",
+                  log.consoleErrors?.length
+                    ? `Console: ${log.consoleErrors.slice(0, 5).join(" | ")}`
+                    : null,
+                  log.failedRequests?.length
+                    ? `Failed requests: ${log.failedRequests
+                        .slice(0, 5)
+                        .map((r) => `${r.method} ${r.url} → ${r.status}`)
+                        .join(" | ")}`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
+                evidence: {
+                  consoleErrors: log.consoleErrors,
+                  failedRequests: log.failedRequests,
+                },
+              });
               if (finding) findingIds.push(finding.id);
             } else if (log.status === "passed") {
               passed++;
@@ -925,11 +923,7 @@ export async function runPipeline(
     iteration: number,
     stepIndex: number,
   ): Promise<boolean> {
-    await patchStep(stepIndex, {
-      status: "active",
-      startedAt: new Date().toISOString(),
-      error: undefined,
-    });
+    await startStep(stepIndex);
     const session = await load();
     if (!session) return false;
     const meta = session.metadata;
@@ -996,11 +990,7 @@ export async function runPipeline(
     index: number,
     repositoryId: string,
   ): Promise<boolean> {
-    await patchStep(index, {
-      status: "active",
-      startedAt: new Date().toISOString(),
-      error: undefined,
-    });
+    await startStep(index);
     const session = await load();
     if (!session?.metadata.targetUrl) return false;
     const meta = session.metadata;
@@ -1071,11 +1061,7 @@ export async function runPipeline(
     index: number,
     repositoryId: string,
   ): Promise<boolean> {
-    await patchStep(index, {
-      status: "active",
-      startedAt: new Date().toISOString(),
-      error: undefined,
-    });
+    await startStep(index);
     const session = await load();
     if (!session) return false;
     const meta = session.metadata;
@@ -1094,15 +1080,17 @@ export async function runPipeline(
       signal,
     });
 
-    for (const cluster of report.clusters) {
-      await q
-        .updateFindingCluster(db, cluster.findingIds, {
-          rootCauseCluster: cluster.rootCause,
-          severity: cluster.severity,
-          kind: cluster.kind,
-        })
-        .catch(() => {});
-    }
+    await Promise.all(
+      report.clusters.map((cluster) =>
+        q
+          .updateFindingCluster(db, cluster.findingIds, {
+            rootCauseCluster: cluster.rootCause,
+            severity: cluster.severity,
+            kind: cluster.kind,
+          })
+          .catch(() => {}),
+      ),
+    );
 
     await mergeMeta({ report });
     await patchStep(index, {

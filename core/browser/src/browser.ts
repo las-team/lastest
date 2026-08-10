@@ -109,7 +109,9 @@ export function createBrowserCapability(
     const teardown = async () => {
       if (closed) return;
       closed = true;
-      for (const ctx of isolatedContexts) await ctx.close().catch(() => {});
+      await Promise.all(
+        isolatedContexts.map((ctx) => ctx.close().catch(() => {})),
+      );
       // Over `connectOverCDP` this disconnects the CDP session only — it does
       // not terminate the EB's Chromium. Releasing the pool slot is what frees
       // the capacity, and that happens below.

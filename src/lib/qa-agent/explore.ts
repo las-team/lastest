@@ -34,6 +34,17 @@ const IDLE_POLL_MS = 250;
 const ASSET_RE =
   /\.(png|jpe?g|gif|svg|webp|ico|css|js|mjs|map|woff2?|ttf|otf|pdf|zip|gz|mp4|webm|mp3|txt|json|xml)(\?|$)/i;
 
+/** Navigate, then give the page a bounded chance to settle before scraping it. */
+async function gotoAndSettle(page: Page, url: string): Promise<void> {
+  await page.goto(url, {
+    waitUntil: "domcontentloaded",
+    timeout: PAGE_NAV_TIMEOUT_MS,
+  });
+  await page
+    .waitForLoadState("networkidle", { timeout: PAGE_SETTLE_TIMEOUT_MS })
+    .catch(() => {});
+}
+
 export interface FrontierEntry {
   url: string;
   depth: number;
@@ -299,15 +310,7 @@ export async function exploreTargetApp(opts: ExploreTargetAppOptions): Promise<{
         // EB is its own browser).
         if (!opts.storageStateJson && opts.credentials && opts.loginUrl) {
           try {
-            await page.goto(opts.loginUrl, {
-              waitUntil: "domcontentloaded",
-              timeout: PAGE_NAV_TIMEOUT_MS,
-            });
-            await page
-              .waitForLoadState("networkidle", {
-                timeout: PAGE_SETTLE_TIMEOUT_MS,
-              })
-              .catch(() => {});
+            await gotoAndSettle(page, opts.loginUrl);
             loginAttempted =
               (await attemptLogin(page, opts.credentials)) || loginAttempted;
           } catch {
@@ -330,15 +333,7 @@ export async function exploreTargetApp(opts: ExploreTargetAppOptions): Promise<{
           }
           observers.reset();
           try {
-            await page.goto(entry.url, {
-              waitUntil: "domcontentloaded",
-              timeout: PAGE_NAV_TIMEOUT_MS,
-            });
-            await page
-              .waitForLoadState("networkidle", {
-                timeout: PAGE_SETTLE_TIMEOUT_MS,
-              })
-              .catch(() => {});
+            await gotoAndSettle(page, entry.url);
             const dom = await extractDom(page);
             const snapshot: QaPageSnapshot = {
               url: entry.url,
