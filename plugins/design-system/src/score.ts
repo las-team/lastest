@@ -1,5 +1,5 @@
 /**
- * Design-system compliance score — mirrors `lib/a11y/wcag-score.ts`.
+ * Design-system compliance score — mirrors `@lastest/plugin-a11y`'s scorer.
  *
  * Start at 100, deduct severity × min(nodes, 3) × category-weight per
  * violation, clamp to [0,100]. Color and font-family carry the highest
@@ -11,7 +11,7 @@ import type {
   DesignSystemScoreSummary,
   DesignSystemTokenUsage,
   DesignTokenCategory,
-} from "@/lib/db/schema";
+} from "@lastest/eb-protocol";
 
 const SEVERITY_WEIGHTS: Record<string, number> = {
   critical: 10,

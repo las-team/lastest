@@ -32,6 +32,8 @@ import type {
   ConsoleEntry,
 } from "@lastest/eb-protocol";
 
+export type { DesignSystemScoreSummary } from "@lastest/eb-protocol";
+
 import type {
   DesignSystemConfig,
   DiffMetadata,
@@ -392,19 +394,6 @@ export interface CapturedScreenshot {
   // document-relative (see selector-utils). Optional/back-compat: jsonb column,
   // so adding this needs no migration; absent on legacy rows.
   domSnapshot?: DomSnapshotData;
-}
-
-export interface DesignSystemScoreSummary {
-  score: number;
-  totalRules: number;
-  passedRules: number;
-  violatedRules: number;
-  bySeverity: {
-    critical: number;
-    serious: number;
-    moderate: number;
-    minor: number;
-  };
 }
 
 // Success criteria / assertion tracking

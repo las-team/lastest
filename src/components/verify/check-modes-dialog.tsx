@@ -24,6 +24,7 @@ import {
   Link as LinkIcon,
   Webhook,
   Database,
+  type LucideIcon,
 } from "lucide-react";
 import { savePlaywrightSettings } from "@/server/actions/settings";
 import {
@@ -33,6 +34,7 @@ import {
   checkModesToSettingsPatch,
   defaultCheckModes,
 } from "@/lib/verify/check-modes";
+import { CHECK_LAYERS } from "@/lib/verify/check-layers";
 
 interface CheckModesDialogProps {
   open: boolean;
@@ -49,84 +51,33 @@ interface CheckModesDialogProps {
 interface LayerMeta {
   id: CheckLayer;
   name: string;
-  icon: typeof Eye;
+  icon: LucideIcon;
   description: string;
 }
 
-const LAYERS: LayerMeta[] = [
-  {
-    id: "visual",
-    name: "Visual",
-    icon: Eye,
-    description: "Pixel screenshot diff against the baseline.",
-  },
-  {
-    id: "text",
-    name: "Text",
-    icon: FileText,
-    description:
-      "Capture page innerText alongside each screenshot and diff it.",
-  },
-  {
-    id: "dom",
-    name: "DOM",
-    icon: Code2,
-    description: "Capture DOM snapshots and overlay element changes.",
-  },
-  {
-    id: "network",
-    name: "Network",
-    icon: Globe,
-    description: "Record HTTP traffic and gate on 4xx/5xx responses.",
-  },
-  {
-    id: "console",
-    name: "Console",
-    icon: Terminal,
-    description:
-      "Surface console errors. Capture is always on; mode governs the verdict.",
-  },
-  {
-    id: "a11y",
-    name: "A11y",
-    icon: Accessibility,
-    description: "Run axe-core WCAG 2.2 AA compliance checks.",
-  },
-  {
-    id: "design",
-    name: "Design",
-    icon: Palette,
-    description:
-      "Compare computed tokens (colors / radii / fonts) against the repo bundle.",
-  },
-  {
-    id: "perf",
-    name: "Perf",
-    icon: Gauge,
-    description:
-      "Capture Web Vitals (LCP, CLS, TBT) and compare against the baseline.",
-  },
-  {
-    id: "url",
-    name: "URL",
-    icon: LinkIcon,
-    description: "Compare the trajectory of URLs visited during the test.",
-  },
-  {
-    id: "api",
-    name: "API",
-    icon: Webhook,
-    description:
-      "Headless HTTP request + response assertions (API-type tests). A failed status/schema/body assertion gates the step.",
-  },
-  {
-    id: "storage",
-    name: "State",
-    icon: Database,
-    description:
-      "Diff end-of-run cookies + localStorage against the baseline run. Capture is always on; informational — never fails a test.",
-  },
-];
+/** `CheckLayerDescriptor.icon` is a lucide-react icon *name* (so
+ *  `core/contracts` and a plugin's `check-layer.ts` stay JSX-free) —
+ *  resolved to the real component here, the one place that renders it. */
+const ICONS: Record<string, LucideIcon> = {
+  Eye,
+  FileText,
+  Code2,
+  Globe,
+  Terminal,
+  Accessibility,
+  Palette,
+  Gauge,
+  Link: LinkIcon,
+  Webhook,
+  Database,
+};
+
+const LAYERS: LayerMeta[] = CHECK_LAYERS.map((layer) => ({
+  id: layer.id,
+  name: layer.name,
+  icon: ICONS[layer.icon] ?? Eye,
+  description: layer.description,
+}));
 
 const MODE_OPTIONS: {
   id: CheckMode;

@@ -1,3 +1,4 @@
+import { designSystemPlugin } from "@lastest/plugin-design-system";
 import { eventsPlugin } from "@lastest/plugin-events";
 import { explorerPlugin } from "@lastest/plugin-explorer";
 import type { resolveRegistry } from "@lastest/kernel";
@@ -23,4 +24,5 @@ import type { resolveRegistry } from "@lastest/kernel";
 export const MANIFESTS: Parameters<typeof resolveRegistry>[0] = [
   eventsPlugin,
   explorerPlugin,
+  designSystemPlugin,
 ];

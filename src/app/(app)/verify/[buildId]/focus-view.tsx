@@ -69,6 +69,7 @@ import {
   type CheckModeMap,
   type CheckLayer,
 } from "@/lib/verify/check-modes";
+import { CHECK_LAYER_BY_ID } from "@/lib/verify/check-layers";
 import { A11yComplianceCard } from "@/components/builds/a11y-compliance-card";
 import { A11yViolationsCard } from "@/components/builds/a11y-violations-card";
 import { DesignSystemComplianceCard } from "@/components/builds/design-system-compliance-card";
@@ -271,13 +272,19 @@ function classifyLayer(
       return result?.a11yViolations != null || result?.a11yPassesCount != null
         ? "clean"
         : "absent";
-    case "design":
+    case "design": {
       // Same opt-in shape as a11y: only marked captured when the EB
-      // harvester ran (violations array or rulesChecked is non-null).
-      return result?.designSystemViolations != null ||
-        result?.designSystemRulesChecked != null
-        ? "clean"
-        : "absent";
+      // harvester ran. Delegates to the plugin instead of duplicating its
+      // knowledge of which result fields mean "captured" — see
+      // `plugins/design-system/src/check-layer.ts`.
+      const captured =
+        !!result &&
+        (CHECK_LAYER_BY_ID.get("design")?.wasCaptured?.(
+          result as unknown as Record<string, unknown>,
+        ) ??
+          false);
+      return captured ? "clean" : "absent";
+    }
     case "perf":
       if (!result?.status) return "absent";
       return "clean";

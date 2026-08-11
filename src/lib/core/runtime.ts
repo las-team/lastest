@@ -22,6 +22,7 @@ import {
   type ScopeRequest,
 } from "@lastest/kernel";
 import { sql } from "@lastest/db";
+import { configureDesignSystem } from "@lastest/plugin-design-system";
 import { configureEvents } from "@lastest/plugin-events";
 import { configureExplorer } from "@lastest/plugin-explorer";
 
@@ -30,6 +31,7 @@ import * as queries from "@/lib/db/queries";
 import { getLogger } from "@/lib/logger";
 import { createAiFactory } from "@/lib/core/ai-capability";
 import { appBrowserHost } from "@/lib/core/browser-host";
+import { appDesignSystemHost } from "@/lib/core/design-system-host";
 import { entitlementsFor } from "@/lib/core/entitlements";
 import { appEventsHost } from "@/lib/core/events-host";
 import { appExplorerHost } from "@/lib/core/explorer-host";
@@ -187,6 +189,7 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
     host: appExplorerHost,
     data: data.capability("explorer"),
   });
+  configureDesignSystem(appDesignSystemHost);
 
   cached = { runtime, data, registry };
   return runtime;

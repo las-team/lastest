@@ -1516,7 +1516,7 @@ async function runBuildAsync(
     try {
       const { aggregateA11yForBuild } = await import("@/lib/a11y/wcag-score");
       const { aggregateDesignSystemForBuild } =
-        await import("@/lib/design-system/score");
+        await import("@lastest/plugin-design-system/score");
       const testResultsForRollup = await queries.getTestResultsByRun(testRunId);
       const hasA11yData = testResultsForRollup.some(
         (r) => r.a11yViolations != null || r.a11yPassesCount != null,

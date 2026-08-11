@@ -19,7 +19,7 @@ import type {
   DesignRoleToken,
   DesignToken,
   DesignTokenCategory,
-} from "@/lib/db/schema";
+} from "@lastest/eb-protocol";
 
 const HEX_RE = /^#([0-9a-f]{3,8})$/i;
 const RGB_RE =

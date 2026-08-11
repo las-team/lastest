@@ -1,4 +1,5 @@
 import type { CheckLayerDescriptor } from "@lastest/contracts";
+import { designSystemCheckLayer } from "@lastest/plugin-design-system/check-layer";
 
 import { CORE_CHECK_LAYER_DESCRIPTORS } from "./core-check-layers";
 
@@ -24,10 +25,11 @@ import { CORE_CHECK_LAYER_DESCRIPTORS } from "./core-check-layers";
  * `getPluginRuntime()`, since every plugin also lists `checkLayers` on its
  * main manifest.
  */
-// PR B adds: `import { designSystemCheckLayer } from "@lastest/plugin-design-system/check-layer";`
 // PR C adds: `import { a11yCheckLayer } from "@lastest/plugin-a11y/check-layer";`
-// then lists each descriptor below.
-const PLUGIN_CHECK_LAYER_DESCRIPTORS: readonly CheckLayerDescriptor[] = [];
+// then lists it below.
+const PLUGIN_CHECK_LAYER_DESCRIPTORS: readonly CheckLayerDescriptor[] = [
+  designSystemCheckLayer,
+];
 
 export const CHECK_LAYERS: readonly CheckLayerDescriptor[] = [
   ...CORE_CHECK_LAYER_DESCRIPTORS,

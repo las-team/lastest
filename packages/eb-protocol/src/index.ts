@@ -133,6 +133,99 @@ export type DesignSystemTokenUsage = Partial<
   Record<DesignTokenCategory, Record<string, number>>
 >;
 
+// ── Design system config + score (persisted jsonb payload shapes,
+// packages/db/src/schema/{shared,tests}.ts columns, and
+// plugins/design-system's own token parser/scorer) ─────────────────────────
+
+/** A token with a display role and the value it resolves to (after
+ *  `var()` chasing). Used in the Setup preview to show "BRAND · Red ·
+ *  #E03E36" tiles instead of just raw token names. */
+export interface DesignRoleToken {
+  /** Token name in CSS (`--c-red`). */
+  name: string;
+  /** Resolved literal value (hex / px / family). */
+  value: string;
+  /** Optional uppercase eyebrow label ("BRAND", "ACTION", "ACCENT") that
+   *  the preview puts on the tile. Inferred from the token name by the
+   *  parser. */
+  role?: string;
+  /** Optional human label ("Red", "Steel Blue") for the tile. Defaults
+   *  to a Title-Cased version of the name suffix. */
+  label?: string;
+}
+
+export interface DesignSystemGroups {
+  brandPalette?: DesignRoleToken[];
+  surfaces?: DesignRoleToken[];
+  inkScale?: DesignRoleToken[];
+  semantic?: DesignRoleToken[];
+  radii?: DesignRoleToken[];
+  spacing?: DesignRoleToken[];
+  typeScale?: DesignRoleToken[];
+  fonts?: DesignRoleToken[];
+}
+
+export interface DesignSystemMeta {
+  /** Title pulled from the bundle README (first H1). */
+  title?: string;
+  /** First paragraph after the H1 in the README. */
+  description?: string;
+  /** All file paths the upload action ingested (CSS + README + assets). */
+  files?: string[];
+  /** Asset filenames (svg / png / woff / woff2) found in the archive.
+   *  Used by the preview's "Missing brand fonts" detection. */
+  assets?: string[];
+  /** When set, the bundle carried `.woff` / `.woff2` files — no font
+   *  warning needed. */
+  hasFontFiles?: boolean;
+}
+
+// A test/repo can declare a "design system" — a closed set of allowed
+// values for color, border-radius, font-family, font-size, and spacing
+// (margin/padding). During each test the EB walks the live DOM at
+// screenshot time, samples computed styles per visible element, and the
+// host marks any computed value not present in the allowed set as a
+// violation. Same flow as a11y: per-test_result violations roll up into a
+// build-level design_system_score (0-100), drill-in shows occurrence count
+// and a sample selector for each off-token value.
+export interface DesignSystemConfig {
+  /** When false, the layer is opt-out for this test even if the repo
+   *  toggle is on. Repo-level config has no `enabled` (the toggle on
+   *  playwright_settings.enableDesignSystem governs that). */
+  enabled?: boolean;
+  /** Allowed CSS values per category. Values are stored normalized
+   *  (lowercase hex, px ints). Token NAMES (`--c-red`) can be supplied as
+   *  keys so the violation card surfaces a friendly label, but the raw
+   *  resolved value is what the comparator matches against. */
+  tokens: Partial<Record<DesignTokenCategory, DesignToken[]>>;
+  /** Hide a class of violations entirely. Useful when a repo controls
+   *  color tokens centrally but vendor 3rd-parties bring their own. */
+  ignoredCategories?: DesignTokenCategory[];
+  /** Per-screenshot cap on collected violations. Defaults to 200 to keep
+   *  test_results.design_system_violations sane in JSONB. */
+  maxViolationsPerScreenshot?: number;
+  /** Display-only grouping the parser builds when ingesting a CSS file.
+   *  The matcher in the EB never reads this — it exists solely to render
+   *  the Claude-Design-style preview card on the Setup tab. */
+  groups?: DesignSystemGroups;
+  /** Bundle metadata captured at upload time. Used by the preview to
+   *  show the bundle title, source files, and asset filenames. */
+  meta?: DesignSystemMeta;
+}
+
+export interface DesignSystemScoreSummary {
+  score: number;
+  totalRules: number;
+  passedRules: number;
+  violatedRules: number;
+  bySeverity: {
+    critical: number;
+    serious: number;
+    moderate: number;
+    minor: number;
+  };
+}
+
 export interface UrlTrajectoryStep {
   stepIndex: number;
   stepLabel?: string;

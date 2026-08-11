@@ -285,8 +285,9 @@ afterAll(async () => {
   // Children first — synthetic ids have no guaranteed cascade for every
   // table touched by a build.
   for (const buildId of buildIds) {
-    await db.delete(visualDiffs).where(eq(visualDiffs.buildId, buildId));
+    // review_todos.diff_id -> visual_diffs.id, so todos must go first.
     await db.delete(reviewTodos).where(eq(reviewTodos.buildId, buildId));
+    await db.delete(visualDiffs).where(eq(visualDiffs.buildId, buildId));
     await db
       .delete((await import("@/lib/db/schema")).stepComparisons)
       .where(
@@ -553,10 +554,15 @@ describe("Test runs / builds, Setup ordering — build 1 (clean baseline)", () =
     // result above would be "failed", not "passed").
     expect(state.setupRan).toBe(true);
 
-    // Clean page (alt text present) → no a11y violation yet. Confirms the
-    // violation asserted on build 2 below is a real delta this test
-    // introduced, not markup that was broken the whole time.
-    expect(testResult.a11yViolations?.length ?? 0).toBe(0);
+    // This handwritten page has a couple of pre-existing, version-independent
+    // a11y issues (missing <html lang>, the unlabeled name input) — real ones,
+    // just not the delta under test. What matters here is that "image-alt"
+    // specifically is ABSENT (alt text is present on v1), so the violation
+    // asserted on build 2 below is a genuine new one, not markup that was
+    // already broken. Confirmed against real axe-core output, not assumed.
+    expect(testResult.a11yViolations?.some((v) => v.id === "image-alt")).toBe(
+      false,
+    );
 
     // ── Row 6 (design-system layer): the red CTA button (#ff0000) is not in
     // the configured token allow-list (#ffffff / #000000) — present from v1

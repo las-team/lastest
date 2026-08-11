@@ -35,7 +35,7 @@ import { runnerRegistry } from "@/lib/ws/runner-registry";
 import {
   mergeDesignSystemConfig,
   isConfigUsable,
-} from "@/lib/design-system/tokens";
+} from "@lastest/plugin-design-system/tokens";
 import { db } from "@/lib/db";
 import { runners, tests as testsTable, backgroundJobs } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";

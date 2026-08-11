@@ -47,6 +47,7 @@ import {
   type CheckMode,
   type CheckModeMap,
 } from "@/lib/verify/check-modes";
+import { CHECK_LAYER_BY_ID } from "@/lib/verify/check-layers";
 import type { VisualDiffLite, TestResultLite } from "./board-focus-client";
 import { RcaBadge } from "@/components/diff/rca-badge";
 import { useSwipeTriage } from "./use-swipe-triage";
@@ -1846,9 +1847,15 @@ function wasLayerCaptured(
     case "a11y":
       return result?.a11yViolations != null || result?.a11yPassesCount != null;
     case "design":
+      // Delegates to the plugin instead of duplicating its knowledge of
+      // which result fields mean "design captured" — see
+      // `plugins/design-system/src/check-layer.ts`.
       return (
-        result?.designSystemViolations != null ||
-        result?.designSystemRulesChecked != null
+        !!result &&
+        (CHECK_LAYER_BY_ID.get("design")?.wasCaptured?.(
+          result as unknown as Record<string, unknown>,
+        ) ??
+          false)
       );
     case "perf":
       return result?.webVitals != null;
@@ -1932,9 +1939,11 @@ function deltaForLayer(step: StepComparison, layer: string): string {
     case "design": {
       const d = layers?.designSystem;
       if (!d) return "";
-      return d.newViolations.length > 0
-        ? `+${d.newViolations.length}`
-        : `−${d.disappeared.length}`;
+      return (
+        CHECK_LAYER_BY_ID.get("design")?.delta?.(
+          d as unknown as Record<string, unknown>,
+        ) ?? ""
+      );
     }
     case "perf": {
       const p = layers?.perf;

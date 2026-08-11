@@ -1,23 +1,26 @@
 import type { CheckLayerDescriptor } from "@lastest/contracts";
 
 /**
- * The 9 check layers core owns directly (RFC §6.3) — everything `CheckLayer`
- * covered before this phase, minus `a11y`/`design`, which are now
- * contributed by `@lastest/plugin-a11y`/`@lastest/plugin-design-system`.
+ * The check layers core owns directly (RFC §6.3) — everything `CheckLayer`
+ * covered before this phase, minus `design`, now contributed by
+ * `@lastest/plugin-design-system` (`a11y` is next: `@lastest/plugin-a11y`
+ * hasn't landed yet — see the entry below — so it stays declared here,
+ * temporarily, until it does).
  *
- * These stay hand-declared here rather than round-tripping through a
- * plugin manifest because `resolveRegistry`'s `CORE_CHECK_LAYERS` (see
- * `core/kernel/src/registry.ts`) treats these 9 ids as reserved — no plugin
- * may claim them. `network`/`console` in particular have derive logic
- * (`deriveCheckModes` in `check-modes.ts`) too bespoke for the generic
- * `modeField`/`legacyEnabledField` shape (a two-axis legacy fallback), so
- * they — and the rest of these — keep their explicit branches there; this
- * array exists for id/label/icon metadata (the cogwheel dialog, the UI
- * layer-iteration lists) rather than to drive derive logic generically.
+ * The 9 permanent members stay hand-declared here rather than
+ * round-tripping through a plugin manifest because `resolveRegistry`'s
+ * `CORE_CHECK_LAYERS` (see `core/kernel/src/registry.ts`) treats their ids
+ * as reserved — no plugin may claim them. `network`/`console` in
+ * particular have derive logic (`deriveCheckModes` in `check-modes.ts`)
+ * too bespoke for the generic `modeField`/`legacyEnabledField` shape (a
+ * two-axis legacy fallback), so they — and the rest of the 9 — keep their
+ * explicit branches there; this array exists for id/label/icon metadata
+ * (the cogwheel dialog, the UI layer-iteration lists) rather than to drive
+ * derive logic generically.
  *
  * `wasCaptured`/`delta` are intentionally omitted: board-view.tsx and
  * focus-view.tsx keep their own hardcoded capture-check/delta switch cases
- * for these 9 layers unchanged. Those optional fields exist on
+ * for these layers unchanged. Those optional fields exist on
  * `CheckLayerDescriptor` for plugin-contributed layers, whose UI logic
  * genuinely does move out of core.
  */
@@ -71,13 +74,26 @@ export const CORE_CHECK_LAYER_DESCRIPTORS: readonly CheckLayerDescriptor[] = [
     defaultMode: "enforce",
     modeField: "consoleMode",
   },
+  // TEMPORARY — remove this entry once @lastest/plugin-a11y lands (RFC §9
+  // phase 3, PR C) and declares it as a `checkLayers` contribution instead,
+  // the same way `design` moved to `@lastest/plugin-design-system` in PR B.
+  {
+    id: "a11y",
+    name: "A11y",
+    icon: "Accessibility",
+    description: "Run axe-core WCAG 2.2 AA compliance checks.",
+    order: 5,
+    defaultMode: "log",
+    modeField: "a11yMode",
+    legacyEnabledField: "enableA11y",
+  },
   {
     id: "perf",
     name: "Perf",
     icon: "Gauge",
     description:
       "Capture Web Vitals (LCP, CLS, TBT) and compare against the baseline.",
-    order: 6,
+    order: 7,
     defaultMode: "log",
     alwaysCaptured: true,
     modeField: "perfMode",
@@ -87,7 +103,7 @@ export const CORE_CHECK_LAYER_DESCRIPTORS: readonly CheckLayerDescriptor[] = [
     name: "URL",
     icon: "Link",
     description: "Compare the trajectory of URLs visited during the test.",
-    order: 7,
+    order: 8,
     defaultMode: "log",
     alwaysCaptured: true,
     modeField: "urlMode",

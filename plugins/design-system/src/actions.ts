@@ -1,37 +1,23 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
 import JSZip from "jszip";
-import { db } from "@/lib/db";
-import { tests, playwrightSettings } from "@/lib/db/schema";
-import type { DesignSystemConfig } from "@/lib/db/schema";
-import { requireTestOwnership } from "@/lib/auth/ownership";
-import { requireRepoAccess } from "@/lib/auth";
-import {
-  parseDesignSystemCss,
-  mergeDesignSystemConfig,
-} from "@/lib/design-system/tokens";
+import type { DesignSystemConfig } from "@lastest/eb-protocol";
+
+import { parseDesignSystemCss, mergeDesignSystemConfig } from "./tokens";
+import { designSystemHost } from "./wiring";
 
 export async function saveTestDesignSystemOverrides(
   testId: string,
   overrides: Partial<DesignSystemConfig> | null,
 ) {
-  await requireTestOwnership(testId);
-  await db
-    .update(tests)
-    .set({ designSystemOverrides: overrides, updatedAt: new Date() })
-    .where(eq(tests.id, testId));
+  await designSystemHost().saveTestOverrides(testId, overrides);
   revalidatePath(`/tests/${testId}`);
   return { success: true };
 }
 
 export async function resetTestDesignSystemOverrides(testId: string) {
-  await requireTestOwnership(testId);
-  await db
-    .update(tests)
-    .set({ designSystemOverrides: null, updatedAt: new Date() })
-    .where(eq(tests.id, testId));
+  await designSystemHost().saveTestOverrides(testId, null);
   revalidatePath(`/tests/${testId}`);
   return { success: true };
 }
@@ -42,12 +28,8 @@ export async function resetTestDesignSystemOverrides(testId: string) {
  * show counts per category without re-parsing client-side.
  */
 export async function saveTestDesignSystemFromCss(testId: string, css: string) {
-  await requireTestOwnership(testId);
   const parsed = parseDesignSystemCss(css);
-  await db
-    .update(tests)
-    .set({ designSystemOverrides: parsed, updatedAt: new Date() })
-    .where(eq(tests.id, testId));
+  await designSystemHost().saveTestOverrides(testId, parsed);
   revalidatePath(`/tests/${testId}`);
   return { success: true, config: parsed };
 }
@@ -56,12 +38,8 @@ export async function saveRepoDesignSystemFromCss(
   repositoryId: string,
   css: string,
 ) {
-  await requireRepoAccess(repositoryId);
   const parsed = parseDesignSystemCss(css);
-  await db
-    .update(playwrightSettings)
-    .set({ designSystem: parsed, updatedAt: new Date() })
-    .where(eq(playwrightSettings.repositoryId, repositoryId));
+  await designSystemHost().saveRepoConfig(repositoryId, parsed);
   revalidatePath(`/settings/${repositoryId}`);
   return { success: true, config: parsed };
 }
@@ -101,7 +79,6 @@ export async function uploadRepoDesignSystemBundle(formData: FormData) {
       error: `Bundle exceeds 5 MB (got ${(file.size / 1024 / 1024).toFixed(1)} MB)`,
     };
   }
-  await requireRepoAccess(repositoryId);
 
   const buf = Buffer.from(await file.arrayBuffer());
   const name = (file.name || "").toLowerCase();
@@ -111,7 +88,8 @@ export async function uploadRepoDesignSystemBundle(formData: FormData) {
     const css = buf.toString("utf-8");
     const parsed = parseDesignSystemCss(css);
     parsed.meta = { files: [file.name], assets: [], hasFontFiles: false };
-    await persist(repositoryId, parsed);
+    await designSystemHost().saveRepoConfig(repositoryId, parsed);
+    revalidatePath("/tests");
     return summarize(parsed, [file.name]);
   }
 
@@ -196,7 +174,8 @@ export async function uploadRepoDesignSystemBundle(formData: FormData) {
     hasFontFiles,
   };
 
-  await persist(repositoryId, merged);
+  await designSystemHost().saveRepoConfig(repositoryId, merged);
+  revalidatePath("/tests");
   return summarize(
     merged,
     cssFiles.map((f) => f.path),
@@ -248,31 +227,6 @@ function extractReadmeMeta(md: string | null): {
   return { title, description };
 }
 
-async function persist(repositoryId: string, config: DesignSystemConfig) {
-  // upsert: row may not exist yet for repos that have never opened the
-  // Playwright Settings page; mirror the pattern in upsertPlaywrightSettings.
-  const [existing] = await db
-    .select()
-    .from(playwrightSettings)
-    .where(eq(playwrightSettings.repositoryId, repositoryId));
-  if (existing) {
-    await db
-      .update(playwrightSettings)
-      .set({ designSystem: config, updatedAt: new Date() })
-      .where(eq(playwrightSettings.id, existing.id));
-  } else {
-    const { v4: uuid } = await import("uuid");
-    await db.insert(playwrightSettings).values({
-      id: uuid(),
-      repositoryId,
-      designSystem: config,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-  }
-  revalidatePath("/tests");
-}
-
 function summarize(config: DesignSystemConfig, files: string[]) {
   const counts = Object.fromEntries(
     Object.entries(config.tokens ?? {}).map(([k, v]) => [
@@ -285,11 +239,7 @@ function summarize(config: DesignSystemConfig, files: string[]) {
 }
 
 export async function clearRepoDesignSystem(repositoryId: string) {
-  await requireRepoAccess(repositoryId);
-  await db
-    .update(playwrightSettings)
-    .set({ designSystem: null, updatedAt: new Date() })
-    .where(eq(playwrightSettings.repositoryId, repositoryId));
+  await designSystemHost().clearRepoConfig(repositoryId);
   revalidatePath("/tests");
   return { success: true };
 }

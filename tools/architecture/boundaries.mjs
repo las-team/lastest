@@ -18,9 +18,9 @@
  *           violation count is ratcheted by the test so it can only go down.
  *
  * Deleting an entry from `PSEUDO_PLUGINS` is how a feature graduates: it moves to
- * `plugins/<id>/` and picks up the error-level rules instead. `explorer` is the
- * first to have done so — its entry is gone from the map below, and its five
- * violations went with it.
+ * `plugins/<id>/` and picks up the error-level rules instead. `explorer` was the
+ * first to have done so; `design-system` is the second (RFC §9 phase 3) — both
+ * entries are gone from the map below, and their violations went with them.
  */
 
 /** Zone globs for the target layout. */
@@ -141,10 +141,6 @@ export const PSEUDO_PLUGINS = {
   },
   "url-diff": { lib: ["src/lib/url-diff"], actions: ["url-diff.ts"] },
   rca: { lib: ["src/lib/rca"], actions: ["rca.ts"] },
-  "design-system": {
-    lib: ["src/lib/design-system"],
-    actions: ["design-system-overrides.ts"],
-  },
   a11y: { lib: ["src/lib/a11y"], actions: [] },
   playground: { lib: ["src/lib/playground"], actions: [] },
   "data-sources": {
