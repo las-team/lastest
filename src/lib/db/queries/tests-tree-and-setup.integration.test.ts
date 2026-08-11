@@ -23,6 +23,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { db } from "@/lib/db";
+import type { Test } from "@/lib/db/schema";
 import {
   defaultSetupSteps,
   functionalAreas,
@@ -311,7 +312,7 @@ describe("Setup scripts — create/edit, attach as repo default, resolve into th
     // resolves into build-ready { code, setupId } ahead of the recorded
     // test's own code, i.e. it WILL run first on a real EB.
     const resolved = await resolveBuildSetup({
-      tests: [recordedTest],
+      tests: [recordedTest as unknown as Test],
       repositoryId,
       build: null,
       logTag: "[integration-test]",

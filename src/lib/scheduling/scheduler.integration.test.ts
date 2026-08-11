@@ -91,7 +91,7 @@ describe("scheduling — preset and custom cron validation", () => {
     });
 
     try {
-      const custom = "17 5 * * 3"; // 05:17 every Wednesday — not a preset
+      const custom: string = "17 5 * * 3"; // 05:17 every Wednesday — not a preset
       expect(isValidCron(custom)).toBe(true);
       expect(
         Object.values(PRESET_SCHEDULES).some((p) => p.cron === custom),

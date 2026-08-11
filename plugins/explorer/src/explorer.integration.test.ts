@@ -40,6 +40,7 @@ import * as queries from "@/lib/db/queries";
 import { getPluginRuntime } from "@/lib/core/runtime";
 
 import { dispatchDueExplorerTriggers } from "./actions";
+import type { ExplorerDb } from "./data/db";
 import {
   getRecentSessions,
   listFindingsByRepo,
@@ -178,7 +179,7 @@ describe("explorer — full session via a due cron trigger (also §3's Schedulin
     // queries still show historical data after the table rename" — run
     // the actual exported query functions (not a re-implemented select)
     // against the session this run just produced.
-    const ctx = { db, host: undefined as never };
+    const ctx = { db: db as unknown as ExplorerDb, host: undefined as never };
     const sessions = await getRecentSessions(ctx, repoId, 10);
     expect(sessions.map((s) => s.id)).toContain(sessionId);
 

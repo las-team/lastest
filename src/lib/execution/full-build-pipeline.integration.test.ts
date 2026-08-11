@@ -528,6 +528,11 @@ describe("Test runs / builds, Setup ordering — build 1 (clean baseline)", () =
       [recordedTestId],
       repositoryId,
     );
+    if (!result.buildId) {
+      throw new Error(
+        "createAndRunBuildCore did not return a buildId (pool busy / queued?)",
+      );
+    }
     buildIds.push(result.buildId);
 
     const justCreated = await queries.getBuild(result.buildId);
@@ -601,6 +606,11 @@ describe("Visual diff review — approve, reject with a comment, ignore regions 
       [recordedTestId],
       repositoryId,
     );
+    if (!result.buildId) {
+      throw new Error(
+        "createAndRunBuildCore did not return a buildId (pool busy / queued?)",
+      );
+    }
     buildIds.push(result.buildId);
     await waitForBuildCompletion(result.buildId);
 
@@ -700,6 +710,11 @@ describe("Visual diff review — approve, reject with a comment, ignore regions 
       [recordedTestId],
       repositoryId,
     );
+    if (!result.buildId) {
+      throw new Error(
+        "createAndRunBuildCore did not return a buildId (pool busy / queued?)",
+      );
+    }
     buildIds.push(result.buildId);
     await waitForBuildCompletion(result.buildId);
 
@@ -756,6 +771,11 @@ describe("Visual diff review — approve, reject with a comment, ignore regions 
       [recordedTestId],
       repositoryId,
     );
+    if (!result.buildId) {
+      throw new Error(
+        "createAndRunBuildCore did not return a buildId (pool busy / queued?)",
+      );
+    }
     buildIds.push(result.buildId);
     await waitForBuildCompletion(result.buildId);
 

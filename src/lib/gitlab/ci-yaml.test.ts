@@ -15,7 +15,7 @@ import { generateCiYaml, type CiYamlConfig } from "./ci-yaml";
  */
 
 const base: CiYamlConfig = {
-  mode: "cli",
+  mode: "persistent",
   projectPath: "acme/widgets",
   triggerEvents: ["push"],
   branchFilter: [],

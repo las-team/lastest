@@ -80,8 +80,12 @@ afterAll(async () => {
 
 describe("live EB stream viewer, end to end through the running front-proxy", () => {
   it("connects through :3000 to the claimed pod's real stream port with a grant minted by toProxyStreamUrl()", async () => {
-    expect(claimed.streamUrl).toMatch(/^wss?:\/\//); // raw pod address, pre-proxy
-    const proxied = toProxyStreamUrl(claimed.streamUrl, "", claimed.instanceId);
+    expect(claimed!.streamUrl).toMatch(/^wss?:\/\//); // raw pod address, pre-proxy
+    const proxied = toProxyStreamUrl(
+      claimed!.streamUrl,
+      "",
+      claimed!.instanceId,
+    );
     expect(proxied).toMatch(/^\/api\/embedded\/stream\/ws\?g=/);
 
     const ws = await tryConnect(proxied!);
@@ -96,7 +100,7 @@ describe("live EB stream viewer, end to end through the running front-proxy", ()
     // Same real pod address and instanceId as the live claim above, but
     // signed with an already-past expiry — exercises the exact code path
     // toProxyStreamUrl() uses, just with a manually-forced TTL.
-    const url = new URL(claimed.streamUrl);
+    const url = new URL(claimed!.streamUrl);
     const savedTtl = process.env.EB_STREAM_GRANT_TTL_SECONDS;
     process.env.EB_STREAM_GRANT_TTL_SECONDS = "-1"; // parses as NaN-guarded → falls back... see below
     let expiredGrant: string | null;
@@ -109,7 +113,7 @@ describe("live EB stream viewer, end to end through the running front-proxy", ()
         url.hostname,
         parseInt(url.port || "9223", 10),
         "expiry-test",
-        claimed.instanceId ?? "",
+        claimed!.instanceId ?? "",
       );
     } finally {
       if (savedTtl === undefined)
