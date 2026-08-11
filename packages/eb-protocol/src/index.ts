@@ -75,6 +75,31 @@ export interface A11yViolation {
   sampleNodes?: A11yViolationSampleNode[];
 }
 
+/** Score roll-up for the a11y check layer. Lives here (not in
+ *  `packages/db`) so `@lastest/plugin-a11y`'s scorer can share the exact
+ *  shape the `test_runs`/`test_results` columns persist. */
+export interface WcagScoreSummary {
+  score: number;
+  totalRules: number;
+  passedRules: number;
+  violatedRules: number;
+  bySeverity: {
+    critical: number;
+    serious: number;
+    moderate: number;
+    minor: number;
+  };
+}
+
+/** Persisted payload of one approved a11y baseline row
+ *  (`a11y_baselines.payload`, owned by `@lastest/plugin-a11y`). */
+export interface A11yBaselinePayload {
+  ruleId: string;
+  selector: string;
+  impact: string;
+  acknowledgedAt: string;
+}
+
 export type DesignTokenCategory =
   | "color" // any color computed property (color, background-color, border-color, fill, stroke)
   | "border-radius" // border-*-radius

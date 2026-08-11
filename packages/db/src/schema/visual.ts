@@ -24,6 +24,8 @@ import type {
   DesignSystemViolation,
 } from "@lastest/eb-protocol";
 
+export type { A11yBaselinePayload } from "@lastest/eb-protocol";
+
 import type { DiffMetadata, DomDiffResult } from "./shared";
 
 import { repositories } from "./repos";
@@ -538,12 +540,11 @@ export interface ConsoleBaselinePayload {
   sample: string;
 }
 
-export interface A11yBaselinePayload {
-  ruleId: string;
-  selector: string;
-  impact: string;
-  acknowledgedAt: string;
-}
+// `A11yBaselinePayload` moved to `@lastest/eb-protocol` (re-exported below)
+// when `a11y_baselines` became `@lastest/plugin-a11y`'s own table — the
+// plugin owns the table and needs the payload shape, and it cannot import
+// `packages/db`. The `a11y` member of `LayerBaselineKind` above stays: it is
+// core's *evidence-layer* vocabulary, not a claim to the table.
 
 export interface PerfBaselinePayload {
   /** Rolling p50/p95 for each Web Vital. */
@@ -608,24 +609,12 @@ export const consoleBaselines = pgTable(
   (table) => [index("idx_console_baselines_test").on(table.testId)],
 );
 
-export const a11yBaselines = pgTable(
-  "a11y_baselines",
-  {
-    id: text("id").primaryKey(),
-    testId: text("test_id")
-      .notNull()
-      .references(() => tests.id, { onDelete: "cascade" }),
-    stepLabel: text("step_label"),
-    branch: text("branch").notNull(),
-    isActive: boolean("is_active").default(true),
-    approvedFromComparisonId: text("approved_from_comparison_id"),
-    approvedBy: text("approved_by"),
-    approvedAt: timestamp("approved_at").$defaultFn(() => new Date()),
-    payload: jsonb("payload").$type<A11yBaselinePayload>().notNull(),
-    createdAt: timestamp("created_at").$defaultFn(() => new Date()),
-  },
-  (table) => [index("idx_a11y_baselines_test").on(table.testId)],
-);
+// `a11yBaselines` moved to `plugins/a11y/src/schema.ts` — the a11y check
+// layer is a plugin now (RFC §9 phase 3). The table gained `repository_id`/
+// `team_id` and dropped its FK to `tests.id` there, per
+// `docs/architecture/core-scope.md` §6: a plugin table carries no FK to a
+// core table, so its rows are reaped by the plugin's own deletion hook
+// instead of a database cascade. Migration: `scripts/migrate.js`.
 
 export const perfBaselines = pgTable(
   "perf_baselines",
@@ -706,7 +695,7 @@ export type NetworkBaseline = typeof networkBaselines.$inferSelect;
 
 export type ConsoleBaseline = typeof consoleBaselines.$inferSelect;
 
-export type A11yBaseline = typeof a11yBaselines.$inferSelect;
+// `A11yBaseline` moved with its table — see `plugins/a11y/src/schema.ts`.
 
 export type PerfBaseline = typeof perfBaselines.$inferSelect;
 

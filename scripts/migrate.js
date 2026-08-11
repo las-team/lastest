@@ -314,9 +314,114 @@ async function migrateExplorerTables() {
   }
 }
 
+// `a11y_baselines` became `@lastest/plugin-a11y`'s own table (RFC §9 phase 3).
+// The table name did not change, but two things about its shape did, and both
+// must happen BEFORE `drizzle-kit push --force` below:
+//
+//   1. `repository_id` / `team_id` are new and NOT NULL. Push would add them
+//      with no default against a populated table and fail — or, worse, on some
+//      paths drop and recreate. So they are added nullable here, backfilled by
+//      joining `a11y_baselines -> tests -> repositories`, and only then set NOT
+//      NULL.
+//   2. The FK `test_id REFERENCES tests(id) ON DELETE CASCADE` is dropped. A
+//      plugin table carries no FK to a core table (core-scope.md §6); the rows
+//      are reaped by the plugin's deletion hook instead.
+//
+// Rows whose team cannot be resolved (orphaned test/repo) are deleted rather
+// than migrated — they are already unreachable: the FK's own cascade would
+// have removed them when their test went away.
+async function migrateA11yBaselineOwnership() {
+  if (!process.env.DATABASE_URL) return;
+  let sql;
+  try {
+    sql = require("postgres")(process.env.DATABASE_URL);
+
+    const tableExists = async (name) => {
+      const rows = await sql`
+        select exists (
+          select 1 from information_schema.tables
+          where table_schema = 'public' and table_name = ${name}
+        ) as exists`;
+      return rows[0]?.exists ?? false;
+    };
+    const columnExists = async (table, column) => {
+      const rows = await sql`
+        select exists (
+          select 1 from information_schema.columns
+          where table_schema = 'public' and table_name = ${table} and column_name = ${column}
+        ) as exists`;
+      return rows[0]?.exists ?? false;
+    };
+
+    if (!(await tableExists("a11y_baselines"))) return;
+
+    // Idempotent: a re-run finds the columns already NOT NULL and does nothing.
+    if (!(await columnExists("a11y_baselines", "repository_id"))) {
+      await sql.unsafe(
+        `alter table a11y_baselines add column repository_id text`,
+      );
+      console.log("[migrate] a11y_baselines: added repository_id");
+    }
+    if (!(await columnExists("a11y_baselines", "team_id"))) {
+      await sql.unsafe(`alter table a11y_baselines add column team_id text`);
+      console.log("[migrate] a11y_baselines: added team_id");
+    }
+
+    await sql.unsafe(`
+      update a11y_baselines b
+         set repository_id = t.repository_id,
+             team_id      = r.team_id
+        from tests t
+        join repositories r on r.id = t.repository_id
+       where b.test_id = t.id
+         and (b.repository_id is null or b.team_id is null)
+         and t.repository_id is not null
+         and r.team_id is not null`);
+
+    const [{ n: orphaned }] = await sql.unsafe(
+      `select count(*)::text as n from a11y_baselines
+        where repository_id is null or team_id is null`,
+    );
+    if (Number(orphaned) > 0) {
+      // Unreachable rows: their test or repo is gone, so the FK cascade this
+      // migration removes would have deleted them anyway.
+      await sql.unsafe(
+        `delete from a11y_baselines where repository_id is null or team_id is null`,
+      );
+      console.warn(
+        `[migrate] a11y_baselines: deleted ${orphaned} row(s) with no resolvable repo/team (orphaned by their test)`,
+      );
+    }
+
+    await sql.unsafe(
+      `alter table a11y_baselines alter column repository_id set not null`,
+    );
+    await sql.unsafe(
+      `alter table a11y_baselines alter column team_id set not null`,
+    );
+
+    // Drop the FK to tests(id) by name-agnostic lookup — the constraint was
+    // created implicitly, so its name differs between environments.
+    const fks = await sql`
+      select con.conname as name
+        from pg_constraint con
+        join pg_class rel on rel.oid = con.conrelid
+       where rel.relname = 'a11y_baselines' and con.contype = 'f'`;
+    for (const { name } of fks) {
+      await sql.unsafe(`alter table a11y_baselines drop constraint "${name}"`);
+      console.log(`[migrate] a11y_baselines: dropped FK ${name}`);
+    }
+  } catch (e) {
+    console.warn("[migrate] a11y baseline migration skipped:", e.message);
+  } finally {
+    if (sql) await sql.end();
+  }
+}
+
 async function main() {
   await preCreate();
   await migrateExplorerTables();
+  await migrateA11yBaselineOwnership();
   await nullOrphans();
   await bumpPoolDefaults();
   await ensureUniqueIndexes();

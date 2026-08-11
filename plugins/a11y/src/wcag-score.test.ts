@@ -4,7 +4,7 @@ import {
   calculateWcagScore,
   aggregateA11yForBuild,
 } from "./wcag-score";
-import type { A11yViolation } from "@/lib/db/schema";
+import type { A11yViolation } from "@lastest/eb-protocol";
 
 function makeViolation(overrides: Partial<A11yViolation> = {}): A11yViolation {
   return {

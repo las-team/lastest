@@ -1845,7 +1845,15 @@ function wasLayerCaptured(
     case "console":
       return result?.consoleErrors != null;
     case "a11y":
-      return result?.a11yViolations != null || result?.a11yPassesCount != null;
+      // Delegated to the plugin, same as `design` below — see
+      // `plugins/a11y/src/check-layer.ts`.
+      return (
+        !!result &&
+        (CHECK_LAYER_BY_ID.get("a11y")?.wasCaptured?.(
+          result as unknown as Record<string, unknown>,
+        ) ??
+          false)
+      );
     case "design":
       // Delegates to the plugin instead of duplicating its knowledge of
       // which result fields mean "design captured" — see
@@ -1932,9 +1940,11 @@ function deltaForLayer(step: StepComparison, layer: string): string {
     case "a11y": {
       const a = layers?.a11y;
       if (!a) return "";
-      return a.newViolations.length > 0
-        ? `+${a.newViolations.length}`
-        : `−${a.disappeared.length}`;
+      return (
+        CHECK_LAYER_BY_ID.get("a11y")?.delta?.(
+          a as unknown as Record<string, unknown>,
+        ) ?? ""
+      );
     }
     case "design": {
       const d = layers?.designSystem;

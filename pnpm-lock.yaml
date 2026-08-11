@@ -97,6 +97,9 @@ importers:
       '@lastest/page-map':
         specifier: workspace:*
         version: link:libs/page-map
+      '@lastest/plugin-a11y':
+        specifier: workspace:*
+        version: link:plugins/a11y
       '@lastest/plugin-design-system':
         specifier: workspace:*
         version: link:plugins/design-system
@@ -681,6 +684,34 @@ importers:
       typescript:
         specifier: ^5
         version: 5.9.3
+
+  plugins/a11y:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/core-data':
+        specifier: workspace:*
+        version: link:../../core/data
+      '@lastest/eb-protocol':
+        specifier: workspace:*
+        version: link:../../packages/eb-protocol
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8)
+    devDependencies:
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
 
   plugins/design-system:
     dependencies:

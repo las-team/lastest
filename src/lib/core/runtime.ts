@@ -22,6 +22,7 @@ import {
   type ScopeRequest,
 } from "@lastest/kernel";
 import { sql } from "@lastest/db";
+import { configureA11y } from "@lastest/plugin-a11y";
 import { configureDesignSystem } from "@lastest/plugin-design-system";
 import { configureEvents } from "@lastest/plugin-events";
 import { configureExplorer } from "@lastest/plugin-explorer";
@@ -190,6 +191,7 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
     data: data.capability("explorer"),
   });
   configureDesignSystem(appDesignSystemHost);
+  configureA11y({ runtime, data: data.capability("a11y") });
 
   cached = { runtime, data, registry };
   return runtime;

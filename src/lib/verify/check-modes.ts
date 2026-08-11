@@ -37,19 +37,17 @@ export type CheckLayer = string;
 
 export type CheckModeMap = Record<CheckLayer, CheckMode>;
 
-/** Layers whose derive/patch logic stays hardcoded below instead of running
- *  through the generic `modeField`/`legacyEnabledField` loop — the 9
- *  permanently core-owned layers (bespoke legacy fallbacks: network's
- *  two-axis capture+errorMode, console's errorMode, text's textDiffEnabled)
- *  plus `a11y`, temporarily, until `@lastest/plugin-a11y` lands (RFC §9
- *  phase 3, PR C) and this moves to the generic loop the way `design` did. */
+/** The 9 core-owned layers, whose derive/patch logic stays hardcoded below
+ *  instead of running through the generic `modeField`/`legacyEnabledField`
+ *  loop — bespoke legacy fallbacks (network's two-axis capture+errorMode,
+ *  console's errorMode, text's textDiffEnabled) that don't reduce to the
+ *  shape a plugin layer declares. Everything else comes from the registry. */
 const HARDCODED_LAYER_IDS: ReadonlySet<string> = new Set([
   "visual",
   "text",
   "dom",
   "network",
   "console",
-  "a11y",
   "perf",
   "url",
   "api",
@@ -164,18 +162,13 @@ export function deriveCheckModes(
       return "disable";
     })();
 
-  // --- a11y ---
-  out.a11y =
-    normalizeMode(source.a11yMode) ??
-    (source.enableA11y === true ? "enforce" : DEFAULTS.a11y);
-
   // --- perf / url / api / storage ---
   out.perf = normalizeMode(source.perfMode) ?? DEFAULTS.perf;
   out.url = normalizeMode(source.urlMode) ?? DEFAULTS.url;
   out.api = normalizeMode(source.apiMode) ?? DEFAULTS.api;
   out.storage = normalizeMode(source.storageMode) ?? DEFAULTS.storage;
 
-  // --- plugin-contributed layers (design; a11y until it graduates too) ---
+  // --- plugin-contributed layers (a11y, design) ---
   // Each declares `modeField`/`legacyEnabledField` on its descriptor instead
   // of a hardcoded branch here — see `CheckLayerDescriptor` in
   // `core/contracts/src/check-layer.ts`. This is what makes a new check
@@ -254,10 +247,6 @@ export function checkModesToSettingsPatch(modes: Partial<CheckModeMap>): {
           ? "warn"
           : "ignore";
   }
-  if (modes.a11y) {
-    patch.a11yMode = modes.a11y;
-    patch.enableA11y = modes.a11y !== "disable";
-  }
   if (modes.perf) {
     patch.perfMode = modes.perf;
   }
@@ -271,7 +260,7 @@ export function checkModesToSettingsPatch(modes: Partial<CheckModeMap>): {
     patch.storageMode = modes.storage;
   }
 
-  // --- plugin-contributed layers (design; a11y until it graduates too) ---
+  // --- plugin-contributed layers (a11y, design) ---
   const rawPatch = patch as Record<string, unknown>;
   for (const layer of CHECK_LAYERS) {
     if (HARDCODED_LAYER_IDS.has(layer.id)) continue;
@@ -464,7 +453,6 @@ export function testModeOverridesToOverridesPatch(
   if (modes.perf) patch.perfMode = modes.perf;
   if (modes.url) patch.urlMode = modes.url;
   if (modes.storage) patch.storageMode = modes.storage;
-  if (modes.a11y) patch.a11yMode = modes.a11y;
   if (modes.network) {
     patch.networkMode = modes.network;
     patch.networkErrorMode = modeToErr(modes.network);
@@ -474,7 +462,7 @@ export function testModeOverridesToOverridesPatch(
     patch.consoleErrorMode = modeToErr(modes.console);
   }
 
-  // --- plugin-contributed layers (design; a11y until it graduates too) ---
+  // --- plugin-contributed layers (a11y, design) ---
   // No legacy-boolean mirror here: per-test overrides postdate the
   // enable*/mode-column migration, so only `*Mode` needs writing.
   const rawPatch = patch as Record<string, unknown>;

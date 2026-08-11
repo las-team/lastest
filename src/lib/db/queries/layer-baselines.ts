@@ -4,13 +4,17 @@
  * One module per layer kind; each table mirrors the visual-diff `baselines`
  * table with a layer-specific JSON payload. Branch-scoped (per-branch
  * baselines, with `main` as the implicit fallback).
+ *
+ * The `a11y` slice is gone from here: `a11y_baselines` is owned by
+ * `@lastest/plugin-a11y` (RFC §9 phase 3) and reached through its own
+ * actions. `LAYER_BASELINE_KINDS` below still lists `"a11y"` — that is core's
+ * evidence-layer vocabulary, not a claim to the table.
  */
 
 import { db } from "../index";
 import {
   networkBaselines,
   consoleBaselines,
-  a11yBaselines,
   perfBaselines,
   variableBaselines,
   urlTrajectoryBaselines,
@@ -19,14 +23,12 @@ import {
 import type {
   NetworkBaseline,
   ConsoleBaseline,
-  A11yBaseline,
   PerfBaseline,
   VariableBaseline,
   UrlTrajectoryBaseline,
   DomBaseline,
   NetworkBaselinePayload,
   ConsoleBaselinePayload,
-  A11yBaselinePayload,
   PerfBaselinePayload,
   VariableBaselinePayload,
   UrlTrajectoryBaselinePayload,
@@ -73,22 +75,6 @@ export async function listActiveConsoleBaselines(
         eq(consoleBaselines.testId, testId),
         eq(consoleBaselines.branch, branch),
         eq(consoleBaselines.isActive, true),
-      ),
-    );
-}
-
-export async function listActiveA11yBaselines(
-  testId: string,
-  branch: string,
-): Promise<A11yBaseline[]> {
-  return db
-    .select()
-    .from(a11yBaselines)
-    .where(
-      and(
-        eq(a11yBaselines.testId, testId),
-        eq(a11yBaselines.branch, branch),
-        eq(a11yBaselines.isActive, true),
       ),
     );
 }
@@ -182,20 +168,6 @@ export async function createConsoleBaseline(
     .select()
     .from(consoleBaselines)
     .where(eq(consoleBaselines.id, id));
-  return row;
-}
-
-export async function createA11yBaseline(
-  input: CreateBaselineInput<A11yBaselinePayload>,
-): Promise<A11yBaseline> {
-  const id = uuid();
-  await db
-    .insert(a11yBaselines)
-    .values({ id, ...input, isActive: true, approvedAt: new Date() });
-  const [row] = await db
-    .select()
-    .from(a11yBaselines)
-    .where(eq(a11yBaselines.id, id));
   return row;
 }
 

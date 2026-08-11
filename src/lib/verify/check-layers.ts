@@ -1,4 +1,5 @@
 import type { CheckLayerDescriptor } from "@lastest/contracts";
+import { a11yCheckLayer } from "@lastest/plugin-a11y/check-layer";
 import { designSystemCheckLayer } from "@lastest/plugin-design-system/check-layer";
 
 import { CORE_CHECK_LAYER_DESCRIPTORS } from "./core-check-layers";
@@ -25,9 +26,8 @@ import { CORE_CHECK_LAYER_DESCRIPTORS } from "./core-check-layers";
  * `getPluginRuntime()`, since every plugin also lists `checkLayers` on its
  * main manifest.
  */
-// PR C adds: `import { a11yCheckLayer } from "@lastest/plugin-a11y/check-layer";`
-// then lists it below.
 const PLUGIN_CHECK_LAYER_DESCRIPTORS: readonly CheckLayerDescriptor[] = [
+  a11yCheckLayer,
   designSystemCheckLayer,
 ];
 

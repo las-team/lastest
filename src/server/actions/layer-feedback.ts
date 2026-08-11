@@ -146,6 +146,7 @@ export async function decideLayer(
           layer: input.layer,
           kind: baselineKind,
           testId: step.testId,
+          repositoryId: repoId,
           stepLabel: step.stepLabel ?? null,
           branch,
           approvedFromComparisonId: input.stepComparisonId,
@@ -328,6 +329,11 @@ interface BaselineWriteInput {
   layer: EvidenceLayer;
   kind: LayerBaselineKind;
   testId: string;
+  /** Only the `a11y` case needs this: that table is owned by
+   *  `@lastest/plugin-a11y`, which scopes every write by repo (and derives
+   *  the team from the resolved context). The six core-owned layer tables
+   *  key off `testId` alone. */
+  repositoryId: string;
   stepLabel: string | null;
   branch: string;
   approvedFromComparisonId: string;
@@ -390,8 +396,13 @@ async function writeLayerBaseline(input: BaselineWriteInput): Promise<void> {
     case "a11y": {
       const a = layerData.a11y;
       if (!a) return;
+      // `a11y_baselines` belongs to `@lastest/plugin-a11y` — core no longer
+      // touches the table, it asks the plugin (RFC §9 phase 3).
+      const { createA11yBaseline } =
+        await import("@lastest/plugin-a11y/actions");
       for (const v of a.newViolations.slice(0, 10)) {
-        await queries.createA11yBaseline({
+        await createA11yBaseline({
+          repositoryId: input.repositoryId,
           testId: input.testId,
           stepLabel: input.stepLabel,
           branch: input.branch,

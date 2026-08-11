@@ -19,8 +19,8 @@
  *
  * Deleting an entry from `PSEUDO_PLUGINS` is how a feature graduates: it moves to
  * `plugins/<id>/` and picks up the error-level rules instead. `explorer` was the
- * first to have done so; `design-system` is the second (RFC §9 phase 3) — both
- * entries are gone from the map below, and their violations went with them.
+ * first to have done so; `design-system` and `a11y` followed in RFC §9 phase 3 —
+ * all three entries are gone from the map below, and their violations with them.
  */
 
 /** Zone globs for the target layout. */
@@ -141,7 +141,6 @@ export const PSEUDO_PLUGINS = {
   },
   "url-diff": { lib: ["src/lib/url-diff"], actions: ["url-diff.ts"] },
   rca: { lib: ["src/lib/rca"], actions: ["rca.ts"] },
-  a11y: { lib: ["src/lib/a11y"], actions: [] },
   playground: { lib: ["src/lib/playground"], actions: [] },
   "data-sources": {
     lib: ["src/lib/csv", "src/lib/google-sheets"],

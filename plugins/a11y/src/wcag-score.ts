@@ -3,7 +3,7 @@
  * Computes a 0–100 score from axe-core violations with severity weighting.
  */
 
-import type { A11yViolation, WcagScoreSummary } from "@/lib/db/schema";
+import type { A11yViolation, WcagScoreSummary } from "@lastest/eb-protocol";
 
 const SEVERITY_WEIGHTS: Record<string, number> = {
   critical: 10,

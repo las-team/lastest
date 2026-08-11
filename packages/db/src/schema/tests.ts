@@ -32,7 +32,10 @@ import type {
   ConsoleEntry,
 } from "@lastest/eb-protocol";
 
-export type { DesignSystemScoreSummary } from "@lastest/eb-protocol";
+export type {
+  DesignSystemScoreSummary,
+  WcagScoreSummary,
+} from "@lastest/eb-protocol";
 
 import type {
   DesignSystemConfig,
@@ -478,19 +481,6 @@ export interface TestVariable {
   assertEnabled?: boolean;
   assertSeverity?: StepRuleSeverity;
   description?: string;
-}
-
-export interface WcagScoreSummary {
-  score: number;
-  totalRules: number;
-  passedRules: number;
-  violatedRules: number;
-  bySeverity: {
-    critical: number;
-    serious: number;
-    moderate: number;
-    minor: number;
-  };
 }
 
 // ── Multi-layer comparison types (v1.13) ─────────────────────────────────────

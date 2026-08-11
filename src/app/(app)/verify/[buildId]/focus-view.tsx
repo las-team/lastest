@@ -267,11 +267,17 @@ function classifyLayer(
     case "console":
       if (!result?.status) return "absent";
       return "clean";
-    case "a11y":
+    case "a11y": {
       // A11y requires the enableA11y toggle, so null/null means *not* run.
-      return result?.a11yViolations != null || result?.a11yPassesCount != null
-        ? "clean"
-        : "absent";
+      // Delegated to the plugin — see `plugins/a11y/src/check-layer.ts`.
+      const captured =
+        !!result &&
+        (CHECK_LAYER_BY_ID.get("a11y")?.wasCaptured?.(
+          result as unknown as Record<string, unknown>,
+        ) ??
+          false);
+      return captured ? "clean" : "absent";
+    }
     case "design": {
       // Same opt-in shape as a11y: only marked captured when the EB
       // harvester ran. Delegates to the plugin instead of duplicating its
