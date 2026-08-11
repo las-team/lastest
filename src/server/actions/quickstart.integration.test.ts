@@ -6,10 +6,12 @@
  * `startQuickstart` (the `"use server"` action) gates on `requireRepoAccess`,
  * a session-based guard unavailable outside a real Next.js request. This
  * calls `executeQuickstart` directly — the same function `startQuickstart`
- * hands off to after its own gate checks — which is why
- * `executeQuickstart`/`buildInitialQsSteps` were changed from
- * module-private to exported in `src/server/actions/quickstart-agent.ts`
- * (visibility only, no behavior change). Note `qs_preflight` (the pipeline's
+ * hands off to after its own gate checks — which is why `executeQuickstart`
+ * was changed from module-private to exported in
+ * `src/server/actions/quickstart-agent.ts` (visibility only, no behavior
+ * change). `buildInitialQsSteps` lives in `@/lib/quickstart/step-definitions`
+ * (a plain module, not `"use server"` — Next.js requires every top-level
+ * export of one to be async, and this isn't). Note `qs_preflight` (the pipeline's
  * own first step) re-checks `isQuickstartEnabled` independently, so the gate
  * is still exercised — just not through the session-auth wrapper.
  *
@@ -39,7 +41,8 @@ import { db } from "@/lib/db";
 import * as queries from "@/lib/db/queries";
 import { agentSessions } from "@/lib/db/schema";
 
-import { executeQuickstart, buildInitialQsSteps } from "./quickstart-agent";
+import { executeQuickstart } from "./quickstart-agent";
+import { buildInitialQsSteps } from "@/lib/quickstart/step-definitions";
 
 const TARGET = "https://the-internet.herokuapp.com";
 
