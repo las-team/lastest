@@ -48,6 +48,37 @@ const RECORDED_TEST = "golden-path-recorded";
 const RECORDED_AREA = "Golden Path Area";
 
 /**
+ * The Radix `<Switch>` that belongs to a labelled settings row.
+ *
+ * Settings rows are all shaped the same way — label text on the left, control
+ * on the right, inside one `justify-between` flex row — so walking up to that
+ * row and back down to the switch is stabler than any class chain.
+ */
+function switchForLabel(page: Page, label: string) {
+  return page
+    .locator(
+      `xpath=//*[normalize-space(text())=${JSON.stringify(label)}]/ancestor::div[contains(@class,"justify-between")][1]//button[@role="switch"]`,
+    )
+    .first();
+}
+
+async function ensureSwitchOn(page: Page, label: string): Promise<void> {
+  const sw = switchForLabel(page, label);
+  await sw.waitFor({ state: "visible", timeout: 60_000 });
+  if ((await sw.getAttribute("data-state")) !== "checked") await sw.click();
+  await expect
+    .poll(() => sw.getAttribute("data-state"), { timeout: 15_000 })
+    .toBe("checked");
+}
+
+/** Progress breadcrumbs — these steps are long, and a bare timeout tells you
+ *  nothing about which of a dozen awaits actually stalled. */
+const T0 = Date.now();
+function mark(what: string): void {
+  console.log(`[gp +${((Date.now() - T0) / 1000).toFixed(1)}s] ${what}`);
+}
+
+/**
  * Click the sidebar's "Run All" and resolve the build it created.
  *
  * `handleRunAll` (sidebar-quick-actions.tsx) calls `createAndRunBuild` and
@@ -177,8 +208,10 @@ describe("§4 golden path — one continuous browser journey", () => {
   it("step 3: records a test by really interacting with the live EB stream", async () => {
     const page = s.page;
     await waitForPoolHeadroom(1);
+    mark("record: pool ok");
 
     await gotoSettled(page, "/record");
+    mark("record: page loaded");
 
     const urlInput = page.locator('input[placeholder="https://example.com"]');
     await urlInput.waitFor({ state: "visible", timeout: 30_000 });
@@ -199,8 +232,10 @@ describe("§4 golden path — one continuous browser journey", () => {
 
     // The EB has to be provisioned, boot Chromium, auto-register, and stream
     // its first frame before the canvas exists at all.
+    mark("record: start clicked");
     const canvas = page.locator("canvas").first();
     await canvas.waitFor({ state: "visible", timeout: 120_000 });
+    mark("record: canvas visible");
     await expect
       .poll(
         async () =>
@@ -213,9 +248,11 @@ describe("§4 golden path — one continuous browser journey", () => {
     // target app's own absolute layout (see `startTargetApp`): the name input
     // sits at (100,60)
     // and the submit button at (280,60).
+    mark("record: first frame");
     await clickStreamAt(page, 150, 72);
     await page.keyboard.type("Ada", { delay: 60 });
     await clickStreamAt(page, 305, 72);
+    mark("record: interactions sent");
 
     // Two explicit captures — step 6 needs more than one screenshot to
     // approve one diff and reject another.
@@ -229,6 +266,7 @@ describe("§4 golden path — one continuous browser journey", () => {
     const recordedSteps = await page.locator("body").innerText();
     expect(recordedSteps).not.toContain("Waiting for interactions...");
 
+    mark("record: stopping");
     await page.getByRole("button", { name: /^Stop$/ }).click();
 
     // Stop → the "Save Recording" review step, which auto-persists the test
@@ -236,6 +274,7 @@ describe("§4 golden path — one continuous browser journey", () => {
     // save has actually returned an id.
     const openTest = page.getByRole("button", { name: /^Open Test$/ });
     await openTest.waitFor({ state: "visible", timeout: 180_000 });
+    mark("record: saved");
 
     const { db } = await import("@/lib/db");
     const { tests } = await import("@/lib/db/schema");
@@ -312,4 +351,221 @@ describe("§4 golden path — one continuous browser journey", () => {
       .where(eq(tests.id, recordedTestId!));
     expect(row?.areaName).toBe(RECORDED_AREA);
   }, 180_000);
+
+  /**
+   * Step 5 — trigger a run from the real control and watch a build appear and
+   * finish. This is also the build that establishes the baselines step 6
+   * diffs against, so it deliberately runs against target v1.
+   */
+  it("step 5: Run All creates a build that runs to completion", async () => {
+    const page = s.page;
+    // Two tests in this repo, one EB each in process mode.
+    await waitForPoolHeadroom(2);
+    await gotoSettled(page, "/tests");
+
+    baselineBuildId = await runAllAndResolveBuild(page);
+    expect(baselineBuildId).toBeTruthy();
+
+    const done = await waitForBuildComplete(baselineBuildId);
+    expect(done.totalTests ?? 0).toBeGreaterThanOrEqual(1);
+
+    // Both the seeded smoke test and the test recorded in step 3 executed.
+    const { db } = await import("@/lib/db");
+    const { builds, testResults } = await import("@/lib/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const [build] = await db
+      .select({ testRunId: builds.testRunId })
+      .from(builds)
+      .where(eq(builds.id, baselineBuildId));
+    const results = await db
+      .select({ testId: testResults.testId, status: testResults.status })
+      .from(testResults)
+      .where(eq(testResults.testRunId, build!.testRunId!));
+    expect(results.length).toBeGreaterThanOrEqual(1);
+    expect(results.map((r) => r.testId)).toContain(recordedTestId);
+  }, 900_000);
+
+  /**
+   * Step 6a — establish baselines by approving the first build.
+   *
+   * A first run has nothing to compare against, so `builds.ts` writes each
+   * screenshot as a `pending` diff with no baseline (`autoApproveDefaultBranch`
+   * is off by default). `approveDiffCore` is what promotes a screenshot to a
+   * baseline — so this is both the setup step 6 needs and a first real
+   * exercise of the review UI's bulk path.
+   */
+  it("step 6a: approving the first build in the review UI creates baselines", async () => {
+    const page = s.page;
+    await gotoSettled(page, `/builds/${baselineBuildId}`);
+
+    const selectAll = page.locator('[aria-label="Select all"]');
+    await selectAll.waitFor({ state: "visible", timeout: 60_000 });
+    await selectAll.click();
+
+    const bulkApprove = page
+      .getByRole("button", { name: /^Expected Change$/ })
+      .first();
+    await bulkApprove.waitFor({ state: "visible", timeout: 15_000 });
+    await bulkApprove.click();
+
+    const { db } = await import("@/lib/db");
+    const { baselines, tests, visualDiffs } = await import("@/lib/db/schema");
+    const { eq, inArray } = await import("drizzle-orm");
+    await expect
+      .poll(
+        async () => {
+          const rows = await db
+            .select({ status: visualDiffs.status })
+            .from(visualDiffs)
+            .where(eq(visualDiffs.buildId, baselineBuildId!));
+          return rows.filter((r) => r.status === "pending").length;
+        },
+        { timeout: 90_000, interval: 2_000 },
+      )
+      .toBe(0);
+
+    const testIds = (
+      await db
+        .select({ id: tests.id })
+        .from(tests)
+        .where(eq(tests.repositoryId, repositoryId!))
+    ).map((t) => t.id);
+    const active = await db
+      .select({ id: baselines.id })
+      .from(baselines)
+      .where(inArray(baselines.testId, testIds));
+    expect(active.length).toBeGreaterThan(0);
+  }, 300_000);
+
+  /**
+   * Step 6b — a second build against a *changed* page, then the review
+   * decisions §4 asks for: approve one screenshot, reject another with a
+   * comment.
+   *
+   * The change is real: `target.setVersion(2)` repaints the CTA from
+   * `#ff0000` to `#1e40af`, so every screenshot of that page differs by a
+   * genuine block of pixels rather than by anti-aliasing noise.
+   *
+   * Two settings are switched on here rather than in step 7 because they have
+   * to be true *while the build runs* for step 7 to have anything to look at:
+   * video recording (the executor only records when it's on) and Early
+   * Adopter (the spec-28 annotated player is gated on it). Both are flipped
+   * through their real Settings controls, not written to the DB.
+   */
+  it("step 6b: a changed page yields real diffs — approve one, reject one with a comment", async () => {
+    const page = s.page;
+
+    await gotoSettled(page, "/settings");
+    await ensureSwitchOn(page, "Video Recording");
+    await ensureSwitchOn(page, "Early Adopter Mode");
+    mark("6b: settings toggled");
+
+    const { db } = await import("@/lib/db");
+    const { playwrightSettings, teams, visualDiffs, reviewTodos } =
+      await import("@/lib/db/schema");
+    const { and, eq, gt } = await import("drizzle-orm");
+
+    // Autosave is debounced (500ms) — assert it actually landed rather than
+    // trusting the optimistic switch state.
+    await expect
+      .poll(
+        async () => {
+          const [row] = await db
+            .select({ v: playwrightSettings.enableVideoRecording })
+            .from(playwrightSettings)
+            .where(eq(playwrightSettings.repositoryId, repositoryId!));
+          return row?.v ?? false;
+        },
+        { timeout: 60_000, interval: 1_000 },
+      )
+      .toBe(true);
+    await expect
+      .poll(
+        async () => {
+          const [row] = await db
+            .select({ v: teams.earlyAdopterMode })
+            .from(teams)
+            .where(eq(teams.id, teamId!));
+          return row?.v ?? false;
+        },
+        { timeout: 60_000, interval: 1_000 },
+      )
+      .toBe(true);
+
+    // Repaint the target, then run the same suite again.
+    target.setVersion(2);
+    await waitForPoolHeadroom(2);
+    await gotoSettled(page, "/tests");
+    diffBuildId = await runAllAndResolveBuild(page);
+    mark(`6b: build ${diffBuildId} started`);
+    await waitForBuildComplete(diffBuildId);
+    mark("6b: build complete");
+
+    // Real pixel diffs, not "no baseline" placeholders.
+    const changed = await db
+      .select({ id: visualDiffs.id, px: visualDiffs.pixelDifference })
+      .from(visualDiffs)
+      .where(
+        and(
+          eq(visualDiffs.buildId, diffBuildId),
+          gt(visualDiffs.pixelDifference, 0),
+        ),
+      );
+    expect(changed.length).toBeGreaterThanOrEqual(2);
+
+    // ── Approve one, through the rendered diff viewer ────────────────────
+    const approveId = changed[0]!.id;
+    await gotoSettled(page, `/builds/${diffBuildId}/diff/${approveId}`);
+    const approve = page
+      .getByRole("button", { name: /^Expected Change$/ })
+      .first();
+    await approve.waitFor({ state: "visible", timeout: 60_000 });
+    await approve.click();
+    await expect
+      .poll(
+        async () => {
+          const [row] = await db
+            .select({ status: visualDiffs.status })
+            .from(visualDiffs)
+            .where(eq(visualDiffs.id, approveId));
+          return row?.status;
+        },
+        { timeout: 60_000, interval: 1_000 },
+      )
+      .toBe("approved");
+    mark("6b: approved");
+
+    // ── Reject another *with a comment* ──────────────────────────────────
+    const rejectId = changed[1]!.id;
+    const comment = "Golden path: CTA colour regression, needs a fix";
+    await gotoSettled(page, `/builds/${diffBuildId}/diff/${rejectId}`);
+    const todoBtn = page.getByRole("button", { name: /^Add to Todo$/ });
+    await todoBtn.waitFor({ state: "visible", timeout: 60_000 });
+    await todoBtn.click();
+    const todoInput = page.locator(
+      'input[placeholder="Describe what needs fixing..."]',
+    );
+    await todoInput.waitFor({ state: "visible", timeout: 15_000 });
+    await todoInput.fill(comment);
+    await page.getByRole("button", { name: /^Add$/ }).click();
+
+    await expect
+      .poll(
+        async () => {
+          const [row] = await db
+            .select({ status: visualDiffs.status })
+            .from(visualDiffs)
+            .where(eq(visualDiffs.id, rejectId));
+          return row?.status;
+        },
+        { timeout: 60_000, interval: 1_000 },
+      )
+      .toBe("todo");
+    const todos = await db
+      .select({ description: reviewTodos.description })
+      .from(reviewTodos)
+      .where(eq(reviewTodos.diffId, rejectId));
+    expect(todos.map((t) => t.description)).toContain(comment);
+    mark("6b: rejected with comment");
+  }, 1_200_000);
 });

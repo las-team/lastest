@@ -624,6 +624,26 @@ In rough order of increasing pain: `rca`, `url-diff`, `app-map`, `share`, `launc
 `scheduling`, then the `src/lib/playwright` split (§6.2), then `qa-agent` last —
 by which point the contract will have been through a dozen features.
 
+> **`url-diff` is blocked and has been moved behind `app-map`.** Counted before
+> starting it: its host port would need **~22 methods** for ~1,000 LOC of
+> feature code — six diff engines from `src/lib/diff`, five EB-capture
+> primitives, six background-job calls, three storage paths. A port larger than
+> the feature it serves is not a boundary, it is core re-exported through a
+> keyhole: it would satisfy "no `@/…` imports" while proving nothing, which is
+> exactly the §10 risk of drawing the boundary wrong.
+>
+> The cause is that `url-diff` is not a feature sitting *on* core — it is a thin
+> orchestration *of* core. Everything it orchestrates (`src/lib/diff` → §6.1
+> `core/diff`, background jobs, the EB command queue) is classified core and
+> **not yet extracted**. So it is blocked on a genuine core PR, which is the
+> workflow §7.2 asks for, not a detour around it. Do `core/diff` first and
+> `url-diff` becomes small.
+>
+> Compare `app-map`, done instead: ~5 host methods for ~1,130 LOC, three of its
+> four modules pure. **The cheap plugins are the ones that compute; the
+> expensive ones are the ones that coordinate.** That is a better predictor than
+> LOC for everything left on this list.
+
 Each plugin is one PR that touches only `plugins/<id>/**` plus generated glue and
 deletions from `src/`. If a plugin needs a new core capability, that is a **separate,
 earlier PR** — which is exactly the workflow being asked for.

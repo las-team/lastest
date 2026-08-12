@@ -4,8 +4,7 @@
  * plugins neither may import the other (RFC §4.3: promote the shared part
  * rather than reach across).
  *
- * `flows.ts` still imports from here; qa-agent now goes straight to the lib.
- * (The previous header here claimed `build-map.ts` re-exported this — it does
- * not, and had not for some time.)
+ * `build-map.ts` re-exports `canonicalPath` from here and `flows.ts` imports
+ * it, so server callers are unchanged; qa-agent now goes straight to the lib.
  */
 export { canonicalPath } from "@lastest/url-canonical";

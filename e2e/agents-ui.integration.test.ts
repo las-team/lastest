@@ -53,10 +53,20 @@
  *
  * ### Scope choices
  *
- * The target is the harness's tiny local app rather than a public sandbox: a
- * one-page target keeps the crawl, the planner's context, and the number of
- * generated tests small enough for both runs to finish in a sane window, and
- * it removes the network from the failure surface. Explorer runs with
+ * The target is `https://the-internet.herokuapp.com`, the same small public QA
+ * sandbox §3's two pipeline suites use — **not** the harness's local app, and
+ * that is not a preference. Both agents run their target URL through the SSRF
+ * guard (`src/lib/url-diff/`), which rejects loopback outright:
+ *
+ *     URL rejected: Target host resolves to a private/internal address: 127.0.0.1
+ *
+ * This suite originally pointed at `startTargetApp()`'s `127.0.0.1:<port>`
+ * server and both agents refused to start (server action → HTTP 500, no
+ * session row ever created). That is the guard working correctly, so the fix
+ * belongs here rather than in the product — but it does mean no golden-path
+ * agent step can ever use the in-process target the other §4 steps rely on.
+ *
+ * Scope is kept small in the ways that remain available: Explorer runs with
  * `maxIterations: 1`; QA Agent runs with every unlocked coverage group
  * deselected (only the always-on "journey" group remains) and auto-approve on.
  *
@@ -78,12 +88,19 @@ import {
   launchSession,
   onboardWithSandbox,
   registerViaUi,
-  startTargetApp,
   teamIdForEmail,
   waitForPoolHeadroom,
   type Session,
-  type TargetApp,
 } from "./harness";
+
+/**
+ * Small, public, purpose-built QA sandbox (login form, dynamic content,
+ * several linked pages) — the same target §3's explorer and qa-agent pipeline
+ * suites use, so a difference in outcome between here and there is
+ * attributable to the UI layer rather than to a different app. See the header
+ * for why a loopback target is not an option.
+ */
+const TARGET = "https://the-internet.herokuapp.com";
 
 // ── Local helpers (not in the harness — several suites share that file) ─────
 
@@ -277,6 +294,27 @@ async function bodyText(page: Page): Promise<string> {
 }
 
 /**
+ * Run `fn`, and on failure append what the page actually said.
+ *
+ * Both agent UIs surface server-action failures as an inline red paragraph
+ * (`setError(...)` in `use-explorer-agent` / `use-qa-agent`) rather than by
+ * throwing, so a bare "timed out waiting for X" hides the real cause — an AI
+ * provider that cannot run, a rejected quota, a gate. This puts the rendered
+ * text in the failure message where it belongs.
+ */
+async function withPageDump<T>(page: Page, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    const text = await bodyText(page).catch(() => "<page text unavailable>");
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `${msg}\n--- rendered page text ---\n${text.slice(0, 3000)}`,
+    );
+  }
+}
+
+/**
  * Every `@lastest/ui` / shadcn Badge currently on the page.
  *
  * Explorer renders the session status as a bare badge (`{session.status}`), so
@@ -292,7 +330,6 @@ async function badgeTexts(page: Page): Promise<string[]> {
 
 // ── Fixture: one registered team + onboarded sandbox repo for both steps ────
 
-let target: TargetApp;
 let session: Session;
 let teamId: string | undefined;
 
@@ -314,11 +351,7 @@ async function setupFixture(attempts = 3): Promise<void> {
     const candidate = await launchSession();
     try {
       await registerViaUi(candidate, "Agents UI");
-      await onboardWithSandbox(
-        candidate,
-        target.origin,
-        `agents-ui-${Date.now()}`,
-      );
+      await onboardWithSandbox(candidate, TARGET, `agents-ui-${Date.now()}`);
       session = candidate;
       teamId = await teamIdForEmail(candidate.email);
       return;
@@ -337,14 +370,12 @@ async function setupFixture(attempts = 3): Promise<void> {
 }
 
 beforeAll(async () => {
-  target = await startTargetApp();
   await setupFixture();
 }, 600_000);
 
 afterAll(async () => {
   await session?.close();
   await destroyTeam(teamId);
-  await target?.close();
 }, 120_000);
 
 // ── Step 10 — Explorer ──────────────────────────────────────────────────────
@@ -369,7 +400,7 @@ describe("§4 step 10 — Explorer session with a live EB stream", () => {
     // depend on that plumbing.
     const urlInput = page.locator("input#x-url");
     await urlInput.waitFor({ state: "visible", timeout: 30_000 });
-    await urlInput.fill(target.origin);
+    await urlInput.fill(TARGET);
     await page.locator("input#x-iterations").fill("1");
 
     const startBtn = page.getByRole("button", { name: /start exploration/i });
@@ -377,15 +408,21 @@ describe("§4 step 10 — Explorer session with a live EB stream", () => {
     await startBtn.click();
 
     // The setup card is replaced by the run card once the server action
-    // returns a session id and the poller picks it up.
-    await until(
-      "the explorer run card (status badge) to appear",
-      async () =>
-        (await badgeTexts(page)).some((t) =>
-          ["active", "paused", "completed", "failed", "cancelled"].includes(t),
-        ),
-      120_000,
-      1_000,
+    // returns a session id and the poller picks it up. Wrapped in a page dump
+    // because `startExplorerAgent` reports refusals (SSRF guard, quota, AI
+    // provider) as inline red text, not as a thrown navigation error.
+    await withPageDump(page, () =>
+      until(
+        "the explorer run card (status badge) to appear",
+        async () =>
+          (await badgeTexts(page)).some((t) =>
+            ["active", "paused", "completed", "failed", "cancelled"].includes(
+              t,
+            ),
+          ),
+        120_000,
+        1_000,
+      ),
     );
 
     // The live-browser card only mounts while the session is running/paused
@@ -486,7 +523,7 @@ describe("§4 step 11 — QA Agent session: crawl → tasks → execution → re
     // A repo that has never run lands straight on the setup card.
     const urlInput = page.locator("input#qa-url");
     await urlInput.waitFor({ state: "visible", timeout: 30_000 });
-    await urlInput.fill(target.origin);
+    await urlInput.fill(TARGET);
 
     // Keep the plan tiny: deselect every unlocked coverage group (the
     // always-on "journey" group cannot be unchecked) so generation stays to a
@@ -518,15 +555,18 @@ describe("§4 step 11 — QA Agent session: crawl → tasks → execution → re
     await seeEnabled(startBtn, '"Start QA agent"', 30_000);
     await startBtn.click();
 
-    // The setup card collapses into the live phase timeline.
-    await until(
-      "the QA phase timeline to appear",
-      async () => {
-        const text = await bodyText(page);
-        return /Preflight/.test(text) && /Discover/.test(text);
-      },
-      120_000,
-      1_000,
+    // The setup card collapses into the live phase timeline. Same page-dump
+    // reasoning as the explorer start above.
+    await withPageDump(page, () =>
+      until(
+        "the QA phase timeline to appear",
+        async () => {
+          const text = await bodyText(page);
+          return /Preflight/.test(text) && /Discover/.test(text);
+        },
+        120_000,
+        1_000,
+      ),
     );
 
     // ── crawl ─────────────────────────────────────────────────────────────

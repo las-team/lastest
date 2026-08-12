@@ -33,6 +33,36 @@ This is the *how*. The *why* is [`core-plugin-refactor.md`](./core-plugin-refact
   is what drops the burndown.
 - Behaviour is identical. This is a move, not a rewrite (RFC §2).
 
+## 1.5 Cost the host port BEFORE you start
+
+Count the distinct core functions the feature calls. That number is the host
+port's size, and it is the single best predictor of whether the migration is
+worth doing yet.
+
+| Port size | Verdict |
+| --- | --- |
+| ≤ ~8 | Go. This is a feature sitting *on* core. |
+| ~8–15 | Go, but expect most of the port to be one missing capability. |
+| > ~15 | **Stop.** The port would be bigger than the feature. |
+
+A port larger than the feature it serves is not a boundary — it is core
+re-exported through a keyhole. It satisfies "no `@/…` imports" while proving
+nothing, which is the §10 risk of drawing the boundary wrong. When the count
+comes out that high, the feature is a thin *orchestration of* core rather than
+a consumer of it, and the real task is extracting the core module it
+orchestrates, as its own PR, first.
+
+Measured so far: `rca` **6** (done), `app-map` **~12** (viable), `url-diff`
+**~22** (deferred — blocked on `core/diff` per RFC §9 phase 4).
+
+> **Counting hazard.** `src/lib/app-map/build-map.ts` contains literal NUL
+> bytes (deliberate `\0` separators in an edge key, line ~217). `grep` treats
+> such a file as binary and **silently reports nothing** — no match, no
+> warning. That made an early survey of this exact feature undercount its
+> imports by seven. Before trusting a grep-based survey, run
+> `file <path>`: anything reported as `data` rather than `text` is invisible to
+> your search. `grep -a` reads it correctly.
+
 ## 2. Pick the shape: does the plugin own tables?
 
 | | Owns tables | Owns no tables |

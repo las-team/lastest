@@ -276,7 +276,14 @@ export async function finishOnboarding(page: Page): Promise<void> {
  */
 export async function gotoSettled(page: Page, path: string): Promise<void> {
   await page.goto(`${BASE_URL}${path}`, { waitUntil: "domcontentloaded" });
-  await page.waitForLoadState("networkidle").catch(() => {});
+  // Short budget on purpose: the signed-in shell holds an activity-feed SSE
+  // stream open, so `networkidle` never actually fires inside the app and the
+  // default 30s timeout would be paid on *every* navigation. All this needs
+  // to cover is the client chunks, which is a sub-second wait on a warm dev
+  // server.
+  await page
+    .waitForLoadState("networkidle", { timeout: 8_000 })
+    .catch(() => {});
 }
 
 /**
