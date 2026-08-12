@@ -1287,6 +1287,25 @@ export async function unlinkSpec(specId: string) {
 }
 
 /**
+ * `id → functionalAreaId` for the given tests.
+ *
+ * Lifted out of `src/lib/rca/run.ts`, which ran this `inArray` select against
+ * the `tests` table itself. That direct `drizzle-orm` import was the counted
+ * `rca::db` boundary violation; `@lastest/plugin-rca` now asks for the same
+ * rows through `RcaHost.getTestAreaIds`, and the query lives here with the
+ * rest of the test queries.
+ */
+export async function getTestFunctionalAreaIds(
+  testIds: string[],
+): Promise<{ id: string; areaId: string | null }[]> {
+  if (!testIds.length) return [];
+  return db
+    .select({ id: tests.id, areaId: tests.functionalAreaId })
+    .from(tests)
+    .where(inArray(tests.id, testIds));
+}
+
+/**
  * Of the given test ids, which have ever executed successfully — i.e. have at
  * least one `test_results` row with `status='passed'`. Used by RCA to decide
  * whether a test's baseline is trustworthy (no green history → lean test-error).

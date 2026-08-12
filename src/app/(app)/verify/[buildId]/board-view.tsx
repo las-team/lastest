@@ -49,7 +49,7 @@ import {
 } from "@/lib/verify/check-modes";
 import { CHECK_LAYER_BY_ID } from "@/lib/verify/check-layers";
 import type { VisualDiffLite, TestResultLite } from "./board-focus-client";
-import { RcaBadge } from "@/components/diff/rca-badge";
+import { RcaBadge } from "@lastest/plugin-rca/ui/rca-badge";
 import { useSwipeTriage } from "./use-swipe-triage";
 
 export type CaseStatus = "regression" | "done" | "missed" | "unknown";

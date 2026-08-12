@@ -35,9 +35,11 @@ const nextConfig: NextConfig = {
     "@lastest/ai-kit",
     "@lastest/cron",
     "@lastest/page-map",
+    "@lastest/url-canonical",
     "@lastest/ui",
     "@lastest/plugin-events",
     "@lastest/plugin-explorer",
+    "@lastest/plugin-rca",
   ],
   outputFileTracingIncludes: {
     "/terms": ["./src/content/legal/terms.md"],

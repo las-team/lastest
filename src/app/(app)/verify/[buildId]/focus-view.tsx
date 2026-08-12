@@ -92,7 +92,7 @@ import {
 } from "@/lib/verify/case-status";
 import { useIsMobile } from "@/lib/hooks/use-is-mobile";
 import type { VisualDiffLite, TestResultLite } from "./board-focus-client";
-import { RcaBadge } from "@/components/diff/rca-badge";
+import { RcaBadge } from "@lastest/plugin-rca/ui/rca-badge";
 import {
   VideoPlayer,
   type PlayerSegment,

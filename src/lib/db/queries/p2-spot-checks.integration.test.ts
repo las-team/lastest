@@ -3,7 +3,7 @@
  * underlying query/action function directly and confirm it doesn't error and
  * returns sane data," per the task's P2 depth bar. Not full feature coverage;
  * one shared fixture, several unrelated rows exercised against it:
- *   - RCA: `classifyBuildDiffs` (src/lib/rca/run.ts)
+ *   - RCA: `classifyBuildDiffs` (@lastest/plugin-rca)
  *   - CSV data sources: create/get/delete round trip
  *   - API test: `parseAssertions` (assertion evaluation, on real syntax)
  *   - Analytics/Impact: `getIssueTimeline`/`getMergedPRs`/`getImpactSummary`
@@ -26,7 +26,9 @@ import {
   tests,
 } from "@/lib/db/schema";
 import * as queries from "@/lib/db/queries";
-import { classifyBuildDiffs } from "@/lib/rca/run";
+import { classifyBuildDiffs } from "@lastest/plugin-rca";
+
+import { appRcaHost } from "@/lib/core/rca-host";
 import { parseAssertions } from "@/lib/playwright/assertion-parser";
 
 let teamId: string;
@@ -104,7 +106,7 @@ afterAll(async () => {
 
 describe("P2 spot-check — RCA", () => {
   it("classifyBuildDiffs runs against a real (diff-free) build without erroring", async () => {
-    const count = await classifyBuildDiffs(buildId);
+    const count = await classifyBuildDiffs(appRcaHost, buildId);
     expect(typeof count).toBe("number");
     expect(count).toBe(0); // no visual diffs on this fixture — sane, not a crash
   });

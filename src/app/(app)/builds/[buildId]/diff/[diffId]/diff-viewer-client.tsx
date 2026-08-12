@@ -16,8 +16,8 @@ import {
   type IgnoreRegionRect,
 } from "@/components/diff/slider-comparison";
 import { SwipeDeck } from "@/components/diff/swipe-deck-client";
-import { RcaBadge } from "@/components/diff/rca-badge";
-import { RcaPanel } from "@/components/diff/rca-panel";
+import { RcaBadge } from "@lastest/plugin-rca/ui/rca-badge";
+import { RcaPanel } from "@lastest/plugin-rca/ui/rca-panel";
 import { useIsMobile } from "@/lib/hooks/use-is-mobile";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {

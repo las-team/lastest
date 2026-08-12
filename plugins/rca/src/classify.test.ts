@@ -10,11 +10,11 @@ import {
   maskDynamic,
 } from "./dynamic-text";
 import type {
-  ChangeMap,
   DiffMetadata,
   DomDiffResult,
   DomSnapshotElement,
-} from "@/lib/db/schema";
+} from "@lastest/eb-protocol";
+import type { RcaChangeMap } from "./host";
 
 const NOW = "2026-06-16T00:00:00.000Z";
 
@@ -39,10 +39,16 @@ function meta(over: Partial<DiffMetadata> = {}): DiffMetadata {
   return { changedRegions: [{ x: 0, y: 0, width: 10, height: 10 }], ...over };
 }
 
-function changeMap(over: Partial<ChangeMap> = {}): ChangeMap {
-  return {
-    files: [],
-    areas: [],
+/**
+ * A full core-shaped Change Map, returned as the narrow `RcaChangeMap` the
+ * port declares. Keeping the seven fields the classifier ignores is the point:
+ * it proves core's real `ChangeMap` is assignable to the port type, which is
+ * what lets this package stay free of a `@lastest/db` import.
+ */
+function changeMap(over: Partial<RcaChangeMap> = {}): RcaChangeMap {
+  const full = {
+    files: [] as RcaChangeMap["files"],
+    areas: [] as RcaChangeMap["areas"],
     tests: [],
     steps: [],
     intentSummary: "",
@@ -52,6 +58,7 @@ function changeMap(over: Partial<ChangeMap> = {}): ChangeMap {
     modelId: "",
     ...over,
   };
+  return full;
 }
 
 function classify(over: Partial<ClassifyDiffInput>) {
@@ -61,7 +68,31 @@ function classify(over: Partial<ClassifyDiffInput>) {
   );
 }
 
-const codeAreaMap = changeMap({
+/**
+ * A Change Map carrying the *full* core `ChangeMapFile`/`ChangeMapArea`
+ * fields, not just the two the port narrows to.
+ *
+ * Declared as a local shape and then passed where `RcaChangeMap` is expected:
+ * that assignment is the assertion. It is the only thing standing between this
+ * package and a `@lastest/db` import, so if core ever renames `areaId` or
+ * `sources` this test stops compiling — which is the point.
+ */
+const codeAreaFixture: {
+  files: {
+    path: string;
+    pkg: string;
+    status: string;
+    insertions: number;
+    deletions: number;
+  }[];
+  areas: {
+    areaId: string;
+    areaName: string;
+    sources: string[];
+    risk: string;
+    aiNarrative: string[];
+  }[];
+} = {
   files: [
     {
       path: "src/app/login/page.tsx",
@@ -80,7 +111,9 @@ const codeAreaMap = changeMap({
       aiNarrative: [],
     },
   ],
-});
+};
+
+const codeAreaMap = changeMap(codeAreaFixture);
 
 describe("classifyDiffSource — CODE verdicts", () => {
   it("structural DOM change + code-flagged area → code:structural, headline code", () => {

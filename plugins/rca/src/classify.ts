@@ -8,7 +8,7 @@
  *   - baseline provenance (cross-branch baseline)
  *
  * It emits a rich-taxonomy {@link RcaVerdict}. No DB/network/IO here so it is
- * fully unit-testable; the caller (`src/lib/rca/run.ts`) loads the inputs and
+ * fully unit-testable; the caller (`./run.ts`) loads the inputs and
  * persists the result into `DiffMetadata.rca`.
  *
  * These are HEURISTICS, deliberately conservative: we never claim `code`
@@ -17,13 +17,14 @@
  */
 
 import type {
-  ChangeMap,
   DiffMetadata,
   RcaCategory,
   RcaSignal,
   RcaVerdict,
-} from "@/lib/db/schema";
-import { isDynamicTextChange } from "@/lib/rca/dynamic-text";
+} from "@lastest/eb-protocol";
+
+import { isDynamicTextChange } from "./dynamic-text";
+import type { RcaChangeMap } from "./host";
 
 /** Bump when the heuristics change so stale verdicts can be recomputed. */
 export const RCA_VERSION = 2;
@@ -36,7 +37,7 @@ const MAX_CHANGED_FILES = 20;
 
 export interface ClassifyDiffInput {
   metadata: DiffMetadata | null | undefined;
-  changeMap?: ChangeMap | null;
+  changeMap?: RcaChangeMap | null;
   testId: string;
   /** Functional area of the diff's test (tests.functionalAreaId), if known. */
   areaId?: string | null;

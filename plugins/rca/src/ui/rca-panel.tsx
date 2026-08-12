@@ -17,7 +17,7 @@
  */
 
 import { useState } from "react";
-import type { RcaVerdict } from "@/lib/db/schema";
+import type { RcaVerdict } from "@lastest/eb-protocol";
 import { Search } from "lucide-react";
 
 const CHANGE_LABEL: Record<string, string> = {

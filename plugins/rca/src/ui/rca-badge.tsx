@@ -8,12 +8,8 @@
  * (category · reason) and, for code verdicts, the build's changed files.
  */
 
-import type { RcaCategory, RcaVerdict } from "@/lib/db/schema";
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "@/components/ui/hover-card";
+import type { RcaCategory, RcaVerdict } from "@lastest/eb-protocol";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@lastest/ui";
 import { Code2, FlaskConical, HelpCircle, FileCode } from "lucide-react";
 
 const HEADLINE: Record<

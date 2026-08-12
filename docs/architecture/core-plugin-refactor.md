@@ -1,6 +1,6 @@
 # RFC: Core + Plugins
 
-**Status:** phase 0 landed, phase 1 (spikes) done. Phase 2 not started.
+**Status:** phases 0–3 landed. Phase 4 started — `rca` done, 12 plugins to go.
 **Author:** planning doc
 **Supersedes:** nothing
 
@@ -14,6 +14,26 @@
 >   Three results change this document: §8's codegen fallback is unnecessary
 >   (S1), §5 contradicts itself about plugin FKs (S2), and §4.2's `withRawPage`
 >   is not needed on day one (S3). Those sections are annotated inline below.
+> - **Phase 2 — done.** The kernel, `@lastest/contracts` and the
+>   `@lastest/core-*` packages are live, and `explorer` is a package. §6 of this
+>   document was **superseded by [`core-scope.md`](./core-scope.md)** in the
+>   process: the RFC's bar for core ("more than one plugin needs it") let core
+>   sprawl to nine modules, and the revised bar — *a module is core only if a
+>   feature getting it wrong would break things for everyone else* — cut it
+>   back. Read `core-scope.md` before arguing about where anything belongs.
+>   Result: [`explorer-migration-result.md`](./explorer-migration-result.md).
+> - **Phase 3 — done.** `CheckLayer` is a registry; `design-system` and `a11y`
+>   are check-layer plugins. Both are table-light, and `design-system` proved
+>   the no-schema shape (manifest + host port, no `ctx` at all).
+> - **Phase 4 — started. 1 of 13 plugins done.** `rca` has landed
+>   ([result](./rca-migration-result.md)). `url-diff` and `app-map` were
+>   attempted in the same wave and are **not** done — the one piece of them that
+>   did land is `libs/url-canonical`, promoted out of `app-map` so `qa-agent`
+>   stops importing it (RFC §4.3), which is why the burndown moved twice. The
+>   repeatable procedure is now written down in
+>   [`plugin-migration-recipe.md`](./plugin-migration-recipe.md) — read that,
+>   not §9 below, before migrating the next feature.
+>   Burndown: **42 → 34 → 32**.
 
 ## 1. The problem
 
@@ -559,10 +579,20 @@ is the R4 half.
 > a contradiction in §5, and S3 came back far better than assumed. Phase 2 is
 > unblocked and slightly cheaper than estimated here.
 
-### Phase 2 — Kernel + first plugin (~3 weeks)
+### Phase 2 — Kernel + first plugin (~3 weeks) — **done**
 
 Build `@lastest/contracts`, `@lastest/kernel`, `core/browser`, and migrate **one**
 plugin end to end.
+
+> **Landed, with one design correction.** The exit criteria below were met —
+> `plugins/explorer` has no `@/` import, no `playwright` and no `@lastest/db`.
+> What the phase also produced was evidence that §6's core was too big, which
+> is why [`core-scope.md`](./core-scope.md) now supersedes it. Two things the
+> RFC did not anticipate: shared pure logic wants a **third tier** (`libs/*`,
+> neither core nor plugin, no review gate), and the gap between "what the
+> plugin needs" and "what core exposes" is best made *visible* as a named
+> **host port** rather than papered over — see `plugins/explorer/src/host.ts`,
+> which started at eight methods and is at five.
 
 **Pilot: `explorer`.** Rationale: ~5,100 LOC (large enough to be a real proof, small
 enough to finish), and it exercises every capability at once — EB (direct-CDP
@@ -575,11 +605,17 @@ Exit criteria: `plugins/explorer` has no `@/` imports, no `playwright` dependenc
 `@lastest/db` dependency; explorer works identically in the app; the ESLint rules are
 **error**-level for `plugins/**`.
 
-### Phase 3 — Check-layer plugins (~1 week)
+### Phase 3 — Check-layer plugins (~1 week) — **done**
 
 Convert `CheckLayer` from a closed union to a registry; move `design-system` and
 `a11y` out as plugins. Small, high-signal, and it makes the highest-churn category of
 change (new check layer) plugin-local.
+
+> **Landed as specified.** The prediction in §6.3 held: this was the cheapest
+> phase and it produced the two shapes every later plugin copies —
+> `design-system` (owns no table, needs no `ctx`, host port only) and `a11y`
+> (owns one `a11y_`-prefixed table, so `schema` + a `deletion` hook, which
+> `resolveRegistry` refuses to boot without).
 
 ### Phase 4 — Roll out (~2–3 months, one PR per plugin)
 
@@ -591,6 +627,26 @@ by which point the contract will have been through a dozen features.
 Each plugin is one PR that touches only `plugins/<id>/**` plus generated glue and
 deletions from `src/`. If a plugin needs a new core capability, that is a **separate,
 earlier PR** — which is exactly the workflow being asked for.
+
+> **Started — `rca` done** ([result](./rca-migration-result.md)), `url-diff` and
+> `app-map` not. Three findings from the first one worth knowing before the
+> next:
+>
+> - **"One PR per plugin" is close to true, but not free.** `rca` needed two
+>   core edits to be *possible at all*: the visual-diff jsonb payload types had
+>   to move to `@lastest/eb-protocol` (a plugin cannot name its own verdict type
+>   otherwise), and a shadcn primitive had to move to `libs/ui`. Both follow
+>   precedents already set by phase 2/3. Expect a small core PR *ahead of* most
+>   phase-4 plugins rather than none — which is the workflow working, not
+>   failing.
+> - **The ordering in this section is by LOC, and LOC is the wrong metric.**
+>   `rca` is the smallest feature in the list and still took two core changes,
+>   because what costs is *how many core tables a feature reads* and *which
+>   primitives its UI touches* — not its size. Re-read the order with that lens.
+> - **A feature that owns no tables is the easy case and most of this list is
+>   that case.** No `schema`, no `deletion` hook, no `ctx` — just a manifest and
+>   a host port. `rca` declared six port methods, four of which would collapse
+>   into one `ctx.diffs` capability if core ever grows one.
 
 ### Phase 5 — Tighten (ongoing)
 

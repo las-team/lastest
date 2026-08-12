@@ -1597,8 +1597,11 @@ async function runBuildAsync(
         // map with each diff's pixel/DOM signals, so it must run AFTER the
         // change map is persisted. Best-effort — the UI treats a missing
         // verdict as "unknown".
-        const { classifyBuildDiffs } = await import("@/lib/rca/run");
-        await classifyBuildDiffs(buildId).catch((e) => {
+        const [{ classifyBuildDiffs }, { appRcaHost }] = await Promise.all([
+          import("@lastest/plugin-rca"),
+          import("@/lib/core/rca-host"),
+        ]);
+        await classifyBuildDiffs(appRcaHost, buildId).catch((e) => {
           console.error(`[rca] classify failed for build ${buildId}:`, e);
         });
       })

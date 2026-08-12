@@ -22,7 +22,7 @@ import type {
   QaExploreBlocked,
   QaPageSnapshot,
 } from "@/lib/db/schema";
-import { canonicalPath } from "@/lib/app-map/canonical";
+import { canonicalPath } from "@lastest/url-canonical";
 import { injectStorageStateIntoEb } from "@/lib/eb/inject-storage-state";
 import { isAuthLink } from "./auth-links";
 import { attachPageObservers, attemptLogin, extractDom } from "./crawl";

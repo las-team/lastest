@@ -23,6 +23,7 @@ export {
   CardTitle,
 } from "./card";
 export { cn } from "./cn";
+export { HoverCard, HoverCardContent, HoverCardTrigger } from "./hover-card";
 export { Input } from "./input";
 export { Label } from "./label";
 export { Progress } from "./progress";

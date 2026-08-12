@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { correlateRegions, pickSelector } from "./correlate";
-import type { DomDiffResult, DomSnapshotElement } from "@/lib/db/schema";
+import type { DomDiffResult, DomSnapshotElement } from "@lastest/eb-protocol";
 
 function el(
   box: { x: number; y: number; width: number; height: number },

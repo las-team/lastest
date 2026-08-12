@@ -170,6 +170,14 @@ export async function registerViaUi(
   name = "Golden Path",
 ): Promise<void> {
   await s.page.goto(`${BASE_URL}/register`, { waitUntil: "domcontentloaded" });
+  // Wait for hydration before touching the form. `domcontentloaded` fires
+  // long before React has attached the submit handler, and on a loaded dev
+  // server (four of these suites sharing one machine) the gap is seconds —
+  // a click landing in that window fills the form, submits nothing, and the
+  // test then waits out its whole timeout on a page that never navigates.
+  // Reproduced directly: same script, same selectors, fails without this
+  // line and passes with it.
+  await s.page.waitForLoadState("networkidle").catch(() => {});
   await s.page.fill("input#name", name);
   await s.page.fill("input#email", s.email);
   await s.page.fill("input#password", s.password);
@@ -194,6 +202,9 @@ export async function onboardWithSandbox(
   projectName: string,
 ): Promise<void> {
   const page = s.page;
+  // Same hydration guard as `registerViaUi` — the wizard's cards are client
+  // components and a pre-hydration click is a silent no-op.
+  await page.waitForLoadState("networkidle").catch(() => {});
 
   // Step 1 — pick the "Manual" path (no AI/MCP dependency in CI).
   await page
@@ -255,6 +266,141 @@ export async function finishOnboarding(page: Page): Promise<void> {
 }
 
 // ── DB helpers (assertions + teardown) ───────────────────────────────────
+
+/**
+ * Navigate and wait for the page to be interactive.
+ *
+ * Every client component in this app attaches its handlers at hydration, so
+ * `domcontentloaded` alone is not enough to click anything — see the comment
+ * in `registerViaUi`. Anything driving the UI should come through here.
+ */
+export async function gotoSettled(page: Page, path: string): Promise<void> {
+  await page.goto(`${BASE_URL}${path}`, { waitUntil: "domcontentloaded" });
+  await page.waitForLoadState("networkidle").catch(() => {});
+}
+
+/**
+ * Free slots in the EB pool, read from the service's own live-backend ledger.
+ *
+ * Same helper `core/browser/src/browser.integration.test.ts` uses, for the
+ * same reason: process mode is 1-job-1-EB and a claim issued while the pool
+ * is at its cap sits in a 5-minute retry loop instead of failing fast. Gating
+ * on headroom keeps this suite measuring the product rather than queueing
+ * latency — and it matters more here, because several §4 steps each want a
+ * browser and other suites may be sharing the same four slots.
+ */
+export async function poolHeadroom(): Promise<number> {
+  const { getPoolStatus } = await import("@lastest/pool-service/client");
+  const status = await getPoolStatus();
+  // Service unreachable — let the claim itself produce the real error rather
+  // than stalling here on a number we cannot read.
+  return status ? status.max - status.size : 99;
+}
+
+export async function waitForPoolHeadroom(
+  min = 1,
+  timeoutMs = 180_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if ((await poolHeadroom()) >= min) return;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `EB pool never had ${min} free slot(s) in ${timeoutMs}ms`,
+      );
+    }
+    await new Promise((r) => setTimeout(r, 1_000));
+  }
+}
+
+/**
+ * Click a point expressed in *remote page* coordinates on the EB stream
+ * canvas.
+ *
+ * `BrowserViewer` forwards mouse events to the EB after scaling by
+ * `canvas.width / rect.width` (browser-viewer-client.tsx), so a click at CSS
+ * offset `p * rect.width / canvas.width` lands on remote page pixel `p`. This
+ * is the whole reason §4 step 3 is automatable at all: the streamed browser
+ * really is interactive, not a video.
+ */
+export async function clickStreamAt(
+  page: Page,
+  pageX: number,
+  pageY: number,
+): Promise<void> {
+  const canvas = page.locator("canvas").first();
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error("stream canvas has no layout box");
+  const dims = await canvas.evaluate((c) => ({
+    w: (c as HTMLCanvasElement).width,
+    h: (c as HTMLCanvasElement).height,
+  }));
+  if (!dims.w || !dims.h) throw new Error("stream canvas has no frame yet");
+  await canvas.click({
+    position: {
+      x: (pageX * box.width) / dims.w,
+      y: (pageY * box.height) / dims.h,
+    },
+  });
+}
+
+/**
+ * Newest build for a repo, newer than `since`.
+ *
+ * The "Run All" control navigates straight to the new build, so the URL is
+ * normally enough — but when every EB is busy the same click *queues* the
+ * build and stays put (`createAndRunBuild` returns `{queued:true}`). That is
+ * a legitimate product path, not a failure, so the caller needs a way to find
+ * the build it just created without a URL to read it from.
+ */
+export async function latestBuildIdForRepo(
+  repositoryId: string,
+  since: Date,
+): Promise<string | null> {
+  const { builds, testRuns } = await import("@/lib/db/schema");
+  const { and, desc, gte } = await import("drizzle-orm");
+  const rows = await db
+    .select({ id: builds.id })
+    .from(builds)
+    .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
+    .where(
+      and(
+        eq(testRuns.repositoryId, repositoryId),
+        gte(builds.createdAt, since),
+      ),
+    )
+    .orderBy(desc(builds.createdAt))
+    .limit(1);
+  return rows[0]?.id ?? null;
+}
+
+/** Poll a build row until the executor marks it complete. */
+export async function waitForBuildComplete(
+  buildId: string,
+  timeoutMs = 420_000,
+): Promise<{ overallStatus: string; totalTests: number | null }> {
+  const { builds } = await import("@/lib/db/schema");
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const [row] = await db
+      .select({
+        overallStatus: builds.overallStatus,
+        totalTests: builds.totalTests,
+        completedAt: builds.completedAt,
+      })
+      .from(builds)
+      .where(eq(builds.id, buildId));
+    if (row?.completedAt) {
+      return { overallStatus: row.overallStatus, totalTests: row.totalTests };
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `build ${buildId} never completed in ${timeoutMs}ms (status ${row?.overallStatus})`,
+      );
+    }
+    await new Promise((r) => setTimeout(r, 2_000));
+  }
+}
 
 export async function teamIdForEmail(email: string): Promise<string> {
   const [row] = await db

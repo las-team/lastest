@@ -100,6 +100,141 @@ export interface A11yBaselinePayload {
   acknowledgedAt: string;
 }
 
+// ---------------------------------------------------------------------------
+// Visual-diff payload shapes (`visual_diffs.metadata`)
+// ---------------------------------------------------------------------------
+//
+// These live here rather than in `packages/db` for the same reason the design
+// tokens above do: `@lastest/plugin-rca` computes the `rca` verdict and reads
+// the pixel/DOM signals it fuses, and a plugin may not import `@lastest/db`
+// (FORBIDDEN_PLUGIN_IMPORTS). `packages/db/src/schema/shared.ts` re-exports
+// every name below, so core call sites are unchanged.
+//
+// Nothing here is a table — they are the shapes of one jsonb column, which is
+// exactly what this package is for.
+
+export interface AlignmentSegment {
+  op: "match" | "insert" | "delete";
+  count: number;
+}
+
+export interface PageShiftInfo {
+  detected: boolean;
+  deltaY: number;
+  confidence: number;
+  insertedRows?: number;
+  deletedRows?: number;
+  alignedBaselineImagePath?: string;
+  alignedCurrentImagePath?: string;
+  alignedDiffImagePath?: string;
+  alignmentSegments?: AlignmentSegment[];
+}
+
+/** DOM diff result for comparing two snapshots. */
+export interface DomDiffResult {
+  added: DomSnapshotElement[];
+  removed: DomSnapshotElement[];
+  changed: Array<{
+    baseline: DomSnapshotElement;
+    current: DomSnapshotElement;
+    changes: ("text" | "position" | "size" | "selector")[];
+  }>;
+  unchangedCount: number;
+}
+
+// ── Root Cause Analysis (RCA) — "is this diff the TEST or the CODE?" ───────
+//
+// A per-visual-diff verdict that fuses signals already computed elsewhere
+// (pixel-diff metadata, optional DOM diff, the build's Change Map) into a
+// rich-taxonomy classification. Computed by `@lastest/plugin-rca` after the
+// build's Change Map is available and persisted into `DiffMetadata.rca`. The
+// `headline` drives the badge color; `signals` explain the verdict; the
+// element-level `regionCauses` come from the correlation phase.
+
+export type RcaCategory =
+  // Application changed because the code changed (real regression or an
+  // intended UI change to approve).
+  | "code:structural" // DOM nodes/attributes added, removed, or re-selected
+  | "code:style" // CSS/visual change (color, spacing, size) tied to a code change
+  | "code:content" // copy/content changed and it is NOT a dynamic-data pattern
+  // Diff is noise from the test/environment, not a code change.
+  | "test:flake" // non-deterministic render with no DOM/code change
+  | "test:dynamic-data" // dates, counters, ids, currency — data, not code
+  | "test:animation" // transient/mid-animation frame or anti-aliasing
+  | "test:environment" // page shift, cross-branch baseline, locale/viewport
+  | "test:never-passed" // test has no green history — its baseline isn't trustworthy
+  // Not enough signal to commit to test-vs-code.
+  | "uncertain";
+
+export interface RcaSignal {
+  category: RcaCategory;
+  /** 0..1 — strength of THIS signal, not a probability across categories. */
+  confidence: number;
+  /** One short plain-English sentence explaining the signal. */
+  reason: string;
+}
+
+/** Element-level cause for one changed pixel region (populated by the
+ *  correlation phase; empty in the Phase-1 classifier-only path). */
+export interface RcaRegionCause {
+  region: { x: number; y: number; width: number; height: number };
+  selector: string;
+  changeType: (
+    | "text"
+    | "position"
+    | "size"
+    | "selector"
+    | "added"
+    | "removed"
+  )[];
+  cssDeltas?: Array<{ property: string; baseline: string; current: string }>;
+}
+
+export interface RcaVerdict {
+  /** Headline bucket that drives the badge: code change, test noise, or unsure. */
+  headline: "code" | "test" | "uncertain";
+  /** Ranked contributing signals (strongest first). */
+  signals: RcaSignal[];
+  /** Build-level files that changed (from the Change Map), surfaced for `code`. */
+  changedFiles: string[];
+  /** Element-level region→cause mapping (correlation phase). */
+  regionCauses?: RcaRegionCause[];
+  /** One-sentence human-readable root cause (AI, best-effort; Phase 4). */
+  narrative?: string;
+  /** Schema/heuristic version, so stale verdicts can be recomputed. */
+  version: number;
+  computedAt: string;
+}
+
+export interface DiffMetadata {
+  changedRegions: { x: number; y: number; width: number; height: number }[];
+  affectedComponents?: string[];
+  changeCategories?: ("layout" | "color" | "text" | "image" | "style")[];
+  pageShift?: PageShiftInfo;
+  isNewTest?: boolean;
+  textRegions?: { x: number; y: number; width: number; height: number }[];
+  textRegionDiffPixels?: number;
+  nonTextRegionDiffPixels?: number;
+  ocrDurationMs?: number;
+  domDiff?: DomDiffResult;
+  textDiffSummary?: { added: number; removed: number; sameAsBaseline: boolean };
+  // Branch the baseline was sourced from when it differs from the build's
+  // branch. Set by `processVisualDiff` when the current-branch baseline lookup
+  // misses and we fall back to the repo's default branch. UI uses this to
+  // label the diff "baseline from <branch>" so users know they're not
+  // comparing apples-to-apples within-branch.
+  baselineSourceBranch?: string;
+  // When no baseline exists on either the current branch or the default
+  // branch, surface where the user DOES have an approved baseline so they
+  // know it's not lost. Empty when there's no approved baseline anywhere.
+  baselineExistsOn?: { branch: string; createdAt: string };
+  // Root Cause Analysis verdict — "is this diff the test or the code?".
+  // Computed post-build by `@lastest/plugin-rca` and read by the diff badge +
+  // Source filter. Absent on diffs predating the feature (UI treats it as
+  // unknown).
+  rca?: RcaVerdict;
+}
+
 export type DesignTokenCategory =
   | "color" // any color computed property (color, background-color, border-color, fill, stroke)
   | "border-radius" // border-*-radius

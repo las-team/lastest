@@ -22,7 +22,7 @@ import type {
   DomDiffResult,
   DomSnapshotElement,
   RcaRegionCause,
-} from "@/lib/db/schema";
+} from "@lastest/eb-protocol";
 
 type Rect = { x: number; y: number; width: number; height: number };
 

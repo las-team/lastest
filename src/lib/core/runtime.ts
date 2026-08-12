@@ -26,6 +26,7 @@ import { configureA11y } from "@lastest/plugin-a11y";
 import { configureDesignSystem } from "@lastest/plugin-design-system";
 import { configureEvents } from "@lastest/plugin-events";
 import { configureExplorer } from "@lastest/plugin-explorer";
+import { configureRca } from "@lastest/plugin-rca";
 
 import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
 import * as queries from "@/lib/db/queries";
@@ -38,6 +39,7 @@ import { appEventsHost } from "@/lib/core/events-host";
 import { appExplorerHost } from "@/lib/core/explorer-host";
 import { createAppJobsHost } from "@/lib/core/jobs-host";
 import { MANIFESTS } from "@/lib/core/manifests";
+import { appRcaHost } from "@/lib/core/rca-host";
 import { appReposHost } from "@/lib/core/repos-host";
 import { appStorageHost } from "@/lib/core/storage-host";
 import { appTestsHost } from "@/lib/core/tests-host";
@@ -192,6 +194,7 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
   });
   configureDesignSystem(appDesignSystemHost);
   configureA11y({ runtime, data: data.capability("a11y") });
+  configureRca({ runtime, host: appRcaHost });
 
   cached = { runtime, data, registry };
   return runtime;
