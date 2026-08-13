@@ -1,36 +1,52 @@
-import { db } from "../index";
 import {
-  launchCohorts,
-  launchProfiles,
-  launchVotes,
-  launchMonthlyWinners,
-  launchComments,
-  launchReactions,
-  launchEvents,
-  users,
-} from "../schema";
-import type {
-  NewLaunchCohort,
-  LaunchCohort,
-  LaunchCohortState,
-  NewLaunchProfile,
-  LaunchProfile,
-  LaunchMonthlyWinner,
-} from "../schema";
-import { DEFAULT_LAUNCH } from "../schema";
-import {
-  eq,
   and,
-  desc,
   asc,
+  count,
+  desc,
+  eq,
   gte,
-  lt,
   inArray,
   isNull,
   sql,
-  count,
 } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
+
+import { LAUNCH_CONFIG } from "../config";
+import {
+  launchCohorts,
+  launchComments,
+  launchEvents,
+  launchMonthlyWinners,
+  launchProfiles,
+  launchReactions,
+  launchVotes,
+  type LaunchCohort,
+  type LaunchCohortState,
+  type LaunchMonthlyWinner,
+  type LaunchProfile,
+  type NewLaunchCohort,
+  type NewLaunchProfile,
+} from "../schema";
+import type { LaunchDb } from "./db";
+
+/**
+ * Every read and write the launch board performs, against its own seven tables
+ * through the handle `core/data` supplied.
+ *
+ * Ported from `src/lib/db/queries/launch.ts`, which shared one `db` handle with
+ * all 98 tables in the app. Two changes, both forced by
+ * `docs/architecture/core-scope.md` §6:
+ *
+ * 1. **The `leftJoin(users)` in the comment queries is gone.** A plugin may not
+ *    read a core table, so `CommentRow` no longer carries `authorName`; the API
+ *    layer resolves display names through `LaunchHost.resolveUserNames` and
+ *    merges them at serialization time.
+ * 2. **`onUserDeleted` deletes** (bottom of this file) exist at all. They are
+ *    the replacement for the four `ON DELETE CASCADE` FKs to `users.id` that
+ *    the schema no longer has.
+ *
+ * Everything else is the same SQL. Behaviour is held constant (RFC §2).
+ */
 
 // ============================================
 // Cohorts
@@ -40,7 +56,9 @@ import { v4 as uuid } from "uuid";
  * The cohort the board currently points at: a `voting` cohort if one is live,
  * otherwise the soonest `open` cohort. Never returns locked/closed archives.
  */
-export async function getCurrentCohort(): Promise<LaunchCohort | undefined> {
+export async function getCurrentCohort(
+  db: LaunchDb,
+): Promise<LaunchCohort | undefined> {
   const [live] = await db
     .select()
     .from(launchCohorts)
@@ -59,6 +77,7 @@ export async function getCurrentCohort(): Promise<LaunchCohort | undefined> {
 }
 
 export async function getCohortById(
+  db: LaunchDb,
   id: string,
 ): Promise<LaunchCohort | undefined> {
   const [row] = await db
@@ -69,6 +88,7 @@ export async function getCohortById(
 }
 
 export async function getCohortByWeekStart(
+  db: LaunchDb,
   weekStartAt: Date,
 ): Promise<LaunchCohort | undefined> {
   const [row] = await db
@@ -79,6 +99,7 @@ export async function getCohortByWeekStart(
 }
 
 export async function getCohortsByState(
+  db: LaunchDb,
   states: LaunchCohortState[],
 ): Promise<LaunchCohort[]> {
   if (states.length === 0) return [];
@@ -90,6 +111,7 @@ export async function getCohortsByState(
 }
 
 export async function createCohort(
+  db: LaunchDb,
   data: Omit<NewLaunchCohort, "id" | "createdAt" | "updatedAt">,
 ): Promise<LaunchCohort> {
   const id = uuid();
@@ -105,6 +127,7 @@ export async function createCohort(
 }
 
 export async function setCohortState(
+  db: LaunchDb,
   id: string,
   state: LaunchCohortState,
 ): Promise<void> {
@@ -115,6 +138,7 @@ export async function setCohortState(
 }
 
 export async function lockCohortWinner(
+  db: LaunchDb,
   id: string,
   winnerSlug: string | null,
 ): Promise<void> {
@@ -126,6 +150,7 @@ export async function lockCohortWinner(
 
 /** All cohorts in a state, oldest first — used by the state engine to advance due ones. */
 export async function listCohortsByStateAsc(
+  db: LaunchDb,
   states: LaunchCohortState[],
 ): Promise<LaunchCohort[]> {
   if (states.length === 0) return [];
@@ -163,6 +188,7 @@ export function normalizeDomain(websiteUrl: string): string | null {
 }
 
 export async function getProfileBySlug(
+  db: LaunchDb,
   slug: string,
 ): Promise<LaunchProfile | undefined> {
   const [row] = await db
@@ -173,6 +199,7 @@ export async function getProfileBySlug(
 }
 
 export async function findProfileByDomain(
+  db: LaunchDb,
   domain: string,
 ): Promise<LaunchProfile | undefined> {
   const [row] = await db
@@ -183,6 +210,7 @@ export async function findProfileByDomain(
 }
 
 export async function listProfilesByCohort(
+  db: LaunchDb,
   cohortId: string,
 ): Promise<LaunchProfile[]> {
   return db
@@ -194,6 +222,7 @@ export async function listProfilesByCohort(
 
 /** Only featured (live) entries for a cohort — what the public leaderboard shows. */
 export async function listFeaturedProfilesByCohort(
+  db: LaunchDb,
   cohortId: string,
 ): Promise<LaunchProfile[]> {
   return db
@@ -209,6 +238,7 @@ export async function listFeaturedProfilesByCohort(
 }
 
 export async function createProfile(
+  db: LaunchDb,
   data: Omit<NewLaunchProfile, "id" | "slug" | "createdAt" | "updatedAt"> & {
     slug?: string;
   },
@@ -218,11 +248,11 @@ export async function createProfile(
 
   // Derive a unique human-readable slug from the name.
   let slug = data.slug || slugifyName(data.name);
-  let existing = await getProfileBySlug(slug);
+  let existing = await getProfileBySlug(db, slug);
   let counter = 1;
   while (existing) {
     slug = `${slugifyName(data.name)}-${counter}`;
-    existing = await getProfileBySlug(slug);
+    existing = await getProfileBySlug(db, slug);
     counter++;
   }
 
@@ -237,6 +267,7 @@ export async function createProfile(
 }
 
 export async function updateProfile(
+  db: LaunchDb,
   slug: string,
   patch: Partial<Omit<NewLaunchProfile, "id" | "slug">>,
 ): Promise<LaunchProfile | undefined> {
@@ -244,7 +275,7 @@ export async function updateProfile(
     .update(launchProfiles)
     .set({ ...patch, updatedAt: new Date() })
     .where(eq(launchProfiles.slug, slug));
-  return getProfileBySlug(slug);
+  return getProfileBySlug(db, slug);
 }
 
 // ============================================
@@ -281,11 +312,14 @@ function isUniqueViolation(err: unknown): boolean {
  * Record a vote. Throws {@link DuplicateVoteError} if the (profile, voter) pair
  * already exists (the DB unique index is the real guard against races).
  */
-export async function createVote(data: {
-  profileId: string;
-  voterUserId: string;
-  ipAddress: string | null;
-}): Promise<void> {
+export async function createVote(
+  db: LaunchDb,
+  data: {
+    profileId: string;
+    voterUserId: string;
+    ipAddress: string | null;
+  },
+): Promise<void> {
   try {
     await db.insert(launchVotes).values({
       id: uuid(),
@@ -303,6 +337,7 @@ export async function createVote(data: {
 }
 
 export async function deleteVote(
+  db: LaunchDb,
   profileId: string,
   voterUserId: string,
 ): Promise<void> {
@@ -317,6 +352,7 @@ export async function deleteVote(
 }
 
 export async function hasUserVoted(
+  db: LaunchDb,
   profileId: string,
   voterUserId: string,
 ): Promise<boolean> {
@@ -333,8 +369,9 @@ export async function hasUserVoted(
   return Boolean(row);
 }
 
-/** Set of profile slugs the user has voted for, across the given profile ids. */
+/** Set of profile ids the user has voted for, across the given profile ids. */
 export async function getUserVotedProfileIds(
+  db: LaunchDb,
   voterUserId: string,
   profileIds: string[],
 ): Promise<Set<string>> {
@@ -352,6 +389,7 @@ export async function getUserVotedProfileIds(
 }
 
 export async function countVotesByUserSince(
+  db: LaunchDb,
   voterUserId: string,
   since: Date,
 ): Promise<number> {
@@ -368,6 +406,7 @@ export async function countVotesByUserSince(
 }
 
 export async function countVotesByIpSince(
+  db: LaunchDb,
   ipAddress: string,
   since: Date,
 ): Promise<number> {
@@ -384,6 +423,7 @@ export async function countVotesByIpSince(
 }
 
 export async function countSubmissionsByUserSince(
+  db: LaunchDb,
   submittedByUserId: string,
   since: Date,
 ): Promise<number> {
@@ -400,7 +440,10 @@ export async function countSubmissionsByUserSince(
 }
 
 /** Recompute and persist a profile's upvoteCount from non-cleared votes. */
-export async function recomputeUpvoteCount(profileId: string): Promise<number> {
+export async function recomputeUpvoteCount(
+  db: LaunchDb,
+  profileId: string,
+): Promise<number> {
   const [row] = await db
     .select({ n: count() })
     .from(launchVotes)
@@ -417,12 +460,15 @@ export async function recomputeUpvoteCount(profileId: string): Promise<number> {
 
 /**
  * Vote-clearing pass for a cohort: flag votes from IPs that appear more than
- * {@link DEFAULT_LAUNCH.suspiciousIpClusterThreshold} times across the cohort's
+ * {@link LAUNCH_CONFIG.suspiciousIpClusterThreshold} times across the cohort's
  * profiles (a single-source burst), then recompute affected upvote counts.
  * Returns the number of votes cleared.
  */
-export async function clearSuspiciousVotes(cohortId: string): Promise<number> {
-  const profiles = await listProfilesByCohort(cohortId);
+export async function clearSuspiciousVotes(
+  db: LaunchDb,
+  cohortId: string,
+): Promise<number> {
+  const profiles = await listProfilesByCohort(db, cohortId);
   const profileIds = profiles.map((p) => p.id);
   if (profileIds.length === 0) return 0;
 
@@ -437,7 +483,7 @@ export async function clearSuspiciousVotes(cohortId: string): Promise<number> {
       ),
     )
     .groupBy(launchVotes.ipAddress)
-    .having(sql`count(*) > ${DEFAULT_LAUNCH.suspiciousIpClusterThreshold}`);
+    .having(sql`count(*) > ${LAUNCH_CONFIG.suspiciousIpClusterThreshold}`);
 
   const suspiciousIps = clusters
     .map((c) => c.ip)
@@ -456,7 +502,7 @@ export async function clearSuspiciousVotes(cohortId: string): Promise<number> {
     .returning({ id: launchVotes.id });
 
   for (const id of profileIds) {
-    await recomputeUpvoteCount(id);
+    await recomputeUpvoteCount(db, id);
   }
   return cleared.length;
 }
@@ -465,27 +511,34 @@ export async function clearSuspiciousVotes(cohortId: string): Promise<number> {
 // Comments
 // ============================================
 
+/**
+ * A comment as this plugin can see it.
+ *
+ * `authorName` is gone: it came from `leftJoin(users, …)`, and `users` is a
+ * core table. The API layer fills the name in from
+ * `LaunchHost.resolveUserNames` instead — see `../api/handlers.ts`.
+ */
 export interface CommentRow {
   id: string;
   body: string;
   authorUserId: string;
-  authorName: string | null;
   createdAt: Date | null;
 }
 
+const commentColumns = {
+  id: launchComments.id,
+  body: launchComments.body,
+  authorUserId: launchComments.authorUserId,
+  createdAt: launchComments.createdAt,
+};
+
 export async function getCommentsForProfile(
+  db: LaunchDb,
   profileId: string,
 ): Promise<CommentRow[]> {
   return db
-    .select({
-      id: launchComments.id,
-      body: launchComments.body,
-      authorUserId: launchComments.authorUserId,
-      authorName: users.name,
-      createdAt: launchComments.createdAt,
-    })
+    .select(commentColumns)
     .from(launchComments)
-    .leftJoin(users, eq(launchComments.authorUserId, users.id))
     .where(
       and(
         eq(launchComments.profileId, profileId),
@@ -495,7 +548,10 @@ export async function getCommentsForProfile(
     .orderBy(asc(launchComments.createdAt));
 }
 
-export async function getCommentById(id: string): Promise<
+export async function getCommentById(
+  db: LaunchDb,
+  id: string,
+): Promise<
   | {
       id: string;
       profileId: string;
@@ -516,12 +572,15 @@ export async function getCommentById(id: string): Promise<
   return row;
 }
 
-export async function createComment(data: {
-  profileId: string;
-  authorUserId: string;
-  body: string;
-  ipAddress: string | null;
-}): Promise<CommentRow> {
+export async function createComment(
+  db: LaunchDb,
+  data: {
+    profileId: string;
+    authorUserId: string;
+    body: string;
+    ipAddress: string | null;
+  },
+): Promise<CommentRow> {
   const id = uuid();
   const now = new Date();
   await db.insert(launchComments).values({
@@ -534,20 +593,16 @@ export async function createComment(data: {
     updatedAt: now,
   });
   const [row] = await db
-    .select({
-      id: launchComments.id,
-      body: launchComments.body,
-      authorUserId: launchComments.authorUserId,
-      authorName: users.name,
-      createdAt: launchComments.createdAt,
-    })
+    .select(commentColumns)
     .from(launchComments)
-    .leftJoin(users, eq(launchComments.authorUserId, users.id))
     .where(eq(launchComments.id, id));
   return row;
 }
 
-export async function softDeleteComment(id: string): Promise<void> {
+export async function softDeleteComment(
+  db: LaunchDb,
+  id: string,
+): Promise<void> {
   await db
     .update(launchComments)
     .set({ deletedAt: new Date(), updatedAt: new Date() })
@@ -555,6 +610,7 @@ export async function softDeleteComment(id: string): Promise<void> {
 }
 
 export async function countCommentsByUserSince(
+  db: LaunchDb,
   authorUserId: string,
   since: Date,
 ): Promise<number> {
@@ -581,6 +637,7 @@ export interface ReactionSummary {
 }
 
 export async function getReactionsForProfile(
+  db: LaunchDb,
   profileId: string,
   reactorUserId?: string,
 ): Promise<ReactionSummary> {
@@ -603,11 +660,14 @@ export async function getReactionsForProfile(
   return { counts, mine };
 }
 
-export async function addReaction(data: {
-  profileId: string;
-  reactorUserId: string;
-  emoji: string;
-}): Promise<void> {
+export async function addReaction(
+  db: LaunchDb,
+  data: {
+    profileId: string;
+    reactorUserId: string;
+    emoji: string;
+  },
+): Promise<void> {
   try {
     await db.insert(launchReactions).values({
       id: uuid(),
@@ -622,11 +682,14 @@ export async function addReaction(data: {
   }
 }
 
-export async function removeReaction(data: {
-  profileId: string;
-  reactorUserId: string;
-  emoji: string;
-}): Promise<void> {
+export async function removeReaction(
+  db: LaunchDb,
+  data: {
+    profileId: string;
+    reactorUserId: string;
+    emoji: string;
+  },
+): Promise<void> {
   await db
     .delete(launchReactions)
     .where(
@@ -642,12 +705,15 @@ export async function removeReaction(data: {
 // Events (analytics)
 // ============================================
 
-export async function hasRecentEvent(data: {
-  profileId: string;
-  type: "view" | "visit";
-  ipHash: string;
-  windowSec: number;
-}): Promise<boolean> {
+export async function hasRecentEvent(
+  db: LaunchDb,
+  data: {
+    profileId: string;
+    type: "view" | "visit";
+    ipHash: string;
+    windowSec: number;
+  },
+): Promise<boolean> {
   const since = new Date(Date.now() - data.windowSec * 1000);
   const [row] = await db
     .select({ id: launchEvents.id })
@@ -664,12 +730,15 @@ export async function hasRecentEvent(data: {
   return Boolean(row);
 }
 
-export async function recordEvent(data: {
-  profileId: string;
-  type: "view" | "visit";
-  ipHash: string;
-  uaHash?: string;
-}): Promise<void> {
+export async function recordEvent(
+  db: LaunchDb,
+  data: {
+    profileId: string;
+    type: "view" | "visit";
+    ipHash: string;
+    uaHash?: string;
+  },
+): Promise<void> {
   try {
     await db.insert(launchEvents).values({
       id: uuid(),
@@ -689,7 +758,10 @@ export async function recordEvent(data: {
 // Stats (owner/admin)
 // ============================================
 
-export async function getProfileEventStats(profileId: string): Promise<{
+export async function getProfileEventStats(
+  db: LaunchDb,
+  profileId: string,
+): Promise<{
   views: number;
   visits: number;
   viewsByDay: { date: string; count: number }[];
@@ -736,7 +808,9 @@ export async function getProfileEventStats(profileId: string): Promise<{
 // Monthly winners
 // ============================================
 
-export async function getMonthlyWinners(): Promise<LaunchMonthlyWinner[]> {
+export async function getMonthlyWinners(
+  db: LaunchDb,
+): Promise<LaunchMonthlyWinner[]> {
   return db
     .select()
     .from(launchMonthlyWinners)
@@ -744,6 +818,7 @@ export async function getMonthlyWinners(): Promise<LaunchMonthlyWinner[]> {
 }
 
 export async function setMonthlyWinner(
+  db: LaunchDb,
   month: string,
   profileSlug: string,
 ): Promise<void> {
@@ -760,5 +835,49 @@ export async function setMonthlyWinner(
     await db
       .insert(launchMonthlyWinners)
       .values({ id: uuid(), month, profileSlug, createdAt: new Date() });
+  }
+}
+
+// ============================================
+// Account deletion (the FK cascade this replaces)
+// ============================================
+
+/**
+ * Everything the board holds for one user.
+ *
+ * Ordered so that a partial failure leaves nothing referencing a row that is
+ * already gone: votes, comments and reactions first (each also triggers an
+ * `upvoteCount` recompute for votes), then the profile back-reference.
+ *
+ * `launch_profiles` rows are *not* deleted. The FK was `ON DELETE SET NULL`,
+ * so a submission has always outlived its submitter — the board keeps showing
+ * a featured app after the founder closes their account. Only the link to the
+ * person goes.
+ */
+export async function deleteUserData(
+  db: LaunchDb,
+  userId: string,
+): Promise<void> {
+  const votedProfiles = await db
+    .select({ profileId: launchVotes.profileId })
+    .from(launchVotes)
+    .where(eq(launchVotes.voterUserId, userId));
+
+  await db.delete(launchVotes).where(eq(launchVotes.voterUserId, userId));
+  await db
+    .delete(launchReactions)
+    .where(eq(launchReactions.reactorUserId, userId));
+  await db
+    .delete(launchComments)
+    .where(eq(launchComments.authorUserId, userId));
+  await db
+    .update(launchProfiles)
+    .set({ submittedByUserId: null, updatedAt: new Date() })
+    .where(eq(launchProfiles.submittedByUserId, userId));
+
+  // The denormalized counter is the board's ranking input, so it must not keep
+  // counting a vote that no longer exists.
+  for (const id of new Set(votedProfiles.map((r) => r.profileId))) {
+    await recomputeUpvoteCount(db, id);
   }
 }

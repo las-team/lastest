@@ -9,6 +9,7 @@
 import type { Browser, Page, BrowserContext } from "playwright";
 import type { StabilizationPayload } from "./protocol.js";
 import { setupFreezeScripts } from "./stabilization.js";
+import { installKeepNamesShim } from "./page-shims.js";
 import { isUsableSelectorValue } from "@lastest/shared";
 import { EmbeddedRecorder } from "./embedded-recorder.js";
 
@@ -727,6 +728,7 @@ export class EmbeddedDebugExecutor {
         : {}),
     });
 
+    await installKeepNamesShim(this.context);
     this.debugPage = await this.context.newPage();
     this.debugPage.setDefaultNavigationTimeout(30000);
     this.debugPage.setDefaultTimeout(15000);

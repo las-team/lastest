@@ -1,14 +1,29 @@
 /**
- * Config for the implicit OAuth handoff that mints scoped tokens for the
- * static lastest-www frontends (launch board, playground leaderboard). The
- * redirect-URI allowlist is the key guard against open-redirect / token-leak:
- * we only ever hand a token back to an origin on this list.
+ * The registered OAuth clients for the implicit token handoff that serves the
+ * static lastest-www frontends (launch board, playground leaderboard, the
+ * marketing site's header login).
+ *
+ * Two things live here and both are boundaries, which is why this is core and
+ * not a feature module (`docs/architecture/core-scope.md` §2 — credentials):
+ *
+ * - **The redirect-URI allowlist.** `/oauth/authorize` hands a bearer token
+ *   back in a URL fragment. The allowlist is the only thing standing between
+ *   that and an open-redirect token leak, so it must not be editable by
+ *   whoever owns the feature the token happens to be for.
+ * - **The client → scope map.** It decides what a minted token may do. A
+ *   client cannot widen its own grant: `/oauth/authorize` intersects the
+ *   requested scope with the value here.
+ *
+ * Moved out of `src/lib/launch/oauth-config.ts` by the `launch` plugin
+ * migration (RFC §9 phase 4). It was never launch's: three clients are
+ * registered, two of them are not the launch board, and `/oauth/authorize` is
+ * a core route. The module was named after the first feature to need it, which
+ * is exactly the near-miss `plugin-migration-recipe.md` §5 warns about — read
+ * the import list, not the directory name.
  */
 
-import { DEFAULT_LAUNCH } from "@/lib/db/schema";
-
 export const LAUNCH_CLIENT_ID = "launch-www";
-export const LAUNCH_SCOPE = DEFAULT_LAUNCH.scope; // 'launch:vote launch:submit'
+export const LAUNCH_SCOPE = "launch:vote launch:submit";
 
 export const PLAYGROUND_CLIENT_ID = "playground-www";
 export const PLAYGROUND_SCOPE = "playground:score";
@@ -17,6 +32,16 @@ export const PLAYGROUND_SCOPE = "playground:score";
 // never calls a scoped API, so it gets no launch/playground scopes).
 export const WWW_CLIENT_ID = "www";
 export const WWW_SCOPE = "openid";
+
+/**
+ * TTL (seconds) of a token minted by `/oauth/authorize`.
+ *
+ * Part of the credential's shape, so it belongs with the client registry
+ * rather than with any one client's feature tunables — it used to sit in
+ * `DEFAULT_LAUNCH.tokenTtlSeconds`, which meant the playground's and the
+ * marketing site's token lifetimes were defined by the launch board.
+ */
+export const OAUTH_TOKEN_TTL_SECONDS = 3600;
 
 // clientId → the full scope string that client may be granted. Requested
 // scopes are intersected with this in /oauth/authorize.

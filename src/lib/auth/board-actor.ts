@@ -1,14 +1,28 @@
 /**
- * Shared actor-resolution + response helpers for the public board APIs
- * (/api/v1/launch, /api/v1/playground). Both routes serve the static
- * lastest-www frontends: reads are public, mutations require a scoped
- * handoff token minted by /oauth/authorize (sessions.kind = 'launch').
+ * Actor resolution for the **public board APIs** — `/api/v1/launch` and
+ * `/api/v1/playground`, which serve the static lastest-www frontends.
+ *
+ * These routes are unlike every other API surface in the app: reads are public
+ * (no 401 for a missing token), and mutations authenticate with a short-lived
+ * scoped handoff token minted by `/oauth/authorize` (`sessions.kind =
+ * 'launch'`) rather than with a team-scoped API key or a repo. There is no
+ * tenant anywhere in the flow — the unit of authorization is a *person* and a
+ * *scope*.
+ *
+ * Core rather than a feature module, for the same reason as
+ * `@/lib/auth/oauth-clients`: this is the code that turns a bearer token into
+ * an identity and decides whether it is allowed to act. It was
+ * `src/lib/launch/api-shared.ts` — named for the first feature that needed it,
+ * already shared with playground, and moved here by the `launch` plugin
+ * migration (RFC §9 phase 4).
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import * as queries from "@/lib/db/queries";
+import type { NextRequest } from "next/server";
+
 import { getCurrentSession } from "@/lib/auth";
-import { scopeIncludes } from "./oauth-config";
+import * as queries from "@/lib/db/queries";
+
+import { scopeIncludes } from "./oauth-clients";
 
 export interface Actor {
   userId: string;
@@ -56,31 +70,4 @@ export function hasScope(actor: Actor, required: string): boolean {
 
 export function isAdmin(actor: Actor): boolean {
   return actor.role === "admin" || actor.role === "owner";
-}
-
-export function err(
-  status: number,
-  error: string,
-  extra?: Record<string, unknown>,
-  headers?: HeadersInit,
-) {
-  return NextResponse.json({ error, ...extra }, { status, headers });
-}
-
-// Machine-readable failure: the frontend switches on `code` (snake_case) and
-// falls back to `error` for the message. Keep both in sync.
-// Codes the launch frontend understands: already_voted, account_too_new,
-// email_unverified, velocity_exceeded, voting_closed (+ dup_domain, insufficient_scope).
-// The playground frontend additionally uses: insufficient_scope,
-// email_unverified, velocity_exceeded.
-export function fail(
-  status: number,
-  code: string,
-  extra?: Record<string, unknown>,
-  headers?: HeadersInit,
-) {
-  return NextResponse.json(
-    { code, error: code, ...extra },
-    { status, headers },
-  );
 }

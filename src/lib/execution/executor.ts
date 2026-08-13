@@ -304,6 +304,32 @@ export interface ExecutionOptions {
   cursorPlaybackSpeedOverride?: number; // One-shot per-call override (e.g. recording preview replay at 2x); takes precedence over per-test/global settings
 }
 
+/**
+ * Whether this run records video.
+ *
+ * Two independent sources, and for a long time only the first was wired up:
+ *  - `forceVideoRecording` — per-run, passed by demo/share builds that need a
+ *    clip regardless of settings;
+ *  - `playwright_settings.enableVideoRecording` — the repo-level "Video
+ *    Recording" toggle in Settings. It saved and read back correctly but no
+ *    consumer ever looked at it, so the switch did nothing.
+ *
+ * Returns `undefined` rather than `false` so the field stays off the wire when
+ * recording is off.
+ *
+ * Note this only reaches the embedded-browser executor; the remote-runner path
+ * has never recorded video.
+ */
+export function resolveVideoRecording(options: {
+  forceVideoRecording?: boolean;
+  playwrightSettings?: Pick<PlaywrightSettings, "enableVideoRecording"> | null;
+}): true | undefined {
+  return options.forceVideoRecording ||
+    options.playwrightSettings?.enableVideoRecording
+    ? true
+    : undefined;
+}
+
 export interface ExecutionProgress {
   completed: number;
   total: number;
@@ -1042,7 +1068,7 @@ async function executeViaRunner(
           options.playwrightSettings?.grantClipboardAccess ?? false,
         acceptDownloads: options.playwrightSettings?.acceptDownloads ?? false,
         headed: options.headless === false,
-        forceVideoRecording: options.forceVideoRecording || undefined,
+        forceVideoRecording: resolveVideoRecording(options),
         recordingViewport,
         lockViewportToRecording:
           options.playwrightSettings?.lockViewportToRecording ?? false,

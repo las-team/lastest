@@ -31,6 +31,20 @@ describe("runDeletionHooks", () => {
     expect(onTeamDeleted).not.toHaveBeenCalled();
   });
 
+  it("picks the user hook, which no tenant hook can stand in for", async () => {
+    // `launch` holds rows that belong to a person, not to a tenant. Deleting a
+    // user does not delete their team, so the team hook never fires for them —
+    // which is why "user" is a target kind rather than something inferable.
+    const onTeamDeleted = vi.fn(async () => {});
+    const onUserDeleted = vi.fn(async () => {});
+    await runDeletionHooks(
+      [{ id: "launch", deletion: { onTeamDeleted, onUserDeleted } }],
+      { kind: "user", id: "u1" },
+    );
+    expect(onUserDeleted).toHaveBeenCalledWith("u1");
+    expect(onTeamDeleted).not.toHaveBeenCalled();
+  });
+
   it("skips a plugin with no hook for this kind without failing", async () => {
     // A plugin may hold team-scoped rows only. That is not an error.
     const report = await runDeletionHooks(

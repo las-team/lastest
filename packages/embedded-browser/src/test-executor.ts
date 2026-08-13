@@ -20,6 +20,7 @@
 
 import type { Browser, BrowserContext, CDPSession, Page } from "playwright";
 import type { StabilizationPayload } from "./protocol.js";
+import { installKeepNamesShim } from "./page-shims.js";
 import type { LogEntry } from "@lastest/eb-protocol";
 import {
   setupFreezeScripts,
@@ -684,6 +685,7 @@ export class EmbeddedTestExecutor {
           ? { userAgent: command.userAgentOverride }
           : {}),
       });
+      await installKeepNamesShim(freshContext);
       // Anchor the recording start for chapter offsets (only when recording).
       if (videoDir) videoStartMs = Date.now();
       return freshContext;
@@ -3245,6 +3247,7 @@ export class EmbeddedTestExecutor {
         ? { userAgent: command.userAgentOverride }
         : {}),
     });
+    await installKeepNamesShim(setupContext);
     const page = await setupContext.newPage();
     // On success, we transfer ownership of setupContext to this.setupContexts
     // for reuse by subsequent tests; finally block must not close it in that case.

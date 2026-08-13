@@ -418,10 +418,55 @@ async function migrateA11yBaselineOwnership() {
   }
 }
 
+// The seven `launch_*` tables became `@lastest/plugin-launch`'s own (RFC §9
+// phase 4). Nothing about their *shape* changed — same names, same columns, so
+// no backfill and no drop/recreate risk. What changed is that five FKs to
+// `users(id)` are gone (`core-scope.md` §6: a plugin table carries no FK to a
+// core table), and the rows are reaped by the plugin's `onUserDeleted` hook
+// instead.
+//
+// This runs BEFORE `drizzle-kit push --force` for one reason: push would drop
+// those constraints itself, but by name, and the names differ between
+// environments because they were created implicitly. Dropping them here by
+// catalogue lookup makes the outcome the same everywhere.
+//
+// FKs *between* the launch tables (`profile_id -> launch_profiles.id`) are
+// deliberately left alone — both sides are plugin-owned, so they break no rule
+// and still cascade.
+async function dropLaunchUserForeignKeys() {
+  if (!process.env.DATABASE_URL) return;
+  let sql;
+  try {
+    sql = require("postgres")(process.env.DATABASE_URL);
+
+    // `conname` is unpredictable; find FKs pointing at `users` by catalogue.
+    const fks = await sql`
+      select rel.relname as table_name, con.conname as name
+        from pg_constraint con
+        join pg_class rel on rel.oid = con.conrelid
+        join pg_class ref on ref.oid = con.confrelid
+       where con.contype = 'f'
+         and ref.relname = 'users'
+         and rel.relname in (
+           'launch_profiles', 'launch_votes', 'launch_comments',
+           'launch_reactions'
+         )`;
+    for (const { table_name: table, name } of fks) {
+      await sql.unsafe(`alter table ${table} drop constraint "${name}"`);
+      console.log(`[migrate] ${table}: dropped FK ${name} (-> users)`);
+    }
+  } catch (e) {
+    console.warn("[migrate] launch FK migration skipped:", e.message);
+  } finally {
+    if (sql) await sql.end();
+  }
+}
+
 async function main() {
   await preCreate();
   await migrateExplorerTables();
   await migrateA11yBaselineOwnership();
+  await dropLaunchUserForeignKeys();
   await nullOrphans();
   await bumpPoolDefaults();
   await ensureUniqueIndexes();

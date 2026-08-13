@@ -362,8 +362,15 @@ export async function deleteRepository(id: string) {
       .delete(functionalAreas)
       .where(eq(functionalAreas.repositoryId, id));
 
-    // 12. Nullify selectedRepositoryId references that don't have a
-    //     SET NULL cascade (users.selectedRepositoryId already does).
+    // 12. Nullify selectedRepositoryId pointers. None of the three is an FK
+    //     any more: users.selectedRepositoryId gave up its SET NULL cascade so
+    //     that `repositories.team_id → teams.id` could exist instead (only one
+    //     of the two edges can, see the column comment in schema/identity.ts),
+    //     which makes doing this here load-bearing rather than tidy-up.
+    await tx
+      .update(users)
+      .set({ selectedRepositoryId: null })
+      .where(eq(users.selectedRepositoryId, id));
     await tx
       .update(teams)
       .set({ selectedRepositoryId: null })

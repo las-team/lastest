@@ -20,6 +20,7 @@ import { EmbeddedTestExecutor } from "./test-executor.js";
 import { EmbeddedRecorder } from "./embedded-recorder.js";
 import { EmbeddedDebugExecutor } from "./debug-executor.js";
 import { CROSS_OS_CHROMIUM_ARGS } from "./stabilization.js";
+import { installKeepNamesShim } from "./page-shims.js";
 import {
   inspectElementAtPoint,
   getAllDomSelectors,
@@ -159,6 +160,7 @@ async function startup(): Promise<void> {
     viewport: { width: config.viewportWidth, height: config.viewportHeight },
   });
 
+  await installKeepNamesShim(context);
   page = await context.newPage();
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "webdriver", { get: () => undefined });

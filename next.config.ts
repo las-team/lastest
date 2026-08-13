@@ -43,6 +43,7 @@ const nextConfig: NextConfig = {
     "@lastest/plugin-events",
     "@lastest/plugin-app-map",
     "@lastest/plugin-explorer",
+    "@lastest/plugin-launch",
     "@lastest/plugin-rca",
   ],
   outputFileTracingIncludes: {

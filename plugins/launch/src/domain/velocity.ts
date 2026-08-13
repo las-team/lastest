@@ -6,7 +6,7 @@
  * early lead from being unbeatable and rewards sustained momentum.
  */
 
-import type { LaunchProfile } from "@/lib/db/schema";
+import type { LaunchProfile } from "../schema";
 
 /** Avg upvotes/hour since `weekStartAt`, floored at a 1h denominator. */
 export function velocityScore(

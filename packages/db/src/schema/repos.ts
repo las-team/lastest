@@ -18,7 +18,15 @@ import {
   timestamp,
   jsonb,
   index,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+
+// `identity` imports this module for `teams.selectedRepositoryId`, so the
+// team-ownership FKs below close a module cycle. Safe in both directions: the
+// `.references()` argument is a lazy callback drizzle only invokes once every
+// table is defined, and the `AnyPgColumn` return annotation stops TypeScript
+// from chasing the inference cycle.
+import { teams } from "./identity";
 
 // Repository provider type
 export type RepositoryProvider = "github" | "gitlab" | "local";
@@ -26,7 +34,14 @@ export type RepositoryProvider = "github" | "gitlab" | "local";
 // Repositories synced from GitHub or GitLab, or created locally
 export const repositories = pgTable("repositories", {
   id: text("id").primaryKey(),
-  teamId: text("team_id"), // Team ownership - FK added after teams table definition
+  // Team ownership. The FK is load-bearing for account deletion: without it a
+  // deleted team left its repositories — and the ~30 tables scoped by them —
+  // behind as unreachable rows, which is a GDPR problem, not just untidy.
+  // `deleteTeam` still unwinds repositories through `deleteRepository()` first;
+  // this cascade is the backstop for anything that deletes a team row directly.
+  teamId: text("team_id").references((): AnyPgColumn => teams.id, {
+    onDelete: "cascade",
+  }),
   provider: text("provider").notNull().default("github"), // 'github' | 'gitlab' | 'local'
   githubRepoId: integer("github_repo_id"), // nullable for GitLab repos
   gitlabProjectId: integer("gitlab_project_id"), // nullable for GitHub repos
@@ -54,7 +69,12 @@ export const repositories = pgTable("repositories", {
 // GitHub OAuth accounts - per-team GitHub connection
 export const githubAccounts = pgTable("github_accounts", {
   id: text("id").primaryKey(),
-  teamId: text("team_id"), // Team ownership - FK added after teams table definition
+  // Team ownership — cascaded, and more urgently than most: the row holds the
+  // team's encrypted OAuth access/refresh tokens. No inbound FKs, so the
+  // cascade is unconditional.
+  teamId: text("team_id").references((): AnyPgColumn => teams.id, {
+    onDelete: "cascade",
+  }),
   githubUserId: text("github_user_id").notNull(),
   githubUsername: text("github_username").notNull(),
   accessToken: text("access_token").notNull(),
@@ -70,7 +90,11 @@ export const githubAccounts = pgTable("github_accounts", {
 // GitLab OAuth / PAT accounts - per-team GitLab connection
 export const gitlabAccounts = pgTable("gitlab_accounts", {
   id: text("id").primaryKey(),
-  teamId: text("team_id"), // Team ownership - FK added after teams table definition
+  // Team ownership — cascaded; holds encrypted OAuth/PAT credentials. See
+  // `githubAccounts.teamId`.
+  teamId: text("team_id").references((): AnyPgColumn => teams.id, {
+    onDelete: "cascade",
+  }),
   gitlabUserId: text("gitlab_user_id").notNull(),
   gitlabUsername: text("gitlab_username").notNull(),
   accessToken: text("access_token").notNull(),

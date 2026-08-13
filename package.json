@@ -78,6 +78,7 @@
     "@lastest/plugin-design-system": "workspace:*",
     "@lastest/plugin-events": "workspace:*",
     "@lastest/plugin-explorer": "workspace:*",
+    "@lastest/plugin-launch": "workspace:*",
     "@lastest/plugin-rca": "workspace:*",
     "@lastest/pool-service": "workspace:*",
     "@lastest/route-scan": "workspace:*",

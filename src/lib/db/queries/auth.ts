@@ -1,6 +1,10 @@
 import { db } from "../index";
 import { encryptField, decryptField } from "@/lib/crypto";
 import { cascadePluginDeletion } from "@/lib/db/plugin-deletion";
+// Module cycle (repositories.ts already imports `getGithubAccountByTeam` from
+// here). Both sides only reach across inside function bodies, and both exports
+// are hoisted function declarations, so either load order resolves.
+import { deleteRepository } from "./repositories";
 import {
   teams,
   users,
@@ -30,6 +34,7 @@ import {
   gte,
   lt,
   isNull,
+  inArray,
   count,
   getTableColumns,
 } from "drizzle-orm";
@@ -100,15 +105,29 @@ export async function updateTeam(id: string, data: Partial<NewTeam>) {
 /**
  * Delete a team and everything that hangs off it.
  *
- * The `DELETE` covers core tables via their FK cascades. Plugin tables have no
- * FK to `teams` by rule (`core-scope.md` §6), so they are cleaned up by their
- * registered deletion hooks instead — driven here, after the core row is gone,
- * so a broken plugin cannot veto account deletion. See
+ * Repositories are unwound explicitly rather than left to the `repositories
+ * .team_id` cascade: ~20 repo-scoped tables still reference `repositories` with
+ * NO ACTION, so a plain DB-level cascade would abort the whole deletion on the
+ * first repo that has any test data. `deleteRepository()` walks that subtree in
+ * FK order and drives the per-repo plugin hooks. The cascade on the column is
+ * the backstop for code paths that delete a team row directly.
+ *
+ * The `DELETE` then covers the remaining core tables via their FK cascades.
+ * Plugin tables have no FK to `teams` by rule (`core-scope.md` §6), so they are
+ * cleaned up by their registered deletion hooks instead — driven here, after the
+ * core row is gone, so a broken plugin cannot veto account deletion. See
  * `@/lib/db/plugin-deletion` for the ordering argument.
  */
 export async function deleteTeam(id: string) {
+  const owned = await db
+    .select({ id: repositories.id })
+    .from(repositories)
+    .where(eq(repositories.teamId, id));
+  for (const repo of owned) {
+    await deleteRepository(repo.id);
+  }
   await db.delete(teams).where(eq(teams.id, id));
-  console.log(`[audit] team.delete teamId=${id}`);
+  console.log(`[audit] team.delete teamId=${id} repositories=${owned.length}`);
   await cascadePluginDeletion({ kind: "team", id });
 }
 
@@ -200,6 +219,22 @@ export async function getUserById(id: string) {
   return row;
 }
 
+/**
+ * Display names for a batch of user ids.
+ *
+ * Added for `src/lib/core/launch-host.ts`: the launch board renders comment
+ * author names, which used to be a `leftJoin(users, …)` inside the feature's
+ * own query module. A plugin may not read a core table (`core-scope.md` §6),
+ * so the join became one batched lookup on this side of the boundary.
+ */
+export async function getUsersByIds(ids: string[]) {
+  if (ids.length === 0) return [];
+  return db
+    .select({ id: users.id, name: users.name })
+    .from(users)
+    .where(inArray(users.id, ids));
+}
+
 export async function getUserByEmail(email: string) {
   const [row] = await db
     .select()
@@ -243,10 +278,24 @@ export async function updateUser(id: string, data: Partial<NewUser>) {
   console.log(`[audit] user.update userId=${id} email=${email}`);
 }
 
+/**
+ * Delete a user and everything that hangs off them.
+ *
+ * Same arrangement as {@link deleteTeam}: core tables cascade through their
+ * FKs, plugin tables have no FK to `users` by rule (`core-scope.md` §6) and are
+ * reaped by their registered `onUserDeleted` hooks, driven after the core row
+ * is gone so a broken plugin cannot veto account deletion.
+ *
+ * The user target exists because plugin data does not only hang off tenants.
+ * `launch_votes`, `launch_comments` and `launch_profiles` belong to a person,
+ * and a person deleting their account does not delete their team — so a team
+ * hook would never fire for them.
+ */
 export async function deleteUser(id: string) {
   const user = await getUserById(id);
   await db.delete(users).where(eq(users.id, id));
   console.log(`[audit] user.delete userId=${id} email=${user?.email}`);
+  await cascadePluginDeletion({ kind: "user", id });
 }
 
 export async function updateUserRole(id: string, role: UserRole) {

@@ -13,8 +13,18 @@ import type { DeletionHook } from "@lastest/contracts";
  * without a hook. This is the other half: something has to actually call them.
  */
 
+/**
+ * What was deleted.
+ *
+ * `user` is the third kind and the one that does not fit the tenancy story: a
+ * team and a repo are tenants, a user is a person. It exists because plugin
+ * rows can hang off either — `explorer_knowledge` belongs to a team,
+ * `launch_votes` belongs to whoever cast them — and account deletion must reap
+ * both. Deleting a user does *not* imply deleting their team, so this is a
+ * separate target rather than something a team hook could infer.
+ */
 export interface DeletionTarget {
-  readonly kind: "team" | "repo";
+  readonly kind: "team" | "repo" | "user";
   readonly id: string;
 }
 
@@ -60,7 +70,9 @@ export async function runDeletionHooks(
     const hook =
       target.kind === "team"
         ? plugin.deletion?.onTeamDeleted
-        : plugin.deletion?.onRepoDeleted;
+        : target.kind === "repo"
+          ? plugin.deletion?.onRepoDeleted
+          : plugin.deletion?.onUserDeleted;
     if (!hook) {
       skipped.push(plugin.id);
       continue;

@@ -3,6 +3,7 @@ import { appMapPlugin } from "@lastest/plugin-app-map";
 import { designSystemPlugin } from "@lastest/plugin-design-system";
 import { eventsPlugin } from "@lastest/plugin-events";
 import { explorerPlugin } from "@lastest/plugin-explorer";
+import { launchPlugin } from "@lastest/plugin-launch";
 import { rcaPlugin } from "@lastest/plugin-rca";
 import type { resolveRegistry } from "@lastest/kernel";
 
@@ -31,4 +32,5 @@ export const MANIFESTS: Parameters<typeof resolveRegistry>[0] = [
   a11yPlugin,
   rcaPlugin,
   appMapPlugin,
+  launchPlugin,
 ];

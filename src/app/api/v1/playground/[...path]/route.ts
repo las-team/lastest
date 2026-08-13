@@ -16,8 +16,9 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import * as queries from "@/lib/db/queries";
-import { resolveActor, hasScope, err, fail } from "@/lib/launch/api-shared";
-import { PLAYGROUND_SCOPE } from "@/lib/launch/oauth-config";
+import { resolveActor, hasScope } from "@/lib/auth/board-actor";
+import { PLAYGROUND_SCOPE } from "@/lib/auth/oauth-clients";
+import { err, fail } from "@/lib/http/board-responses";
 import { ACHIEVEMENT_POINTS, scoreFor } from "@/lib/playground/registry";
 import { getBoard, invalidateBoardCache } from "@/lib/playground/leaderboard";
 import { DEFAULT_PLAYGROUND } from "@/lib/db/schema";

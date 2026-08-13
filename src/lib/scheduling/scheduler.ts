@@ -5,7 +5,7 @@
 
 import * as queries from "@/lib/db/queries";
 import { getNextRunTime } from "./cron";
-import { processLaunchCohorts } from "@/lib/launch/cohort-engine";
+import { processLaunchCohorts } from "@lastest/plugin-launch/cohorts";
 
 let started = false;
 let intervalId: ReturnType<typeof setInterval> | null = null;

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { velocityScore, rankProfiles, pickWinnerSlug } from "./velocity";
-import type { LaunchProfile } from "@/lib/db/schema";
+import type { LaunchProfile } from "../schema";
 
 function profile(
   slug: string,

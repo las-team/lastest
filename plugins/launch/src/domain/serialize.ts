@@ -9,8 +9,8 @@ import type {
   LaunchCohort,
   LaunchProfile,
   LaunchMonthlyWinner,
-} from "@/lib/db/schema";
-import type { CommentRow, ReactionSummary } from "@/lib/db/queries/launch";
+} from "../schema";
+import type { CommentRow, ReactionSummary } from "../data/queries";
 
 export interface SerializedCohort {
   id: string;
@@ -91,14 +91,23 @@ export interface SerializedComment {
   isOwn: boolean;
 }
 
+/**
+ * `authorName` arrives as an argument rather than on the row.
+ *
+ * It used to be `users.name`, pulled in by a `leftJoin` inside the query. A
+ * plugin may not read a core table (`core-scope.md` §6), so the handler
+ * resolves names through `LaunchHost.resolveUserNames` and passes them here.
+ * `null` reproduces exactly what the left join gave for a missing user.
+ */
 export function serializeComment(
   row: CommentRow,
+  authorName: string | null,
   viewerUserId?: string,
 ): SerializedComment {
   return {
     id: row.id,
     body: row.body,
-    authorName: row.authorName ?? null,
+    authorName,
     authorHandle: null, // users table has no handle field
     createdAtISO: row.createdAt?.toISOString() ?? null,
     isOwn: Boolean(viewerUserId && row.authorUserId === viewerUserId),

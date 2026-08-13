@@ -22,7 +22,10 @@ import {
   doublePrecision,
 } from "drizzle-orm/pg-core";
 
-import { repositories } from "./repos";
+// No local imports: this module is the bottom of the schema graph (see the
+// header), and `repos` now imports it for the team-ownership cascade. The one
+// edge that used to point the other way — `users.selectedRepositoryId` —
+// is documented at the column.
 
 // ============================================
 // Teams & Auth Tables
@@ -125,10 +128,24 @@ export const users = pgTable("users", {
   avatarUrl: text("avatar_url"),
   teamId: text("team_id").references(() => teams.id), // Single team membership
   role: text("role").notNull().default("member"), // 'owner' | 'admin' | 'member' | 'viewer'
-  selectedRepositoryId: text("selected_repository_id").references(
-    () => repositories.id,
-    { onDelete: "set null" },
-  ),
+  /**
+   * Last repository this user had selected in the UI — soft state, and
+   * deliberately *not* an FK.
+   *
+   * It used to carry `references(() => repositories.id, onDelete: "set null")`,
+   * which made `identity` import `repos`. That is the wrong direction for this
+   * module and it collided head-on with the FK that actually matters:
+   * `repositories.team_id → teams.id`, without which a deleted team left its
+   * repositories (and every table scoped by them) behind as unreachable rows.
+   * Only one of the two edges can exist — `tools/architecture/schema-graph.mjs`
+   * fails the build on a schema module cycle — so the team-ownership cascade
+   * wins and this pointer is maintained in application code instead
+   * (`deleteRepository()` nullifies it).
+   *
+   * A stale value is harmless: `getSelectedRepository()` looks the row up and
+   * falls back when it is missing.
+   */
+  selectedRepositoryId: text("selected_repository_id"),
   emailVerified: boolean("email_verified").default(false),
   // Onboarding wizard state (v3 fork-at-start). Null = wizard not yet completed.
   // Existing users are backfilled to NOW() on migration so they don't see the wizard.
@@ -157,7 +174,9 @@ export const sessions = pgTable("sessions", {
   // 'browser' = standard interactive session (default)
   // 'api'     = long-lived programmatic API token (MCP, VSCode extension, scripts)
   // 'launch'  = short-lived scoped token minted by the /oauth/authorize handoff
-  //             for the launch.lastest.cloud frontend (see DEFAULT_LAUNCH).
+  //             for the static lastest-www frontends (launch board, playground,
+  //             marketing site). The client registry, the scopes it may grant
+  //             and the TTL live in `src/lib/auth/oauth-clients.ts`.
   kind: text("kind").notNull().default("browser"),
   // Human label for 'api' tokens (e.g. "Claude Code laptop"). Null for browser sessions.
   label: text("label"),

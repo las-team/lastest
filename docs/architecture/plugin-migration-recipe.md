@@ -2,7 +2,9 @@
 
 **Status:** written for the first phase-4 wave (`rca`, `url-diff`, `app-map`),
 generalised from the explorer pilot ([`explorer-migration-result.md`](./explorer-migration-result.md))
-and the two check-layer plugins.
+and the two check-layer plugins. Revised after
+[`launch`](./launch-migration-result.md), which added §2.1 (which deletion
+target), §2.2 (a plugin need not be tenanted) and the API-route case in §6.
 **Audience:** whoever migrates the next feature out of `src/` into `plugins/<id>/`.
 
 This is the *how*. The *why* is [`core-plugin-refactor.md`](./core-plugin-refactor.md)
@@ -52,8 +54,17 @@ comes out that high, the feature is a thin *orchestration of* core rather than
 a consumer of it, and the real task is extracting the core module it
 orchestrates, as its own PR, first.
 
-Measured so far: `rca` **6** (done), `app-map` **9** (done), `url-diff` **~22**
-(never migrated — reclassified as core, RFC §9 phase 4).
+Measured so far: `launch` **4** (done), `rca` **6** (done), `app-map` **9**
+(done), `url-diff` **~22** (never migrated — reclassified as core, RFC §9
+phase 4).
+
+> **Port size does not track LOC, in either direction.** `launch` is twice
+> `rca`'s size with two thirds of its port; `url-diff` is smaller than both and
+> would have needed 22. What it tracks is **how much of what the feature
+> touches belongs to somebody else**. A useful proxy you can count in a
+> minute: *joins from the feature's queries into a core table*. `launch` had
+> exactly one (`launch_comments → users` for a display name) and it cost
+> exactly one port method.
 
 > **Count core functions the feature *calls*. Nothing else.** A first pass over
 > `app-map` counted 20 distinct imported symbols and would have stopped the
@@ -100,6 +111,63 @@ deletion complete ([`core-scope.md`](./core-scope.md) §6).
 **A feature that only reads core tables owns no tables.** It reaches them
 through a capability (`ctx.tests`, `ctx.repos`, `ctx.storage`) or, where core has
 no API yet, through a **host port**.
+
+### 2.1 Then ask what the rows hang off — team, repo, or user
+
+The deletion hook has three targets, and picking the wrong one ships a GDPR
+regression that nothing catches.
+
+| The rows belong to | Hook | Example |
+| --- | --- | --- |
+| a tenant | `onTeamDeleted` / `onRepoDeleted` | `explorer_knowledge`, `a11y_baselines` |
+| a person | `onUserDeleted` | `launch_votes`, `launch_comments` |
+
+**Deleting a user does not delete their team.** So a team hook never fires for
+user-scoped rows, and the FK you are removing (`REFERENCES users(id) ON DELETE
+CASCADE`) was the only thing reaping them. `onUserDeleted` exists because
+`launch` hit exactly this — and it landed as a **core PR before** the migration
+(`core/contracts`, `core/data`, plus the `cascadePluginDeletion` call in
+`queries.deleteUser`, which did not exist at all).
+
+Mechanical check before you write `schema.ts`: list the FKs you are about to
+drop and see what each points at.
+
+```
+select rel.relname as tbl, ref.relname as points_at, con.confdeltype
+  from pg_constraint con
+  join pg_class rel on rel.oid = con.conrelid
+  join pg_class ref on ref.oid = con.confrelid
+ where con.contype = 'f' and rel.relname like '<id>_%';
+```
+
+Note also that a hook can be *stricter* than the FK it replaces, and usually
+should be: `ON DELETE CASCADE` removed launch's vote rows but left the
+denormalized `upvote_count` stale. The hook recomputes it.
+
+### 2.2 A plugin does not have to be tenanted at all
+
+`launch` never calls `contextFor` and never holds a `PluginContext`. Its board
+is a public directory — anonymous readers, writers identified by a user id and
+an OAuth scope, no `team_id` column anywhere — so `ctx.team` would have been a
+lie, and a tenancy assertion that always passes reads exactly like one that
+works.
+
+The composition root passes no `runtime`, only the handle:
+
+```ts
+configureLaunch({ host: appLaunchHost, data: data.capability("launch") });
+```
+
+This is not a new mechanism — it is the route every plugin's *deletion hook*
+already takes, since a hook runs because a tenant was deleted and has no scope
+left to build a context from. The data boundary is unaffected: the handle is
+still the schema-scoped one `core/data` built after validating the `<id>_`
+prefix.
+
+Nothing in the manifest records this today; the only signal is the missing
+`runtime`. If a second untenanted plugin appears (`share`, `gamification` and
+`playground` all have user-scoped surfaces), make it explicit in the kernel
+first — that is a core PR, not a migration.
 
 ## 3. The host port — the honest escape hatch
 
@@ -203,6 +271,15 @@ worth as much as a migration, so grep for these before designing anything.
   is not there yet moves in — definition to `libs/ui`, re-export shim left at
   `src/components/ui/<name>.tsx` so no app import changes. `libs/` carries no
   CODEOWNERS gate, so this is not a core PR.
+- **API routes work the same way, and are usually a *bare* re-export.** The
+  handlers live in the package (`plugins/<id>/src/api/handlers.ts`) and
+  `src/app/api/.../route.ts` re-exports them by name — Next.js discovers route
+  handlers by named export, so `export { GET, POST } from "@lastest/plugin-<id>/api"`
+  is what it wants. (This is *not* the S1 `"use server"` trap above; that one
+  applies only to `"use server"` files.) Unlike a page there is normally
+  nothing to compose — no selected repository, no plan gate, no app UI — so the
+  app side keeps only the file-system routing plus `export const dynamic`. See
+  `src/app/api/v1/launch/[...path]/route.ts`, 16 lines for a 681-line handler.
 - **App UI a plugin cannot import goes down as a prop.** `app-map` handed its
   live-progress panel down as `exploreProgressPanel` (a `ComponentType`) and
   qa-agent's cancel action as `onCancelExploration`, the same way
@@ -235,8 +312,14 @@ narrowing is why `app-map` needed no core change at all.
 | `src/lib/core/manifests.ts` | import + append to `MANIFESTS` |
 | `src/lib/core/runtime.ts` | import `configure<Name>` + call it in `getPluginRuntime` |
 | `src/lib/core/<id>-host.ts` | the app's fill for the host port, if there is one |
+| `scripts/migrate.js` | if tables moved: drop the FKs to core tables *by catalogue lookup*, before `drizzle-kit push` |
 | `tools/architecture/boundaries.mjs` | **delete** the `PSEUDO_PLUGINS` entry |
 | `tools/architecture/baseline.json` | regenerate with `pnpm arch:baseline` — but see below |
+
+`drizzle.config.ts` needs no edit — it already globs `plugins/*/src/schema.ts`.
+The FK drop does: `push` would drop the constraints itself, but *by name*, and
+implicitly-created constraint names differ between environments. Find them in
+`pg_constraint` instead. See `dropLaunchUserForeignKeys()`.
 
 The baseline only needs regenerating if the count actually moved. `app-map`
 graduated without changing it (§1.5's first counting hazard), and a baseline
@@ -267,6 +350,20 @@ console.log(Object.values(m.node).filter(v =>
 That number must equal the number of exported actions. `app-map` expected 5 and
 got 5. A silently-empty result is what the S1 re-export trap looks like from
 the outside.
+
+**A plugin with no actions needs a different check.** `launch` exports none —
+its only surface is a REST route — so the manifest count is vacuously zero.
+There, confirm the route appears in the build's route table
+(`ƒ /api/v1/launch/[...path]`) *and* that the plugin's own code landed in the
+emitted chunk, e.g. `grep -rl '<a string only the handler contains>' .next/server/`.
+A re-export that resolved to nothing would still print a route line.
+
+**`pnpm test` does not check the plugin registry.** `resolveRegistry` and
+`core/data`'s namespace validation only run inside `getPluginRuntime()`, which
+needs a database — so a `<id>_` prefix typo or an empty `deletion` object used
+to be provable only by booting the app. `src/lib/core/manifests.test.ts` now
+runs those checks against `MANIFESTS` (which is import-safe by design). Nothing
+to add per migration; it just has to keep passing.
 
 ## 9. Write down what you did *not* verify
 

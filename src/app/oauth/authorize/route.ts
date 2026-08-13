@@ -22,8 +22,8 @@ import {
   isValidClientId,
   isAllowedRedirectUri,
   scopeForClient,
-} from "@/lib/launch/oauth-config";
-import { DEFAULT_LAUNCH } from "@/lib/db/schema";
+  OAUTH_TOKEN_TTL_SECONDS,
+} from "@/lib/auth/oauth-clients";
 
 export const dynamic = "force-dynamic";
 
@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
       .join(" ") || clientScope;
 
   const token = randomBytes(32).toString("base64url");
-  const ttl = DEFAULT_LAUNCH.tokenTtlSeconds;
+  const ttl = OAUTH_TOKEN_TTL_SECONDS;
   const expiresAt = new Date(Date.now() + ttl * 1000);
   await queries.createLaunchToken({
     userId: session.user.id,

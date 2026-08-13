@@ -16,7 +16,6 @@ import {
   jsonb,
   index,
   uniqueIndex,
-  doublePrecision,
 } from "drizzle-orm/pg-core";
 
 import type { PwAgentType } from "./shared";
@@ -502,251 +501,18 @@ export type NewRepoAward = typeof repoAwards.$inferInsert;
 // Launch directory (launch.lastest.cloud)
 // ============================================
 //
-// Backs the "Tested & Featured" launch board. The board's frontend lives in a
-// separate static-export repo and persists nothing — submissions, votes, the
-// weekly cohort cadence, and the per-user auth handoff all live here. Reads are
-// public; mutations require a short-lived launch-scoped token (sessions.kind =
-// 'launch'). See src/lib/launch/* + src/app/api/v1/launch/[...path]/route.ts.
-
-// Tunables for the launch board. Surfaced as DEFAULT_LAUNCH so the route +
-// state engine + gating layer share one source of truth.
-export const DEFAULT_LAUNCH = {
-  // Curated quality bar: max featured slots that go live per weekly cohort.
-  featuredSlotsPerWeek: 12,
-  // Anti-gaming velocity caps (rolling 1h window).
-  votesPerAccountPerHour: 30,
-  votesPerIpPerHour: 60,
-  submissionsPerAccountPerHour: 5,
-  // Launch token TTL (seconds) minted by /oauth/authorize.
-  tokenTtlSeconds: 3600,
-  // Scope string the implicit OAuth flow grants.
-  scope: "launch:vote launch:submit",
-  // Vote-clearing: votes sharing an IP beyond this count in a cohort are flagged
-  // as a suspicious cluster and excluded from the winner decision.
-  suspiciousIpClusterThreshold: 5,
-  // Comments
-  commentsPerAccountPerHour: 20,
-  commentMaxLength: 2000,
-  // Reactions
-  allowedReactions: ["🔥", "❤️", "🚀", "👏", "🤯"],
-  // Analytics events
-  eventsPerIpPerMinute: 30,
-  eventDedupeWindowSec: 1800,
-} as const;
-
-// Weekly cohort: open (accepting/queued) → voting (live Mon–Sun) →
-// locked (winner decided Sun) → closed (archived).
-export type LaunchCohortState = "open" | "voting" | "locked" | "closed";
-
-export const launchCohorts = pgTable(
-  "launch_cohorts",
-  {
-    id: text("id").primaryKey(),
-    // Monday 00:00 PT — start of the voting week. Unique = one cohort per week.
-    weekStartAt: timestamp("week_start_at").notNull().unique(),
-    // Sunday 23:59 PT — voting closes.
-    weekEndAt: timestamp("week_end_at").notNull(),
-    state: text("state").$type<LaunchCohortState>().notNull().default("open"),
-    // Slug of the Founder-of-the-Week winner, set when the cohort locks.
-    winnerSlug: text("winner_slug"),
-    createdAt: timestamp("created_at"),
-    updatedAt: timestamp("updated_at"),
-  },
-  (table) => [index("idx_launch_cohorts_state").on(table.state)],
-);
-
-export type LaunchCohort = typeof launchCohorts.$inferSelect;
-
-export type NewLaunchCohort = typeof launchCohorts.$inferInsert;
-
-export type LaunchProfileStatus =
-  | "pending_review"
-  | "featured"
-  | "rejected"
-  | "archived";
-
-export interface LaunchWalkthrough {
-  src: string;
-  poster?: string;
-  description?: string;
-}
-
-export const launchProfiles = pgTable(
-  "launch_profiles",
-  {
-    id: text("id").primaryKey(),
-    // Human-readable URL handle (kebab of name + uniqueness counter).
-    slug: text("slug").notNull().unique(),
-    cohortId: text("cohort_id").references(() => launchCohorts.id, {
-      onDelete: "set null",
-    }),
-    submittedByUserId: text("submitted_by_user_id").references(() => users.id, {
-      onDelete: "set null",
-    }),
-    name: text("name").notNull(),
-    tagline: text("tagline"),
-    description: text("description"),
-    category: text("category"),
-    websiteUrl: text("website_url").notNull(),
-    // Normalized host (lowercase, no www/port) for dup-domain detection.
-    domain: text("domain"),
-    founderName: text("founder_name"),
-    founderHandle: text("founder_handle"),
-    contactEmail: text("contact_email"),
-    logoUrl: text("logo_url"),
-    status: text("status")
-      .$type<LaunchProfileStatus>()
-      .notNull()
-      .default("pending_review"),
-    // Admin-attached test report (points at an existing /r/<slug> public share)
-    // + AI walkthrough video. Set via the admin PATCH endpoint.
-    testReportShareUrl: text("test_report_share_url"),
-    walkthrough: jsonb("walkthrough").$type<LaunchWalkthrough>(),
-    // Denormalized cache of non-cleared votes; source of truth is launch_votes.
-    upvoteCount: integer("upvote_count").notNull().default(0),
-    // Anti-gaming editorial signals.
-    flagged: boolean("flagged").notNull().default(false),
-    suspiciousVoteRatio: doublePrecision("suspicious_vote_ratio"),
-    createdAt: timestamp("created_at"),
-    updatedAt: timestamp("updated_at"),
-  },
-  (table) => [
-    index("idx_launch_profiles_cohort").on(table.cohortId),
-    index("idx_launch_profiles_domain").on(table.domain),
-    index("idx_launch_profiles_status").on(table.status),
-  ],
-);
-
-export type LaunchProfile = typeof launchProfiles.$inferSelect;
-
-export type NewLaunchProfile = typeof launchProfiles.$inferInsert;
-
-export const launchVotes = pgTable(
-  "launch_votes",
-  {
-    id: text("id").primaryKey(),
-    profileId: text("profile_id")
-      .notNull()
-      .references(() => launchProfiles.id, { onDelete: "cascade" }),
-    voterUserId: text("voter_user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    ipAddress: text("ip_address"),
-    // Vote-clearing soft-flag: a cleared vote is excluded from upvoteCount/winner.
-    cleared: boolean("cleared").notNull().default(false),
-    createdAt: timestamp("created_at"),
-  },
-  (table) => [
-    // One vote per account per profile — drives the 409 already-voted response.
-    uniqueIndex("uq_launch_votes_profile_voter").on(
-      table.profileId,
-      table.voterUserId,
-    ),
-    index("idx_launch_votes_voter").on(table.voterUserId),
-    index("idx_launch_votes_ip").on(table.ipAddress),
-  ],
-);
-
-export type LaunchVote = typeof launchVotes.$inferSelect;
-
-export type NewLaunchVote = typeof launchVotes.$inferInsert;
-
-// "Tested Startup of the Month" — admin-set from the month's weekly winners.
-export const launchMonthlyWinners = pgTable(
-  "launch_monthly_winners",
-  {
-    id: text("id").primaryKey(),
-    month: text("month").notNull().unique(), // 'YYYY-MM' (PT)
-    profileSlug: text("profile_slug").notNull(),
-    createdAt: timestamp("created_at"),
-  },
-  (table) => [index("idx_launch_monthly_winners_month").on(table.month)],
-);
-
-export type LaunchMonthlyWinner = typeof launchMonthlyWinners.$inferSelect;
-
-export type NewLaunchMonthlyWinner = typeof launchMonthlyWinners.$inferInsert;
-
-export const launchComments = pgTable(
-  "launch_comments",
-  {
-    id: text("id").primaryKey(),
-    profileId: text("profile_id")
-      .notNull()
-      .references(() => launchProfiles.id, { onDelete: "cascade" }),
-    authorUserId: text("author_user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    body: text("body").notNull(),
-    ipAddress: text("ip_address"),
-    flagged: boolean("flagged").notNull().default(false),
-    deletedAt: timestamp("deleted_at"),
-    createdAt: timestamp("created_at"),
-    updatedAt: timestamp("updated_at"),
-  },
-  (table) => [
-    index("idx_launch_comments_profile").on(table.profileId),
-    index("idx_launch_comments_author").on(table.authorUserId),
-  ],
-);
-
-export type LaunchComment = typeof launchComments.$inferSelect;
-
-export type NewLaunchComment = typeof launchComments.$inferInsert;
-
-export const launchReactions = pgTable(
-  "launch_reactions",
-  {
-    id: text("id").primaryKey(),
-    profileId: text("profile_id")
-      .notNull()
-      .references(() => launchProfiles.id, { onDelete: "cascade" }),
-    reactorUserId: text("reactor_user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    emoji: text("emoji").notNull(),
-    createdAt: timestamp("created_at"),
-  },
-  (table) => [
-    uniqueIndex("uq_launch_reactions_profile_reactor_emoji").on(
-      table.profileId,
-      table.reactorUserId,
-      table.emoji,
-    ),
-  ],
-);
-
-export type LaunchReaction = typeof launchReactions.$inferSelect;
-
-export type NewLaunchReaction = typeof launchReactions.$inferInsert;
-
-export const launchEvents = pgTable(
-  "launch_events",
-  {
-    id: text("id").primaryKey(),
-    profileId: text("profile_id")
-      .notNull()
-      .references(() => launchProfiles.id, { onDelete: "cascade" }),
-    type: text("type").$type<"view" | "visit">().notNull(),
-    // sha256(ip + YYYY-MM-DD) — never store raw IP
-    ipHash: text("ip_hash").notNull(),
-    uaHash: text("ua_hash"),
-    createdAt: timestamp("created_at"),
-  },
-  (table) => [
-    index("idx_launch_events_profile_type").on(table.profileId, table.type),
-    index("idx_launch_events_created_at").on(table.createdAt),
-    uniqueIndex("uq_launch_events_dedupe").on(
-      table.profileId,
-      table.type,
-      table.ipHash,
-    ),
-  ],
-);
-
-export type LaunchEvent = typeof launchEvents.$inferSelect;
-
-export type NewLaunchEvent = typeof launchEvents.$inferInsert;
+// MOVED OUT. The seven `launch_*` tables and `DEFAULT_LAUNCH` now live in
+// `plugins/launch/src/schema.ts` and `plugins/launch/src/config.ts` — the
+// launch board is a plugin (RFC §9 phase 4), and `core-scope.md` §6 says
+// core does not know what a plugin stores or where.
+//
+// The FKs from those tables to `users.id` are gone with them; account
+// deletion now reaches them through the plugin's `onUserDeleted` hook,
+// driven by `cascadePluginDeletion` in `queries.deleteUser`.
+//
+// `sessions.kind = 'launch'` is unrelated and stays core: it is the OAuth
+// handoff credential (see `src/lib/auth/oauth-clients.ts`), shared by the
+// launch board, the playground and the marketing site.
 
 // ============================================
 // Playground score & leaderboard
@@ -760,7 +526,8 @@ export type NewLaunchEvent = typeof launchEvents.$inferInsert;
 // 'launch', minted by /oauth/authorize for client `playground-www`). See
 // src/lib/playground/* + src/app/api/v1/playground/[...path]/route.ts.
 
-// Tunables for the playground leaderboard — same role as DEFAULT_LAUNCH.
+// Tunables for the playground leaderboard — the same role LAUNCH_CONFIG
+// plays for the launch plugin.
 export const DEFAULT_PLAYGROUND = {
   // Anti-gaming velocity caps. The full registry is ~75 achievements, so a
   // legitimate speedrun of everything fits well inside one hour's budget.

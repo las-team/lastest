@@ -27,6 +27,7 @@ import { configureAppMap } from "@lastest/plugin-app-map";
 import { configureDesignSystem } from "@lastest/plugin-design-system";
 import { configureEvents } from "@lastest/plugin-events";
 import { configureExplorer } from "@lastest/plugin-explorer";
+import { configureLaunch } from "@lastest/plugin-launch";
 import { configureRca } from "@lastest/plugin-rca";
 
 import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
@@ -41,6 +42,7 @@ import { appEventsHost } from "@/lib/core/events-host";
 import { appExplorerHost } from "@/lib/core/explorer-host";
 import { createAppJobsHost } from "@/lib/core/jobs-host";
 import { MANIFESTS } from "@/lib/core/manifests";
+import { appLaunchHost } from "@/lib/core/launch-host";
 import { appRcaHost } from "@/lib/core/rca-host";
 import { appReposHost } from "@/lib/core/repos-host";
 import { appStorageHost } from "@/lib/core/storage-host";
@@ -198,6 +200,10 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
   configureA11y({ runtime, data: data.capability("a11y") });
   configureRca({ runtime, host: appRcaHost });
   configureAppMap({ runtime, host: appAppMapHost });
+  // No `runtime` — the launch board has no tenant, so there is no scope to
+  // build a `ctx` from and nothing to build one for. See
+  // `plugins/launch/src/wiring.ts`.
+  configureLaunch({ host: appLaunchHost, data: data.capability("launch") });
 
   cached = { runtime, data, registry };
   return runtime;

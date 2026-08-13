@@ -49,6 +49,21 @@ export interface DeletionHook {
   onTeamDeleted?(teamId: string): Promise<void>;
   /** Delete everything this plugin holds for the repo. Must be idempotent. */
   onRepoDeleted?(repoId: string): Promise<void>;
+  /**
+   * Delete everything this plugin holds for the *user*. Must be idempotent.
+   *
+   * Added for `@lastest/plugin-launch`, the first plugin whose rows hang off a
+   * user rather than off a tenant: a launch profile, vote, comment or reaction
+   * belongs to a person, and that person can delete their account without any
+   * team or repo being deleted. Before this existed, the only two targets were
+   * team and repo, so such a plugin had no way to honour "delete my account"
+   * at all — the FK to `users.id` that used to cascade is exactly what
+   * `core-scope.md` §6 removes.
+   *
+   * A plugin implements only the targets it actually owns rows for. Most own
+   * team/repo rows and nothing here; `launch` is the reverse.
+   */
+  onUserDeleted?(userId: string): Promise<void>;
 }
 
 export interface DataCapability<TSchema = unknown> {

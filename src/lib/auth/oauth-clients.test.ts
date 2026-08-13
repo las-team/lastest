@@ -8,9 +8,9 @@ import {
   LAUNCH_SCOPE,
   PLAYGROUND_CLIENT_ID,
   PLAYGROUND_SCOPE,
-} from "./oauth-config";
+} from "./oauth-clients";
 
-describe("launch/oauth-config", () => {
+describe("auth/oauth-clients", () => {
   afterEach(() => {
     delete process.env.LAUNCH_REDIRECT_ORIGINS;
     vi.unstubAllEnvs();

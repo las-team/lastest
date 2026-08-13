@@ -63,6 +63,18 @@ describe("core deletion drives plugin deletion hooks", () => {
     });
   });
 
+  it("deleteUser cascades to plugins", async () => {
+    // The launch plugin's rows hang off a user, not off a tenant: deleting an
+    // account must reap them even though no team or repo went away.
+    const { deleteUser } = await import("./auth");
+    await deleteUser("user-1");
+
+    expect(cascadePluginDeletion).toHaveBeenCalledWith({
+      kind: "user",
+      id: "user-1",
+    });
+  });
+
   it("deleteRepository cascades to plugins", async () => {
     const { deleteRepository } = await import("./repositories");
     await deleteRepository("repo-1");

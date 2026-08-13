@@ -1,7 +1,7 @@
 # RFC: Core + Plugins
 
-**Status:** phases 0–3 landed. Phase 4 in progress — `rca` and `app-map` done,
-`url-diff` resolved as core, 11 plugins to go.
+**Status:** phases 0–3 landed. Phase 4 in progress — `rca`, `app-map` and
+`launch` done, `url-diff` resolved as core, 10 plugins to go.
 **Author:** planning doc
 **Supersedes:** nothing
 
@@ -26,9 +26,10 @@
 > - **Phase 3 — done.** `CheckLayer` is a registry; `design-system` and `a11y`
 >   are check-layer plugins. Both are table-light, and `design-system` proved
 >   the no-schema shape (manifest + host port, no `ctx` at all).
-> - **Phase 4 — in progress. 2 of 13 plugins done.** `rca`
->   ([result](./rca-migration-result.md)) and `app-map`
->   ([result](./app-map-migration-result.md)) have landed. `url-diff` did not
+> - **Phase 4 — in progress. 3 of 13 plugins done.** `rca`
+>   ([result](./rca-migration-result.md)), `app-map`
+>   ([result](./app-map-migration-result.md)) and `launch`
+>   ([result](./launch-migration-result.md)) have landed. `url-diff` did not
 >   go to a plugin at all — it was **reclassified as core**: its in-app page
 >   and sidebar entry were removed, and what is left has no user surface and
 >   exists only to serve the documented `POST /api/v1/snapshot` and
@@ -36,7 +37,26 @@
 >   reading of `core-scope.md` §2. The repeatable procedure is written down in
 >   [`plugin-migration-recipe.md`](./plugin-migration-recipe.md) — read that,
 >   not §9 below, before migrating the next feature.
->   Burndown: **42 → 34 → 32 → 31 → 22**.
+>   Burndown: **42 → 34 → 32 → 31 → 22 → 21**.
+>
+>   **`launch` is the first plugin with no tenant, and it needed a core PR to
+>   be possible at all.** Its rows belong to a *person* — votes, comments,
+>   reactions on a public board — not to a team, so the `DeletionHook`
+>   contract's two targets (`onTeamDeleted`, `onRepoDeleted`) could not reach
+>   them. Removing the `ON DELETE CASCADE` FKs to `users.id` that §5 requires
+>   would have been a silent GDPR regression. `onUserDeleted`, a `"user"`
+>   `DeletionTarget`, and a `cascadePluginDeletion` call in `deleteUser`
+>   landed first as their own commit. That is §7.2's split-PR workflow paying
+>   for itself: the gap was found *because* the core change had to be named
+>   and reviewed separately.
+>
+>   It also breaks the LOC correlation in the opposite direction from
+>   `url-diff`: **twice `rca`'s size, two thirds of its port** (4 methods vs
+>   6). §4.1's `PluginContext` turns out to decompose more finely than
+>   "you get a `ctx` or you get nothing" — launch takes a schema-scoped
+>   `DataCapability` directly from its wiring slot and never builds a context,
+>   because `ctx.team` would have been a lie. Worth knowing before `share`,
+>   `gamification` and `playground`, which all have user-scoped surfaces.
 >
 >   **The 31 → 22 drop was not a migration.** It was four shared dependencies
 >   promoted to `libs/` in one pass
@@ -726,6 +746,20 @@ earlier PR** — which is exactly the workflow being asked for.
 >   that case.** No `schema`, no `deletion` hook, no `ctx` — just a manifest and
 >   a host port. `rca` declared six port methods, four of which would collapse
 >   into one `ctx.diffs` capability if core ever grows one.
+> - **Owning tables is not the expensive part; owning *core-shaped* tables
+>   is.** `launch` moved seven tables and a 764-line query module and it was
+>   still the cheapest port of the three, because none of that data belongs to
+>   anyone else. The one place it hurt was a single `leftJoin(users)` for a
+>   comment author's display name — one join across the boundary cost one host
+>   method and one extra round trip. Count *joins to core tables*, not tables.
+> - **Read a feature's import list, not its directory name — and do it before
+>   costing the port.** Two modules under `src/lib/launch/` were not launch's:
+>   the OAuth redirect-URI allowlist (a credential boundary shared by three
+>   clients, two of them not the launch board) and the board actor resolver
+>   (already shared with `playground`). Both went to core in the pre-migration
+>   commit. §4.3's amendment says do promotions in bulk and first; this is the
+>   same lesson at feature scale, where the destination is core rather than
+>   `libs/`.
 
 ### Phase 5 — Tighten (ongoing)
 

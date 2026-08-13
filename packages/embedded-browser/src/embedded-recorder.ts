@@ -26,6 +26,7 @@ export type RetainedSetupContextLookup = (setupId: string) => {
   viewport?: { width: number; height: number };
 } | null;
 import { browserRecordingScript } from "./browser-script.js";
+import { ensureKeepNamesShim, installKeepNamesShim } from "./page-shims.js";
 import path from "path";
 import fs from "fs";
 import os from "os";
@@ -201,6 +202,9 @@ export class EmbeddedRecorder {
       });
       this.ownsContext = true;
     }
+    // Before the first page exists: everything we inject below is bundler
+    // output that may reference esbuild's `__name` helper. See ./page-shims.
+    await installKeepNamesShim(this.context);
     this.page = await this.context.newPage();
     await this.page.addInitScript(() => {
       Object.defineProperty(navigator, "webdriver", { get: () => undefined });
@@ -397,6 +401,7 @@ export class EmbeddedRecorder {
         cursorFPS: options.cursorFPS ?? 30,
         selectorPriority,
       };
+      await ensureKeepNamesShim(page);
       await page.addInitScript(browserRecordingScript, initArgs);
       await page.evaluate(browserRecordingScript, initArgs);
       return;
@@ -634,6 +639,9 @@ export class EmbeddedRecorder {
       selectorPriority,
     };
 
+    // `page` may be one we did not create (recording from a live debug
+    // session), so its current document predates the context-level shim.
+    await ensureKeepNamesShim(page);
     await page.addInitScript(browserRecordingScript, initArgs);
     await page.evaluate(browserRecordingScript, initArgs);
     this.exposedOnPage = page;
