@@ -1,12 +1,22 @@
 # Test plan — core/plugin refactor (`claude/core-plugin-refactor-plan`)
 
-> **Status (2026-08-10): §0/§1 executed directly, §2 executed via four parallel
-> agents doing real runtime verification (not a re-read).** Two confirmed
-> regressions, both fixable in one line each — see §2.18 for the full
-> results, or jump straight to "Confirmed regressions" there. §3/§4 (the full
-> feature matrix and manual golden-path walkthrough) are still open — they
-> need an actual browser, which wasn't available in the environment this run
-> executed in.
+> **Status (2026-08-13): §0–§4 all executed.** §0/§1 directly; §2 via four
+> parallel agents doing real runtime verification; §3 as ~30 committed
+> `*.integration.test.ts` suites against live infra; §4 **automated as a real
+> Playwright browser journey** (`e2e/`) rather than left as a manual
+> walkthrough — which is what finally closed §2.18's "no browser was
+> available" gap.
+>
+> - §2 found **2 regressions**, both since fixed (§2.18).
+> - §3 found **no new regressions** in ~30 suites (§3.1).
+> - §4's browser run found **3 real product bugs that every earlier layer
+>   structurally could not see** — all three pre-existing on `main`, none
+>   caused by this refactor (§4.1). The most serious: **the Recorder is
+>   completely broken** in the default dev provisioner mode.
+>
+> Caveat on §4's numbers: they were gathered while a *second, unrelated*
+> plugin-rollout effort was live in the same working tree, which repeatedly
+> restarted and at times broke the dev server mid-run. See §4.2.
 
 **Scope of "the refactor" as actually diffed against `main`:** 347 files,
 +35,974/−7,419. This is **not** the full plugin rollout in
@@ -621,11 +631,32 @@ changed; **P2** = spot-check.
 
 ---
 
-## 4. Manual golden-path E2E script
+## 4. Golden-path E2E script — **now automated** (`e2e/`)
 
-Run this once, start to finish, as the final sanity pass after §1–§3. It's
-deliberately the product's core promise end to end, exercising most of the
-refactored surfaces along the way.
+This was written as a manual walkthrough only because the run that produced
+§2.18 had no browser. That premise turned out to be wrong about the repo:
+`playwright` and `@playwright/test` are already root dependencies and
+Chromium is installed, so §4 now exists as a real browser suite driving the
+actual app at `http://localhost:3000`:
+
+| File | Covers |
+| --- | --- |
+| `e2e/harness.ts` | Local target app, Chromium session + console-error capture, the real register → onboarding → sandbox-repo flow, DB helpers |
+| `e2e/golden-path.integration.test.ts` | Steps 1–7b as ONE continuous journey (state carries between steps) |
+| `e2e/settings-ui.integration.test.ts` | Steps 12–14 |
+| `e2e/agents-ui.integration.test.ts` | Steps 10–11 (written; see §4.2) |
+| `e2e/share-and-deletion.integration.test.ts` | Steps 15–16 + the 8–9 triage (partial; see §4.2) |
+
+Run with `pnpm test:integration`. Prerequisites are the usual ones **plus a
+running app** (`pnpm dev`), since these drive it over HTTP.
+
+Why this is worth more than the manual pass it replaces: it is re-runnable,
+and it caught three real bugs (§4.1) that ~30 non-browser suites in §3 could
+not, because each of them lives specifically in the gap between "the server
+action works" and "the product works".
+
+The steps below are the original script, kept as the specification the suite
+implements.
 
 1. Log in (or register a fresh team) → confirm onboarding lands correctly.
 2. Connect/add a repository.
@@ -659,6 +690,86 @@ refactored surfaces along the way.
     not your real one): delete the team and confirm every table this plan
     touched — including explorer's plugin tables and any `plugin_jobs` rows —
     is actually gone (§2.8).
+
+---
+
+### 4.1 Results — 2026-08-13 browser run
+
+Best clean run of `golden-path.integration.test.ts`: **8 passed / 2 failed**,
+both failures being real product bugs the suite deliberately asserts as red
+rather than hiding. `settings-ui.integration.test.ts`: **green, twice, with
+clean teardown.**
+
+| Step | Verdict |
+| --- | --- |
+| 1 register → onboarding | PASS |
+| 2 sandbox repo + base URL | PASS — repo created through the wizard, `branchBaseUrls.main` set to the target |
+| — app shell renders, zero console errors | PASS — `libs/ui` re-exports resolve at runtime (§2.10) |
+| 3 record a test | **PARTIAL — recorder is broken (finding 1).** Test authored through the real Import-code UI instead; labelled as such in the file |
+| 4 test appears in tree under its area | PASS — asserted against the rendered tree |
+| 5 Run All → build completes | PASS |
+| 6a approve build → baselines | PASS |
+| 6b real diffs; approve one, reject one with comment | PASS — real pixel diffs, both decisions persisted |
+| 7 Verify check-layer tabs | PASS — **13 layers walked, 13 distinct panes**; content genuinely switches, deep-link `?mode=focus` resolves (§2.10) |
+| 7b playback scrubber sync | Blocked by finding 2; verified via the `forceVideoRecording` path instead (§2.17) |
+| 12 schedules (preset + custom cron) | PASS — preset resolves through the `libs/cron` shim *in the client bundle*, invalid cron rejected |
+| 13 billing / QA-Agent gating | PASS — no client/server drift, checked on `free` and on `pro` |
+| 14 settings autosave | PASS — **debounce survives a real page reload**, both cards, including §2.2's new `explorerModel` field |
+
+#### Findings — 3 real bugs, all pre-existing on `main`, none caused by this refactor
+
+1. **The Recorder is completely broken in the default dev provisioner mode.**
+   Every session dies with `page.evaluate: ReferenceError: __name is not
+   defined`. `browserRecordingScript` (`packages/embedded-browser/src/browser-script.ts`)
+   contains named inner functions; esbuild's `keepNames` — via `tsx`, which
+   is how `process`-mode EBs are launched — rewrites them to call a `__name`
+   helper, and Playwright then serialises that source into a page where the
+   helper does not exist. Recorder sources are byte-identical to `main`.
+   **Why §3 missed it:** §3's Recorder row drove Playwright directly and ran
+   codegen, explicitly noting it never touched the `start_recording` path.
+2. **Settings → Testing → "Video Recording" is a dead toggle.** It is saved
+   and read back correctly, and *nothing consumes it*: the EB executor gates
+   video solely on `command.forceVideoRecording`
+   (`test-executor.ts`), which only demo/share builds pass. Verified true on
+   `main` too. Consequence: the spec-28 annotated scrubber is unreachable
+   through the documented path — step 7b reaches it via `forceVideoRecording`.
+3. **`repositories` has no foreign key to `teams` at all** — the column's own
+   comment claims one was "added after teams table definition"; it never was.
+   Deleting a team therefore orphans its repositories. **5 orphaned repos
+   already exist in the dev DB.** Same class as §2.18's confirmed
+   `plugin_jobs` regression but wider, and directly relevant to §2.8's GDPR
+   claim: the cascade has a hole *above* the plugin layer.
+
+Two harness/infra issues also surfaced, both fixed or recorded:
+
+- `queries.deleteTeam()` **throws** for any team that still has a member
+  (`users_team_id_teams_id_fk` is NO ACTION); the product avoids this by
+  deleting the user first. `destroyTeam` swallowed the throw and leaked every
+  e2e team — now fixed to delete users and repos first, and to fail loudly.
+- EBs can be left `busy` and are **not reaped**, wedging the pool at
+  `online: 0` until cleaned by hand. Observed after abnormally-terminated
+  runs; it is §2.1's pool-exhaustion mode, reachable in practice.
+
+### 4.2 What is not yet green, and why
+
+- **Steps 10–11 (Explorer live stream, QA Agent) — written, not passing.**
+  `agents-ui.integration.test.ts` exists with a deliberately strict
+  `assertStreamPainted()` (FPS strip + non-zero-intrinsic-size canvas + >1
+  distinct sampled colour, so it cannot pass on a blank canvas), but every
+  run so far was killed by the environment before producing a verdict.
+  **§2.18's live-stream gap is therefore still open.**
+- **Steps 15–16 — partially written**, share-link and deletion-sweep cases
+  incomplete.
+- **Steps 8–9 — still blocked on GitHub credentials**, as originally
+  predicted. `confirm-on-green`'s scope guard is covered at runtime by §3.
+- **Suite stability.** Results varied run to run: one run scored 8/10,
+  another 1/11 with everything timing out. Two causes, neither in the code
+  under test: (a) a second, unrelated plugin-rollout effort was live in the
+  same working tree, repeatedly restarting the dev server and at points
+  leaving it 500ing (a moved `rca/dynamic-text`, later a moved
+  `github/content`); (b) the 4-slot EB pool with asynchronous teardown
+  starves a journey that runs four real builds back to back. **Re-run these
+  against a quiet tree before drawing conclusions from a red result.**
 
 ---
 
