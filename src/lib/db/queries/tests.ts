@@ -1,4 +1,5 @@
 import { db } from "../index";
+import { notifyTestCreated } from "../test-hooks";
 import {
   functionalAreas,
   tests,
@@ -16,6 +17,7 @@ import {
   testSpecs,
 } from "../schema";
 import type {
+  BotKind,
   NewFunctionalArea,
   NewTest,
   NewTestRun,
@@ -154,6 +156,13 @@ export async function createTest(
   data: Omit<NewTest, "id" | "createdAt" | "updatedAt">,
   branch?: string | null,
   viewport?: { width?: number; height?: number } | null,
+  /**
+   * "An agent of this kind authored the test." Callers that know which agent
+   * they are but not its per-team bot row id pass this instead of
+   * `data.createdByBotId`; the listener resolves and stamps it. See
+   * `@/lib/db/test-hooks`.
+   */
+  createdByAgent?: BotKind | null,
 ) {
   const id = uuid();
   const now = new Date();
@@ -177,16 +186,15 @@ export async function createTest(
     createdAt: now,
   });
 
-  // Gamification: stamp creator + award test_created. Dynamic import to break
-  // the module-eval cycle (queries → auth → queries). Never throws.
-  import("@/lib/gamification/hooks")
-    .then((m) =>
-      m.onTestCreated(id, {
-        createdByUserId: data.createdByUserId ?? null,
-        createdByBotId: data.createdByBotId ?? null,
-      }),
-    )
-    .catch(() => {});
+  // Raise the domain notification and move on. Core does not know who listens
+  // — that is the whole point of `test-hooks`, which replaced a dynamic
+  // `import("@/lib/gamification/hooks")` here. Never throws, never awaited.
+  notifyTestCreated({
+    testId: id,
+    createdByUserId: data.createdByUserId ?? null,
+    createdByBotId: data.createdByBotId ?? null,
+    createdByAgent: createdByAgent ?? null,
+  });
 
   return { id, ...data, createdAt: now, updatedAt: now };
 }

@@ -2196,10 +2196,6 @@ async function runQaGenerate(
     areaIdByGroup.set(group, area.id);
   }
 
-  const qaBot = await queries
-    .getBotByKind(teamId, "play_agent")
-    .catch(() => undefined);
-
   const substeps: NonNullable<AgentStepState["substeps"]> = pending.map(
     (item) => ({
       label: `${itemLabel(item)}: ${item.title}`,
@@ -2244,16 +2240,25 @@ async function runQaGenerate(
       });
       continue;
     }
-    const test = await queries.createTest({
-      repositoryId,
-      functionalAreaId: areaIdByGroup.get(item.group),
-      name: item.title,
-      code: `// Headless API test — executed via apiDefinition (${definition.method} ${definition.url})`,
-      targetUrl,
-      testType: "api",
-      apiDefinition: definition,
-      ...(qaBot ? { createdByBotId: qaBot.id } : {}),
-    });
+    const test = await queries.createTest(
+      {
+        repositoryId,
+        functionalAreaId: areaIdByGroup.get(item.group),
+        name: item.title,
+        code: `// Headless API test — executed via apiDefinition (${definition.method} ${definition.url})`,
+        targetUrl,
+        testType: "api",
+        apiDefinition: definition,
+        // Authored by the play_agent bot. The bot *row* belongs to
+        // @lastest/plugin-gamification, so this passes the agent kind and lets
+        // the plugin's test-created listener resolve and stamp the id — a
+        // feature must not read another feature's table to attribute its own
+        // work. See src/lib/db/test-hooks.ts.
+      },
+      undefined,
+      undefined,
+      "play_agent",
+    );
     substeps[subIdx] = { ...substeps[subIdx], status: "done" };
     await updateSubsteps(sessionId, "qa_generate", substeps);
     await upsertLedger({
@@ -2361,20 +2366,25 @@ async function runQaGenerate(
             },
           );
           if (result.success && result.code) {
-            const test = await queries.createTest({
-              repositoryId,
-              functionalAreaId: areaIdByGroup.get(item.group),
-              name: item.title,
-              code: result.code,
-              targetUrl,
-              playwrightOverrides: itemPlaywrightOverrides(itemGroups(item)),
-              // Chain the captured login session; when repo defaults already
-              // cover auth this stays undefined (defaults apply to every test).
-              ...(authSetupOverrides
-                ? { setupOverrides: authSetupOverrides }
-                : {}),
-              ...(qaBot ? { createdByBotId: qaBot.id } : {}),
-            });
+            const test = await queries.createTest(
+              {
+                repositoryId,
+                functionalAreaId: areaIdByGroup.get(item.group),
+                name: item.title,
+                code: result.code,
+                targetUrl,
+                playwrightOverrides: itemPlaywrightOverrides(itemGroups(item)),
+                // Chain the captured login session; when repo defaults already
+                // cover auth this stays undefined (defaults apply to every test).
+                ...(authSetupOverrides
+                  ? { setupOverrides: authSetupOverrides }
+                  : {}),
+                // Authored by the play_agent bot — see the note above.
+              },
+              undefined,
+              undefined,
+              "play_agent",
+            );
             substeps[subIdx] = {
               ...substeps[subIdx],
               status: "done",

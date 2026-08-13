@@ -18,7 +18,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
-import type { PwAgentType } from "./shared";
+import type { BotKind, PwAgentType } from "./shared";
 
 import { teams, users } from "./identity";
 
@@ -164,8 +164,6 @@ export type NewActivityEvent = typeof activityEvents.$inferInsert;
 // ── Gamification: Beat-the-Bot ───────────────────────────────────────────────
 
 export type ActorKind = "user" | "bot";
-
-export type BotKind = "play_agent" | "generate_agent" | "mcp_server";
 
 // Bots that compete on the leaderboard alongside humans. Seeded per team when gamification
 // is first enabled via ensureDefaultBots().

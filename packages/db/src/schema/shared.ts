@@ -204,3 +204,14 @@ export type PwAgentType =
   | "quickstart"
   | "ranger"
   | "explorer";
+
+/**
+ * The in-product agents that can author a test.
+ *
+ * Core's own vocabulary, not gamification's: `tests.created_by_bot_id` is a
+ * core column and `createTest`'s `createdByAgent` argument is typed by this.
+ * The `gamification_bots` *row* per kind belongs to
+ * `@lastest/plugin-gamification`, which is why this type stayed behind when
+ * that table left — see `src/lib/db/test-hooks.ts`.
+ */
+export type BotKind = "play_agent" | "generate_agent" | "mcp_server";

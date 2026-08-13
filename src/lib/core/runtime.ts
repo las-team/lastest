@@ -34,6 +34,7 @@ import { configureRca } from "@lastest/plugin-rca";
 
 import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
 import * as queries from "@/lib/db/queries";
+import { setTestCreatedListener } from "@/lib/db/test-hooks";
 import { getLogger } from "@/lib/logger";
 import { createAiFactory } from "@/lib/core/ai-capability";
 import { appApiTestHost } from "@/lib/core/api-test-host";
@@ -216,6 +217,18 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
     host: appPlaygroundHost,
     data: data.capability("playground"),
   });
+
+  // Core raises `tests` domain notifications through a port it owns; this is
+  // where the feature that listens gets attached. `createTest` used to
+  // `import("@/lib/gamification/hooks")` directly, which is core reaching into
+  // a feature — see `src/lib/db/test-hooks.ts` for why that had to invert and
+  // why the registration belongs here rather than in the query layer.
+  //
+  // Boot-time registration is what makes this equivalent to the old dynamic
+  // import: `src/instrumentation.ts` awaits `getPluginRuntime()` before the
+  // server handles a request, so no `createTest` can outrun it.
+  const { onTestCreated } = await import("@/lib/gamification/hooks");
+  setTestCreatedListener(onTestCreated);
 
   cached = { runtime, data, registry };
   return runtime;

@@ -11,6 +11,7 @@ import {
 } from "@/lib/gamification/rules";
 import type {
   ActorKind,
+  BotKind,
   ScoreEventKind,
   ScoreEventSource,
   NewUserScore,
@@ -322,6 +323,22 @@ async function runBeatBotCheck(args: {
   }
 
   return { botName, beatBy };
+}
+
+/**
+ * Resolve a team's bot row id for an agent kind.
+ *
+ * Exists so nothing outside this feature has to read the bots table to
+ * attribute work to an agent. `createTest(…, createdByAgent)` routes through
+ * `src/lib/db/test-hooks.ts` to `onTestCreated`, which calls this — see the
+ * note at `src/server/actions/qa-agent.ts`'s test creation.
+ */
+export async function resolveBotIdByKind(
+  teamId: string,
+  kind: BotKind,
+): Promise<string | null> {
+  const bot = await queries.getBotByKind(teamId, kind).catch(() => null);
+  return bot?.id ?? null;
 }
 
 // ── Admin actions: seasons ──────────────────────────────────────────────
