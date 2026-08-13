@@ -88,7 +88,7 @@ function verdictFromBuildStatus(status: BuildStatus): ValidateDiffVerdict {
  *   - `POST /api/v1/validate-diff` runs `verifyAuth` + `verifyRepoOwnership`
  *     (401/404) before invoking this (see src/app/api/v1/[...slug]/route.ts).
  *   - `validateDiffAction` (server action) runs `requireRepoAccess` first
- *     (see src/server/actions/api-tests.ts).
+ *     (see src/server/actions/validate-diff-action.ts).
  * Keep that invariant: any new caller MUST establish repo ownership first.
  */
 export async function validateDiffCore(

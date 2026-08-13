@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { validateDiffAction } from "@/server/actions/api-tests";
+import { validateDiffAction } from "@/server/actions/validate-diff-action";
 import type { ValidateDiffResult } from "@/server/actions/validate-diff";
 
 /**

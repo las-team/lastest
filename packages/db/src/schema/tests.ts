@@ -22,6 +22,8 @@ import {
 import type {
   DomSnapshotData,
   A11yViolation,
+  ApiTestDefinition,
+  ApiTestResultData,
   DesignSystemViolation,
   DesignSystemTokenUsage,
   AssertionResult,
@@ -35,6 +37,19 @@ import type {
 export type {
   DesignSystemScoreSummary,
   WcagScoreSummary,
+} from "@lastest/eb-protocol";
+
+// API-test payload shapes (E1). Owned by `@lastest/plugin-api-test`, stored in
+// core columns on `tests` / `test_results`, so they are defined in
+// `@lastest/eb-protocol` and re-exported here — app code has always imported
+// them from `@/lib/db/schema` next to the rows they live in.
+export type {
+  ApiAuth,
+  ApiAssertion,
+  ApiAssertionKind,
+  ApiAssertionResultData,
+  ApiTestDefinition,
+  ApiTestResultData,
 } from "@lastest/eb-protocol";
 
 import type {
@@ -227,72 +242,12 @@ export const functionalAreas = pgTable("functional_areas", {
 // A standalone request executed without a browser; results flow through the
 // same test_results / step_comparisons / evidence pipeline as browser tests
 // under the `api` check layer.
+//
+// The shapes themselves live in `@lastest/eb-protocol` (re-exported at the top
+// of this module and from `./eb-protocol`), because `@lastest/plugin-api-test`
+// owns them and may not import `@lastest/db`. The *columns* stay here: they are
+// on `tests` and `test_results`, which are core tables.
 // ---------------------------------------------------------------------------
-
-export type ApiAuth =
-  | { type: "none" }
-  | { type: "bearer"; token: string }
-  | { type: "basic"; username: string; password: string }
-  | { type: "custom"; headers: Record<string, string> };
-
-export type ApiAssertionKind =
-  | "status"
-  | "header"
-  | "jsonPath"
-  | "jsonSchema"
-  | "bodyContains"
-  | "latencyMs";
-
-export interface ApiAssertion {
-  kind: ApiAssertionKind;
-  /** status: exact status code, or `in` for a set of acceptable codes. */
-  equals?: number;
-  in?: number[];
-  /** header: header name to assert on (case-insensitive). */
-  header?: string;
-  /** jsonPath: dot-path into the JSON response body. */
-  path?: string;
-  /** Expected value (jsonPath / header) or substring (bodyContains). */
-  value?: string | number | boolean;
-  /** jsonSchema: a JSON Schema object validated with ajv. */
-  schema?: unknown;
-  /** latencyMs: max acceptable round-trip latency. */
-  maxMs?: number;
-  /** header/jsonPath: require an exact same-type match (no string coercion).
-   *  Default comparison is type-aware, keyed off the expected value's type. */
-  strict?: boolean;
-  description?: string;
-}
-
-export interface ApiTestDefinition {
-  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-  url: string;
-  headers?: Record<string, string>;
-  query?: Record<string, string>;
-  body?: unknown;
-  auth?: ApiAuth;
-  assertions: ApiAssertion[];
-  /** Optional per-request timeout (ms). Falls back to DEFAULT_API_TEST_SETTINGS. */
-  timeoutMs?: number;
-}
-
-export interface ApiAssertionResultData {
-  kind: ApiAssertionKind;
-  passed: boolean;
-  description: string;
-  expected?: unknown;
-  actual?: unknown;
-}
-
-/** Persisted result of a headless API test (stored on test_results.apiResult). */
-export interface ApiTestResultData {
-  passed: boolean;
-  statusCode: number | null;
-  latencyMs: number;
-  assertionResults: ApiAssertionResultData[];
-  error?: string;
-  responseSnippet?: string;
-}
 
 export const tests = pgTable("tests", {
   id: text("id").primaryKey(),

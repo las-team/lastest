@@ -480,6 +480,87 @@ export interface StorageStateSnapshot {
   }>;
 }
 
+// ── API tests (E1) — a headless HTTP request, its assertions, its result ────
+//
+// The one family in this file that never crosses the runner wire: an API test
+// executes in-process (`@lastest/plugin-api-test`), not in a browser pod. It
+// lives here anyway because this package is also the home for *jsonb payload
+// shapes a plugin owns but the core schema stores* — `tests.api_definition`
+// and `test_results.api_result` are core columns, and the plugin that fills
+// them may not import `@lastest/db`.
+//
+// That is the `RcaVerdict` precedent above (`docs/architecture/
+// plugin-migration-recipe.md` §6.1: promote the plugin's *own* payload types,
+// narrow somebody else's). `packages/db/src/schema/tests.ts` re-exports every
+// name below, so nothing in the app changed import path when they moved.
+
+export type ApiAuth =
+  | { type: "none" }
+  | { type: "bearer"; token: string }
+  | { type: "basic"; username: string; password: string }
+  | { type: "custom"; headers: Record<string, string> };
+
+export type ApiAssertionKind =
+  | "status"
+  | "header"
+  | "jsonPath"
+  | "jsonSchema"
+  | "bodyContains"
+  | "latencyMs";
+
+export interface ApiAssertion {
+  kind: ApiAssertionKind;
+  /** status: exact status code, or `in` for a set of acceptable codes. */
+  equals?: number;
+  in?: number[];
+  /** header: header name to assert on (case-insensitive). */
+  header?: string;
+  /** jsonPath: dot-path into the JSON response body. */
+  path?: string;
+  /** Expected value (jsonPath / header) or substring (bodyContains). */
+  value?: string | number | boolean;
+  /** jsonSchema: a JSON Schema object validated with ajv. */
+  schema?: unknown;
+  /** latencyMs: max acceptable round-trip latency. */
+  maxMs?: number;
+  /** header/jsonPath: require an exact same-type match (no string coercion).
+   *  Default comparison is type-aware, keyed off the expected value's type. */
+  strict?: boolean;
+  description?: string;
+}
+
+/** Stored verbatim in `tests.api_definition`. Carries live credentials — the
+ *  *displayed* copies are redacted by the plugin's `redactApiDefinition`. */
+export interface ApiTestDefinition {
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  url: string;
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
+  body?: unknown;
+  auth?: ApiAuth;
+  assertions: ApiAssertion[];
+  /** Optional per-request timeout (ms). Falls back to DEFAULT_API_TEST_SETTINGS. */
+  timeoutMs?: number;
+}
+
+export interface ApiAssertionResultData {
+  kind: ApiAssertionKind;
+  passed: boolean;
+  description: string;
+  expected?: unknown;
+  actual?: unknown;
+}
+
+/** Persisted result of a headless API test (stored on test_results.apiResult). */
+export interface ApiTestResultData {
+  passed: boolean;
+  statusCode: number | null;
+  latencyMs: number;
+  assertionResults: ApiAssertionResultData[];
+  error?: string;
+  responseSnippet?: string;
+}
+
 // ============================================
 // Base Message Types
 // ============================================
