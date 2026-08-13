@@ -48,6 +48,15 @@ export const launchPlugin = definePlugin({
   id: "launch",
   title: "Launch board",
 
+  // No team anywhere in this feature — see the note above. Declared rather
+  // than merely true: `resolveRegistry` now refuses any capability beyond
+  // `data` for such a plugin, refuses `provides` and refuses job handlers, and
+  // `buildContext` throws `UntenantedPluginError` if anything hands one a
+  // scope. When this plugin landed, the only signal was the absent `runtime`
+  // in `wiring.ts`; the field arrived with `@lastest/plugin-playground`, the
+  // second plugin of this shape.
+  tenancy: "none",
+
   // `data` and nothing else. No browser, no AI, no jobs, no events — the board
   // computes rankings from its own rows and serves JSON.
   capabilities: ["data"],

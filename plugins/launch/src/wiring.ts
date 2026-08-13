@@ -28,6 +28,13 @@ import type { LaunchHost } from "./host";
  * handle below is still the schema-scoped one `core/data` built after
  * validating the `launch_` prefix on all seven tables, so this plugin can
  * reach its own tables and nothing else.
+ *
+ * The missing `runtime` used to be the *only* record of any of this. It is not
+ * any more: the manifest declares `tenancy: "none"`, `resolveRegistry`
+ * enforces what that implies, and `buildContext` throws if a context is ever
+ * built for this plugin anyway. That core change landed with the second
+ * untenanted plugin (`@lastest/plugin-playground`), which is what this file
+ * used to ask for.
  */
 
 export interface LaunchWiring {
