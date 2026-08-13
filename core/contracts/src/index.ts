@@ -48,6 +48,7 @@ export type {
   NavEntry,
   PluginContext,
   PluginManifest,
+  PluginTenancy,
   ProvidedCapabilities,
   ProviderScope,
 } from "./plugin";

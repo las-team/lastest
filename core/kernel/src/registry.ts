@@ -47,6 +47,20 @@ export const CORE_PROVIDED: readonly CapabilityName[] = [
  * reduce to a plugin-declarable shape). Anything else must come from a
  * plugin's `checkLayers`.
  */
+/**
+ * The only capability an untenanted plugin may consume.
+ *
+ * Every other capability's factory is handed a `ContextScope`, and every
+ * `ContextScope` carries a `team` — a browser claim is metered and
+ * priority-classed per team, storage is tenant-scoped bytes against a tenant
+ * quota, AI spend is attributed to a payer, `repos`/`tests` are core entities
+ * that belong to one. `data` is the exception because `core/data` scopes by
+ * *plugin id*, not by tenant: the handle is bound to the plugin's own
+ * `<id>_`-prefixed tables, which is a boundary that holds with or without a
+ * team behind it.
+ */
+const UNTENANTED_CAPABILITIES: readonly CapabilityName[] = ["data"];
+
 export const CORE_CHECK_LAYERS: readonly string[] = [
   "visual",
   "text",
@@ -117,6 +131,11 @@ export interface ResolvedRegistry {
  *   or another plugin's. `CheckLayer` is an open registry (RFC §6.3); a
  *   collision here would mean two layers silently overwriting one another's
  *   mode/evidence in the Verify UI.
+ * - **An untenanted plugin asking for something tenant-shaped** — see
+ *   `PluginTenancy`. `tenancy: "none"` is a declaration that there is no team
+ *   to resolve, so anything requiring the kernel to build one is a
+ *   contradiction that should fail at boot rather than at the first request,
+ *   where it would surface as an invented or a missing `ctx.team`.
  */
 export function resolveRegistry(
   manifests: readonly AnyManifest[],
@@ -203,6 +222,31 @@ export function resolveRegistry(
       }
       checkLayers.set(layer.id, { ...layer, pluginId: m.id });
     }
+
+    if (m.tenancy === "none") {
+      for (const cap of m.capabilities ?? []) {
+        if (UNTENANTED_CAPABILITIES.includes(cap)) continue;
+        problems.push(
+          `plugin "${m.id}" declares \`tenancy: "none"\` but consumes "${cap}", ` +
+            `which is built from a resolved team (only ` +
+            `${UNTENANTED_CAPABILITIES.map((c) => `"${c}"`).join(", ")} is tenant-free)`,
+        );
+      }
+      if ((m.provides ?? []).length > 0) {
+        problems.push(
+          `plugin "${m.id}" declares \`tenancy: "none"\` but provides a ` +
+            `capability — a provider is handed its consumer's team, which this ` +
+            `plugin has said it does not have`,
+        );
+      }
+      if (Object.keys(m.jobs ?? {}).length > 0) {
+        problems.push(
+          `plugin "${m.id}" declares \`tenancy: "none"\` but registers job ` +
+            `handlers — dispatching a job builds a context, and a context needs ` +
+            `a team`,
+        );
+      }
+    }
   }
 
   // Second pass: consumers need their providers to exist. Done separately so
@@ -245,6 +289,30 @@ export interface ContextScope {
 }
 
 /**
+ * Raised when something tries to build a `PluginContext` for a plugin that
+ * declared `tenancy: "none"`.
+ *
+ * `resolveRegistry` already rejects the manifest shapes that would *need* a
+ * context (any capability beyond `data`, any `provides`, any job handler), so
+ * reaching this is a caller mistake rather than a configuration one: the
+ * composition root wired a `runtime` into an untenanted plugin, or the plugin
+ * called `contextFor` directly. Both would otherwise succeed and hand back a
+ * `ctx.team` resolved from whoever happened to be logged in — the exact lie
+ * `tenancy: "none"` exists to prevent.
+ */
+export class UntenantedPluginError extends Error {
+  constructor(readonly pluginId: string) {
+    super(
+      `Plugin "${pluginId}" declares \`tenancy: "none"\` and cannot be given a ` +
+        `PluginContext — there is no team to scope one to. Take the capability ` +
+        `it needs straight from its wiring slot instead (see ` +
+        `plugins/launch/src/wiring.ts).`,
+    );
+    this.name = "UntenantedPluginError";
+  }
+}
+
+/**
  * Build the context for one plugin: exactly its declared capabilities, nothing
  * else.
  *
@@ -252,6 +320,10 @@ export interface ContextScope {
  * derived from, so the compile-time narrowing and the runtime shape cannot
  * drift apart — which is the only way the `ctx.browser` type error is a real
  * guarantee rather than a comment.
+ *
+ * The tenancy guard sits here rather than in `contextFor` because `dispatch`
+ * builds a context too, and one guard on the shared path cannot be bypassed by
+ * adding a second entry point later.
  */
 export function buildContext<
   C extends CapabilityName,
@@ -261,6 +333,10 @@ export function buildContext<
   scope: ContextScope,
   factories: CapabilityFactories,
 ): PluginContext<C> {
+  if (manifest.tenancy === "none") {
+    throw new UntenantedPluginError(manifest.id);
+  }
+
   const ctx: Record<string, unknown> = {
     pluginId: manifest.id,
     team: scope.team,

@@ -109,6 +109,39 @@ export interface NavEntry {
   readonly icon?: string;
 }
 
+/**
+ * Whether the plugin's world has a tenant in it.
+ *
+ * `"team"` is the default and was the only shape until `@lastest/plugin-launch`:
+ * the plugin acts *for* a team, the kernel resolves one, and `ctx.team` is the
+ * tenancy assertion every capability is bound to.
+ *
+ * `"none"` means there is no tenant to resolve — not that one was skipped. A
+ * public board whose readers are anonymous and whose writers are identified by
+ * a user id and an OAuth scope has no `team_id` column to scope by, so a
+ * `ctx.team` would have to be invented, and **a tenancy check that always
+ * passes reads exactly like a tenancy check that works**. That is the failure
+ * this field exists to make impossible.
+ *
+ * Declaring `"none"` is a *narrowing*, not an exemption. `resolveRegistry`
+ * refuses anything that would require the kernel to build a scope the plugin
+ * has said does not exist — every capability except `data`, any `provides`
+ * (a provider is handed the consumer's `team`), and any job handler (dispatch
+ * builds a context). `buildContext` then refuses at runtime as a backstop, so
+ * an untenanted plugin cannot obtain a `PluginContext` even by asking.
+ *
+ * What it deliberately does *not* relax is the data boundary: an untenanted
+ * plugin still receives only the schema-scoped handle `core/data` bound after
+ * validating its `<id>_` table prefix, and it still owes a `deletion` hook —
+ * usually `onUserDeleted`, since person-scoped rows are the reason a plugin
+ * ends up here in the first place.
+ *
+ * Before this field existed, the only signal that a plugin was untenanted was
+ * the *absence* of a `runtime` in its wiring — invisible in the manifest and
+ * unenforced. See `docs/architecture/plugin-migration-recipe.md` §2.2.
+ */
+export type PluginTenancy = "team" | "none";
+
 export interface PluginManifest<
   C extends CapabilityName = never,
   P extends CapabilityName = never,
@@ -116,6 +149,14 @@ export interface PluginManifest<
   /** kebab-case. Namespaces the plugin's tables, jobs, storage keys and events. */
   readonly id: string;
   readonly title: string;
+
+  /**
+   * Whether this plugin acts for a tenant. Defaults to `"team"`.
+   *
+   * Set `"none"` only when there is genuinely no team in the feature — see
+   * `PluginTenancy`, which documents what the kernel then refuses to give you.
+   */
+  readonly tenancy?: PluginTenancy;
 
   /**
    * Capabilities this plugin consumes. The kernel builds a context containing

@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { definePlugin } from "./define";
-import { buildContext, PluginRegistryError, resolveRegistry } from "./registry";
+import {
+  buildContext,
+  PluginRegistryError,
+  resolveRegistry,
+  UntenantedPluginError,
+} from "./registry";
 
 const scope = {
   team: { id: "t1", plan: "pro" as const, entitlements: new Set(["ai"]) },
@@ -235,6 +240,87 @@ describe("resolveRegistry", () => {
       expect(problems[0]).toContain("contributed by both");
     });
   });
+
+  describe("tenancy", () => {
+    // `tenancy: "none"` says "there is no team here". Every rule below rejects
+    // a manifest that would then require the kernel to produce one anyway —
+    // the failure mode being prevented is an invented `ctx.team`, which reads
+    // exactly like a working tenancy check.
+    it("accepts an untenanted plugin that only consumes data", () => {
+      const launch = definePlugin({
+        id: "launch",
+        title: "Launch board",
+        tenancy: "none",
+        capabilities: ["data"],
+        schema: async () => ({}),
+        deletion: { onUserDeleted: async () => {} },
+      });
+      expect(() => resolveRegistry([launch])).not.toThrow();
+    });
+
+    it("rejects an untenanted plugin consuming a tenant-scoped capability", () => {
+      const problems = problemsOf(() =>
+        resolveRegistry([
+          definePlugin({
+            id: "launch",
+            title: "Launch board",
+            tenancy: "none",
+            capabilities: ["data", "browser", "storage"],
+          }),
+        ]),
+      );
+      expect(problems).toHaveLength(2);
+      expect(problems[0]).toContain('consumes "browser"');
+      expect(problems[1]).toContain('consumes "storage"');
+    });
+
+    it("rejects an untenanted provider", () => {
+      // A provider receives its *consumer's* team in `ProviderScope`. A plugin
+      // with no team of its own can still be handed one that way, which is the
+      // tenancy confusion this forbids outright.
+      const problems = problemsOf(() =>
+        resolveRegistry([
+          definePlugin({
+            id: "events",
+            title: "Events",
+            tenancy: "none",
+            provides: ["events"],
+            implement: {
+              events: () => ({ emit: vi.fn(), subscribe: vi.fn() }),
+            },
+          }),
+        ]),
+      );
+      expect(problems[0]).toContain("provides a capability");
+    });
+
+    it("rejects an untenanted plugin registering job handlers", () => {
+      const problems = problemsOf(() =>
+        resolveRegistry([
+          definePlugin({
+            id: "launch",
+            title: "Launch board",
+            tenancy: "none",
+            jobs: { "launch.rank": async () => {} },
+          }),
+        ]),
+      );
+      expect(problems[0]).toContain("registers job handlers");
+    });
+
+    it("treats a plugin with no `tenancy` as team-scoped", () => {
+      // The default has to stay silent: every plugin written before this field
+      // existed omits it and must keep resolving unchanged.
+      const explorer = definePlugin({
+        id: "explorer",
+        title: "Explorer",
+        capabilities: ["browser", "data"],
+        schema: async () => ({}),
+        deletion: { onTeamDeleted: async () => {} },
+      });
+      expect(() => resolveRegistry([explorer])).not.toThrow();
+    });
+  });
 });
 
 describe("buildContext", () => {
@@ -288,5 +374,21 @@ describe("buildContext", () => {
     expect(() => buildContext(manifest, scope, {})).toThrow(
       /No factory registered for capability "browser"/,
     );
+  });
+
+  it("refuses to build a context for an untenanted plugin", () => {
+    // The backstop for what `resolveRegistry` cannot see: a composition root
+    // that wires a `runtime` into an untenanted plugin, or the plugin calling
+    // `contextFor` itself. Both would otherwise succeed and hand back a
+    // `ctx.team` belonging to whoever happened to be logged in.
+    const launch = definePlugin({
+      id: "launch",
+      title: "Launch board",
+      tenancy: "none",
+      capabilities: ["data"],
+    });
+    expect(() =>
+      buildContext(launch, scope, { data: () => ({ db: {} }) }),
+    ).toThrow(UntenantedPluginError);
   });
 });

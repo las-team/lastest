@@ -12,6 +12,7 @@ export {
   PLUGIN_ID_RE,
   PluginRegistryError,
   resolveRegistry,
+  UntenantedPluginError,
 } from "./registry";
 export type {
   CapabilityFactories,
