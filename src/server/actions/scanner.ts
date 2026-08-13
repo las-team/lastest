@@ -3,9 +3,11 @@
 import { revalidatePath } from "next/cache";
 import * as queries from "@/lib/db/queries";
 import { requireRepoAccess } from "@/lib/auth";
-import { RemoteRouteScanner } from "@/lib/scanner/remote-scanner";
-import { generateSmokeTestCode } from "@/lib/scanner/test-generator";
-import type { RouteInfo } from "@/lib/scanner/types";
+import {
+  RemoteRouteScanner,
+  generateSmokeTestCode,
+  type RouteInfo,
+} from "@lastest/route-scan";
 
 export async function startRemoteRouteScan(
   repositoryId: string,

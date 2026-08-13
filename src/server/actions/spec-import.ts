@@ -18,11 +18,7 @@ import type {
   ExtractedAcceptanceCriterion,
 } from "@/lib/db/schema";
 import { revalidatePath } from "next/cache";
-import {
-  getRepoTree,
-  getFileContent,
-  compareBranches,
-} from "@/lib/github/content";
+import { getRepoTree, getFileContent, compareBranches } from "@lastest/github";
 import { runParallel } from "@/lib/ai/parallel";
 import { createJob, updateJobProgress, completeJob, failJob } from "./jobs";
 import { getCurrentBranchForRepo } from "@/lib/git-utils";

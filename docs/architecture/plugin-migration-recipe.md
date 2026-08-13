@@ -152,11 +152,37 @@ things that break *everyone* when a feature gets them wrong (tenancy, capacity,
 money, credentials, the registry). Shared code that guards nothing is a library,
 and putting it in core is how the RFC's core got to nine modules.
 
-The explorer pilot created `libs/page-map` and `libs/cron` this way. Keep libs
-free of `@/…` and free of plugin imports — `pnpm arch` enforces both.
+The explorer pilot created `libs/page-map` and `libs/cron` this way; a later
+bulk pass added `libs/github`, `libs/test-templates` and `libs/route-scan`
+([result](./shared-dependency-promotions.md)). Keep libs free of `@/…` and free
+of plugin imports — `pnpm arch` enforces both.
 
 If the helper *is* a security boundary (an SSRF guard, crypto, a quota check),
 it belongs in core instead, and it is a separate PR.
+
+**The test is mechanical — read the module's import list:**
+
+| Its imports | Verdict |
+| --- | --- |
+| nothing, or only other `libs/*` | library. Promote. |
+| `@/lib/db`, `@/lib/ai`, another feature | not shared logic, it is a feature. Wants `ctx.jobs`. |
+| a storage path, crypto, a quota, an SSRF guard | boundary. Core, separate PR. |
+
+`@/lib/share/video-fallback` is the instructive near-miss: 66 lines, imports
+only `fs/promises` and `path`, looks exactly like a library — and is not one,
+because it joins a caller-supplied id into a filesystem path under
+`storage/`. Row three, not row one.
+
+**Do this as its own pass, before the migrations, not inside one.** Count the
+violations by *module imported* rather than by importing feature — one module
+was 19% of the whole burndown. If you promote during a migration instead, that
+import becomes a host-port method: the rule is satisfied and the coupling
+survives.
+
+**Check for shims first.** `qa-agent` was importing `@/lib/scheduling/cron`,
+which has been a 13-line re-export of `@lastest/cron` since phase 2. The
+violation was the *path*, not the dependency. A one-line import change was
+worth as much as a migration, so grep for these before designing anything.
 
 ## 6. Routes and actions cross the package boundary fine (spike S1)
 

@@ -8,7 +8,7 @@ import {
   type QaCodeCheck,
 } from "./code-check";
 import { buildDocsDigest, isSupportedDocName } from "./docs";
-import type { TreeEntry } from "@/lib/github/content";
+import type { TreeEntry } from "@lastest/github";
 
 const blob = (path: string): TreeEntry => ({
   path,

@@ -36,7 +36,20 @@
 >   reading of `core-scope.md` §2. The repeatable procedure is written down in
 >   [`plugin-migration-recipe.md`](./plugin-migration-recipe.md) — read that,
 >   not §9 below, before migrating the next feature.
->   Burndown: **42 → 34 → 32 → 31**.
+>   Burndown: **42 → 34 → 32 → 31 → 22**.
+>
+>   **The 31 → 22 drop was not a migration.** It was four shared dependencies
+>   promoted to `libs/` in one pass
+>   ([result](./shared-dependency-promotions.md)) — `@lastest/github` alone was
+>   6 violations, 19% of the burndown, because four features each imported it
+>   across a feature line. §4.3's "promote the shared part" turns out to be
+>   worth *doing first and in bulk*, not per-migration: a feature migration
+>   would have converted each of those imports into a host-port method and
+>   carried the coupling across the boundary in a nicer coat.
+>
+>   Every remaining `cross-plugin` violation is now a feature calling another
+>   feature's *behaviour* (which wants `ctx.jobs`, not an import) plus one
+>   storage item. The cheap structural wins are spent.
 >
 >   **The burndown is not a complete measure, and `app-map` is how we found
 >   out.** It graduated without moving the number, because its one real
@@ -332,6 +345,27 @@ The honest trade: `withRawPage` means R4 is not perfectly enforced on day one. W
 
 If a promotion into core is contentious, that is a signal the two features should be
 one plugin. Merging is allowed; a direct import is not.
+
+> **Amended in practice: promote to `libs/`, in bulk, before migrating.** Two
+> corrections from doing this for real
+> ([result](./shared-dependency-promotions.md)):
+>
+> - **The destination is usually `libs/`, not core.** This section says
+>   "promote into `@lastest/contracts` or a core module". `core-scope.md` §3
+>   added a third tier after this was written, and it is where almost all of
+>   these land: a GitHub REST client that takes its token as an argument, a
+>   template renderer, a route scanner. None guards tenancy, capacity, money or
+>   credentials, so none belongs behind a review gate.
+> - **Do the promotions as their own pass, not inside a migration.** Counted by
+>   *module imported* rather than by importing feature, four modules accounted
+>   for nine violations across seven features. Migrating those features one at
+>   a time would have turned each import into a host-port method — satisfying
+>   the rule while preserving the coupling. Promotion deletes it.
+>
+> The test for "is this promotable" is mechanical: **read its import list.** If
+> it imports nothing, or only other libs, it is a library. If it imports
+> `@/lib/db`, `@/lib/ai` or a storage path, it is a feature or a boundary and
+> promotion is the wrong answer.
 
 ## 5. Data ownership
 

@@ -9,7 +9,7 @@ import {
 } from "@/lib/billing/feature-access";
 import { isBillingEnabled } from "@/lib/billing/enabled";
 import { assertAgentRunMinutesAvailable } from "@/lib/billing/agent-eb-usage";
-import { getNextRunTime, isValidCron } from "@/lib/scheduling/cron";
+import { getNextRunTime, isValidCron } from "@lastest/cron";
 import {
   assertSafeOutboundUrl,
   SsrfBlockedError,
@@ -42,7 +42,7 @@ import {
   renderQuickstartPassword,
   slugify,
   utcStamp,
-} from "@/lib/playwright/quickstart-templates";
+} from "@lastest/test-templates";
 import {
   buildApiDefinition,
   buildDiscoveryDigest,
@@ -1389,8 +1389,7 @@ async function runQaDiscover(
       staticRoutes = existing.map((r) => ({ path: r.path, type: r.type }));
       framework = existing[0]?.framework ?? undefined;
     } else if (githubConnected && repo && ghAccount?.accessToken) {
-      const { RemoteRouteScanner } =
-        await import("@/lib/scanner/remote-scanner");
+      const { RemoteRouteScanner } = await import("@lastest/route-scan");
       const scanner = new RemoteRouteScanner({
         accessToken: ghAccount.accessToken,
         owner: repo.owner ?? "",
@@ -1438,7 +1437,7 @@ async function runQaDiscover(
         { getRepoTree, getFileContent, compareBranches },
       ] = await Promise.all([
         import("@/lib/ai/codebase-intelligence"),
-        import("@/lib/github/content"),
+        import("@lastest/github"),
       ]);
       const { extractDeclaredEndpoints } =
         await import("@/lib/qa-agent/code-check");

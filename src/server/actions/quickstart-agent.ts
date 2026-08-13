@@ -25,7 +25,7 @@ import {
   utcStamp,
   slugify,
   AUTH_CHAIN_FAILED_MARKER,
-} from "@/lib/playwright/quickstart-templates";
+} from "@lastest/test-templates";
 import {
   runQuickstartScoutPublic,
   runQuickstartScoutAuthed,

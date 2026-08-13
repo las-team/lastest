@@ -157,7 +157,7 @@ export const PSEUDO_PLUGINS = {
     actions: ["github-actions.ts", "gitlab-pipelines.ts"],
   },
   scheduling: {
-    lib: ["src/lib/scheduling", "src/lib/scanner"],
+    lib: ["src/lib/scheduling"],
     actions: ["schedules.ts", "scanner.ts"],
   },
   // §6.2 — the `src/lib/playwright` split. `lib` stays empty; these plugins own
@@ -190,7 +190,6 @@ export const PSEUDO_PLUGINS = {
     lib: ["src/lib/quickstart"],
     files: [
       "src/lib/playwright/quickstart-scout.ts",
-      "src/lib/playwright/quickstart-templates.ts",
       "src/lib/playwright/static-scout.ts",
     ],
     actions: ["quickstart-agent.ts"],

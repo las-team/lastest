@@ -1,0 +1,22 @@
+{
+  "name": "@lastest/route-scan",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Route discovery over a GitHub repo tree (framework detection, route extraction, smoke-test generation). No DB, no browser, no credential resolution — the third tier of docs/architecture/core-scope.md §3.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lastest/github": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  },
+  "license": "FSL-1.1-ALv2"
+}

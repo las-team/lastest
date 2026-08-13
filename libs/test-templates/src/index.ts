@@ -1,5 +1,16 @@
 /**
- * Canonical Playwright test bodies the QuickStart agent emits.
+ * `@lastest/test-templates` — canonical Playwright test bodies the agents emit.
+ *
+ * ### Why this is a library and not part of `quickstart`
+ *
+ * RFC §6.2 assigned this file to the `quickstart` plugin, and §6.2 warns it is
+ * "the one most likely to be wrong on the first attempt". It was, here: both
+ * `quickstart-agent` and `qa-agent` render from it (`renderAuthSetupCode`,
+ * `renderQuickstartPassword`, `slugify`, `utcStamp`), so it is shared logic,
+ * not one feature's internals. It imports nothing, guards nothing, and
+ * produces strings — `core-scope.md` §3's definition of the third tier, and
+ * RFC §4.3's "promote the shared part" rather than let one feature reach into
+ * another.
  *
  * These are the productized form of the patterns in
  * `~/.claude/skills/gtm-lastest-saas-demo/references/test-template.md`.

@@ -11,7 +11,7 @@ import {
   DESTRUCTIVE_CTA_PATTERN,
   CAPTCHA_LOCATOR,
   AUTH_CHAIN_FAILED_MARKER,
-} from "./quickstart-templates";
+} from "./index";
 
 const sampleEmail = "viktor+postbox202604030915@lastest.cloud";
 const samplePassword = "Lastest-Demo-202604030915!";

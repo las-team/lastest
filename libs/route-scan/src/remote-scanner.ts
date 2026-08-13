@@ -7,7 +7,7 @@ import {
   getFileContent,
   pathExists,
   type TreeEntry,
-} from "@/lib/github/content";
+} from "@lastest/github";
 import type { RouteInfo, ScanProgress, ScanResult } from "./types";
 
 export interface RemoteScannerConfig {

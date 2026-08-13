@@ -8,7 +8,7 @@
  */
 
 import * as queries from "@/lib/db/queries";
-import { getRepoTree, getFileContent } from "@/lib/github/content";
+import { getRepoTree, getFileContent } from "@lastest/github";
 import type { PlannerResult } from "@/lib/playwright/planner-types";
 
 const SPEC_PATTERNS = [

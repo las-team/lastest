@@ -1,4 +1,4 @@
-import type { TreeEntry } from "@/lib/github/content";
+import type { TreeEntry } from "@lastest/github";
 
 /**
  * QA Agent code check — static analysis of the connected repo that feeds the

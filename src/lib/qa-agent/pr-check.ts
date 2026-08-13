@@ -8,7 +8,7 @@ import type {
   QaPrSymbol,
   QaTestPlan,
 } from "@/lib/db/schema";
-import type { CompareResult } from "@/lib/github/content";
+import type { CompareResult } from "@lastest/github";
 import { apiRouteUrlPath, type QaDeclaredEndpoint } from "./code-check";
 
 /**
