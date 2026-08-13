@@ -1387,8 +1387,10 @@ async function executeExplorerPipeline(
       `Explorer failed: ${msg}`,
     );
   } finally {
-    activeControllers.delete(sessionId);
-    await releaseSessionEb(sessionId).catch(() => {});
+    if (activeControllers.get(sessionId) === controller) {
+      activeControllers.delete(sessionId);
+      await releaseSessionEb(sessionId).catch(() => {});
+    }
   }
 }
 
@@ -1427,12 +1429,13 @@ async function startExplorerCore(
     "explorer",
   );
   if (existing) {
-    activeControllers.get(existing.id)?.abort();
+    const controller = activeControllers.get(existing.id);
+    controller?.abort();
     await queries.updateAgentSession(existing.id, {
       status: "cancelled",
       completedAt: new Date(),
     });
-    await releaseSessionEb(existing.id).catch(() => {});
+    if (!controller) await releaseSessionEb(existing.id).catch(() => {});
   }
 
   const settings = await queries.getAISettings(input.repositoryId);
@@ -1549,9 +1552,10 @@ export async function pauseExplorerAgent(
 ): Promise<{ success: boolean }> {
   const { session } = await requireExplorerSession(sessionId);
   if (session.status !== "active") return { success: false };
-  activeControllers.get(sessionId)?.abort();
+  const controller = activeControllers.get(sessionId);
+  controller?.abort();
   await queries.updateAgentSession(sessionId, { status: "paused" });
-  await releaseSessionEb(sessionId).catch(() => {});
+  if (!controller) await releaseSessionEb(sessionId).catch(() => {});
   revalidatePath("/explorer");
   return { success: true };
 }
@@ -1577,12 +1581,13 @@ export async function cancelExplorerAgent(
   sessionId: string,
 ): Promise<{ success: boolean }> {
   const { session, teamId } = await requireExplorerSession(sessionId);
-  activeControllers.get(sessionId)?.abort();
+  const controller = activeControllers.get(sessionId);
+  controller?.abort();
   await queries.updateAgentSession(sessionId, {
     status: "cancelled",
     completedAt: new Date(),
   });
-  await releaseSessionEb(sessionId).catch(() => {});
+  if (!controller) await releaseSessionEb(sessionId).catch(() => {});
   emitActivity(
     teamId,
     session.repositoryId,
