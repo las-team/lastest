@@ -1,7 +1,7 @@
 # RFC: Core + Plugins
 
-**Status:** phases 0–3 landed. Phase 4 in progress — `rca`, `app-map` and
-`launch` done, `url-diff` resolved as core, 10 plugins to go.
+**Status:** phases 0–3 landed. Phase 4 in progress — `rca`, `app-map`,
+`launch` and `api-test` done, `url-diff` resolved as core, 9 plugins to go.
 **Author:** planning doc
 **Supersedes:** nothing
 
@@ -26,10 +26,11 @@
 > - **Phase 3 — done.** `CheckLayer` is a registry; `design-system` and `a11y`
 >   are check-layer plugins. Both are table-light, and `design-system` proved
 >   the no-schema shape (manifest + host port, no `ctx` at all).
-> - **Phase 4 — in progress. 3 of 13 plugins done.** `rca`
+> - **Phase 4 — in progress. 4 of 13 plugins done.** `rca`
 >   ([result](./rca-migration-result.md)), `app-map`
->   ([result](./app-map-migration-result.md)) and `launch`
->   ([result](./launch-migration-result.md)) have landed. `url-diff` did not
+>   ([result](./app-map-migration-result.md)), `launch`
+>   ([result](./launch-migration-result.md)) and `api-test`
+>   ([result](./api-test-migration-result.md)) have landed. `url-diff` did not
 >   go to a plugin at all — it was **reclassified as core**: its in-app page
 >   and sidebar entry were removed, and what is left has no user surface and
 >   exists only to serve the documented `POST /api/v1/snapshot` and
@@ -37,7 +38,52 @@
 >   reading of `core-scope.md` §2. The repeatable procedure is written down in
 >   [`plugin-migration-recipe.md`](./plugin-migration-recipe.md) — read that,
 >   not §9 below, before migrating the next feature.
->   Burndown: **42 → 34 → 32 → 31 → 22 → 21**.
+>   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21**.
+>
+>   **`api-test` is where the burndown stopped being the metric, on purpose.**
+>   It went in at zero counted violations and came out at zero — and unlike
+>   `app-map`, nothing was hiding: both counting hazards were checked and the
+>   feature genuinely had none. The reason generalises to most of what is
+>   left. The walker counts forbidden *imports*; this feature's coupling was to
+>   core **tables** (`tests`, `test_results`) and core **auth**
+>   (`requireRepoCapability`), reached through `src/lib/db/queries`, which is
+>   `CORE_SRC_PATHS` and therefore allowed. A feature can be built almost
+>   entirely on other people's data and score zero. **From here the host-port
+>   count is the honest number**, and §1.5 of the recipe is where it lives.
+>
+>   It is also the first plugin that **persists data and owns no table** — an
+>   API test *is* a `tests` row — which made `core-scope.md` §6 ("a plugin does
+>   not reach a core table, it calls a core function") the whole design rather
+>   than a rule that happened not to bind. Two consequences worth carrying
+>   forward. First, `ctx.tests` did not fit and was deliberately not stretched:
+>   its `createQuarantined` cannot express an un-quarantined write or an
+>   update, so the gap was declared in the host port instead of widening a
+>   capability inside a feature PR. Second, and better: **the two write methods
+>   swallowed their own authorization.** `requireRepoCapability(…,
+>   "tests:write")` and `requireTestOwnership` used to be the first line of a
+>   server action, one statement away from the write they guard; they now run
+>   *inside* the host's `createTest`/`updateTest`, and the plugin has no other
+>   path to the table. Three surveyed symbols became zero port methods, and a
+>   guard that could be forgotten became one that cannot be.
+>
+>   The same move fixed a credential leak-in-waiting the same way: `tests.code`
+>   is human-visible and version-snapshotted, an `ApiTestDefinition` can carry
+>   a live bearer token, and the *host* now renders that column from the
+>   definition rather than accepting a pre-rendered string. The plugin keeps
+>   the redaction logic (it is knowledge about its own `ApiAuth` type); core
+>   keeps the decision to apply it.
+>
+>   **And §4.2's "escape hatch" argument has a positive twin worth naming.**
+>   `runApiTest` had no test coverage at all, because covering it meant mocking
+>   global `fetch` *and* an undici `Agent` — the feature owned both halves of
+>   its own SSRF control. Moving the transport behind one host method
+>   (`fetchGuarded`, "do the request", not "give me the guard") made a stub
+>   four lines, and the request path is now covered. The honest framing: the
+>   boundary did not create that testability by being a boundary — dependency
+>   injection did — but the boundary is what forced the question. A migration
+>   that had passed `@/lib/security` through the port wholesale would have
+>   satisfied `pnpm arch` and produced none of it. That is the §10 "boundary
+>   drawn wrong" risk in its most seductive form: it looks like compliance.
 >
 >   **`launch` is the first plugin with no tenant, and it needed a core PR to
 >   be possible at all.** Its rows belong to a *person* — votes, comments,

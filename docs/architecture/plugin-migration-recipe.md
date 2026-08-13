@@ -4,7 +4,10 @@
 generalised from the explorer pilot ([`explorer-migration-result.md`](./explorer-migration-result.md))
 and the two check-layer plugins. Revised after
 [`launch`](./launch-migration-result.md), which added §2.1 (which deletion
-target), §2.2 (a plugin need not be tenanted) and the API-route case in §6.
+target), §2.2 (a plugin need not be tenanted) and the API-route case in §6;
+and after [`api-test`](./api-test-migration-result.md), which added §2.3 (a
+plugin that persists into core tables), §3.1 (write the guard into the port
+method) and the shape rule in §3.
 **Audience:** whoever migrates the next feature out of `src/` into `plugins/<id>/`.
 
 This is the *how*. The *why* is [`core-plugin-refactor.md`](./core-plugin-refactor.md)
@@ -54,9 +57,18 @@ comes out that high, the feature is a thin *orchestration of* core rather than
 a consumer of it, and the real task is extracting the core module it
 orchestrates, as its own PR, first.
 
-Measured so far: `launch` **4** (done), `rca` **6** (done), `app-map` **9**
-(done), `url-diff` **~22** (never migrated — reclassified as core, RFC §9
-phase 4).
+Measured so far: `launch` **4** (done), `api-test` **5** (done), `rca` **6**
+(done), `app-map` **9** (done), `url-diff` **~22** (never migrated —
+reclassified as core, RFC §9 phase 4).
+
+> **Group by *what each method is*, not only by how many collapse together.**
+> `api-test`'s five grouped into three — one security boundary, two authorized
+> writes, two AI preflight reads — but the useful fact is that the security one
+> (`fetchGuarded`) is the *third* declaration of the same gap, after
+> `explorer`'s `assertSafeOutboundUrl` and `app-map`'s `fetchSitemapXml`. One
+> `core/security` PR retires a method in three plugins at once. A port of 5
+> containing a shared boundary is cheaper than a port of 5 containing five
+> private reads.
 
 > **Port size does not track LOC, in either direction.** `launch` is twice
 > `rca`'s size with two thirds of its port; `url-diff` is smaller than both and
@@ -76,6 +88,16 @@ phase 4).
 > capability, one security boundary, and three calls into an unmigrated
 > neighbour — three items of debt, not nine. A port of 9 that groups into 3
 > is healthier than a port of 6 that groups into 6.
+
+> **A zero burndown is now the normal case, not a red flag.** After `app-map`
+> the instinct was that zero counted violations meant something was hidden.
+> `api-test` went in at zero with *both* hazards below checked and genuinely
+> had none — because the walker counts forbidden **imports**, and that feature's
+> coupling was to core **tables** and core **auth**, reached through
+> `src/lib/db/queries`, which is `CORE_SRC_PATHS` and therefore allowed. Most
+> of what is left on the list looks like that. Still run the two checks; just
+> do not expect the number to move, and do not read a flat number as "nothing
+> happened". **The port count is the metric from here.**
 
 > **Counting hazard 1 — the walker's blind spot.** `pnpm arch` reporting zero
 > violations for a feature does not mean it has none.
@@ -169,6 +191,31 @@ Nothing in the manifest records this today; the only signal is the missing
 `playground` all have user-scoped surfaces), make it explicit in the kernel
 first — that is a core PR, not a migration.
 
+### 2.3 A plugin can persist and still own no table
+
+`api-test` owns no storage and is not computed-on-read either: an API test *is*
+a `tests` row (`testType: "api"` + an `apiDefinition` jsonb), and its result is
+a `test_results.api_result` jsonb. Both are core tables.
+
+The manifest consequence is the easy case — no `schema`, no `deletion` hook,
+core's own cascades already reach the rows. The design consequence is not:
+[`core-scope.md`](./core-scope.md) §6 ("a plugin does not reach a core table, it
+calls a core function") stops being a rule that happens not to bind and becomes
+the entire shape of the port.
+
+Two things to decide when you hit this:
+
+- **Does an existing capability fit — really fit?** `ctx.tests` exists and was
+  the wrong answer here: `createQuarantined` deliberately cannot express an
+  un-quarantined write, an `apiDefinition`, or an update at all, and those
+  refusals are the capability's design, not gaps to patch. Widening a
+  capability to fit its second consumer is a **core PR with its own review**.
+  Declaring the gap in the host port is the migration PR. Do not merge the two.
+- **Whose jsonb is it?** A payload the plugin is the only writer *and* reader
+  of, sitting in a core column, is the promote case (§6.1 row one) — six
+  API-test types went to `@lastest/eb-protocol` and the core schema re-exports
+  them, so no app import path changed.
+
 ## 3. The host port — the honest escape hatch
 
 When the feature needs something core does not expose yet, declare it as an
@@ -199,6 +246,53 @@ Two things make this legitimate rather than a loophole:
 
 Write the file header the way `plugins/explorer/src/host.ts` does: say which
 methods are permanent seams and which are scaffolding waiting on a core PR.
+
+### 3.1 Shape each method as "do the thing", not "give me the primitive"
+
+The two forms both satisfy `pnpm arch`. Only one is a boundary.
+
+```ts
+assertSafeOutboundUrl(url: string): Promise<void>;   // a re-export
+fetchGuarded(url, req): Promise<GuardedResponse>;    // a boundary
+```
+
+With the first, the plugin still owns the control flow: it can call the guard
+and then `fetch` anyway, or add a `skipCheck` flag, or forget it in the second
+call site. With the second there is nothing in the package to forget *with* —
+no `fetch`, no dispatcher, no guard. `plugins/explorer` has the weaker shape
+and should be revisited when `core/security` lands; `api-test` has the
+stronger one.
+
+**The same rule turns an authorization habit into a property.** Any port method
+that performs a *write* should carry its own guard:
+
+```ts
+// src/lib/core/<id>-host.ts — the guard is inside the write, not beside it
+async createTest(input) {
+  await requireRepoCapability(input.repositoryId, "tests:write");
+  return { id: (await queries.createTest({ … })).id };
+}
+```
+
+`plugins/api-test/src/actions.ts` then has no guard at all, because it has no
+other route to the table — three surveyed symbols
+(`requireRepoCapability`, `requireRepoAccess`, `requireTestOwnership`) became
+**zero** port methods this way. It is also forced rather than chosen: RBAC
+`Capability` values are not on `PluginContext` and should not be.
+
+Apply the same reasoning to anything the write must *not* omit. `tests.code` is
+human-visible and snapshotted into `test_versions`, and an API definition can
+carry a live bearer token — so the host takes the definition and renders the
+column through the plugin's `renderApiDefinitionForCode` itself, rather than
+accepting a pre-rendered string. The plugin owns the redaction logic (its own
+type); core owns the decision to apply it.
+
+**A side effect worth expecting: injected transports make the engine
+testable.** `runApiTest` had no coverage before the migration because testing it
+meant mocking global `fetch` and an undici `Agent`. With `fetchGuarded`
+injected, a stub host is four lines. Be honest about the causation in your
+result doc — dependency injection did that, not the boundary; the boundary is
+what forced the question.
 
 ## 4. Wiring — why `Symbol.for` and not a module-level `let`
 
@@ -312,6 +406,7 @@ narrowing is why `app-map` needed no core change at all.
 | `src/lib/core/manifests.ts` | import + append to `MANIFESTS` |
 | `src/lib/core/runtime.ts` | import `configure<Name>` + call it in `getPluginRuntime` |
 | `src/lib/core/<id>-host.ts` | the app's fill for the host port, if there is one |
+| `src/lib/core/ai-capability.ts` | if you declare `capabilities: ["ai"]`: add your `AIActionType` to `ACTION_TYPES` |
 | `scripts/migrate.js` | if tables moved: drop the FKs to core tables *by catalogue lookup*, before `drizzle-kit push` |
 | `tools/architecture/boundaries.mjs` | **delete** the `PSEUDO_PLUGINS` entry |
 | `tools/architecture/baseline.json` | regenerate with `pnpm arch:baseline` — but see below |
@@ -321,9 +416,17 @@ The FK drop does: `push` would drop the constraints itself, but *by name*, and
 implicitly-created constraint names differ between environments. Find them in
 `pg_constraint` instead. See `dropLaunchUserForeignKeys()`.
 
-The baseline only needs regenerating if the count actually moved. `app-map`
-graduated without changing it (§1.5's first counting hazard), and a baseline
-rewritten to the same number is noise in the diff.
+The baseline only needs regenerating if the count actually moved. `app-map` and
+`api-test` both graduated without changing it, and a baseline rewritten to the
+same number is noise in the diff.
+
+**The `ai-capability` row is a silent one.** `createAiFactory` drops an
+`actionType` it does not recognise — the `ai_prompt_logs.action_type` column is
+an enum, so passing an unknown value would fail the insert inside the logging
+path rather than at the call site. The allowlist started as the three
+`explorer_*` values, so a feature moving its `generateWithAI(...)` call onto
+`ctx.ai.generate(...)` **loses its spend attribution with no error, no warning
+and no failing test**. `api-test` had to add `create_test`. Check yours.
 
 ## 8. Gates
 
