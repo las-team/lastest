@@ -343,11 +343,11 @@ async function claimSessionEb(
   // Browser time on this claim is metered to the team (see agent-eb-usage);
   // the release in releaseSessionEb settles it.
   const eb = await claimEmbeddedBrowserForAgent(
+    { billTeamId: teamId },
     EB_CLAIM_TIMEOUT_MS,
     () => {
       mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
     },
-    teamId,
   ).catch(() => undefined);
   // Register the claim before any other await: releaseSessionEb only releases
   // what it finds in sessionEbs, so a throw in the metadata merge below would

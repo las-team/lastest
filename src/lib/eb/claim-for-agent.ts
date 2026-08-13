@@ -6,7 +6,7 @@ import {
 } from "@/server/actions/embedded-sessions";
 import { beginAgentEbUsage } from "@/lib/billing/agent-eb-usage";
 import { db } from "@/lib/db";
-import { embeddedSessions } from "@/lib/db/schema";
+import { embeddedSessions, repositories } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
 /**
@@ -55,21 +55,55 @@ async function isCdpReachable(cdpUrl: string): Promise<boolean> {
 }
 
 /**
+ * Who to bill for the claim→release window of an agent-held EB.
+ *
+ * - `{ billTeamId }` — meter the window to that team's monthly run-minutes
+ *   (settled at release; see `agent-eb-usage.ts`). `null` means "attribution
+ *   was attempted but there is no owning team" (e.g. a repo with no `teamId`
+ *   in a self-hosted deployment) — nothing is billed.
+ * - `{ unmetered: reason }` — deliberate opt-out for callers whose browser
+ *   time is metered elsewhere (e.g. the test executor records run minutes at
+ *   run completion). The reason string documents why at the call site.
+ */
+export type AgentEbAttribution =
+  | { billTeamId: string | null }
+  | { unmetered: string };
+
+/**
+ * Resolve billing attribution from the repository the agent works on: the
+ * claim is billed to the repo's owning team. Best-effort — a lookup failure
+ * degrades to un-attributed (under-counting) rather than blocking the claim.
+ */
+export async function agentEbAttributionForRepo(
+  repositoryId: string,
+): Promise<AgentEbAttribution> {
+  try {
+    const [repo] = await db
+      .select({ teamId: repositories.teamId })
+      .from(repositories)
+      .where(eq(repositories.id, repositoryId));
+    return { billTeamId: repo?.teamId ?? null };
+  } catch {
+    return { billTeamId: null };
+  }
+}
+
+/**
  * Claim an embedded browser from the pool for AI agent use.
  * Waits (polls) until an EB becomes available, up to maxWaitMs.
  * Returns CDP + stream URLs and the runnerId for release.
  * Caller MUST call releasePoolEB(runnerId) when done.
  *
- * Pass `billTeamId` to meter the browser time this claim consumes: the
- * claim→release window is billed to that team's monthly run-minutes when the
- * EB is released. Pool runners belong to the internal system team, so the
- * caller is the only place that knows who to attribute it to. Omit it for
- * paths that meter separately (the test executor) to avoid double-counting.
+ * `attribution` is REQUIRED and decides whose monthly run-minutes the
+ * claim→release window is billed to. Pool runners belong to the internal
+ * system team, so the caller is the only place that knows who to attribute
+ * it to. Callers that meter the browser time elsewhere must say so with an
+ * explicit `{ unmetered: reason }` — there is no silent default.
  */
 export async function claimEmbeddedBrowserForAgent(
+  attribution: AgentEbAttribution,
   maxWaitMs = 5 * 60 * 1000,
   onQueued?: () => void,
-  billTeamId?: string,
 ): Promise<
   | {
       cdpUrl: string;
@@ -80,6 +114,8 @@ export async function claimEmbeddedBrowserForAgent(
     }
   | undefined
 > {
+  const billTeamId =
+    "billTeamId" in attribution ? attribution.billTeamId : null;
   const deadline = Date.now() + maxWaitMs;
   let notifiedQueued = false;
   let firstAttempt = true;

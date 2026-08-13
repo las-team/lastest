@@ -132,9 +132,13 @@ async function executeRanger(
       },
     );
 
-    const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
-      mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
-    });
+    const eb = await claimEmbeddedBrowserForAgent(
+      { billTeamId: teamId },
+      5 * 60 * 1000,
+      () => {
+        mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+      },
+    );
     if (!eb) {
       await patchStep(sessionId, "ranger_provision", {
         status: "failed",

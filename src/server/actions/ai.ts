@@ -22,7 +22,10 @@ import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
 import { awardScore } from "@/server/actions/gamification";
 import type { AgentStepState } from "@/lib/db/schema";
 import { releasePoolEB } from "@/server/actions/embedded-sessions";
-import { claimEmbeddedBrowserForAgent } from "@/lib/eb/claim-for-agent";
+import {
+  claimEmbeddedBrowserForAgent,
+  agentEbAttributionForRepo,
+} from "@/lib/eb/claim-for-agent";
 
 async function getAIConfig(
   repositoryId?: string | null,
@@ -109,9 +112,10 @@ export async function aiEnhanceTest(
   userPrompt?: string,
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   const { agentEnhanceTest } = await import("@/lib/playwright/enhancer-agent");
-  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-    () => undefined,
-  );
+  const eb = await claimEmbeddedBrowserForAgent(
+    await agentEbAttributionForRepo(repositoryId),
+    5 * 60 * 1000,
+  ).catch(() => undefined);
   if (!eb) {
     return {
       success: false,
@@ -226,16 +230,20 @@ export async function startGenerateTestAgent(data: {
     (async () => {
       const startTime = Date.now();
       // Wait for an EB from the pool (queues if all busy)
-      const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
-        queries
-          .updateAgentSession(session.id, {
-            metadata: { ...session.metadata, queuedForBrowser: true } as Record<
-              string,
-              unknown
-            >,
-          })
-          .catch(() => {});
-      });
+      const eb = await claimEmbeddedBrowserForAgent(
+        { billTeamId: teamId || null },
+        5 * 60 * 1000,
+        () => {
+          queries
+            .updateAgentSession(session.id, {
+              metadata: {
+                ...session.metadata,
+                queuedForBrowser: true,
+              } as Record<string, unknown>,
+            })
+            .catch(() => {});
+        },
+      );
       if (!eb) {
         throw new Error(
           "No browsers available — all browsers are busy. Please try again later.",
@@ -458,16 +466,20 @@ export async function startGeneratePlaceholderTestAgent(data: {
     (async () => {
       const startTime = Date.now();
       // Wait for an EB from the pool (queues if all busy)
-      const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
-        queries
-          .updateAgentSession(session.id, {
-            metadata: { ...session.metadata, queuedForBrowser: true } as Record<
-              string,
-              unknown
-            >,
-          })
-          .catch(() => {});
-      });
+      const eb = await claimEmbeddedBrowserForAgent(
+        { billTeamId: teamId || null },
+        5 * 60 * 1000,
+        () => {
+          queries
+            .updateAgentSession(session.id, {
+              metadata: {
+                ...session.metadata,
+                queuedForBrowser: true,
+              } as Record<string, unknown>,
+            })
+            .catch(() => {});
+        },
+      );
       if (!eb) {
         throw new Error(
           "No browsers available — all browsers are busy. Please try again later.",
@@ -785,7 +797,7 @@ export async function healTest(
   repositoryId: string,
   testId: string,
 ): Promise<{ success: boolean; code?: string; error?: string }> {
-  await requireRepoAccess(repositoryId);
+  const { team } = await requireRepoAccess(repositoryId);
   const test = await queries.getTest(testId);
   if (!test) return { success: false, error: "Test not found" };
   if (test.repositoryId !== repositoryId) {
@@ -795,9 +807,10 @@ export async function healTest(
     };
   }
   const { agentHealTest } = await import("@/lib/playwright/healer-agent");
-  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-    () => undefined,
-  );
+  const eb = await claimEmbeddedBrowserForAgent(
+    { billTeamId: team.id },
+    5 * 60 * 1000,
+  ).catch(() => undefined);
   if (!eb) {
     return {
       success: false,
@@ -870,16 +883,20 @@ export async function startHealTestAgent(data: {
     // Fire-and-forget background execution
     (async () => {
       const startTime = Date.now();
-      const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
-        queries
-          .updateAgentSession(session.id, {
-            metadata: { ...session.metadata, queuedForBrowser: true } as Record<
-              string,
-              unknown
-            >,
-          })
-          .catch(() => {});
-      });
+      const eb = await claimEmbeddedBrowserForAgent(
+        { billTeamId: teamId || null },
+        5 * 60 * 1000,
+        () => {
+          queries
+            .updateAgentSession(session.id, {
+              metadata: {
+                ...session.metadata,
+                queuedForBrowser: true,
+              } as Record<string, unknown>,
+            })
+            .catch(() => {});
+        },
+      );
       if (!eb) {
         throw new Error(
           "No browsers available — all browsers are busy. Please try again later.",
@@ -1041,9 +1058,10 @@ export async function createTest(
   context: TestGenerationContext,
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   const { agentCreateTest } = await import("@/lib/playwright/generator-agent");
-  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-    () => undefined,
-  );
+  const eb = await claimEmbeddedBrowserForAgent(
+    await agentEbAttributionForRepo(repositoryId),
+    5 * 60 * 1000,
+  ).catch(() => undefined);
   if (!eb) {
     return {
       success: false,

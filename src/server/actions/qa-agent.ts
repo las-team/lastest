@@ -662,11 +662,11 @@ async function runQaLogin(
     // claims its own EB later) picks up the deferred validation.
     let cdpUrl: string | undefined;
     const eb = await claimEmbeddedBrowserForAgent(
+      { billTeamId: teamId },
       EB_CLAIM_TIMEOUT_MS,
       () => {
         mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
       },
-      teamId,
     ).catch(() => undefined);
     // Record the claim before any other await: the finally's release is keyed
     // on runnerId, so a throw in the metadata merge below would otherwise
@@ -1178,11 +1178,11 @@ async function runQaDiscoverSwarm(args: {
   try {
     // Explorer #1 must succeed — full claim timeout.
     const first = await claimEmbeddedBrowserForAgent(
+      { billTeamId: teamId },
       EB_CLAIM_TIMEOUT_MS,
       () => {
         mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
       },
-      teamId,
     );
     if (!first) throw new Error("No embedded browser available");
     ebs.push(first);
@@ -1191,9 +1191,8 @@ async function runQaDiscoverSwarm(args: {
     const extras = await Promise.all(
       Array.from({ length: want - 1 }, () =>
         claimEmbeddedBrowserForAgent(
+          { billTeamId: teamId },
           SWARM_EXTRA_CLAIM_TIMEOUT_MS,
-          undefined,
-          teamId,
         ).catch(() => undefined),
       ),
     );
@@ -1631,11 +1630,11 @@ async function runQaDiscover(
       await updateSubsteps(sessionId, "qa_discover", substeps);
     } else {
       const eb = await claimEmbeddedBrowserForAgent(
+        { billTeamId: teamId },
         EB_CLAIM_TIMEOUT_MS,
         () => {
           mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
         },
-        teamId,
       );
       if (!eb) {
         substeps[2] = {
@@ -2301,11 +2300,11 @@ async function runQaGenerate(
   try {
     if (browserItems.length > 0) {
       const eb = await claimEmbeddedBrowserForAgent(
+        { billTeamId: teamId },
         EB_CLAIM_TIMEOUT_MS,
         () => {
           mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
         },
-        teamId,
       );
       if (!eb) {
         await setStepFailed(
@@ -2694,11 +2693,11 @@ async function runQaHeal(
   const healedTestIds: string[] = [];
   try {
     const eb = await claimEmbeddedBrowserForAgent(
+      { billTeamId: teamId },
       EB_CLAIM_TIMEOUT_MS,
       () => {
         mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
       },
-      teamId,
     );
     if (eb) {
       runnerId = eb.runnerId;
