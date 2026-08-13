@@ -5,7 +5,10 @@
  */
 
 import Ajv from "ajv";
-import { validateTargetUrl, SsrfBlockedError } from "@/lib/url-diff/ssrf";
+import {
+  assertSafeOutboundUrl,
+  SsrfBlockedError,
+} from "@/lib/security/outbound-url";
 import { createSsrfSafeDispatcher } from "@/lib/security/outbound-url";
 import { redactSensitiveText } from "./redact";
 import { DEFAULT_API_TEST_SETTINGS } from "@/lib/db/schema";
@@ -236,7 +239,7 @@ export async function runApiTest(
   // the connect-time dispatcher below still re-validates every connection.
   if (!ctx.skipSsrfCheck) {
     try {
-      await validateTargetUrl(url);
+      await assertSafeOutboundUrl(url);
     } catch (e) {
       const msg =
         e instanceof SsrfBlockedError

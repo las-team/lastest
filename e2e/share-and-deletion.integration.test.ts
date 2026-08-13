@@ -68,7 +68,7 @@ async function waitUntil<T>(
   what: string,
   timeoutMs = 60_000,
   intervalMs = 500,
-): Promise<T> {
+): Promise<NonNullable<T>> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const v = await fn().catch(() => undefined as T | undefined);

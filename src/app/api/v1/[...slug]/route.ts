@@ -81,11 +81,11 @@ import { startUrlDiff } from "@/server/actions/url-diff";
 import { captureUrl, loadCaptureFromDisk } from "@/lib/url-diff/capture";
 import { buildUrlDiff } from "@/lib/url-diff/engine";
 import {
-  validateTargetUrl,
+  assertSafeOutboundUrl,
   SsrfBlockedError,
   extractSourceIp,
-} from "@/lib/url-diff/ssrf";
-import { checkRateLimit } from "@/lib/url-diff/rate-limit";
+} from "@/lib/security/outbound-url";
+import { checkRateLimit } from "@/lib/rate-limit/endpoint-bucket";
 import {
   generateAndStoreCaptionsForBuild,
   storeCaptionsForBuild,
@@ -1766,7 +1766,7 @@ export async function POST(
         return NextResponse.json({ error: "url required" }, { status: 400 });
       }
       try {
-        await validateTargetUrl(body.url, { sourceIp });
+        await assertSafeOutboundUrl(body.url, { sourceIp });
       } catch (err) {
         if (err instanceof SsrfBlockedError) {
           return NextResponse.json(
@@ -1855,7 +1855,7 @@ export async function POST(
         return NextResponse.json({ error: "url required" }, { status: 400 });
       }
       try {
-        await validateTargetUrl(body.url, { sourceIp });
+        await assertSafeOutboundUrl(body.url, { sourceIp });
       } catch (err) {
         if (err instanceof SsrfBlockedError) {
           return NextResponse.json(
@@ -1948,8 +1948,8 @@ export async function POST(
       }
       try {
         await Promise.all([
-          validateTargetUrl(body.urlA, { sourceIp }),
-          validateTargetUrl(body.urlB, { sourceIp }),
+          assertSafeOutboundUrl(body.urlA, { sourceIp }),
+          assertSafeOutboundUrl(body.urlB, { sourceIp }),
         ]);
       } catch (err) {
         if (err instanceof SsrfBlockedError) {

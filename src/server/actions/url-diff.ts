@@ -1,5 +1,19 @@
 "use server";
 
+/**
+ * Ad-hoc two-URL diff — the engine behind `POST /api/v1/diff`.
+ *
+ * **This is core, not a feature.** The in-app URL Diff page and its sidebar
+ * entry were removed; what remains exists solely to serve the documented
+ * public API (`docs/specs/url-diff-integration.md`), which is why
+ * `src/lib/url-diff` and this module are listed in `CORE_SRC_PATHS` rather
+ * than as a pseudo-plugin destined for `plugins/`.
+ *
+ * The UI-only `getUrlDiffResult` reader went with the page; API callers poll
+ * `statusUrl` (`/api/jobs/:id`) instead, which is where the result blob has
+ * always been written.
+ */
+
 import { requireTeamAccess } from "@/lib/auth";
 import {
   createJob,
@@ -13,8 +27,11 @@ import {
   type CaptureSide,
   type PoolTier,
 } from "@/lib/url-diff/capture";
-import { buildUrlDiff, type UrlDiffResult } from "@/lib/url-diff/engine";
-import { validateTargetUrl, SsrfBlockedError } from "@/lib/url-diff/ssrf";
+import { buildUrlDiff } from "@/lib/url-diff/engine";
+import {
+  assertSafeOutboundUrl,
+  SsrfBlockedError,
+} from "@/lib/security/outbound-url";
 
 export interface StartUrlDiffInput {
   urlA: string;
@@ -35,8 +52,8 @@ export async function startUrlDiff(
 
   // SSRF pre-flight — throws SsrfBlockedError on disallowed targets.
   const ssrfOpts = { sourceIp: input.sourceIp ?? "" };
-  await validateTargetUrl(input.urlA, ssrfOpts);
-  await validateTargetUrl(input.urlB, ssrfOpts);
+  await assertSafeOutboundUrl(input.urlA, ssrfOpts);
+  await assertSafeOutboundUrl(input.urlB, ssrfOpts);
 
   const label = `URL Diff: ${truncate(input.urlA)} vs ${truncate(input.urlB)}`;
   const jobId = await createJob(
@@ -63,15 +80,6 @@ export async function startUrlDiff(
   });
 
   return { jobId };
-}
-
-export async function getUrlDiffResult(
-  jobId: string,
-): Promise<UrlDiffResult | null> {
-  await requireTeamAccess();
-  const job = await getBackgroundJob(jobId);
-  const meta = (job?.metadata ?? {}) as { urlDiffResult?: UrlDiffResult };
-  return meta.urlDiffResult ?? null;
 }
 
 interface RunUrlDiffOpts {

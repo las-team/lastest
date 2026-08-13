@@ -9,11 +9,7 @@
  * Pure data — no layout, no React.
  */
 
-import type {
-  AppMapNode,
-  AppMapEdge,
-  AppMapEdgeKind,
-} from "@/lib/app-map/build-map";
+import type { AppMapNode, AppMapEdge, AppMapEdgeKind } from "./build-map";
 
 export interface SpanningTree {
   rootId: string;

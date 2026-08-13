@@ -9,9 +9,9 @@ import {
   Lock,
   X,
 } from "lucide-react";
-import type { AppMapNode } from "@/lib/app-map/build-map";
-import type { AppFlow } from "@/lib/app-map/flows";
-import { flowsThroughNode } from "@/lib/app-map/flows";
+import type { AppMapNode } from "../build-map";
+import type { AppFlow } from "../flows";
+import { flowsThroughNode } from "../flows";
 import { COVERAGE_COLOR, COVERAGE_LABEL } from "./app-map-shared";
 
 // ── Detail panel (in-container so it renders in fullscreen too) ───────────────

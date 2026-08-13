@@ -23,10 +23,23 @@ export {
   CardTitle,
 } from "./card";
 export { cn } from "./cn";
+export {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogOverlay,
+  DialogPortal,
+  DialogTitle,
+  DialogTrigger,
+} from "./dialog";
 export { HoverCard, HoverCardContent, HoverCardTrigger } from "./hover-card";
 export { Input } from "./input";
 export { Label } from "./label";
 export { Progress } from "./progress";
+export { Slider } from "./slider";
 export {
   Select,
   SelectContent,

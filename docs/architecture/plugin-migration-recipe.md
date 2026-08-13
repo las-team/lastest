@@ -52,10 +52,31 @@ comes out that high, the feature is a thin *orchestration of* core rather than
 a consumer of it, and the real task is extracting the core module it
 orchestrates, as its own PR, first.
 
-Measured so far: `rca` **6** (done), `app-map` **~12** (viable), `url-diff`
-**~22** (deferred — blocked on `core/diff` per RFC §9 phase 4).
+Measured so far: `rca` **6** (done), `app-map` **9** (done), `url-diff` **~22**
+(never migrated — reclassified as core, RFC §9 phase 4).
 
-> **Counting hazard.** `src/lib/app-map/build-map.ts` contains literal NUL
+> **Count core functions the feature *calls*. Nothing else.** A first pass over
+> `app-map` counted 20 distinct imported symbols and would have stopped the
+> migration; the real port was **9**. The 11-symbol difference was type-only
+> imports (which get narrowed or promoted — §3.1) and `@/components/ui`
+> primitives (which go to `libs/ui` — §5). Neither is a port method.
+>
+> Then group what is left. `app-map`'s nine were five reads of one missing
+> capability, one security boundary, and three calls into an unmigrated
+> neighbour — three items of debt, not nine. A port of 9 that groups into 3
+> is healthier than a port of 6 that groups into 6.
+
+> **Counting hazard 1 — the walker's blind spot.** `pnpm arch` reporting zero
+> violations for a feature does not mean it has none.
+> `crossPluginPatternsFor()` builds its patterns from `@/…` aliases, so a
+> `plugin → plugin` import written as a *relative* path inside
+> `src/server/actions/` is invisible to it. `app-map` graduated with a clean
+> burndown while holding exactly such an import
+> (`import { addQaTask, startQaAgent } from "./qa-agent"`). Always run
+> `grep -rn 'from "\./' src/server/actions/<feature>.ts` as part of the survey.
+
+> **Counting hazard 2 — binary files.** `plugins/app-map/src/build-map.ts`
+> (formerly `src/lib/app-map/build-map.ts`) contains literal NUL
 > bytes (deliberate `\0` separators in an edge key, line ~217). `grep` treats
 > such a file as binary and **silently reports nothing** — no match, no
 > warning. That made an early survey of this exact feature undercount its
@@ -152,7 +173,31 @@ it belongs in core instead, and it is a separate PR.
   import. See `src/app/(app)/explorer/page.tsx` for the pattern and for the
   reasoning about what is legitimate to pass down.
 - **`"use client"` components** inside the package work. Import shadcn
-  primitives from `@lastest/ui`, not from `@/components/ui`.
+  primitives from `@lastest/ui`, not from `@/components/ui`. A primitive that
+  is not there yet moves in — definition to `libs/ui`, re-export shim left at
+  `src/components/ui/<name>.tsx` so no app import changes. `libs/` carries no
+  CODEOWNERS gate, so this is not a core PR.
+- **App UI a plugin cannot import goes down as a prop.** `app-map` handed its
+  live-progress panel down as `exploreProgressPanel` (a `ComponentType`) and
+  qa-agent's cancel action as `onCancelExploration`, the same way
+  `src/app/(app)/explorer/page.tsx` hands down `browserViewer`. The rule:
+  **the plugin owns the placement, the app owns the thing placed.** A render
+  prop is not a loophole — the plugin still learns nothing about what it
+  mounted.
+
+### 6.1 Types the plugin may not import: narrow, or promote?
+
+Both are legitimate; the deciding question is *whose type is it*.
+
+| | Do this | Precedent |
+| --- | --- | --- |
+| The type is the plugin's own payload | **Promote** it to `@lastest/eb-protocol` (a core PR) | `rca` — its verdict shapes |
+| The type belongs to core or to another unmigrated feature | **Narrow** it: declare the fields you read in `host.ts`, and let a `satisfies` clause in `src/lib/core/<id>-host.ts` be the assertion that it still matches | `rca`'s `RcaChangeMap`; `app-map`'s `AppMapDiscovery` |
+
+Narrowing is not a fork as long as the assertion exists: if core's shape
+drifts, the host file stops type-checking. Promoting *another* feature's
+payload types ahead of that feature's own migration is presumptuous — and
+narrowing is why `app-map` needed no core change at all.
 
 ## 7. Registration checklist
 
@@ -163,8 +208,13 @@ it belongs in core instead, and it is a separate PR.
 | `next.config.ts` | add to `transpilePackages` |
 | `src/lib/core/manifests.ts` | import + append to `MANIFESTS` |
 | `src/lib/core/runtime.ts` | import `configure<Name>` + call it in `getPluginRuntime` |
+| `src/lib/core/<id>-host.ts` | the app's fill for the host port, if there is one |
 | `tools/architecture/boundaries.mjs` | **delete** the `PSEUDO_PLUGINS` entry |
-| `tools/architecture/baseline.json` | regenerate with `pnpm arch:baseline` |
+| `tools/architecture/baseline.json` | regenerate with `pnpm arch:baseline` — but see below |
+
+The baseline only needs regenerating if the count actually moved. `app-map`
+graduated without changing it (§1.5's first counting hazard), and a baseline
+rewritten to the same number is noise in the diff.
 
 ## 8. Gates
 
@@ -179,6 +229,18 @@ pnpm build                       # the real check that actions + route pages sti
 
 `pnpm build` is the one that matters. Type-checking a package in isolation will
 not tell you whether Next.js can still dispatch the action.
+
+Better than "the build passed" — count the action ids it produced:
+
+```
+node -e "const m=require('./.next/server/server-reference-manifest.json');
+console.log(Object.values(m.node).filter(v =>
+  JSON.stringify(v).includes('plugins/<id>/src/actions')).length)"
+```
+
+That number must equal the number of exported actions. `app-map` expected 5 and
+got 5. A silently-empty result is what the S1 re-export trap looks like from
+the outside.
 
 ## 9. Write down what you did *not* verify
 

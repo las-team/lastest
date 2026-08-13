@@ -23,7 +23,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import * as queries from "@/lib/db/queries";
-import { extractSourceIp } from "@/lib/url-diff/ssrf";
+import { extractSourceIp } from "@/lib/security/outbound-url";
 import {
   assertCanVote,
   assertCanSubmit,

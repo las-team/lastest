@@ -12,8 +12,10 @@
  * `getLatestTestResultsWithTrajectoryByRepo`.
  */
 
-import type { CapturedScreenshot, UrlTrajectoryStep } from "@/lib/db/schema";
-import { canonicalPath } from "./canonical";
+import type { UrlTrajectoryStep } from "@lastest/eb-protocol";
+import { canonicalPath } from "@lastest/url-canonical";
+
+import type { AppMapCapturedScreenshot } from "./host";
 
 export interface AppFlowStep {
   stepIndex: number;
@@ -64,8 +66,8 @@ export function deriveFlows(
       .sort((a, b) => a.stepIndex - b.stepIndex);
     if (traj.length < 2) continue;
 
-    const shots = (r.screenshots ?? []) as CapturedScreenshot[];
-    const shotByLabel = new Map<string, CapturedScreenshot>();
+    const shots = (r.screenshots ?? []) as AppMapCapturedScreenshot[];
+    const shotByLabel = new Map<string, AppMapCapturedScreenshot>();
     for (const shot of shots) {
       if (shot.label && !shotByLabel.has(shot.label)) {
         shotByLabel.set(shot.label, shot);

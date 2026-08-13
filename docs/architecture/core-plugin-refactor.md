@@ -1,6 +1,7 @@
 # RFC: Core + Plugins
 
-**Status:** phases 0–3 landed. Phase 4 started — `rca` done, 12 plugins to go.
+**Status:** phases 0–3 landed. Phase 4 in progress — `rca` and `app-map` done,
+`url-diff` resolved as core, 11 plugins to go.
 **Author:** planning doc
 **Supersedes:** nothing
 
@@ -25,15 +26,24 @@
 > - **Phase 3 — done.** `CheckLayer` is a registry; `design-system` and `a11y`
 >   are check-layer plugins. Both are table-light, and `design-system` proved
 >   the no-schema shape (manifest + host port, no `ctx` at all).
-> - **Phase 4 — started. 1 of 13 plugins done.** `rca` has landed
->   ([result](./rca-migration-result.md)). `url-diff` and `app-map` were
->   attempted in the same wave and are **not** done — the one piece of them that
->   did land is `libs/url-canonical`, promoted out of `app-map` so `qa-agent`
->   stops importing it (RFC §4.3), which is why the burndown moved twice. The
->   repeatable procedure is now written down in
+> - **Phase 4 — in progress. 2 of 13 plugins done.** `rca`
+>   ([result](./rca-migration-result.md)) and `app-map`
+>   ([result](./app-map-migration-result.md)) have landed. `url-diff` did not
+>   go to a plugin at all — it was **reclassified as core**: its in-app page
+>   and sidebar entry were removed, and what is left has no user surface and
+>   exists only to serve the documented `POST /api/v1/snapshot` and
+>   `POST /api/v1/diff` endpoints. A documented public API is core by any
+>   reading of `core-scope.md` §2. The repeatable procedure is written down in
 >   [`plugin-migration-recipe.md`](./plugin-migration-recipe.md) — read that,
 >   not §9 below, before migrating the next feature.
->   Burndown: **42 → 34 → 32**.
+>   Burndown: **42 → 34 → 32 → 31**.
+>
+>   **The burndown is not a complete measure, and `app-map` is how we found
+>   out.** It graduated without moving the number, because its one real
+>   `plugin → plugin` edge was a *relative* import between two files in
+>   `src/server/actions/` and `crossPluginPatternsFor()` only matches `@/…`
+>   specifiers. Two such invisible edges existed; this removed one. Fixing the
+>   walker is a `tools/architecture/` PR that will *raise* the baseline by one.
 
 ## 1. The problem
 
@@ -624,8 +634,8 @@ In rough order of increasing pain: `rca`, `url-diff`, `app-map`, `share`, `launc
 `scheduling`, then the `src/lib/playwright` split (§6.2), then `qa-agent` last —
 by which point the contract will have been through a dozen features.
 
-> **`url-diff` is blocked and has been moved behind `app-map`.** Counted before
-> starting it: its host port would need **~22 methods** for ~1,000 LOC of
+> **`url-diff` was never migrated — it was reclassified as core.** Counted
+> before starting it: its host port would need **~22 methods** for ~1,000 LOC of
 > feature code — six diff engines from `src/lib/diff`, five EB-capture
 > primitives, six background-job calls, three storage paths. A port larger than
 > the feature it serves is not a boundary, it is core re-exported through a
@@ -639,19 +649,34 @@ by which point the contract will have been through a dozen features.
 > workflow §7.2 asks for, not a detour around it. Do `core/diff` first and
 > `url-diff` becomes small.
 >
-> Compare `app-map`, done instead: ~5 host methods for ~1,130 LOC, three of its
-> four modules pure. **The cheap plugins are the ones that compute; the
-> expensive ones are the ones that coordinate.** That is a better predictor than
-> LOC for everything left on this list.
+> Compare `app-map`, done instead: **9 host methods** for ~3,000 LOC vertical,
+> three of its four engine modules pure. **The cheap plugins are the ones that
+> compute; the expensive ones are the ones that coordinate.** That is a better
+> predictor than LOC for everything left on this list — and `app-map` sharpened
+> it: 2,500 of its 3,000 LOC is React, and the UI cost almost nothing to move
+> (two shadcn primitives to `libs/ui`, two render props). Coordination shows up
+> in the port count; UI weight does not show up anywhere.
 
 Each plugin is one PR that touches only `plugins/<id>/**` plus generated glue and
 deletions from `src/`. If a plugin needs a new core capability, that is a **separate,
 earlier PR** — which is exactly the workflow being asked for.
 
-> **Started — `rca` done** ([result](./rca-migration-result.md)), `url-diff` and
-> `app-map` not. Three findings from the first one worth knowing before the
-> next:
+> **In progress — `rca` ([result](./rca-migration-result.md)) and `app-map`
+> ([result](./app-map-migration-result.md)) done.** Findings worth knowing
+> before the next one:
 >
+> - **A clean burndown is not proof of a clean feature.** `app-map` had zero
+>   counted violations and still held a `plugin → plugin` import — written as a
+>   relative path between two `src/server/actions/` files, which the walker does
+>   not inspect. Before trusting a zero, run
+>   `grep -rn 'from "\./' src/server/actions/<feature>.ts`.
+> - **"One PR per plugin" *can* be free.** `app-map` needed **no core change at
+>   all** — the counter-example to `rca` below. Where `rca` had to move its own
+>   payload types into `@lastest/eb-protocol`, `app-map` declared narrow
+>   structural copies in its host port and let the composition root's
+>   `satisfies` clauses be the assertion that they still match. Prefer that when
+>   the types belong to *another* unmigrated feature; prefer promotion when they
+>   are the plugin's own.
 > - **"One PR per plugin" is close to true, but not free.** `rca` needed two
 >   core edits to be *possible at all*: the visual-diff jsonb payload types had
 >   to move to `@lastest/eb-protocol` (a plugin cannot name its own verdict type

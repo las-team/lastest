@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ImageOff } from "lucide-react";
-import type { AppMapNode } from "@/lib/app-map/build-map";
+import type { AppMapNode } from "../build-map";
 import { COVERAGE_COLOR, COVERAGE_LABEL } from "./app-map-shared";
 
 /**

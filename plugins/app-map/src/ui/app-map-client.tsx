@@ -45,7 +45,7 @@ import {
   Radar,
   Square,
 } from "lucide-react";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@lastest/ui";
 import {
   getAppMap,
   getAppFlows,
@@ -53,25 +53,39 @@ import {
   startExploration,
   type GetAppMapResult,
   type ActiveExploration,
-  type StartExplorationInput,
-} from "@/server/actions/app-map";
-import { cancelQaAgent } from "@/server/actions/qa-agent";
+} from "../actions";
 import type {
   AppMapGraph,
   AppMapNode,
   AppMapEdge,
   CoverageStatus,
-} from "@/lib/app-map/build-map";
-import type { AppFlow } from "@/lib/app-map/flows";
-import { buildSpanningTree } from "@/lib/app-map/hierarchy";
+} from "../build-map";
+import type { AppFlow } from "../flows";
+import { buildSpanningTree } from "../hierarchy";
 import { COVERAGE_COLOR, COVERAGE_LABEL } from "./app-map-shared";
 import { NodeDetailPanel } from "./node-detail-panel";
 import { TreeOutline } from "./tree-outline";
 import { ScreensGallery } from "./screens-gallery";
 import { FlowsView } from "./flows-view";
 import { FlowPlayer } from "./flow-player";
-import { ExploreDialog } from "./explore-dialog";
-import { ExploreProgressPanel } from "./explore-progress-panel";
+import { ExploreDialog, type ExploreRequest } from "./explore-dialog";
+
+/**
+ * The live-progress panel for a running exploration, supplied by the app.
+ *
+ * It is not in this package and cannot be: it renders a QA-agent session
+ * (`useQaAgent`) inside core's EB stream viewer (`BrowserViewer`), so it is
+ * two things a plugin may not import. Passing it down is the same move
+ * `src/app/(app)/explorer/page.tsx` makes with `browserViewer` — the plugin
+ * decides *where* the live view goes and *when* it is mounted, the app decides
+ * what it is.
+ */
+export type ExploreProgressPanelComponent = React.ComponentType<{
+  sessionId: string;
+  repositoryId: string;
+  onFinished: () => void;
+  onClose: () => void;
+}>;
 
 // ── Layout constants ──────────────────────────────────────────────────────────
 // Thumbnail is 16:9 (matches the default 1920×1080 run viewport), so
@@ -297,7 +311,7 @@ const nodeTypes = { page: PageNode };
 // ── Main client ───────────────────────────────────────────────────────────────
 interface AppMapClientProps {
   initialGraph: AppMapGraph | null;
-  emptyReason: "no-repo" | "no-data" | null;
+  emptyReason: "no-data" | null;
   repositoryId: string;
   branch: string;
   qaAgentEnabled: boolean;
@@ -305,6 +319,10 @@ interface AppMapClientProps {
   maxExplorers: number;
   /** In-flight exploration (reload-resume) — null when none is running. */
   activeExploration: ActiveExploration | null;
+  /** App-supplied — see `ExploreProgressPanelComponent`. */
+  exploreProgressPanel: ExploreProgressPanelComponent;
+  /** App-supplied — cancelling a QA-agent session is qa-agent's action. */
+  onCancelExploration: (sessionId: string) => Promise<void>;
 }
 
 export function AppMapClient({
@@ -315,6 +333,8 @@ export function AppMapClient({
   qaAgentEnabled,
   maxExplorers,
   activeExploration,
+  exploreProgressPanel: ExploreProgressPanel,
+  onCancelExploration,
 }: AppMapClientProps) {
   const [graph, setGraph] = useState<AppMapGraph | null>(initialGraph);
   const [selected, setSelected] = useState<AppMapNode | null>(null);
@@ -479,7 +499,11 @@ export function AppMapClient({
       if (!qaAgentEnabled) return;
       setRequesting(node.path);
       try {
-        await requestCoverage({ path: node.path, url: node.url });
+        await requestCoverage({
+          repositoryId,
+          path: node.path,
+          url: node.url,
+        });
         setQueued((q) => {
           const next = new Set(q);
           next.add(node.path);
@@ -494,13 +518,16 @@ export function AppMapClient({
         setRequesting(null);
       }
     },
-    [qaAgentEnabled],
+    [qaAgentEnabled, repositoryId],
   );
 
   const refresh = useCallback(() => {
     startRefresh(async () => {
       try {
-        const result: GetAppMapResult = await getAppMap({ branch });
+        const result: GetAppMapResult = await getAppMap({
+          repositoryId,
+          branch,
+        });
         if (result.ok) {
           setGraph(result.graph);
           toast.success("App map refreshed");
@@ -513,7 +540,7 @@ export function AppMapClient({
         );
       }
     });
-  }, [branch]);
+  }, [branch, repositoryId]);
 
   // ── Flows (lazy — fetched when the Flows tab or a detail panel first needs
   // them; cached for the rest of the visit) ──
@@ -524,13 +551,13 @@ export function AppMapClient({
     if (flowsRequested.current) return;
     flowsRequested.current = true;
     setFlowsLoading(true);
-    getAppFlows({ branch })
-      .then((r) => setFlows(r.ok ? r.flows : []))
+    getAppFlows({ repositoryId, branch })
+      .then((r) => setFlows(r.flows))
       .catch(() => {
         setFlows([]);
       })
       .finally(() => setFlowsLoading(false));
-  }, [branch]);
+  }, [branch, repositoryId]);
   useEffect(() => {
     if (view === "flows" || selected) ensureFlows();
   }, [view, selected, ensureFlows]);
@@ -560,7 +587,7 @@ export function AppMapClient({
       refetchTimer = setTimeout(async () => {
         refetchTimer = null;
         try {
-          const result = await getAppMap({ branch });
+          const result = await getAppMap({ repositoryId, branch });
           if (!closed && result.ok) setGraph(result.graph);
         } catch {
           // transient — the next event retries
@@ -596,9 +623,13 @@ export function AppMapClient({
   }, [exploringSessionId, repositoryId, branch]);
 
   const launchExploration = useCallback(
-    async (input: StartExplorationInput) => {
+    async (input: ExploreRequest) => {
       try {
-        const { sessionId } = await startExploration(input);
+        const { sessionId } = await startExploration({
+          ...input,
+          repositoryId,
+          branch,
+        });
         setExploreCount(0);
         setPanelHidden(false);
         setExploringSessionId(sessionId);
@@ -612,13 +643,13 @@ export function AppMapClient({
         throw err;
       }
     },
-    [],
+    [repositoryId, branch],
   );
 
   const stopExploration = useCallback(async () => {
     if (!exploringSessionId) return;
     try {
-      await cancelQaAgent(exploringSessionId);
+      await onCancelExploration(exploringSessionId);
       setExploringSessionId(null);
       toast.message("Exploration stopped");
     } catch (err) {
@@ -626,7 +657,7 @@ export function AppMapClient({
         err instanceof Error ? err.message : "Could not stop the exploration",
       );
     }
-  }, [exploringSessionId]);
+  }, [exploringSessionId, onCancelExploration]);
 
   // Step-by-step flow player (covers the whole container while open).
   const [playing, setPlaying] = useState<{
@@ -1147,7 +1178,7 @@ export function AppMapClient({
             repositoryId={repositoryId}
             onFinished={() => {
               setExploringSessionId(null);
-              getAppMap({ branch })
+              getAppMap({ repositoryId, branch })
                 .then((r) => {
                   if (r.ok) setGraph(r.graph);
                 })

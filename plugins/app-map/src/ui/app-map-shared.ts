@@ -1,4 +1,4 @@
-import type { CoverageStatus } from "@/lib/app-map/build-map";
+import type { CoverageStatus } from "../build-map";
 
 export const COVERAGE_COLOR: Record<CoverageStatus, string> = {
   covered: "#3f9142",

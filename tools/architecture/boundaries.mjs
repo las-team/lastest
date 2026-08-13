@@ -21,7 +21,8 @@
  * `plugins/<id>/` and picks up the error-level rules instead. `explorer` was the
  * first to have done so; `design-system` and `a11y` followed in RFC §9 phase 3 —
  * all three entries are gone from the map below, and their violations with them.
- * `rca` is the first of RFC §9 phase 4 and went the same way.
+ * `rca` is the first of RFC §9 phase 4 and went the same way; `app-map` is the
+ * second.
  */
 
 /** Zone globs for the target layout. */
@@ -80,6 +81,13 @@ export const CORE_SRC_PATHS = [
   // Setup/teardown orchestration is part of the execution substrate (§6.1), not
   // a feature: every run resolves and runs it.
   "src/lib/setup",
+  // Ad-hoc URL capture + diff. Was a pseudo-plugin (`url-diff`) until the
+  // in-app page and sidebar entry were removed; what is left has no user
+  // surface at all and exists only to serve `POST /api/v1/snapshot` and
+  // `POST /api/v1/diff` (docs/specs/url-diff-integration.md). A documented
+  // public API is core by any reading of core-scope.md §2 — it is the thing
+  // other people build against.
+  "src/lib/url-diff",
   // The core half of the §6.2 split. The plugin half is enumerated per plugin
   // below; anything not named there stays core by default.
   "src/lib/playwright",
@@ -122,7 +130,6 @@ export const PSEUDO_PLUGINS = {
     actions: ["qa-agent.ts"],
     components: ["src/components/qa-agent"],
   },
-  "app-map": { lib: ["src/lib/app-map"], actions: ["app-map.ts"] },
   demo: { lib: ["src/lib/demo"], actions: ["demo.ts", "demo-notes.ts"] },
   share: {
     lib: ["src/lib/share"],
@@ -140,7 +147,6 @@ export const PSEUDO_PLUGINS = {
     actions: ["api-tests.ts"],
     components: ["src/components/api-tests"],
   },
-  "url-diff": { lib: ["src/lib/url-diff"], actions: ["url-diff.ts"] },
   playground: { lib: ["src/lib/playground"], actions: [] },
   "data-sources": {
     lib: ["src/lib/csv", "src/lib/google-sheets"],

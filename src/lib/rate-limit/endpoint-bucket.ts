@@ -1,7 +1,15 @@
 /**
- * Tiny in-memory token-bucket rate limiter for URL Diff endpoints.
+ * Tiny in-memory token-bucket rate limiter for expensive public API endpoints.
  * Keyed by `${ip}:${userId}` with a 1-minute window. Survives Next dev
  * hot-reloads via globalThis (mirroring `__remoteRecordingSessions`).
+ *
+ * Distinct from `./limiter.ts`, which is a *sliding-window* limiter used for
+ * login POSTs. This one is a fixed-window bucket that also emits the
+ * `X-RateLimit-*`/`Retry-After` response headers a public API caller expects.
+ *
+ * Lived under `src/lib/url-diff/` until that feature's UI was removed. It never
+ * belonged there: `POST /api/v1/scout` is a quickstart endpoint and has always
+ * been one of its three callers.
  */
 
 const WINDOW_MS = 60_000;
@@ -9,7 +17,7 @@ const DEFAULT_LIMIT = 5;
 
 type Slot = { count: number; resetAt: number };
 
-const KEY = "__urlDiffRateBucket" as const;
+const KEY = "__endpointRateBucket" as const;
 type Bucket = Map<string, Slot>;
 
 function bucket(): Bucket {

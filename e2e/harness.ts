@@ -425,5 +425,24 @@ export async function teamIdForEmail(email: string): Promise<string> {
  */
 export async function destroyTeam(teamId: string | undefined): Promise<void> {
   if (!teamId) return;
-  await queries.deleteTeam(teamId).catch(() => {});
+
+  // `queries.deleteTeam` is a bare `delete from teams`, and
+  // `users_team_id_teams_id_fk` is NO ACTION — so it *throws* for any team
+  // that still has a member. The product never hits this because
+  // `deleteAccount` removes the user first; a test fixture has to do the
+  // same. This used to be `deleteTeam().catch(() => {})`, which turned that
+  // throw into a silent no-op and leaked every e2e team into the dev DB.
+  const { users } = await import("@/lib/db/schema");
+  await db.delete(users).where(eq(users.teamId, teamId));
+
+  // Repos are NOT cascaded — `repositories.team_id` has no foreign key at
+  // all (see `packages/db/src/schema/repos.ts`, whose comment claims one was
+  // "added after teams table definition"; it never was). Without this the
+  // team's repositories survive it with a dangling team_id.
+  const { repositories } = await import("@/lib/db/schema");
+  await db.delete(repositories).where(eq(repositories.teamId, teamId));
+
+  // Deliberately unguarded: a fixture that cannot clean up should say so
+  // loudly rather than quietly accumulate rows across re-runs.
+  await queries.deleteTeam(teamId);
 }

@@ -2,22 +2,21 @@
  * Sitemap.xml fetcher for the App Map — pulls a target app's declared page URLs
  * from `${baseUrl}/sitemap.xml`, following sitemap-index recursion.
  *
- * All outbound fetches go through the SSRF guard (`safeOutboundFetch`), so a
- * localhost/private/dev base URL is refused and we degrade to an empty list
- * rather than throwing into a server-component render.
+ * All outbound fetches go through the SSRF guard, so a localhost/private/dev
+ * base URL is refused and we degrade to an empty list rather than throwing
+ * into a server-component render. The guard itself is **not** in this package:
+ * it arrives as `AppMapHost.fetchSitemapXml`, because an SSRF check is a
+ * security boundary and `docs/architecture/core-scope.md` §2 puts those in
+ * core. What is left here is the parsing and the index-recursion — pure, and
+ * the plugin's to own.
  *
  * Parsing is a deliberately small regex over `<loc>` elements — the sitemaps
  * protocol subset we need is well-formed and this avoids adding an XML dep.
  */
 
-import {
-  safeOutboundFetch,
-  SsrfBlockedError,
-} from "@/lib/security/outbound-url";
+import type { AppMapHost } from "./host";
 
 export interface FetchSitemapOptions {
-  /** Source IP for the SSRF allowlist, if known. */
-  sourceIp?: string;
   /** Cap on total URLs collected across the index tree. Default 500. */
   maxUrls?: number;
   /** Per-request timeout in ms. Default 5000. */
@@ -52,37 +51,13 @@ function extractLocs(xml: string): string[] {
   return out;
 }
 
-async function fetchXml(
-  url: string,
-  opts: FetchSitemapOptions,
-): Promise<string | null> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 5000);
-  try {
-    const res = await safeOutboundFetch(
-      url,
-      {
-        headers: { accept: "application/xml,text/xml;q=0.9,*/*;q=0.5" },
-        signal: controller.signal,
-      },
-      { sourceIp: opts.sourceIp },
-    );
-    if (!res.ok) return null;
-    return await res.text();
-  } catch (err) {
-    // SSRF-blocked (dev/localhost/private) or network/timeout — degrade silently.
-    if (err instanceof SsrfBlockedError) return null;
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 /**
  * Returns the de-duplicated absolute page URLs declared in the app's sitemap.
- * Never throws — returns `[]` on any error, empty base, or blocked host.
+ * Never throws — returns `[]` on any error, empty base, or blocked host. The
+ * "blocked host" half of that promise is `host.fetchSitemapXml`'s to keep.
  */
 export async function fetchSitemapUrls(
+  host: AppMapHost,
   baseUrl: string,
   opts: FetchSitemapOptions = {},
 ): Promise<string[]> {
@@ -108,7 +83,9 @@ export async function fetchSitemapUrls(
     if (seen.has(url)) continue;
     seen.add(url);
 
-    const xml = await fetchXml(url, opts);
+    const xml = await host.fetchSitemapXml(url, {
+      timeoutMs: opts.timeoutMs ?? 5000,
+    });
     if (!xml) continue;
 
     const isIndex = /<sitemapindex[\s>]/i.test(xml);

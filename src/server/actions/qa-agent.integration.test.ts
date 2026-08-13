@@ -5,7 +5,7 @@
  * Explore session, confirm map/flow data it produces is retrievable").
  *
  * App Map is computed on read from `agent_sessions.metadata.qaDiscovery`
- * (`src/lib/app-map/build-map.ts`'s own doc comment) — i.e. QA Agent's own
+ * (`plugins/app-map/src/build-map.ts`'s own doc comment) — i.e. QA Agent's own
  * `mode: "explore"` pipeline (`qa_setup` → `qa_login` → `qa_discover`, no
  * plan/generate/execute) is literally the "Explore session" the App Map row
  * asks for. Running it first, against the same repo the full-mode test also
@@ -34,8 +34,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import * as queries from "@/lib/db/queries";
 import { agentSessions } from "@/lib/db/schema";
-import { buildAppMap } from "@/lib/app-map/build-map";
-import { deriveFlows } from "@/lib/app-map/flows";
+import { buildAppMap, deriveFlows } from "@lastest/plugin-app-map";
+
+import { appAppMapHost } from "@/lib/core/app-map-host";
 
 import { startQaAgentFromTrigger } from "./qa-agent";
 
@@ -115,7 +116,14 @@ describe("QA Agent — explore mode (also §3's App Map row)", () => {
     // trajectories. No routes/sitemap exist for this throwaway repo, so a
     // non-empty graph here can only have come from the crawl this test
     // just ran — that's the coherence check §3 asks for.
-    const graph = await buildAppMap(repoId, { includeSitemap: false });
+    // `buildAppMap` takes its host explicitly since the migration to
+    // `@lastest/plugin-app-map` — `appAppMapHost` is the same fill the
+    // composition root wires in, so this exercises the real path.
+    const graph = await buildAppMap(appAppMapHost, repoId, {
+      branch: "main",
+      baseUrl: TARGET,
+      includeSitemap: false,
+    });
     expect(graph.nodes.length).toBeGreaterThan(0);
     expect(graph.nodes.some((n) => n.sources?.includes("crawl"))).toBe(true);
     // Every node should carry a well-formed canonical path id.

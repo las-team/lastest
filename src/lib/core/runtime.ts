@@ -23,6 +23,7 @@ import {
 } from "@lastest/kernel";
 import { sql } from "@lastest/db";
 import { configureA11y } from "@lastest/plugin-a11y";
+import { configureAppMap } from "@lastest/plugin-app-map";
 import { configureDesignSystem } from "@lastest/plugin-design-system";
 import { configureEvents } from "@lastest/plugin-events";
 import { configureExplorer } from "@lastest/plugin-explorer";
@@ -32,6 +33,7 @@ import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
 import * as queries from "@/lib/db/queries";
 import { getLogger } from "@/lib/logger";
 import { createAiFactory } from "@/lib/core/ai-capability";
+import { appAppMapHost } from "@/lib/core/app-map-host";
 import { appBrowserHost } from "@/lib/core/browser-host";
 import { appDesignSystemHost } from "@/lib/core/design-system-host";
 import { entitlementsFor } from "@/lib/core/entitlements";
@@ -195,6 +197,7 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
   configureDesignSystem(appDesignSystemHost);
   configureA11y({ runtime, data: data.capability("a11y") });
   configureRca({ runtime, host: appRcaHost });
+  configureAppMap({ runtime, host: appAppMapHost });
 
   cached = { runtime, data, registry };
   return runtime;

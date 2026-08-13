@@ -2,8 +2,8 @@
 
 import { useCallback, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import type { AppMapNode } from "@/lib/app-map/build-map";
-import type { SpanningTree } from "@/lib/app-map/hierarchy";
+import type { AppMapNode } from "../build-map";
+import type { SpanningTree } from "../hierarchy";
 import { COVERAGE_COLOR } from "./app-map-shared";
 
 /**

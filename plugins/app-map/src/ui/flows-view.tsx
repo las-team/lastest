@@ -1,7 +1,7 @@
 "use client";
 
 import { Film, ImageOff, Loader2 } from "lucide-react";
-import type { AppFlow } from "@/lib/app-map/flows";
+import type { AppFlow } from "../flows";
 
 /**
  * Flows tab — named user journeys derived from test URL trajectories.

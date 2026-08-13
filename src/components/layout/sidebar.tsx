@@ -14,7 +14,6 @@ import {
   Building2,
   TrendingDown,
   Trophy,
-  SplitSquareHorizontal,
   ShieldCheck,
   GitCommit,
   Wrench,
@@ -70,12 +69,7 @@ const gamificationNav = [
   { name: "Leaderboard", href: "/leaderboard", icon: Trophy },
 ];
 
-const EARLY_ADOPTER_ITEMS = new Set([
-  "Compose",
-  "Compare",
-  "Impact",
-  "URL Diff",
-]);
+const EARLY_ADOPTER_ITEMS = new Set(["Compose", "Compare", "Impact"]);
 
 const definitionNav = [
   { name: "Tests", href: "/tests", icon: FileCode },
@@ -89,7 +83,6 @@ const executionNav = [
   { name: "QA Agent", href: "/qa-agent", icon: Bot },
   { name: "Explorer", href: "/explorer", icon: Compass },
   { name: "Compare", href: "/compare", icon: GitCompare },
-  { name: "URL Diff", href: "/url-diff", icon: SplitSquareHorizontal },
   { name: "Impact", href: "/analytics/impact", icon: TrendingDown },
 ];
 

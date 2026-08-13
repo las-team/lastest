@@ -51,6 +51,10 @@
 /src/lib/hooks/                 @ewyct
 /src/lib/setup/                 @ewyct
 /src/lib/playwright/            @ewyct
+# No UI — this is the engine behind the documented public API
+# (`POST /api/v1/snapshot`, `POST /api/v1/diff`). See boundaries.mjs.
+/src/lib/url-diff/              @ewyct
+/src/server/actions/url-diff.ts @ewyct
 /src/lib/utils.ts               @ewyct
 /src/lib/logger.ts              @ewyct
 /src/lib/crypto.ts              @ewyct

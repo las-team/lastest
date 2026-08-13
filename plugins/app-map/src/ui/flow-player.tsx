@@ -8,7 +8,7 @@ import {
   ImageOff,
   X,
 } from "lucide-react";
-import type { AppFlow } from "@/lib/app-map/flows";
+import type { AppFlow } from "../flows";
 
 /**
  * Step-by-step player for a flow: large current-step screenshot, prev/next +

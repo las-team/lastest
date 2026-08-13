@@ -28,6 +28,14 @@ function formatClock(ms: number): string {
  * thumbnail), amber BLOCKED rows, and header totals with a Stop button.
  * State comes from the same 2s /api/qa-agent/[sessionId] polling the QA
  * agent page uses.
+ *
+ * **Why this one component stayed in the app** while the rest of App Map's UI
+ * moved to `plugins/app-map`: it renders a *QA-agent* session (`useQaAgent`)
+ * inside core's EB stream viewer (`BrowserViewer`), so it is one plugin plus
+ * one core component — two things `@lastest/plugin-app-map` may not import.
+ * It is handed down as `exploreProgressPanel`, the same way
+ * `src/app/(app)/explorer/page.tsx` hands down `browserViewer`. The plugin
+ * decides where it goes and when it mounts; the app decides what it is.
  */
 export function ExploreProgressPanel({
   sessionId,

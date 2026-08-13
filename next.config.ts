@@ -38,6 +38,7 @@ const nextConfig: NextConfig = {
     "@lastest/url-canonical",
     "@lastest/ui",
     "@lastest/plugin-events",
+    "@lastest/plugin-app-map",
     "@lastest/plugin-explorer",
     "@lastest/plugin-rca",
   ],

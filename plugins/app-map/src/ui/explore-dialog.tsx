@@ -9,10 +9,26 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Slider } from "@/components/ui/slider";
-import type { ExploreStrategy } from "@/lib/db/schema";
-import type { StartExplorationInput } from "@/server/actions/app-map";
+  Slider,
+} from "@lastest/ui";
+
+import type { AppMapExploreStrategy } from "../host";
+
+/**
+ * What the dialog collects. Deliberately *not* `StartExplorationInput` — that
+ * one also carries `repositoryId` and `branch`, which are the client's to
+ * supply, not a form's. Keeping them out means the dialog cannot be handed a
+ * repository it was not rendered for.
+ */
+export interface ExploreRequest {
+  explorers: number;
+  depth: number;
+  strategy: AppMapExploreStrategy;
+  maxMinutes: number;
+  authContext?: string;
+  email?: string;
+  password?: string;
+}
 
 const DEPTH_LABEL = [
   "",
@@ -24,12 +40,15 @@ const DEPTH_LABEL = [
   "Deepest",
 ];
 const TIME_CHOICES = [2, 5, 10, 20] as const;
-const STRATEGIES: Array<{ id: ExploreStrategy; label: string; hint: string }> =
-  [
-    { id: "breadth", label: "Breadth-first", hint: "wide before deep" },
-    { id: "balanced", label: "Balanced", hint: "mix of both" },
-    { id: "depth", label: "Depth-first", hint: "follow paths down" },
-  ];
+const STRATEGIES: Array<{
+  id: AppMapExploreStrategy;
+  label: string;
+  hint: string;
+}> = [
+  { id: "breadth", label: "Breadth-first", hint: "wide before deep" },
+  { id: "balanced", label: "Balanced", hint: "mix of both" },
+  { id: "depth", label: "Depth-first", hint: "follow paths down" },
+];
 
 /** Page budget mirror of the server derivation (6 + depth*5, cap 40). */
 function pageBudget(depth: number): number {
@@ -49,11 +68,11 @@ export function ExploreDialog({
   maxExplorers: number;
   /** Pro gate — exploration reuses the QA agent access check. */
   qaAgentEnabled: boolean;
-  onLaunch: (input: StartExplorationInput) => Promise<void>;
+  onLaunch: (input: ExploreRequest) => Promise<void>;
 }) {
   const [explorers, setExplorers] = useState(1);
   const [depth, setDepth] = useState(2);
-  const [strategy, setStrategy] = useState<ExploreStrategy>("balanced");
+  const [strategy, setStrategy] = useState<AppMapExploreStrategy>("balanced");
   const [maxMinutes, setMaxMinutes] = useState<number>(5);
   const [authContext, setAuthContext] = useState("");
   const [email, setEmail] = useState("");
