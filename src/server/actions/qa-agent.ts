@@ -668,14 +668,17 @@ async function runQaLogin(
       },
       teamId,
     ).catch(() => undefined);
-    await mergeMetadata(sessionId, {
-      queuedForBrowser: false,
-      ...(eb ? { streamUrl: proxiedStream(eb.streamUrl, eb.instanceId) } : {}),
-    });
+    // Record the claim before any other await: the finally's release is keyed
+    // on runnerId, so a throw in the metadata merge below would otherwise
+    // strand a claimed (and billing) EB until process restart.
     if (eb) {
       runnerId = eb.runnerId;
       cdpUrl = eb.cdpUrl;
     }
+    await mergeMetadata(sessionId, {
+      queuedForBrowser: false,
+      ...(eb ? { streamUrl: proxiedStream(eb.streamUrl, eb.instanceId) } : {}),
+    }).catch(() => {});
 
     // 1) Existing setup infrastructure (setup steps / storage states).
     if (existing.storageStateId) {

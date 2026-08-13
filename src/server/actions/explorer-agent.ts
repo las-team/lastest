@@ -349,17 +349,17 @@ async function claimSessionEb(
     },
     teamId,
   ).catch(() => undefined);
+  // Register the claim before any other await: releaseSessionEb only releases
+  // what it finds in sessionEbs, so a throw in the metadata merge below would
+  // otherwise strand a claimed (and billing) EB until process restart.
+  const entry = eb
+    ? { runnerId: eb.runnerId, cdpUrl: eb.cdpUrl, authApplied: false }
+    : null;
+  if (entry) sessionEbs.set(sessionId, entry);
   await mergeMetadata(sessionId, {
     queuedForBrowser: false,
     ...(eb ? { streamUrl: proxiedStream(eb.streamUrl, eb.instanceId) } : {}),
-  });
-  if (!eb) return null;
-  const entry = {
-    runnerId: eb.runnerId,
-    cdpUrl: eb.cdpUrl,
-    authApplied: false,
-  };
-  sessionEbs.set(sessionId, entry);
+  }).catch(() => {});
   return entry;
 }
 
