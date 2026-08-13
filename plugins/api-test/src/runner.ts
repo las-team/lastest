@@ -2,22 +2,45 @@
  * Headless HTTP engine for API tests (E1). Executes a single request without a
  * browser and evaluates response assertions. The assertion evaluation is a pure
  * function (`evaluateApiAssertions`) so it is unit-testable without network.
+ *
+ * ### The request itself is core's to make
+ *
+ * This module does not call `fetch`. It hands the resolved URL and headers to
+ * `host.fetchGuarded`, which owns the SSRF pre-flight, the connect-time IP
+ * re-validation and the timeout — see `plugins/api-test/src/host.ts`. The
+ * package has no way to reach the network otherwise, which is the point:
+ * `core-scope.md` §2 makes outbound requests to a tenant-supplied URL a core
+ * boundary, and a boundary a feature can opt out of is not one.
+ *
+ * `host` is an argument rather than something read from the wiring slot
+ * because the only caller is core's executor, on the hot path of every build.
+ * See `wiring.ts`.
  */
 
 import Ajv from "ajv";
-import {
-  assertSafeOutboundUrl,
-  SsrfBlockedError,
-} from "@/lib/security/outbound-url";
-import { createSsrfSafeDispatcher } from "@/lib/security/outbound-url";
+import type {
+  ApiTestDefinition,
+  ApiAssertion,
+  ApiAuth,
+} from "@lastest/eb-protocol";
+
+import type { ApiTestHost } from "./host";
 import { redactSensitiveText } from "./redact";
-import { DEFAULT_API_TEST_SETTINGS } from "@/lib/db/schema";
-import type { ApiTestDefinition, ApiAssertion, ApiAuth } from "@/lib/db/schema";
 import type {
   ApiAssertionResult,
   ApiResponseSnapshot,
   ApiTestResult,
 } from "./types";
+
+/**
+ * Fallback per-request timeout when `ApiTestDefinition.timeoutMs` is unset.
+ *
+ * Was `DEFAULT_API_TEST_SETTINGS.timeoutMs` in the core schema's settings
+ * module. It is this engine's default and nothing else read it, so it moved
+ * with the engine rather than staying behind as a constant core exports for
+ * one plugin.
+ */
+export const DEFAULT_API_TEST_TIMEOUT_MS = 15_000;
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 
@@ -196,9 +219,6 @@ function applyAuth(headers: Record<string, string>, auth?: ApiAuth): void {
 export interface RunApiTestContext {
   /** Prefix for relative `url` values (the repo's baseUrl). */
   baseUrl?: string;
-  /** Skip the per-request SSRF/DNS validation. Only set by callers that
-   *  validated the same URL immediately beforehand (e.g. the load runner). */
-  skipSsrfCheck?: boolean;
 }
 
 /** Resolve an absolute URL, optionally joining a relative path to baseUrl, and
@@ -216,7 +236,16 @@ export function resolveApiUrl(
   return u.toString();
 }
 
+/**
+ * Execute one API test.
+ *
+ * `host` supplies the guarded transport (see the module header). Every failure
+ * mode — invalid URL, SSRF block, timeout, transport error, failed assertion —
+ * comes back as a resolved `ApiTestResult`, never a throw: a test that cannot
+ * reach its target is a failed test, and the executor records it as one.
+ */
 export async function runApiTest(
+  host: ApiTestHost,
   def: ApiTestDefinition,
   ctx: RunApiTestContext = {},
 ): Promise<ApiTestResult> {
@@ -234,95 +263,63 @@ export async function runApiTest(
     };
   }
 
-  // SSRF guard — API tests can target arbitrary URLs from the server. The load
-  // runner validates once up front and sets skipSsrfCheck for the inner storm;
-  // the connect-time dispatcher below still re-validates every connection.
-  if (!ctx.skipSsrfCheck) {
-    try {
-      await assertSafeOutboundUrl(url);
-    } catch (e) {
-      const msg =
-        e instanceof SsrfBlockedError
-          ? `Blocked by SSRF guard: ${e.message}`
-          : String(e);
-      return {
-        passed: false,
-        statusCode: null,
-        latencyMs: 0,
-        assertionResults: [],
-        error: msg,
-      };
-    }
-  }
-
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...def.headers,
   };
   applyAuth(headers, def.auth);
 
-  const timeoutMs = def.timeoutMs ?? DEFAULT_API_TEST_SETTINGS.timeoutMs;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timeoutMs = def.timeoutMs ?? DEFAULT_API_TEST_TIMEOUT_MS;
 
-  try {
-    const response = await fetch(url, {
-      method: def.method,
-      headers,
-      body:
-        def.body !== undefined && def.method !== "GET"
-          ? JSON.stringify(def.body)
-          : undefined,
-      signal: controller.signal,
-      // Re-validate the resolved IP at connect time to defend against
-      // DNS-rebinding between the pre-flight check above and the actual fetch.
-      dispatcher: await createSsrfSafeDispatcher(),
-    } as RequestInit & { dispatcher: unknown });
-    const latencyMs = Date.now() - started;
-    const rawText = await response.text();
-    let json: unknown = undefined;
-    const ct = response.headers.get("content-type") ?? "";
-    if (ct.includes("application/json") || ct.includes("+json")) {
-      try {
-        json = JSON.parse(rawText);
-      } catch {
-        /* leave undefined */
-      }
-    }
-    const headerMap: Record<string, string> = {};
-    response.headers.forEach((v, k) => {
-      headerMap[k.toLowerCase()] = v;
-    });
+  // The SSRF guard, the connect-time IP re-validation and the timeout all live
+  // behind this one call. There is no branch that skips them, and no `fetch`
+  // in this package to skip them with.
+  const response = await host.fetchGuarded(url, {
+    method: def.method,
+    headers,
+    body:
+      def.body !== undefined && def.method !== "GET"
+        ? JSON.stringify(def.body)
+        : undefined,
+    timeoutMs,
+  });
 
-    const assertionResults = evaluateApiAssertions(def.assertions ?? [], {
-      statusCode: response.status,
-      headers: headerMap,
-      json,
-      rawText,
-      latencyMs,
-    });
+  const latencyMs = Date.now() - started;
 
-    return {
-      passed: assertionResults.every((r) => r.passed),
-      statusCode: response.status,
-      latencyMs,
-      assertionResults,
-      responseSnippet: redactSensitiveText(rawText.slice(0, 2048)),
-    };
-  } catch (e) {
-    const aborted = e instanceof Error && e.name === "AbortError";
+  if (!response.ok) {
     return {
       passed: false,
       statusCode: null,
-      latencyMs: Date.now() - started,
+      latencyMs,
       assertionResults: [],
-      error: aborted
-        ? `Request timed out after ${timeoutMs}ms`
-        : e instanceof Error
-          ? e.message
-          : String(e),
+      error: response.error,
     };
-  } finally {
-    clearTimeout(timer);
   }
+
+  const rawText = response.text;
+  let json: unknown = undefined;
+  const ct = response.headers["content-type"] ?? "";
+  if (ct.includes("application/json") || ct.includes("+json")) {
+    try {
+      json = JSON.parse(rawText);
+    } catch {
+      /* leave undefined */
+    }
+  }
+
+  const assertionResults = evaluateApiAssertions(def.assertions ?? [], {
+    statusCode: response.status,
+    headers: response.headers,
+    json,
+    rawText,
+    latencyMs,
+  });
+
+  return {
+    passed: assertionResults.every((r) => r.passed),
+    statusCode: response.status,
+    latencyMs,
+    assertionResults,
+    responseSnippet: redactSensitiveText(rawText.slice(0, 2048)),
+  };
 }

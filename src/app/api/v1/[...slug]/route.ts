@@ -2054,7 +2054,7 @@ export async function POST(
         // The `code` column is human-visible and snapshotted into
         // test_versions — never let credentials land in it.
         const { renderApiDefinitionForCode } =
-          await import("@/lib/api-test/redact");
+          await import("@lastest/plugin-api-test/redact");
         code =
           code && typeof code === "string"
             ? code
@@ -2218,8 +2218,15 @@ export async function POST(
       if (!(await verifyRepoOwnership(body.repositoryId, session))) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
-      const { generateApiTest } = await import("@/lib/api-test/generator");
-      const gen = await generateApiTest({
+      // Through the plugin's action rather than `generateApiTest` directly:
+      // the generator now needs `ctx.ai`, and `contextFor({ repositoryId })` is
+      // what resolves it (re-running `requireRepoAccess`, which `getCurrentSession`
+      // satisfies from this route's bearer token). Persisting stays here,
+      // because bot/user attribution is core's to set and the plugin's
+      // `createApiTest` deliberately cannot express it.
+      const { generateApiTestDefinitionAction } =
+        await import("@lastest/plugin-api-test/actions");
+      const gen = await generateApiTestDefinitionAction({
         repositoryId: body.repositoryId,
         prompt: body.prompt,
         endpoint: body.endpoint,
@@ -2236,7 +2243,7 @@ export async function POST(
       const name =
         body.name?.trim() || `${gen.definition.method} ${gen.definition.url}`;
       const { renderApiDefinitionForCode } =
-        await import("@/lib/api-test/redact");
+        await import("@lastest/plugin-api-test/redact");
       const created = await queries.createTest({
         repositoryId: body.repositoryId,
         name,
@@ -3012,7 +3019,7 @@ export async function PUT(
         updates.apiDefinition = def;
         if (body.code === undefined) {
           const { renderApiDefinitionForCode } =
-            await import("@/lib/api-test/redact");
+            await import("@lastest/plugin-api-test/redact");
           updates.code = renderApiDefinitionForCode(def);
         }
         if (body.targetUrl === undefined) updates.targetUrl = def.url;

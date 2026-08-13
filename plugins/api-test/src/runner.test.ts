@@ -1,7 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { evaluateApiAssertions, resolveApiUrl, valueMatches } from "./runner";
+import {
+  DEFAULT_API_TEST_TIMEOUT_MS,
+  evaluateApiAssertions,
+  resolveApiUrl,
+  runApiTest,
+  valueMatches,
+} from "./runner";
+import type { ApiTestHost, GuardedRequest, GuardedResponse } from "./host";
 import type { ApiResponseSnapshot } from "./types";
-import type { ApiTestDefinition } from "@/lib/db/schema";
+import type { ApiTestDefinition } from "@lastest/eb-protocol";
 
 const baseRes: ApiResponseSnapshot = {
   statusCode: 200,
@@ -188,5 +195,118 @@ describe("resolveApiUrl", () => {
     expect(
       resolveApiUrl(def("/s", { q: "hi", n: "2" }), "https://app.test"),
     ).toBe("https://app.test/s?q=hi&n=2");
+  });
+});
+
+/**
+ * End-to-end over `runApiTest` with a stub transport.
+ *
+ * These tests exist *because* of the migration. The pre-plugin engine called
+ * `fetch` and `createSsrfSafeDispatcher` itself, so covering the request path
+ * meant mocking global fetch and an undici Agent; nothing did, and the whole
+ * band between "assertions evaluate correctly" and "a build ran" was untested.
+ * With the transport injected (`host.fetchGuarded`), a stub is four lines.
+ */
+describe("runApiTest", () => {
+  function hostReturning(response: GuardedResponse): {
+    host: ApiTestHost;
+    calls: Array<{ url: string; req: GuardedRequest }>;
+  } {
+    const calls: Array<{ url: string; req: GuardedRequest }> = [];
+    const host = {
+      async fetchGuarded(url: string, req: GuardedRequest) {
+        calls.push({ url, req });
+        return response;
+      },
+      createTest: notCalled,
+      updateTest: notCalled,
+      aiSupportsJson: notCalled,
+      apiLayerHint: notCalled,
+    } as unknown as ApiTestHost;
+    return { host, calls };
+  }
+
+  const notCalled = () => {
+    throw new Error("not part of the run path");
+  };
+
+  const ok = (over: Partial<Extract<GuardedResponse, { ok: true }>> = {}) =>
+    ({
+      ok: true,
+      status: 200,
+      headers: { "content-type": "application/json" },
+      text: '{"id":7}',
+      ...over,
+    }) satisfies GuardedResponse;
+
+  it("resolves the URL, applies auth, and grades assertions", async () => {
+    const { host, calls } = hostReturning(ok());
+    const result = await runApiTest(
+      host,
+      {
+        method: "GET",
+        url: "/api/me",
+        auth: { type: "bearer", token: "secret-token" },
+        assertions: [
+          { kind: "status", equals: 200 },
+          { kind: "jsonPath", path: "id", value: 7 },
+        ],
+      },
+      { baseUrl: "https://app.test" },
+    );
+
+    expect(calls[0]!.url).toBe("https://app.test/api/me");
+    expect(calls[0]!.req.headers.Authorization).toBe("Bearer secret-token");
+    expect(calls[0]!.req.timeoutMs).toBe(DEFAULT_API_TEST_TIMEOUT_MS);
+    expect(result.passed).toBe(true);
+    expect(result.statusCode).toBe(200);
+  });
+
+  it("reports a guarded-transport failure as a failed test, not a throw", async () => {
+    const { host } = hostReturning({
+      ok: false,
+      error: "Blocked by SSRF guard: resolves to a private address",
+    });
+    const result = await runApiTest(host, {
+      method: "GET",
+      url: "http://169.254.169.254/latest/meta-data",
+      assertions: [{ kind: "status", equals: 200 }],
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.statusCode).toBeNull();
+    expect(result.error).toContain("SSRF");
+    expect(result.assertionResults).toEqual([]);
+  });
+
+  it("redacts token-shaped material out of the persisted response snippet", async () => {
+    const { host } = hostReturning(
+      ok({
+        headers: { "content-type": "text/plain" },
+        text: "access_token=ghp_abcdefghijklmnopqrstuvwxyz012345 done",
+      }),
+    );
+    const result = await runApiTest(host, {
+      method: "GET",
+      url: "https://api.example.com/token",
+      assertions: [{ kind: "status", equals: 200 }],
+    });
+
+    expect(result.responseSnippet).not.toContain("ghp_abcdefghij");
+    expect(result.responseSnippet).toContain("done");
+  });
+
+  it("does not call the transport at all for an unresolvable URL", async () => {
+    const { host, calls } = hostReturning(ok());
+    const result = await runApiTest(host, {
+      method: "GET",
+      url: "/relative", // no baseUrl → `new URL` throws inside resolveApiUrl
+      assertions: [{ kind: "status", equals: 200 }],
+      query: { a: "1" },
+    });
+
+    expect(calls).toHaveLength(0);
+    expect(result.passed).toBe(false);
+    expect(result.error).toContain("Invalid URL");
   });
 });

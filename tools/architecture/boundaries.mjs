@@ -22,7 +22,7 @@
  * first to have done so; `design-system` and `a11y` followed in RFC §9 phase 3 —
  * all three entries are gone from the map below, and their violations with them.
  * `rca` is the first of RFC §9 phase 4 and went the same way; `app-map` is the
- * second and `launch` the third.
+ * second, `launch` the third and `api-test` the fourth.
  */
 
 /** Zone globs for the target layout. */
@@ -140,11 +140,6 @@ export const PSEUDO_PLUGINS = {
     lib: ["src/lib/gamification", "src/lib/awards"],
     actions: ["gamification.ts"],
     components: ["src/components/gamification", "src/components/awards"],
-  },
-  "api-test": {
-    lib: ["src/lib/api-test"],
-    actions: ["api-tests.ts"],
-    components: ["src/components/api-tests"],
   },
   playground: { lib: ["src/lib/playground"], actions: [] },
   "data-sources": {

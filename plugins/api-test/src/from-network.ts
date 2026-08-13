@@ -13,11 +13,35 @@
  */
 
 import type {
-  NetworkRequest,
   ApiTestDefinition,
   ApiAuth,
   ApiAssertion,
-} from "@/lib/db/schema";
+} from "@lastest/eb-protocol";
+
+/**
+ * A captured network request, narrowed to the seven fields this reads.
+ *
+ * Core's `NetworkRequest` (`packages/db/src/schema/tests.ts`) also carries
+ * `duration`, `resourceType`, `atMs`, `responseHeaders`, `startTime` and
+ * `responseSize`; none of it seeds a request. Declared here rather than
+ * promoted because the type belongs to the *run capture*, not to this feature
+ * — recipe §6.1 row two, the same call `plugins/app-map` made for
+ * `AppMapDiscovery`.
+ *
+ * The assertion that the shapes still match is the call itself: every caller
+ * passes a real `NetworkRequest`, so a core field that changed type or
+ * disappeared would stop compiling at
+ * `src/app/(app)/verify/[buildId]/focus-view.tsx` and its two siblings.
+ */
+export interface CapturedRequest {
+  url: string;
+  method: string;
+  status: number;
+  failed?: boolean;
+  requestHeaders?: Record<string, string>;
+  postData?: string;
+  responseBody?: string;
+}
 
 export interface ApiTestSeed {
   name: string;
@@ -127,7 +151,7 @@ function deriveBodyAssertions(
 }
 
 /** Build an editable API-test seed from a captured network request. */
-export function networkRequestToApiTest(req: NetworkRequest): ApiTestSeed {
+export function networkRequestToApiTest(req: CapturedRequest): ApiTestSeed {
   const upper = (req.method || "GET").toUpperCase();
   const method = (
     SUPPORTED_METHODS.has(upper as ApiTestDefinition["method"]) ? upper : "GET"

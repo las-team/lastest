@@ -2,13 +2,39 @@
  * AI generator for API tests (E1). Produces an ApiTestDefinition from a natural
  * language prompt and/or an OpenAPI spec, grounded in the repo's detected API
  * layer (REST/GraphQL/tRPC) via codebase intelligence when available.
+ *
+ * ### What the migration changed here
+ *
+ * The model call is `ctx.ai.generate()` — a capability, so the provider API key
+ * and the spend attribution stay in core and never enter this package
+ * (`core-scope.md` §4). What used to be four app imports
+ * (`generateWithAI` + `aiConfigFromSettings` + `queries.getAISettings` +
+ * `parseAiJson`) is now one capability call plus `@lastest/ai-kit`, which is
+ * where the JSON-repair half of the old `@/lib/ai` went precisely because it
+ * carries no secret.
+ *
+ * Two questions the capability cannot answer stayed as host methods, and both
+ * are reads rather than boundaries: whether the configured provider can be held
+ * to JSON at all, and what the repo's API layer looks like. See `host.ts`.
  */
 
-import { generateWithAI, gatherCodebaseIntelligence } from "@/lib/ai";
-import { aiConfigFromSettings } from "@/lib/ai/provider-config";
-import { parseAiJson } from "@/lib/ai/json-parse";
-import * as queries from "@/lib/db/queries";
-import type { ApiTestDefinition, ApiAssertion } from "@/lib/db/schema";
+import { parseAiJson } from "@lastest/ai-kit";
+import type { ApiTestDefinition, ApiAssertion } from "@lastest/eb-protocol";
+
+import type { ApiTestHost } from "./host";
+
+/** The slice of `ctx.ai` this module needs. */
+export interface GeneratorAi {
+  generate(
+    prompt: string,
+    opts: {
+      actionType: string;
+      repositoryId?: string;
+      systemPrompt?: string;
+      json?: boolean;
+    },
+  ): Promise<{ text: string }>;
+}
 
 export interface GenerateApiTestInput {
   repositoryId: string;
@@ -50,11 +76,13 @@ Prefer relative urls (the runner prepends the repo baseUrl). Always include at l
 const VALID_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 
 export async function generateApiTest(
+  deps: { ai: GeneratorAi; host: ApiTestHost },
   input: GenerateApiTestInput,
 ): Promise<GenerateApiTestResult> {
   const { repositoryId } = input;
-  const settings = await queries.getAISettings(repositoryId);
-  if (settings.provider === "claude-cli") {
+  const { ai, host } = deps;
+
+  if (!(await host.aiSupportsJson(repositoryId))) {
     return {
       status: "ai_unavailable",
       summary:
@@ -63,25 +91,9 @@ export async function generateApiTest(
   }
 
   // Best-effort repo context: detected API layer for GitHub-connected repos.
-  let apiLayerHint = "";
-  try {
-    const repo = await queries.getRepository(repositoryId);
-    if (repo?.provider === "github" && repo.teamId) {
-      const account = await queries.getGithubAccountByTeam(repo.teamId);
-      if (account?.accessToken) {
-        const branch = repo.defaultBranch || "main";
-        const intel = await gatherCodebaseIntelligence(
-          account.accessToken,
-          repo.owner,
-          repo.name,
-          branch,
-        );
-        apiLayerHint = `Detected API layer: ${intel.apiLayer}.`;
-      }
-    }
-  } catch {
-    // Non-critical.
-  }
+  // The host swallows its own failures — a missing hint degrades the prompt,
+  // it does not fail the request.
+  const apiLayerHint = (await host.apiLayerHint(repositoryId)) ?? "";
 
   const contextParts = [
     apiLayerHint,
@@ -102,16 +114,13 @@ ${contextParts.join("\n\n")}`;
 
   let response: string;
   try {
-    response = await generateWithAI(
-      aiConfigFromSettings(settings, { readOnly: true }),
-      prompt,
-      SYSTEM_PROMPT,
-      {
-        actionType: "create_test",
-        repositoryId,
-        responseFormat: "json_object",
-      },
-    );
+    const result = await ai.generate(prompt, {
+      actionType: "create_test",
+      repositoryId,
+      systemPrompt: SYSTEM_PROMPT,
+      json: true,
+    });
+    response = result.text;
   } catch (e) {
     return {
       status: "ai_unavailable",

@@ -5,7 +5,7 @@ import {
   redactSensitiveText,
   REDACTED,
 } from "./redact";
-import type { ApiTestDefinition } from "@/lib/db/schema";
+import type { ApiTestDefinition } from "@lastest/eb-protocol";
 
 describe("redactApiDefinition", () => {
   it("masks bearer tokens", () => {

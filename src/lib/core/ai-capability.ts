@@ -37,10 +37,21 @@ import type { ContextScope } from "@lastest/kernel";
  * instead of inventing its own column.
  */
 
+/**
+ * `AIActionType` values a plugin may attribute a call to.
+ *
+ * An allowlist rather than the whole union because `ai_prompt_logs.action_type`
+ * is an enum column: a plugin inventing a value would fail the insert inside
+ * the logging path rather than at the call site. Add the value here when a
+ * plugin legitimately needs it — `create_test` arrived with
+ * `@lastest/plugin-api-test`, whose generator has always logged under it, and
+ * omitting it would have silently dropped the attribution on migration.
+ */
 const ACTION_TYPES = new Set<string>([
   "explorer_plan",
   "explorer_act",
   "explorer_analyze",
+  "create_test",
 ]);
 
 /** Apply the tier to a resolved provider config. */

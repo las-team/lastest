@@ -29,11 +29,11 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { ReplayPlayer } from "@/components/replay-player";
 import { resolveStepSegments } from "@/lib/playback/step-timings";
-import { ApiTestDialog } from "@/components/api-tests/api-test-dialog";
+import { ApiTestDialog } from "@lastest/plugin-api-test/ui/api-test-dialog";
 import {
   networkRequestToApiTest,
   type ApiTestSeed,
-} from "@/lib/api-test/from-network";
+} from "@lastest/plugin-api-test/from-network";
 import {
   Play,
   Trash2,

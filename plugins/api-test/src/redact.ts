@@ -9,7 +9,7 @@
  * executes against; only the *rendered / displayed* copies are redacted.
  */
 
-import type { ApiTestDefinition, ApiAuth } from "@/lib/db/schema";
+import type { ApiTestDefinition, ApiAuth } from "@lastest/eb-protocol";
 
 export const REDACTED = "••••••";
 

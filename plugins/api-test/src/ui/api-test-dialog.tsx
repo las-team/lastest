@@ -6,15 +6,16 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import type { ApiTestDefinition, FunctionalArea } from "@/lib/db/schema";
-import { ApiTestForm } from "./api-test-form";
+} from "@lastest/ui";
+import type { ApiTestDefinition } from "@lastest/eb-protocol";
+
+import { ApiTestForm, type ApiTestAreaOption } from "./api-test-form";
 
 interface ApiTestDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   repositoryId: string;
-  areas: FunctionalArea[];
+  areas: ApiTestAreaOption[];
   /** When editing, the existing test id + initial values. */
   testId?: string;
   initialName?: string;

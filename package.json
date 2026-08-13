@@ -74,6 +74,7 @@
     "@lastest/mcp-server": "workspace:*",
     "@lastest/page-map": "workspace:*",
     "@lastest/plugin-a11y": "workspace:*",
+    "@lastest/plugin-api-test": "workspace:*",
     "@lastest/plugin-app-map": "workspace:*",
     "@lastest/plugin-design-system": "workspace:*",
     "@lastest/plugin-events": "workspace:*",

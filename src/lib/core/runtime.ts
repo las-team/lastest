@@ -23,6 +23,7 @@ import {
 } from "@lastest/kernel";
 import { sql } from "@lastest/db";
 import { configureA11y } from "@lastest/plugin-a11y";
+import { configureApiTest } from "@lastest/plugin-api-test";
 import { configureAppMap } from "@lastest/plugin-app-map";
 import { configureDesignSystem } from "@lastest/plugin-design-system";
 import { configureEvents } from "@lastest/plugin-events";
@@ -34,6 +35,7 @@ import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
 import * as queries from "@/lib/db/queries";
 import { getLogger } from "@/lib/logger";
 import { createAiFactory } from "@/lib/core/ai-capability";
+import { appApiTestHost } from "@/lib/core/api-test-host";
 import { appAppMapHost } from "@/lib/core/app-map-host";
 import { appBrowserHost } from "@/lib/core/browser-host";
 import { appDesignSystemHost } from "@/lib/core/design-system-host";
@@ -200,6 +202,7 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
   configureA11y({ runtime, data: data.capability("a11y") });
   configureRca({ runtime, host: appRcaHost });
   configureAppMap({ runtime, host: appAppMapHost });
+  configureApiTest({ runtime, host: appApiTestHost });
   // No `runtime` — the launch board has no tenant, so there is no scope to
   // build a `ctx` from and nothing to build one for. See
   // `plugins/launch/src/wiring.ts`.

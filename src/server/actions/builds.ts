@@ -1028,12 +1028,15 @@ async function runBuildAsync(
     try {
       const { scoreMultiLayer } = await import("@/lib/comparison/scorer");
       // E1: fold api-test assertion evidence into the step verdict.
+      // The push is also the assertion that the plugin's narrowed
+      // `ApiEvidenceItem` still matches core's `EvidenceItem` — see
+      // `plugins/api-test/src/evidence.ts`.
       const apiEvidence: import("@/lib/db/schema").EvidenceItem[] = [];
       if (result.apiResult) {
         apiEvidence.push(
-          ...(await import("@/lib/api-test/evidence")).apiResultToEvidence(
-            result.apiResult,
-          ),
+          ...(
+            await import("@lastest/plugin-api-test/evidence")
+          ).apiResultToEvidence(result.apiResult),
         );
       }
       const prevResult = await queries.getPreviousTestResultForTest(

@@ -1,18 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Separator } from "@/components/ui/separator";
 import {
+  Button,
+  Input,
+  Label,
+  Textarea,
+  Separator,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@lastest/ui";
 import { Loader2, Plus, Sparkles, Trash2, Lock } from "lucide-react";
 import { toast } from "sonner";
 import type {
@@ -20,17 +20,31 @@ import type {
   ApiAssertion,
   ApiAssertionKind,
   ApiAuth,
-  FunctionalArea,
-} from "@/lib/db/schema";
+} from "@lastest/eb-protocol";
+
 import {
   createApiTest,
   updateApiTest,
   generateApiTestDefinitionAction,
-} from "@/server/actions/api-tests";
+} from "../actions";
+
+/**
+ * A functional area, narrowed to what the area picker renders.
+ *
+ * Core's `FunctionalArea` row also carries `repositoryId`, `parentId`,
+ * `agentPlan`, `planSnapshot` and five more columns; a `<SelectItem>` needs an
+ * id and a label. Every caller passes a real `FunctionalArea[]`, so the
+ * assignment at each call site is the assertion that the shapes still match
+ * (recipe §6.1 row two).
+ */
+export interface ApiTestAreaOption {
+  id: string;
+  name: string;
+}
 
 export interface ApiTestFormProps {
   repositoryId: string;
-  areas: FunctionalArea[];
+  areas: ApiTestAreaOption[];
   /** When editing, the existing test id + initial values. */
   testId?: string;
   initialName?: string;

@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/card";
 import { Webhook } from "lucide-react";
 import type { FunctionalArea } from "@/lib/db/schema";
-import { ApiTestForm } from "@/components/api-tests/api-test-form";
+import { ApiTestForm } from "@lastest/plugin-api-test/ui/api-test-form";
 
 interface ApiTestPanelProps {
   repositoryId: string | undefined;

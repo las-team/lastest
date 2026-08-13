@@ -175,11 +175,11 @@ import {
   RuntimeErrorsPanel,
   stripRuntimeErrorsFromMessage,
 } from "@/components/builds/runtime-errors-panel";
-import { ApiTestDialog } from "@/components/api-tests/api-test-dialog";
+import { ApiTestDialog } from "@lastest/plugin-api-test/ui/api-test-dialog";
 import {
   networkRequestToApiTest,
   type ApiTestSeed,
-} from "@/lib/api-test/from-network";
+} from "@lastest/plugin-api-test/from-network";
 import {
   CheckCircle,
   ListTodo,

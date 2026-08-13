@@ -1,14 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { networkRequestToApiTest } from "./from-network";
-import type { NetworkRequest } from "@/lib/db/schema";
+import { networkRequestToApiTest, type CapturedRequest } from "./from-network";
 
-function req(over: Partial<NetworkRequest> = {}): NetworkRequest {
+function req(over: Partial<CapturedRequest> = {}): CapturedRequest {
   return {
     url: "https://api.example.com/v1/users/42",
     method: "GET",
     status: 200,
-    duration: 12,
-    resourceType: "fetch",
     ...over,
   };
 }

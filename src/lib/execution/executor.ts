@@ -356,7 +356,12 @@ async function executeApiTests(
   onResult?: (result: TestRunResult) => Promise<void>,
 ): Promise<TestRunResult[]> {
   if (apiTests.length === 0) return [];
-  const { runApiTest } = await import("@/lib/api-test/runner");
+  // The plugin owns the engine; the app owns the transport. `runApiTest` takes
+  // its host as an argument rather than reading the plugin's wiring slot, so
+  // this stays a plain import and a build does not depend on the plugin
+  // runtime having been booted — see `plugins/api-test/src/wiring.ts`.
+  const { runApiTest } = await import("@lastest/plugin-api-test/runner");
+  const { appApiTestHost } = await import("@/lib/core/api-test-host");
   const baseUrl = options.environmentConfig?.baseUrl ?? undefined;
   const results: TestRunResult[] = [];
 
@@ -372,7 +377,7 @@ async function executeApiTests(
         errorMessage: "API test has no apiDefinition",
       };
     } else {
-      const apiResult = await runApiTest(def, { baseUrl });
+      const apiResult = await runApiTest(appApiTestHost, def, { baseUrl });
       result = {
         testId: test.id,
         status: apiResult.passed ? "passed" : "failed",
