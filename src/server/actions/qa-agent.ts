@@ -8,6 +8,7 @@ import {
   hasQaAgentAccess,
 } from "@/lib/billing/feature-access";
 import { isBillingEnabled } from "@/lib/billing/enabled";
+import { planConfig } from "@/lib/billing/plans";
 import { assertAgentRunMinutesAvailable } from "@/lib/billing/agent-eb-usage";
 import { getNextRunTime, isValidCron } from "@/lib/scheduling/cron";
 import {
@@ -3100,8 +3101,18 @@ export async function startQaAgent(
       maxMinutes: 5,
     };
     const depth = Math.max(1, Math.min(Math.floor(requested.depth), 6));
+    // Swarm size is a per-tier limit (plans.ts maxExplorers) — the dialog's
+    // slider is capped to it client-side, but a crafted request must not get
+    // a bigger EB fleet than the plan sells. Self-hosted (no billing) keeps
+    // the absolute ceiling of 10.
+    const maxExplorers = isBillingEnabled()
+      ? Math.max(1, planConfig(team.plan).maxExplorers)
+      : 10;
     const config: QaExploreConfig = {
-      explorers: Math.max(1, Math.min(Math.floor(requested.explorers), 10)),
+      explorers: Math.max(
+        1,
+        Math.min(Math.floor(requested.explorers), maxExplorers),
+      ),
       depth,
       strategy: requested.strategy,
       maxMinutes: Math.max(1, Math.min(requested.maxMinutes, 20)),

@@ -8,7 +8,7 @@ import type {
   ExplorerFindingKind,
   ExplorerTrigger,
 } from "../schema";
-import { eq, and, desc, lte, inArray } from "drizzle-orm";
+import { eq, and, asc, desc, lte, inArray } from "drizzle-orm";
 
 /**
  * Explorer-agent findings (defects / UX issues observed while exploring) and
@@ -145,7 +145,8 @@ export async function upsertExplorerTrigger(
   return row;
 }
 
-/** Enabled cron triggers whose nextRunAt has passed — the scheduler's pick. */
+/** Enabled cron triggers whose nextRunAt has passed — the scheduler's pick.
+ *  Oldest-due first so the dispatcher's per-tick start cap drains fairly. */
 export async function getDueExplorerTriggers(
   now: Date = new Date(),
 ): Promise<ExplorerTrigger[]> {
@@ -157,7 +158,8 @@ export async function getDueExplorerTriggers(
         eq(explorerTriggers.scheduleEnabled, true),
         lte(explorerTriggers.nextRunAt, now),
       ),
-    );
+    )
+    .orderBy(asc(explorerTriggers.nextRunAt));
 }
 
 export async function markExplorerTriggerFired(

@@ -63,6 +63,7 @@ import type {
   KnowledgePageAutomationStep,
   NewAgentKnowledge,
   QaAuthState,
+  TeamPlan,
 } from "@/lib/db/schema";
 
 /**
@@ -337,9 +338,11 @@ function credentialsFrom(
 async function claimSessionEb(
   sessionId: string,
   teamId: string,
+  signal: AbortSignal,
 ): Promise<{ runnerId: string; cdpUrl: string; authApplied: boolean } | null> {
   const held = sessionEbs.get(sessionId);
   if (held) return held;
+  if (signal.aborted) return null;
   // Browser time on this claim is metered to the team (see agent-eb-usage);
   // the release in releaseSessionEb settles it.
   const eb = await claimEmbeddedBrowserForAgent(
@@ -349,6 +352,15 @@ async function claimSessionEb(
       mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
     },
   ).catch(() => undefined);
+  // A pause — or a pause→resume that replaced this pipeline's controller —
+  // can land while the claim was in flight. Registering the claim now would
+  // either strand it (this pipeline's finally guard no longer matches) or
+  // overwrite an EB the successor pipeline already registered, leaking that
+  // one instead. Hand the fresh claim straight back.
+  if (signal.aborted || sessionEbs.has(sessionId)) {
+    if (eb) await releasePoolEB(eb.runnerId).catch(() => {});
+    return signal.aborted ? null : (sessionEbs.get(sessionId) ?? null);
+  }
   // Register the claim before any other await: releaseSessionEb only releases
   // what it finds in sessionEbs, so a throw in the metadata merge below would
   // otherwise strand a claimed (and billing) EB until process restart.
@@ -587,8 +599,11 @@ async function runExplorerResearch(
     { stepId: "explorer_research" },
   );
 
-  const eb = await claimSessionEb(sessionId, teamId);
+  const eb = await claimSessionEb(sessionId, teamId, signal);
   if (!eb) {
+    // Aborted mid-claim (pause/cancel — possibly with a successor pipeline
+    // already running): just stop, the session state isn't ours to fail.
+    if (signal.aborted) return false;
     await setStepFailedAt(
       sessionId,
       stepIndex,
@@ -797,8 +812,9 @@ async function runExplorerAct(
     { stepId: "explorer_act" },
   );
 
-  const eb = await claimSessionEb(sessionId, teamId);
+  const eb = await claimSessionEb(sessionId, teamId, signal);
   if (!eb) {
+    if (signal.aborted) return false;
     await setStepFailedAt(
       sessionId,
       stepIndex,
@@ -1508,6 +1524,7 @@ export async function startExplorerAgent(
 async function requireExplorerSession(sessionId: string): Promise<{
   session: AgentSession;
   teamId: string;
+  teamPlan: TeamPlan;
 }> {
   const { team } = await requireTeamAccess();
   const session = await queries.getAgentSession(sessionId);
@@ -1517,7 +1534,7 @@ async function requireExplorerSession(sessionId: string): Promise<{
   if (session.teamId && session.teamId !== team.id) {
     throw new Error("Explorer session not found");
   }
-  return { session, teamId: team.id };
+  return { session, teamId: team.id, teamPlan: team.plan };
 }
 
 export async function getExplorerSession(
@@ -1552,9 +1569,16 @@ export async function pauseExplorerAgent(
 ): Promise<{ success: boolean }> {
   const { session } = await requireExplorerSession(sessionId);
   if (session.status !== "active") return { success: false };
+  // CAS so a concurrent cancel (or a second pause) can't be overwritten —
+  // only the caller that actually flipped the row proceeds to abort/release.
+  const paused = await queries.transitionAgentSessionStatus(
+    sessionId,
+    "active",
+    "paused",
+  );
+  if (!paused) return { success: false };
   const controller = activeControllers.get(sessionId);
   controller?.abort();
-  await queries.updateAgentSession(sessionId, { status: "paused" });
   if (!controller) await releaseSessionEb(sessionId).catch(() => {});
   revalidatePath("/explorer");
   return { success: true };
@@ -1563,13 +1587,27 @@ export async function pauseExplorerAgent(
 export async function resumeExplorerAgent(
   sessionId: string,
 ): Promise<{ success: boolean }> {
-  const { session, teamId } = await requireExplorerSession(sessionId);
+  const { session, teamId, teamPlan } = await requireExplorerSession(sessionId);
   if (session.status !== "paused") return { success: false };
+  // Resume re-enters the same gates as a start: a team that dropped below the
+  // required plan or burned its run-minute quota while the session sat paused
+  // must not bring it back to life.
+  assertQaAgentAccess(teamPlan, isBillingEnabled());
+  await assertAgentRunMinutesAvailable(teamId);
   // Re-open the interrupted step so the resume-safe driver re-runs it.
   const steps = session.steps.map((s) =>
     s.status === "active" ? { ...s, status: "pending" as const } : s,
   );
-  await queries.updateAgentSession(sessionId, { status: "active", steps });
+  // CAS paused→active: of two concurrent resumes exactly one flips the row
+  // and starts a pipeline — the loser must not spawn a second pipeline that
+  // replaces the winner's controller and orphans its claimed EB.
+  const resumed = await queries.transitionAgentSessionStatus(
+    sessionId,
+    "paused",
+    "active",
+    { steps },
+  );
+  if (!resumed) return { success: false };
   executeExplorerPipeline(sessionId, teamId, session.repositoryId).catch(
     (err) => console.error("[Explorer] unhandled:", err),
   );
@@ -1750,12 +1788,27 @@ export async function updateExplorerTriggerConfig(
   return { success: true };
 }
 
+/** Most sessions the trigger dispatcher may start in one scheduler tick.
+ *  Every session holds an embedded browser, so an unbounded tick (30 due
+ *  triggers after downtime) would stampede the EB pool. Triggers beyond the
+ *  cap are simply left due — nextRunAt stays in the past and the next tick
+ *  drains them oldest-first. */
+const TRIGGER_STARTS_PER_TICK = 3;
+
+/** A team gets one scheduled explorer session at a time across its repos —
+ *  cron triggers on many repos must not stack EB-holding sessions for one
+ *  tenant. Manual starts stay per-repo-gated only. */
+const MAX_ACTIVE_TRIGGER_SESSIONS_PER_TEAM = 1;
+
 /** Fire due explorer cron triggers. Called from the scheduler tick alongside
  *  the QA-agent trigger dispatch — no user session (system context). */
 export async function dispatchDueExplorerTriggers(): Promise<number> {
   const due = await queries.getDueExplorerTriggers().catch(() => []);
   let fired = 0;
   for (const trigger of due) {
+    // Per-tick fan-out cap: leave the remainder due (NOT re-armed) so the
+    // next tick picks them up instead of skipping a whole cron cycle.
+    if (fired >= TRIGGER_STARTS_PER_TICK) break;
     const nextRunAt = trigger.cronExpression
       ? getNextRunTime(trigger.cronExpression)
       : null;
@@ -1775,6 +1828,17 @@ export async function dispatchDueExplorerTriggers(): Promise<number> {
       // rather than firing. Mirrors startQaAgentFromTrigger.
       const team = await queries.getTeam(trigger.teamId);
       if (!team || !hasQaAgentAccess(team.plan, isBillingEnabled())) {
+        await queries.markExplorerTriggerFired(trigger.id, { nextRunAt });
+        continue;
+      }
+
+      // Per-team concurrency: triggers on several repos of one team must not
+      // stack EB-holding sessions. Re-arm — the next due cycle retries.
+      const teamActive = await queries.countActiveAgentSessionsForTeam(
+        trigger.teamId,
+        "explorer",
+      );
+      if (teamActive >= MAX_ACTIVE_TRIGGER_SESSIONS_PER_TEAM) {
         await queries.markExplorerTriggerFired(trigger.id, { nextRunAt });
         continue;
       }

@@ -23,7 +23,7 @@ import type {
   AgentStepId,
   AgentSessionMetadata,
 } from "../schema";
-import { eq, desc, and, or, isNotNull, lt } from "drizzle-orm";
+import { eq, desc, and, or, isNotNull, lt, count } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 
 // Spec Imports
@@ -465,6 +465,42 @@ export async function updateAgentSession(
     .update(agentSessions)
     .set({ ...patch, updatedAt: new Date() })
     .where(eq(agentSessions.id, id));
+}
+
+/** Count a team's currently-active sessions of a kind across all its repos.
+ *  Used by the scheduled-trigger dispatchers to cap fan-out per team. */
+export async function countActiveAgentSessionsForTeam(
+  teamId: string,
+  kind: AgentSessionKind,
+): Promise<number> {
+  const [row] = await db
+    .select({ value: count() })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.teamId, teamId),
+        eq(agentSessions.kind, kind),
+        eq(agentSessions.status, "active"),
+      ),
+    );
+  return row?.value ?? 0;
+}
+
+/** Compare-and-set a session's status: applies only while the row still holds
+ *  `from`, so two concurrent callers (e.g. a double resume) can't both win.
+ *  Returns true when this call performed the transition. */
+export async function transitionAgentSessionStatus(
+  id: string,
+  from: AgentSessionStatus,
+  to: AgentSessionStatus,
+  extra?: { steps?: AgentStepState[]; completedAt?: Date },
+): Promise<boolean> {
+  const rows = await db
+    .update(agentSessions)
+    .set({ status: to, ...extra, updatedAt: new Date() })
+    .where(and(eq(agentSessions.id, id), eq(agentSessions.status, from)))
+    .returning({ id: agentSessions.id });
+  return rows.length > 0;
 }
 
 // Stuck-detection sweep. An active session whose `updatedAt` hasn't moved in

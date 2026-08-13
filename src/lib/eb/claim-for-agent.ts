@@ -4,7 +4,10 @@ import {
   claimOrProvisionPoolEB,
   releasePoolEB,
 } from "@/server/actions/embedded-sessions";
-import { beginAgentEbUsage } from "@/lib/billing/agent-eb-usage";
+import {
+  beginAgentEbUsage,
+  assertAgentRunMinutesAvailable,
+} from "@/lib/billing/agent-eb-usage";
 import { db } from "@/lib/db";
 import { embeddedSessions, repositories } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -116,6 +119,12 @@ export async function claimEmbeddedBrowserForAgent(
 > {
   const billTeamId =
     "billTeamId" in attribution ? attribution.billTeamId : null;
+  // Quota is asserted at the claim itself, not only at session start: agent
+  // sessions claim EBs repeatedly over a long lifetime (and resume paths
+  // exist), so a start-time-only check would let a team keep burning browser
+  // time long after crossing its ceiling. Throws — callers that swallow claim
+  // errors degrade to "no browser available", which fails the step safely.
+  if (billTeamId) await assertAgentRunMinutesAvailable(billTeamId);
   const deadline = Date.now() + maxWaitMs;
   let notifiedQueued = false;
   let firstAttempt = true;
