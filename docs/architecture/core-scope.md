@@ -129,6 +129,21 @@ core's team/repo deletion path drives every registered hook. A test asserts that
 every plugin with storage has one. Without that, this rule quietly breaks
 deletion.
 
+> **Two amendments from doing this for real.**
+>
+> - **The targets are team, repo *and user*.** `onUserDeleted` was added for
+>   `plugins/launch`, whose rows belong to a person rather than a tenant —
+>   deleting a user does not delete their team, so no team hook would ever
+>   fire for them and the `ON DELETE CASCADE` this rule removes was the only
+>   thing reaping them. Such a plugin also declares `tenancy: "none"` in its
+>   manifest, which the kernel enforces: it may consume `data` and nothing
+>   else, because `core/data` scopes by plugin id while every other capability
+>   is built from a resolved team.
+> - **Deleting a join is not the same as deleting a column.** A plugin
+>   replacing an `innerJoin` to a core table with a host lookup loses an
+>   existence predicate that is invisible in the column list — see
+>   [`plugin-migration-recipe.md`](./plugin-migration-recipe.md) §3.2.
+
 Precedent that this is workable: the schema already has **104 `*_id` columns
 with no FK constraint** (§7). Convention-only references are the existing norm
 here, not a novelty.

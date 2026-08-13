@@ -1,7 +1,8 @@
 # RFC: Core + Plugins
 
 **Status:** phases 0–3 landed. Phase 4 in progress — `rca`, `app-map`,
-`launch` and `api-test` done, `url-diff` resolved as core, 9 plugins to go.
+`launch`, `api-test` and `playground` done, `url-diff` resolved as core,
+8 plugins to go.
 **Author:** planning doc
 **Supersedes:** nothing
 
@@ -26,19 +27,65 @@
 > - **Phase 3 — done.** `CheckLayer` is a registry; `design-system` and `a11y`
 >   are check-layer plugins. Both are table-light, and `design-system` proved
 >   the no-schema shape (manifest + host port, no `ctx` at all).
-> - **Phase 4 — in progress. 4 of 13 plugins done.** `rca`
+> - **Phase 4 — in progress. 5 of 13 plugins done.** `rca`
 >   ([result](./rca-migration-result.md)), `app-map`
 >   ([result](./app-map-migration-result.md)), `launch`
->   ([result](./launch-migration-result.md)) and `api-test`
->   ([result](./api-test-migration-result.md)) have landed. `url-diff` did not
->   go to a plugin at all — it was **reclassified as core**: its in-app page
+>   ([result](./launch-migration-result.md)), `api-test`
+>   ([result](./api-test-migration-result.md)) and `playground`
+>   ([result](./playground-migration-result.md)) have landed. `url-diff` did
+>   not go to a plugin at all — it was **reclassified as core**: its in-app page
 >   and sidebar entry were removed, and what is left has no user surface and
 >   exists only to serve the documented `POST /api/v1/snapshot` and
 >   `POST /api/v1/diff` endpoints. A documented public API is core by any
 >   reading of `core-scope.md` §2. The repeatable procedure is written down in
 >   [`plugin-migration-recipe.md`](./plugin-migration-recipe.md) — read that,
 >   not §9 below, before migrating the next feature.
->   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21**.
+>   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21**.
+>
+>   **`playground` is the first migration whose port is worth building core
+>   for, and it took two plugins to prove it.** Three methods — the smallest
+>   port yet — and *all three* are declared verbatim in `plugins/launch/src/host.ts`:
+>   resolve a bearer token to a person, rate-limit a key, look up display data
+>   for a set of user ids. Two untenanted features, migrated independently,
+>   arrived at the same three needs and nothing else. So the port's honest size
+>   is **zero new debt items**: it adds nothing to the phase-5 backlog and
+>   doubles the evidence for what is on it. One `core/identity` capability plus
+>   a rate-limit capability would retire *both* ports completely — six methods,
+>   two plugins, zero left. Neither made that case alone. This is §1.5's
+>   "group by what each method is" taken to its endpoint, and it is the thing
+>   to build before `share`, `gamification` and the rest of the user-scoped
+>   list, which will otherwise each write a third copy.
+>
+>   It is also where **`launch`'s deferred core question got closed the way the
+>   process intends.** That migration ended by noting nothing in the manifest
+>   recorded untenanted-ness — the only signal was an absent `runtime` in the
+>   wiring — and by declining to fix it as speculative until a second such
+>   plugin existed. This is that plugin, so `tenancy: "team" | "none"` landed
+>   first as its own commit. The field is a *narrowing*, not an exemption:
+>   `resolveRegistry` then rejects every capability but `data`, rejects
+>   `provides`, rejects job handlers, and `buildContext` throws if anything
+>   builds a context for such a plugin anyway. **The instructive part is that
+>   it was not blocking.** `launch`'s core PR (`onUserDeleted`) was — without
+>   it the migration shipped a silent GDPR regression. This one was a guard
+>   rail the feature would have worked fine without, and a guard rail bundled
+>   into a feature PR is an afterthought or nothing. §7.2's split is what made
+>   it get written at all, which is a different argument for the workflow than
+>   `launch` supplied.
+>
+>   And the first evidence that **the framework investment compounds**:
+>   `playground` needed *no* deletion-related core change, because `launch`
+>   had already paid for `onUserDeleted`, the `"user"` `DeletionTarget` and the
+>   `cascadePluginDeletion` call. Second plugin of a shape, materially cheaper
+>   than the first. Expect the same for `share` and `gamification`.
+>
+>   One rule generalised out of it, now recipe §3.2: **when `core-scope.md` §6
+>   makes you delete a join to a core table, check the join type.** A
+>   `leftJoin` is only supplying a column and a port method replaces it. An
+>   `innerJoin` is supplying a column *and an existence predicate* — the
+>   playground's leaderboard join was silently dropping rows whose user no
+>   longer exists, and replacing only the display name would have put deleted
+>   people back on a public board. The predicate is invisible in the column
+>   list, which is where you would look.
 >
 >   **`api-test` is where the burndown stopped being the metric, on purpose.**
 >   It went in at zero counted violations and came out at zero — and unlike
@@ -798,6 +845,15 @@ earlier PR** — which is exactly the workflow being asked for.
 >   anyone else. The one place it hurt was a single `leftJoin(users)` for a
 >   comment author's display name — one join across the boundary cost one host
 >   method and one extra round trip. Count *joins to core tables*, not tables.
+> - **Compare your port to the ports that already exist, method by method.**
+>   `playground`'s three are all in `launch`'s four. A port that duplicates
+>   another plugin's entirely is not four items of debt and three more — it is
+>   the same three, now proven twice, and that is the argument for building the
+>   core capability rather than a fifth host file. See the phase-4 note above.
+> - **The second plugin of a shape is cheaper, and that is the return on the
+>   framework.** `playground` needed no deletion-related core change because
+>   `launch` had already landed `onUserDeleted`. First direct evidence in
+>   phase 4 that a core PR forced by one migration is prepaid for the next.
 > - **Read a feature's import list, not its directory name — and do it before
 >   costing the port.** Two modules under `src/lib/launch/` were not launch's:
 >   the OAuth redirect-URI allowlist (a credential boundary shared by three

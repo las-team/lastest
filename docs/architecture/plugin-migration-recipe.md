@@ -4,10 +4,14 @@
 generalised from the explorer pilot ([`explorer-migration-result.md`](./explorer-migration-result.md))
 and the two check-layer plugins. Revised after
 [`launch`](./launch-migration-result.md), which added §2.1 (which deletion
-target), §2.2 (a plugin need not be tenanted) and the API-route case in §6;
+target), §2.2 (a plugin need not be tenanted), §3.2 (replacing a join to a core table)
+and the API-route case in §6;
 and after [`api-test`](./api-test-migration-result.md), which added §2.3 (a
 plugin that persists into core tables), §3.1 (write the guard into the port
-method) and the shape rule in §3.
+method) and the shape rule in §3; and after
+[`playground`](./playground-migration-result.md), which closed §2.2's open
+question (`tenancy` is now a manifest field the kernel enforces) and sharpened
+§1.5 (compare your port to the ports that exist) and §3.2.
 **Audience:** whoever migrates the next feature out of `src/` into `plugins/<id>/`.
 
 This is the *how*. The *why* is [`core-plugin-refactor.md`](./core-plugin-refactor.md)
@@ -57,9 +61,9 @@ comes out that high, the feature is a thin *orchestration of* core rather than
 a consumer of it, and the real task is extracting the core module it
 orchestrates, as its own PR, first.
 
-Measured so far: `launch` **4** (done), `api-test` **5** (done), `rca` **6**
-(done), `app-map` **9** (done), `url-diff` **~22** (never migrated —
-reclassified as core, RFC §9 phase 4).
+Measured so far: `playground` **3** (done), `launch` **4** (done), `api-test`
+**5** (done), `rca` **6** (done), `app-map` **9** (done), `url-diff` **~22**
+(never migrated — reclassified as core, RFC §9 phase 4).
 
 > **Group by *what each method is*, not only by how many collapse together.**
 > `api-test`'s five grouped into three — one security boundary, two authorized
@@ -69,6 +73,27 @@ reclassified as core, RFC §9 phase 4).
 > `core/security` PR retires a method in three plugins at once. A port of 5
 > containing a shared boundary is cheaper than a port of 5 containing five
 > private reads.
+
+> **Check your port against the ports that already exist — method by method,
+> before you write it.** `playground`'s three (`resolveActor`, `rateLimit`, a
+> batched user lookup) are all declared verbatim in `plugins/launch/src/host.ts`.
+> Not a port *containing* a shared gap: a port that is **entirely** shared gap,
+> arrived at independently by two migrations. Its honest size is therefore
+> **zero new debt items** — it adds nothing to the phase-5 backlog and doubles
+> the evidence for what is on it. That is the strongest form this signal takes,
+> and it is the argument that justifies building the core capability: one
+> `core/identity` PR plus a rate-limit capability retires six methods across two
+> plugins. **If a method you are about to declare already exists verbatim in
+> another plugin's `host.ts`, say so in your result doc.** Neither plugin alone
+> made that case; together they do.
+>
+> Two smaller rules from the same comparison. Where the two differ, **the
+> *wider* signature is usually the right one**: `PlaygroundHost.rateLimit`
+> returns `{ allowed, retryAfterMs }` because the route's 429 carries a computed
+> `Retry-After`, and taking launch's boolean would have been a behaviour change
+> smuggled in through a port signature. And where one plugin needs less, **take
+> less**: playground's actor carries no `isAdmin`, because that board has no
+> staff endpoints, so nothing in the package *could* grow a role check.
 
 > **Port size does not track LOC, in either direction.** `launch` is twice
 > `rca`'s size with two thirds of its port; `url-diff` is smaller than both and
@@ -166,30 +191,58 @@ Note also that a hook can be *stricter* than the FK it replaces, and usually
 should be: `ON DELETE CASCADE` removed launch's vote rows but left the
 denormalized `upvote_count` stale. The hook recomputes it.
 
-### 2.2 A plugin does not have to be tenanted at all
+### 2.2 A plugin does not have to be tenanted at all — declare it
 
-`launch` never calls `contextFor` and never holds a `PluginContext`. Its board
-is a public directory — anonymous readers, writers identified by a user id and
-an OAuth scope, no `team_id` column anywhere — so `ctx.team` would have been a
-lie, and a tenancy assertion that always passes reads exactly like one that
-works.
+Some plugins never call `contextFor` and never hold a `PluginContext`. A public
+directory — anonymous readers, writers identified by a user id and an OAuth
+scope, no `team_id` column anywhere — has no team to scope to, so `ctx.team`
+would be a lie, and **a tenancy assertion that always passes reads exactly like
+one that works**.
 
-The composition root passes no `runtime`, only the handle:
+Say so in the manifest:
 
 ```ts
-configureLaunch({ host: appLaunchHost, data: data.capability("launch") });
+export const playgroundPlugin = definePlugin({
+  id: "playground",
+  title: "Playground leaderboard",
+  tenancy: "none",          // ← the declaration
+  capabilities: ["data"],   // ← the only capability you may then consume
+  schema: () => import("./schema"),
+  deletion: createDeletionHook(),
+});
 ```
 
-This is not a new mechanism — it is the route every plugin's *deletion hook*
-already takes, since a hook runs because a tenant was deleted and has no scope
-left to build a context from. The data boundary is unaffected: the handle is
-still the schema-scoped one `core/data` built after validating the `<id>_`
-prefix.
+and let the composition root pass no `runtime`, only the handle:
 
-Nothing in the manifest records this today; the only signal is the missing
-`runtime`. If a second untenanted plugin appears (`share`, `gamification` and
-`playground` all have user-scoped surfaces), make it explicit in the kernel
-first — that is a core PR, not a migration.
+```ts
+configurePlayground({ host: appPlaygroundHost, data: data.capability("playground") });
+```
+
+Taking the `DataCapability` straight from the wiring slot is not a new
+mechanism — it is the route every plugin's *deletion hook* already takes, since
+a hook runs because a tenant was deleted and has no scope left to build a
+context from.
+
+**`tenancy: "none"` is a narrowing, not an exemption**, and that is the whole
+design. `resolveRegistry` rejects every capability but `data` (the rest are all
+built from a resolved `ContextScope`, which carries a team), rejects `provides`
+(a provider is handed its consumer's team), and rejects job handlers (dispatch
+builds a context). `buildContext` throws `UntenantedPluginError` if anything
+hands one a scope anyway — a composition root wiring a `runtime` in, or the
+plugin calling `contextFor` itself. `data` is the exception because `core/data`
+scopes by *plugin id*: the handle is bound to the `<id>_`-prefixed tables, a
+boundary that holds with or without a team behind it.
+
+What it does not relax: you still owe a `deletion` hook, and it is almost
+always `onUserDeleted` — see §2.1.
+
+> Written up as `launch`'s open question ("the only signal is the missing
+> `runtime`; if a second untenanted plugin appears, make it explicit in the
+> kernel first — that is a core PR, not a migration") and closed as
+> `playground`'s core PR, exactly that way. Worth noting *because it was not
+> blocking*: unlike `onUserDeleted`, the migration would have worked without
+> it. A guard rail bundled into a feature PR is an afterthought or nothing;
+> splitting it out is what made it get written.
 
 ### 2.3 A plugin can persist and still own no table
 
@@ -293,6 +346,32 @@ meant mocking global `fetch` and an undici `Agent`. With `fetchGuarded`
 injected, a stub host is four lines. Be honest about the causation in your
 result doc — dependency injection did that, not the boundary; the boundary is
 what forced the question.
+
+### 3.2 Replacing a join to a core table: check the join type first
+
+`core-scope.md` §6 means every join from a feature query into a core table has
+to go. The column list tells you what to put in the port method. It does not
+tell you what else the join was doing.
+
+| Join | What it was doing | Port method is enough? |
+| --- | --- | --- |
+| `leftJoin(users)` | supplying a column | **yes** — `resolveUserNames`, and rows with no match still render |
+| `innerJoin(users)` | supplying a column **and an existence predicate** | **no** — reproduce the filter too |
+
+`launch`'s comment authors were a `leftJoin`: the port returns names, missing
+users render `null`, done. `playground`'s leaderboard was an `innerJoin`, and a
+row whose user no longer exists used to match nothing and silently vanish.
+Replacing only the name would have put deleted people back on a public board.
+So the host method distinguishes an **absent** user (dropped) from a **present**
+user with `name: null` (kept), and the plugin drops any id the host does not
+return.
+
+Keep the filter even when a deletion hook now reaps those rows — rows orphaned
+*before* the hook existed are exactly the ones that would surface.
+
+The cost of the swap is one batched round trip per call instead of one join.
+Bound it: `playground` pays it at most once per 60s board-cache TTL, over an id
+set already in memory.
 
 ## 4. Wiring — why `Symbol.for` and not a module-level `let`
 

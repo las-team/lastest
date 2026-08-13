@@ -128,6 +128,16 @@ convention, not a check. A future core PR could make it explicit — a `scope:
 it here: it is core, and it is speculative until a second untenanted plugin
 exists.
 
+> **Resolved.** The second untenanted plugin is
+> [`playground`](./playground-migration-result.md), and the field landed first
+> as its own commit (`d26add04`), spelled `tenancy: "team" | "none"`. It went
+> further than proposed here: `resolveRegistry` rejects any capability but
+> `data`, any `provides` and any job handler for such a plugin, and
+> `buildContext` — not just `contextFor` — throws `UntenantedPluginError`,
+> because `dispatch` builds a context too and one guard on the shared path
+> cannot be routed around later. `plugins/launch/src/index.ts` now declares
+> the field; nothing about launch's behaviour changed.
+
 ---
 
 ## 4. `onUserDeleted` — the core PR this needed first
