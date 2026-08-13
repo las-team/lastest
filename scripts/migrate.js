@@ -418,11 +418,14 @@ async function migrateA11yBaselineOwnership() {
   }
 }
 
-// The seven `launch_*` tables became `@lastest/plugin-launch`'s own (RFC §9
+// Person-scoped plugin tables: drop their FKs to `users(id)`.
+//
+// The seven `launch_*` tables became `@lastest/plugin-launch`'s own and
+// `playground_achievements` became `@lastest/plugin-playground`'s (RFC §9
 // phase 4). Nothing about their *shape* changed — same names, same columns, so
-// no backfill and no drop/recreate risk. What changed is that five FKs to
+// no backfill and no drop/recreate risk. What changed is that six FKs to
 // `users(id)` are gone (`core-scope.md` §6: a plugin table carries no FK to a
-// core table), and the rows are reaped by the plugin's `onUserDeleted` hook
+// core table), and the rows are reaped by each plugin's `onUserDeleted` hook
 // instead.
 //
 // This runs BEFORE `drizzle-kit push --force` for one reason: push would drop
@@ -430,10 +433,10 @@ async function migrateA11yBaselineOwnership() {
 // environments because they were created implicitly. Dropping them here by
 // catalogue lookup makes the outcome the same everywhere.
 //
-// FKs *between* the launch tables (`profile_id -> launch_profiles.id`) are
+// FKs *between* a plugin's own tables (`profile_id -> launch_profiles.id`) are
 // deliberately left alone — both sides are plugin-owned, so they break no rule
 // and still cascade.
-async function dropLaunchUserForeignKeys() {
+async function dropPluginUserForeignKeys() {
   if (!process.env.DATABASE_URL) return;
   let sql;
   try {
@@ -449,14 +452,14 @@ async function dropLaunchUserForeignKeys() {
          and ref.relname = 'users'
          and rel.relname in (
            'launch_profiles', 'launch_votes', 'launch_comments',
-           'launch_reactions'
+           'launch_reactions', 'playground_achievements'
          )`;
     for (const { table_name: table, name } of fks) {
       await sql.unsafe(`alter table ${table} drop constraint "${name}"`);
       console.log(`[migrate] ${table}: dropped FK ${name} (-> users)`);
     }
   } catch (e) {
-    console.warn("[migrate] launch FK migration skipped:", e.message);
+    console.warn("[migrate] plugin FK migration skipped:", e.message);
   } finally {
     if (sql) await sql.end();
   }
@@ -466,7 +469,7 @@ async function main() {
   await preCreate();
   await migrateExplorerTables();
   await migrateA11yBaselineOwnership();
-  await dropLaunchUserForeignKeys();
+  await dropPluginUserForeignKeys();
   await nullOrphans();
   await bumpPoolDefaults();
   await ensureUniqueIndexes();

@@ -80,6 +80,7 @@
     "@lastest/plugin-events": "workspace:*",
     "@lastest/plugin-explorer": "workspace:*",
     "@lastest/plugin-launch": "workspace:*",
+    "@lastest/plugin-playground": "workspace:*",
     "@lastest/plugin-rca": "workspace:*",
     "@lastest/pool-service": "workspace:*",
     "@lastest/route-scan": "workspace:*",

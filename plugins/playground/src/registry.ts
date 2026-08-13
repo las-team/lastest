@@ -1,6 +1,10 @@
-// playground-registry.ts — VENDORED from lastest-www. Single source of truth is the frontend
+// registry.ts — VENDORED from lastest-www. Single source of truth is the frontend
 // (`lastest-www:src/lib/playground-achievements.ts` + `src/lib/playground.ts`). Regenerate
 // (don't hand-edit) whenever the frontend registry changes; retire ids, never re-point them.
+// Was `src/lib/playground/registry.ts`; moved verbatim by the plugin migration.
+// It is the reason this feature is cheap to own: points are always taken from
+// here, never from the request body, so the whole scoring rule is one pure
+// module with no dependencies at all.
 // Points = easy 10 / medium 15 / hard 25. Completion bonus per exercise = easy 20 / med 30 / hard 50.
 // 75 achievements / 18 exercises / max 1755 (1175 achievement + 580 completion).
 

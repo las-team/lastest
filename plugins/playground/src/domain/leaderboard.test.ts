@@ -1,17 +1,16 @@
-import { describe, it, expect, vi } from "vitest";
-import type { PlaygroundLeaderboardRow } from "@/lib/db/queries/playground";
+import { describe, it, expect } from "vitest";
 
-// Mock the DB layer — rankBoard is pure, but the module imports the queries
-// barrel (for getBoard) and we don't want a real pg client in unit tests.
-vi.mock("@/lib/db/queries", () => ({
-  getPlaygroundLeaderboardRows: vi.fn(),
-}));
+import { rankBoard, type NamedLeaderboardRow } from "./leaderboard";
 
-import { rankBoard } from "./leaderboard";
+/**
+ * `rankBoard` was always pure, but the test used to `vi.mock("@/lib/db/queries")`
+ * because importing this module pulled the app's shared `db` handle in through
+ * `getBoard`. Inside the package there is nothing to mock: the handle arrives
+ * from the wiring slot, so a test that only exercises the ranking never touches
+ * it. Same assertions, one less lie.
+ */
 
-function row(
-  over: Partial<PlaygroundLeaderboardRow>,
-): PlaygroundLeaderboardRow {
+function row(over: Partial<NamedLeaderboardRow>): NamedLeaderboardRow {
   return {
     userId: "u",
     name: "User",
@@ -87,5 +86,20 @@ describe("playground/leaderboard rankBoard", () => {
       }),
     ]);
     expect(board.map((e) => e.userId)).toEqual(["a", "b"]);
+  });
+
+  it("keeps a null display name rather than dropping the entry", () => {
+    // `resolveUsers` returns a *present* user with `name: null` for someone who
+    // never set one — distinct from an absent user, which `hydrate` drops. The
+    // old `innerJoin` produced exactly this pair too, via `users.name`.
+    const board = rankBoard([
+      row({
+        userId: "nameless",
+        name: null,
+        achievementIds: ["login.signed-in"],
+      }),
+    ]);
+    expect(board).toHaveLength(1);
+    expect(board[0].name).toBeNull();
   });
 });

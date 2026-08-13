@@ -5,6 +5,7 @@ import { designSystemPlugin } from "@lastest/plugin-design-system";
 import { eventsPlugin } from "@lastest/plugin-events";
 import { explorerPlugin } from "@lastest/plugin-explorer";
 import { launchPlugin } from "@lastest/plugin-launch";
+import { playgroundPlugin } from "@lastest/plugin-playground";
 import { rcaPlugin } from "@lastest/plugin-rca";
 import type { resolveRegistry } from "@lastest/kernel";
 
@@ -35,4 +36,5 @@ export const MANIFESTS: Parameters<typeof resolveRegistry>[0] = [
   appMapPlugin,
   launchPlugin,
   apiTestPlugin,
+  playgroundPlugin,
 ];

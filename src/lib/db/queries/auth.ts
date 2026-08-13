@@ -220,17 +220,25 @@ export async function getUserById(id: string) {
 }
 
 /**
- * Display names for a batch of user ids.
+ * The public-facing slice of a batch of user rows.
  *
  * Added for `src/lib/core/launch-host.ts`: the launch board renders comment
  * author names, which used to be a `leftJoin(users, …)` inside the feature's
  * own query module. A plugin may not read a core table (`core-scope.md` §6),
  * so the join became one batched lookup on this side of the boundary.
+ * `src/lib/core/playground-host.ts` is the second caller — it replaced both an
+ * `innerJoin(users)` in the leaderboard aggregate and a per-request
+ * `getUserById`.
+ *
+ * `createdAt` is here for the playground, which clamps a client-reported
+ * achievement timestamp to `[account creation, now]`. Deliberately not
+ * `select()` — everything a board host may hand a plugin is enumerated here,
+ * and email is not on the list.
  */
 export async function getUsersByIds(ids: string[]) {
   if (ids.length === 0) return [];
   return db
-    .select({ id: users.id, name: users.name })
+    .select({ id: users.id, name: users.name, createdAt: users.createdAt })
     .from(users)
     .where(inArray(users.id, ids));
 }

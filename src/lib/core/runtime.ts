@@ -29,6 +29,7 @@ import { configureDesignSystem } from "@lastest/plugin-design-system";
 import { configureEvents } from "@lastest/plugin-events";
 import { configureExplorer } from "@lastest/plugin-explorer";
 import { configureLaunch } from "@lastest/plugin-launch";
+import { configurePlayground } from "@lastest/plugin-playground";
 import { configureRca } from "@lastest/plugin-rca";
 
 import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
@@ -45,6 +46,7 @@ import { appExplorerHost } from "@/lib/core/explorer-host";
 import { createAppJobsHost } from "@/lib/core/jobs-host";
 import { MANIFESTS } from "@/lib/core/manifests";
 import { appLaunchHost } from "@/lib/core/launch-host";
+import { appPlaygroundHost } from "@/lib/core/playground-host";
 import { appRcaHost } from "@/lib/core/rca-host";
 import { appReposHost } from "@/lib/core/repos-host";
 import { appStorageHost } from "@/lib/core/storage-host";
@@ -207,6 +209,13 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
   // build a `ctx` from and nothing to build one for. See
   // `plugins/launch/src/wiring.ts`.
   configureLaunch({ host: appLaunchHost, data: data.capability("launch") });
+  // Likewise untenanted, and now saying so: `tenancy: "none"` in its manifest
+  // is what makes the missing `runtime` here a declared fact rather than an
+  // omission — `buildContext` would refuse to give it a `ctx` at all.
+  configurePlayground({
+    host: appPlaygroundHost,
+    data: data.capability("playground"),
+  });
 
   cached = { runtime, data, registry };
   return runtime;
