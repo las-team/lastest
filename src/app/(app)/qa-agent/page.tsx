@@ -19,6 +19,7 @@ import {
   hasQaAgentAccess,
   qaAgentMinPlanName,
 } from "@/lib/billing/feature-access";
+import { isBillingEnabled } from "@/lib/billing/enabled";
 import { planConfig } from "@/lib/billing/plans";
 import { Bot } from "lucide-react";
 
@@ -33,7 +34,7 @@ export default async function QaAgentPage() {
   // QA Agent is a Pro-tier feature. Gate before anything else so teams below
   // the required plan always land on the upgrade screen (regardless of whether
   // they've connected a repo yet).
-  if (team && !hasQaAgentAccess(team.plan)) {
+  if (team && !hasQaAgentAccess(team.plan, isBillingEnabled())) {
     return (
       <QaAgentUpgradeGate
         currentPlanName={planConfig(team.plan).name}

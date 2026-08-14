@@ -36,6 +36,11 @@ export function ensureSchedulerStarted() {
       console.error("[scheduler] Error processing QA agent triggers:", error);
     }
     try {
+      await processDueExplorerTriggers();
+    } catch (error) {
+      console.error("[scheduler] Error processing explorer triggers:", error);
+    }
+    try {
       await processLaunchCohorts();
     } catch (error) {
       console.error("[scheduler] Error processing launch cohorts:", error);
@@ -159,5 +164,25 @@ async function processDueQaTriggers() {
     }
   } finally {
     qaProcessing = false;
+  }
+}
+
+let explorerProcessing = false;
+
+/** Fire due explorer cron triggers. The dispatch action owns nextRunAt
+ *  advancement, busy-skip, and target-URL resolution. */
+async function processDueExplorerTriggers() {
+  if (explorerProcessing) return;
+  explorerProcessing = true;
+  try {
+    // Import dynamically to avoid circular dependencies (same as QA above).
+    const { dispatchDueExplorerTriggers } =
+      await import("@/server/actions/explorer-agent");
+    const fired = await dispatchDueExplorerTriggers();
+    if (fired > 0) {
+      console.log(`[scheduler] Started ${fired} scheduled explorer session(s)`);
+    }
+  } finally {
+    explorerProcessing = false;
   }
 }

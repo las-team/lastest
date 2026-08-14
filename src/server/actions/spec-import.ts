@@ -31,7 +31,7 @@ import { extractText } from "unpdf";
 import mammoth from "mammoth";
 import { PLACEHOLDER_CODE } from "@/lib/constants/placeholder";
 import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
-import { claimEmbeddedBrowserForAgent } from "./ai";
+import { claimEmbeddedBrowserForAgent } from "@/lib/eb/claim-for-agent";
 import { releasePoolEB } from "./embedded-sessions";
 
 // ============================================
@@ -1452,7 +1452,7 @@ export async function validateTestWithMCP(
   testId: string,
   baseUrl: string,
 ): Promise<ValidateTestResponse> {
-  await requireRepoAccess(repositoryId);
+  const { team } = await requireRepoAccess(repositoryId);
   try {
     // Check if baseUrl is localhost
     const url = new URL(baseUrl);
@@ -1493,9 +1493,10 @@ If fixes are needed, return the FIXED code.
 
 Return ONLY the code (fixed or original), no explanations.`;
 
-    const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-      () => undefined,
-    );
+    const eb = await claimEmbeddedBrowserForAgent(
+      { billTeamId: team.id },
+      5 * 60 * 1000,
+    ).catch(() => undefined);
     if (!eb) {
       return {
         success: false,

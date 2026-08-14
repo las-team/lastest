@@ -41,6 +41,7 @@ import {
   XCircle,
   Zap,
   Bot,
+  Compass,
   Eye,
   Server,
   Brain,
@@ -143,6 +144,17 @@ export function AISettingsCard({
     settings.pwAgentTimeout ?? 300000,
   );
 
+  // Explorer agent settings
+  const [explorerMaxIterations, setExplorerMaxIterations] = useState(
+    settings.explorerMaxIterations ?? DEFAULT_AI_SETTINGS.explorerMaxIterations,
+  );
+  const [explorerStyleRotation, setExplorerStyleRotation] = useState(
+    settings.explorerStyleRotation || DEFAULT_AI_SETTINGS.explorerStyleRotation,
+  );
+  const [explorerModel, setExplorerModel] = useState(
+    settings.explorerModel || "",
+  );
+
   // AI Diffing settings
   const [aiDiffingEnabled, setAiDiffingEnabled] = useState(
     settings.aiDiffingEnabled ?? false,
@@ -194,6 +206,13 @@ export function AISettingsCard({
     aiDiffingOllamaModel: settings.aiDiffingOllamaModel || "",
     pwAgentModel: settings.pwAgentModel || "",
     pwAgentTimeout: settings.pwAgentTimeout ?? 300000,
+    explorerMaxIterations:
+      settings.explorerMaxIterations ??
+      DEFAULT_AI_SETTINGS.explorerMaxIterations,
+    explorerStyleRotation:
+      settings.explorerStyleRotation ||
+      DEFAULT_AI_SETTINGS.explorerStyleRotation,
+    explorerModel: settings.explorerModel || "",
   });
 
   const doSave = useCallback(() => {
@@ -226,6 +245,9 @@ export function AISettingsCard({
           aiDiffingOllamaModel: aiDiffingOllamaModel || null,
           pwAgentModel: pwAgentModel || null,
           pwAgentTimeout,
+          explorerMaxIterations,
+          explorerStyleRotation: explorerStyleRotation || null,
+          explorerModel: explorerModel || null,
         });
         toast.success("AI settings saved");
       } catch (err) {
@@ -257,6 +279,9 @@ export function AISettingsCard({
     aiDiffingOllamaModel,
     pwAgentModel,
     pwAgentTimeout,
+    explorerMaxIterations,
+    explorerStyleRotation,
+    explorerModel,
   ]);
 
   // Auto-save with debounce - only when values differ from original props
@@ -283,7 +308,10 @@ export function AISettingsCard({
       aiDiffingOllamaBaseUrl !== orig.aiDiffingOllamaBaseUrl ||
       aiDiffingOllamaModel !== orig.aiDiffingOllamaModel ||
       pwAgentModel !== orig.pwAgentModel ||
-      pwAgentTimeout !== orig.pwAgentTimeout;
+      pwAgentTimeout !== orig.pwAgentTimeout ||
+      explorerMaxIterations !== orig.explorerMaxIterations ||
+      explorerStyleRotation !== orig.explorerStyleRotation ||
+      explorerModel !== orig.explorerModel;
 
     if (!hasChanges) return;
 
@@ -322,6 +350,9 @@ export function AISettingsCard({
     aiDiffingOllamaModel,
     pwAgentModel,
     pwAgentTimeout,
+    explorerMaxIterations,
+    explorerStyleRotation,
+    explorerModel,
     doSave,
   ]);
 
@@ -802,6 +833,63 @@ export function AISettingsCard({
               />
               <p className="text-xs text-muted-foreground">
                 Maximum time for agent operations. Default: 300s (5 min).
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Explorer Agent Section */}
+        <div className="border-t pt-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Compass className="w-4 h-4 text-orange-600" />
+            <h3 className="font-medium">Explorer Agent</h3>
+          </div>
+          <p className="text-xs text-muted-foreground mb-4">
+            Defaults for autonomous exploratory-testing runs (the /explorer
+            page). The explorer makes many small AI calls, so a cheaper, faster
+            model is often the right choice here.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="space-y-2">
+              <Label htmlFor="explorerMaxIterations">Max iterations</Label>
+              <Input
+                id="explorerMaxIterations"
+                type="number"
+                min={1}
+                max={12}
+                value={explorerMaxIterations}
+                onChange={(e) =>
+                  setExplorerMaxIterations(
+                    Math.max(1, Math.min(12, Number(e.target.value) || 1)),
+                  )
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Research→plan→act→analyze loops per run (budget).
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="explorerStyleRotation">Style rotation</Label>
+              <Input
+                id="explorerStyleRotation"
+                value={explorerStyleRotation}
+                onChange={(e) => setExplorerStyleRotation(e.target.value)}
+                placeholder="normal,curious,psycho"
+              />
+              <p className="text-xs text-muted-foreground">
+                Comma list of planning styles cycled per iteration.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="explorerModel">Model override</Label>
+              <Input
+                id="explorerModel"
+                value={explorerModel}
+                onChange={(e) => setExplorerModel(e.target.value)}
+                placeholder="empty = same as test generation"
+              />
+              <p className="text-xs text-muted-foreground">
+                Model for the explorer loop on the active provider.
               </p>
             </div>
           </div>

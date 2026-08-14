@@ -28,7 +28,7 @@ import { chromium } from "playwright";
 import { executeSetupViaRunner } from "@/lib/execution/executor";
 import { classifyTemplate } from "@/lib/templates/classifier";
 import { gatherCodebaseIntelligence } from "@/lib/ai/codebase-intelligence";
-import { claimEmbeddedBrowserForAgent } from "@/server/actions/ai";
+import { claimEmbeddedBrowserForAgent } from "@/lib/eb/claim-for-agent";
 import { releasePoolEB } from "@/server/actions/embedded-sessions";
 import type { CodebaseIntelligence } from "@/lib/ai/codebase-intelligence";
 import type { CodebaseIntelligenceContext } from "@/lib/ai/types";
@@ -658,7 +658,7 @@ async function testLoginScript(
 async function runEnvSetup(
   sessionId: string,
   repositoryId: string,
-  _teamId: string,
+  teamId: string,
   signal: AbortSignal,
 ) {
   await setStepActive(sessionId, "env_setup");
@@ -796,16 +796,20 @@ async function runEnvSetup(
 
   // Claim an EB from the pool — login detection + script test both run against
   // the embedded browser via CDP, never a host-local chromium.
-  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
-    queries
-      .updateAgentSession(sessionId, {
-        metadata: {
-          ...(session?.metadata ?? {}),
-          queuedForBrowser: true,
-        } as Record<string, unknown>,
-      })
-      .catch(() => {});
-  });
+  const eb = await claimEmbeddedBrowserForAgent(
+    { billTeamId: teamId },
+    5 * 60 * 1000,
+    () => {
+      queries
+        .updateAgentSession(sessionId, {
+          metadata: {
+            ...(session?.metadata ?? {}),
+            queuedForBrowser: true,
+          } as Record<string, unknown>,
+        })
+        .catch(() => {});
+    },
+  );
 
   if (!eb) {
     await updateSubsteps(sessionId, "env_setup", [
@@ -2462,9 +2466,10 @@ async function runFixTests(
           );
 
           // Claim an EB for this healer call
-          const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-            () => undefined,
-          );
+          const eb = await claimEmbeddedBrowserForAgent(
+            { billTeamId: teamId },
+            5 * 60 * 1000,
+          ).catch(() => undefined);
           let healResult: { success: boolean; code?: string; error?: string };
           if (!eb) {
             healResult = {
@@ -3272,9 +3277,10 @@ export async function rerunPlanner(
 
       const { runDeepDiveExploration } =
         await import("@/lib/playwright/planner-agent");
-      const diveEB = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-        () => undefined,
-      );
+      const diveEB = await claimEmbeddedBrowserForAgent(
+        { billTeamId: team.id },
+        5 * 60 * 1000,
+      ).catch(() => undefined);
       if (!diveEB) {
         throw new Error(
           "No embedded browsers available — all browsers are busy. Please try again later.",

@@ -34,27 +34,44 @@ import {
   Minimize2,
   Lock,
   RefreshCw,
-  ExternalLink,
   ImageOff,
-  Camera,
   X,
   Waypoints,
   Home,
   Filter,
   Plus,
   RotateCcw,
+  PanelLeft,
+  Radar,
+  Square,
 } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   getAppMap,
+  getAppFlows,
   requestCoverage,
+  startExploration,
   type GetAppMapResult,
+  type ActiveExploration,
+  type StartExplorationInput,
 } from "@/server/actions/app-map";
+import { cancelQaAgent } from "@/server/actions/qa-agent";
 import type {
   AppMapGraph,
   AppMapNode,
   AppMapEdge,
   CoverageStatus,
 } from "@/lib/app-map/build-map";
+import type { AppFlow } from "@/lib/app-map/flows";
+import { buildSpanningTree } from "@/lib/app-map/hierarchy";
+import { COVERAGE_COLOR, COVERAGE_LABEL } from "./app-map-shared";
+import { NodeDetailPanel } from "./node-detail-panel";
+import { TreeOutline } from "./tree-outline";
+import { ScreensGallery } from "./screens-gallery";
+import { FlowsView } from "./flows-view";
+import { FlowPlayer } from "./flow-player";
+import { ExploreDialog } from "./explore-dialog";
+import { ExploreProgressPanel } from "./explore-progress-panel";
 
 // ── Layout constants ──────────────────────────────────────────────────────────
 // Thumbnail is 16:9 (matches the default 1920×1080 run viewport), so
@@ -62,16 +79,7 @@ import type {
 const NODE_W = 248;
 const NODE_H = 222;
 
-const COVERAGE_COLOR: Record<CoverageStatus, string> = {
-  covered: "#3f9142",
-  planned: "#E09836",
-  uncovered: "#9ca3af",
-};
-const COVERAGE_LABEL: Record<CoverageStatus, string> = {
-  covered: "Covered",
-  planned: "Planned",
-  uncovered: "No coverage",
-};
+type MapView = "map" | "screens" | "flows";
 
 function edgeStyle(kind: AppMapEdge["kind"]): React.CSSProperties {
   if (kind === "redirect")
@@ -293,6 +301,10 @@ interface AppMapClientProps {
   repositoryId: string;
   branch: string;
   qaAgentEnabled: boolean;
+  /** Plan cap for the Explore dialog's explorers slider. */
+  maxExplorers: number;
+  /** In-flight exploration (reload-resume) — null when none is running. */
+  activeExploration: ActiveExploration | null;
 }
 
 export function AppMapClient({
@@ -301,6 +313,8 @@ export function AppMapClient({
   repositoryId,
   branch,
   qaAgentEnabled,
+  maxExplorers,
+  activeExploration,
 }: AppMapClientProps) {
   const [graph, setGraph] = useState<AppMapGraph | null>(initialGraph);
   const [selected, setSelected] = useState<AppMapNode | null>(null);
@@ -310,13 +324,17 @@ export function AppMapClient({
   const [refreshing, startRefresh] = useTransition();
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // ── Persisted UI state (filters + dragged card positions + viewport),
-  // per repo. Loaded after mount (not in the initializer) to keep SSR/client
-  // HTML equal; the canvas renders only once `hydrated` so the saved viewport
-  // applies at React Flow init instead of jumping after fitView.
+  // ── Persisted UI state (view tab + filters + entry root + outline + dragged
+  // card positions + viewport), per repo. Loaded after mount (not in the
+  // initializer) to keep SSR/client HTML equal; the canvas renders only once
+  // `hydrated` so the saved viewport applies at React Flow init instead of
+  // jumping after fitView.
   const stateStorageKey = `app-map:state:${repositoryId}`;
   const legacyFilterKey = `app-map:filters:${repositoryId}`;
+  const [view, setView] = useState<MapView>("map");
   const [excludePatterns, setExcludePatterns] = useState<string[]>([]);
+  const [entryRootId, setEntryRootId] = useState<string | null>(null);
+  const [outlineOpen, setOutlineOpen] = useState(false);
   const [positionOverrides, setPositionOverrides] = useState<
     Record<string, { x: number; y: number }>
   >({});
@@ -346,6 +364,19 @@ export function AppMapClient({
         ) {
           viewportRef.current = parsed.viewport;
         }
+        if (
+          parsed?.view === "map" ||
+          parsed?.view === "screens" ||
+          parsed?.view === "flows"
+        ) {
+          setView(parsed.view);
+        }
+        if (typeof parsed?.entryRoot === "string") {
+          setEntryRootId(parsed.entryRoot);
+        }
+        if (typeof parsed?.outline === "boolean") {
+          setOutlineOpen(parsed.outline);
+        }
       } else {
         // Migrate the earlier filters-only key.
         const legacy = localStorage.getItem(legacyFilterKey);
@@ -365,30 +396,34 @@ export function AppMapClient({
     setHydrated(true);
   }, [stateStorageKey, legacyFilterKey]);
 
-  const persistState = useCallback(
-    (
-      filters: string[],
-      positions: Record<string, { x: number; y: number }>,
-    ) => {
-      try {
-        localStorage.setItem(
-          stateStorageKey,
-          JSON.stringify({
-            filters,
-            positions,
-            viewport: viewportRef.current,
-          }),
-        );
-      } catch {
-        // storage full/blocked — state still works for the session
-      }
-    },
-    [stateStorageKey],
-  );
+  const persistState = useCallback(() => {
+    try {
+      localStorage.setItem(
+        stateStorageKey,
+        JSON.stringify({
+          filters: excludePatterns,
+          positions: positionOverrides,
+          viewport: viewportRef.current,
+          view,
+          entryRoot: entryRootId,
+          outline: outlineOpen,
+        }),
+      );
+    } catch {
+      // storage full/blocked — state still works for the session
+    }
+  }, [
+    stateStorageKey,
+    excludePatterns,
+    positionOverrides,
+    view,
+    entryRootId,
+    outlineOpen,
+  ]);
   useEffect(() => {
     if (!hydrated) return;
-    persistState(excludePatterns, positionOverrides);
-  }, [excludePatterns, positionOverrides, hydrated, persistState]);
+    persistState();
+  }, [hydrated, persistState]);
 
   const addPattern = useCallback((pattern: string) => {
     const cleaned = pattern.trim();
@@ -402,11 +437,12 @@ export function AppMapClient({
     setExcludePatterns((prev) => prev.filter((p) => p !== pattern));
   }, []);
 
-  /** Reset button: clear filters, dragged positions, and the saved viewport,
-   *  back to the auto layout + fit view. */
+  /** Reset button: clear filters, dragged positions, the entry root, and the
+   *  saved viewport, back to the auto layout + fit view. */
   const resetView = useCallback(() => {
     setExcludePatterns([]);
     setPositionOverrides({});
+    setEntryRootId(null);
     viewportRef.current = null;
     try {
       localStorage.removeItem(stateStorageKey);
@@ -479,6 +515,135 @@ export function AppMapClient({
     });
   }, [branch]);
 
+  // ── Flows (lazy — fetched when the Flows tab or a detail panel first needs
+  // them; cached for the rest of the visit) ──
+  const [flows, setFlows] = useState<AppFlow[] | null>(null);
+  const [flowsLoading, setFlowsLoading] = useState(false);
+  const flowsRequested = useRef(false);
+  const ensureFlows = useCallback(() => {
+    if (flowsRequested.current) return;
+    flowsRequested.current = true;
+    setFlowsLoading(true);
+    getAppFlows({ branch })
+      .then((r) => setFlows(r.ok ? r.flows : []))
+      .catch(() => {
+        setFlows([]);
+      })
+      .finally(() => setFlowsLoading(false));
+  }, [branch]);
+  useEffect(() => {
+    if (view === "flows" || selected) ensureFlows();
+  }, [view, selected, ensureFlows]);
+
+  // ── Exploration (QA agent mode = "explore") ──
+  // While a run is live, an SSE subscription to the activity feed bumps the
+  // screens-found counter on every map:page_discovered event and debounces a
+  // getAppMap refetch (4s) so the canvas grows as the explorers crawl.
+  const [exploringSessionId, setExploringSessionId] = useState<string | null>(
+    activeExploration?.sessionId ?? null,
+  );
+  const [exploreCount, setExploreCount] = useState(
+    activeExploration?.explore?.pagesDiscovered ?? 0,
+  );
+  const [exploreOpen, setExploreOpen] = useState(false);
+  const [panelHidden, setPanelHidden] = useState(false);
+
+  useEffect(() => {
+    if (!exploringSessionId) return;
+    const es = new EventSource(
+      `/api/activity-feed?repo=${encodeURIComponent(repositoryId)}`,
+    );
+    let refetchTimer: ReturnType<typeof setTimeout> | null = null;
+    let closed = false;
+    const scheduleRefetch = () => {
+      if (refetchTimer) return;
+      refetchTimer = setTimeout(async () => {
+        refetchTimer = null;
+        try {
+          const result = await getAppMap({ branch });
+          if (!closed && result.ok) setGraph(result.graph);
+        } catch {
+          // transient — the next event retries
+        }
+      }, 4000);
+    };
+    es.onmessage = (e) => {
+      try {
+        const evt = JSON.parse(e.data) as {
+          sessionId?: string | null;
+          eventType?: string;
+        };
+        if (evt.sessionId !== exploringSessionId) return;
+        if (evt.eventType === "map:page_discovered") {
+          setExploreCount((n) => n + 1);
+          scheduleRefetch();
+        } else if (
+          evt.eventType === "session:complete" ||
+          evt.eventType === "session:error"
+        ) {
+          setExploringSessionId(null);
+          scheduleRefetch();
+        }
+      } catch {
+        // non-JSON keepalives
+      }
+    };
+    return () => {
+      closed = true;
+      es.close();
+      if (refetchTimer) clearTimeout(refetchTimer);
+    };
+  }, [exploringSessionId, repositoryId, branch]);
+
+  const launchExploration = useCallback(
+    async (input: StartExplorationInput) => {
+      try {
+        const { sessionId } = await startExploration(input);
+        setExploreCount(0);
+        setPanelHidden(false);
+        setExploringSessionId(sessionId);
+        toast.success("Exploration started", {
+          description: "New screens will appear on the map as they're found",
+        });
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Could not start exploring",
+        );
+        throw err;
+      }
+    },
+    [],
+  );
+
+  const stopExploration = useCallback(async () => {
+    if (!exploringSessionId) return;
+    try {
+      await cancelQaAgent(exploringSessionId);
+      setExploringSessionId(null);
+      toast.message("Exploration stopped");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Could not stop the exploration",
+      );
+    }
+  }, [exploringSessionId]);
+
+  // Step-by-step flow player (covers the whole container while open).
+  const [playing, setPlaying] = useState<{
+    flowId: string;
+    stepIndex: number;
+  } | null>(null);
+  const openFlow = useCallback(
+    (flowId: string, stepIndex: number) => {
+      ensureFlows();
+      setPlaying({ flowId, stepIndex });
+    },
+    [ensureFlows],
+  );
+  const playingFlow = playing
+    ? (flows?.find((f) => f.id === playing.flowId) ?? null)
+    : null;
+
   // Apply exclude filters, then drop edges whose endpoints were hidden.
   const filtered = useMemo(() => {
     const allNodes = graph?.nodes ?? [];
@@ -502,14 +667,47 @@ export function AppMapClient({
     [graph, excludePatterns],
   );
 
-  const rootId = useMemo(
-    () => pickRootId(filtered.nodes, filtered.edges),
+  const nodesById = useMemo(
+    () => new Map(filtered.nodes.map((n) => [n.id, n])),
     [filtered],
   );
-  const positions = useMemo(
-    () => computePositions(filtered.nodes, filtered.edges),
-    [filtered],
+
+  // Effective root: the user-chosen entry root (if still visible) or the
+  // heuristic pick. An explicit entry root also switches the layout to a
+  // clean single-rooted hierarchy (spanning-tree edges only).
+  const rootId = useMemo(() => {
+    if (entryRootId && nodesById.has(entryRootId)) return entryRootId;
+    return pickRootId(filtered.nodes, filtered.edges);
+  }, [entryRootId, nodesById, filtered]);
+
+  const tree = useMemo(
+    () =>
+      rootId ? buildSpanningTree(filtered.nodes, filtered.edges, rootId) : null,
+    [filtered, rootId],
   );
+  const hierarchyActive = !!entryRootId && !!tree;
+
+  const positions = useMemo(() => {
+    if (!hierarchyActive || !tree) {
+      return computePositions(filtered.nodes, filtered.edges);
+    }
+    // Hierarchy layout: dagre sees only the spanning tree; unreachable nodes
+    // park in a bottom "unlinked" rank.
+    const reachable = filtered.nodes.filter((n) => tree.parent.has(n.id));
+    const treeEdges = filtered.edges.filter((e) => tree.treeEdgeIds.has(e.id));
+    const pos = computePositions(reachable, treeEdges);
+    let maxY = 0;
+    for (const p of pos.values()) maxY = Math.max(maxY, p.y);
+    const startY = maxY + NODE_H + 120;
+    const perRow = 6;
+    tree.unreachable.forEach((id, i) => {
+      pos.set(id, {
+        x: 48 + (i % perRow) * (NODE_W + 48),
+        y: startY + Math.floor(i / perRow) * (NODE_H + 48),
+      });
+    });
+    return pos;
+  }, [filtered, hierarchyActive, tree]);
 
   const rfNodes: Node[] = useMemo(
     () =>
@@ -546,18 +744,25 @@ export function AppMapClient({
 
   const rfEdges: Edge[] = useMemo(
     () =>
-      filtered.edges.map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        animated: e.kind === "redirect",
-        style: edgeStyle(e.kind),
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color: edgeStyle(e.kind).stroke as string,
-        },
-      })),
-    [filtered],
+      filtered.edges.map((e) => {
+        // In hierarchy mode, non-tree edges stay visible but recede.
+        const dimmed = hierarchyActive && tree && !tree.treeEdgeIds.has(e.id);
+        const style = dimmed
+          ? { ...edgeStyle(e.kind), opacity: 0.25, strokeDasharray: "4 4" }
+          : edgeStyle(e.kind);
+        return {
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          animated: !dimmed && e.kind === "redirect",
+          style,
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: edgeStyle(e.kind).stroke as string,
+          },
+        };
+      }),
+    [filtered, hierarchyActive, tree],
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
@@ -569,6 +774,36 @@ export function AppMapClient({
     (_: unknown, n: Node) => setSelected((n.data as PageNodeData).node),
     [],
   );
+
+  /** Outline row click: select the node and center the canvas on it. */
+  const onOutlineSelect = useCallback(
+    (nodeId: string) => {
+      const node = nodesById.get(nodeId);
+      if (!node) return;
+      setSelected(node);
+      const pos = positionOverrides[nodeId] ?? positions.get(nodeId);
+      if (pos) {
+        rfInstanceRef.current?.setCenter(
+          pos.x + NODE_W / 2,
+          pos.y + NODE_H / 2,
+          { zoom: 0.75, duration: 300 },
+        );
+      }
+    },
+    [nodesById, positions, positionOverrides],
+  );
+
+  const onSetEntryRoot = useCallback((nodeId: string | null) => {
+    setEntryRootId(nodeId);
+    if (nodeId) {
+      // The layout is about to change wholesale — dragged positions from the
+      // free-form layout would fight the hierarchy.
+      setPositionOverrides({});
+      requestAnimationFrame(() => {
+        rfInstanceRef.current?.fitView({ padding: 0.15 });
+      });
+    }
+  }, []);
 
   if (!graph) {
     return (
@@ -588,12 +823,26 @@ export function AppMapClient({
   ).length;
 
   return (
-    <div ref={containerRef} className="relative flex-1 min-h-0 bg-background">
-      {/* Toolbar */}
-      <div className="absolute left-3 top-3 z-10 flex items-center gap-2 rounded-lg border bg-card/95 px-3 py-2 shadow-sm backdrop-blur">
-        <Waypoints className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm font-semibold">App Map</span>
-        <span className="text-xs text-muted-foreground">
+    <div
+      ref={containerRef}
+      className="relative flex flex-1 min-h-0 flex-col bg-background"
+    >
+      {/* View tabs */}
+      <div className="flex items-center gap-3 border-b bg-card px-3 py-1.5">
+        <Tabs value={view} onValueChange={(v) => setView(v as MapView)}>
+          <TabsList className="h-8">
+            <TabsTrigger value="map" className="text-xs">
+              Map
+            </TabsTrigger>
+            <TabsTrigger value="screens" className="text-xs">
+              Screens
+            </TabsTrigger>
+            <TabsTrigger value="flows" className="text-xs">
+              Flows
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <span className="hidden text-xs text-muted-foreground sm:block">
           {filtered.nodes.length} pages · {coveredCount} covered ·{" "}
           {uncoveredCount} uncovered
           {filtered.hiddenCount > 0 && ` · ${filtered.hiddenCount} hidden`}
@@ -601,368 +850,341 @@ export function AppMapClient({
         <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
           {graph.branch}
         </span>
-      </div>
-
-      {/* Legend + actions */}
-      <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
-        <div className="hidden items-center gap-2 rounded-lg border bg-card/95 px-3 py-2 text-[11px] shadow-sm backdrop-blur sm:flex">
-          {(["covered", "planned", "uncovered"] as CoverageStatus[]).map(
-            (c) => (
-              <span key={c} className="flex items-center gap-1">
-                <span
-                  className="h-2.5 w-2.5 rounded-full"
-                  style={{ backgroundColor: COVERAGE_COLOR[c] }}
-                />
-                {COVERAGE_LABEL[c]}
-              </span>
-            ),
-          )}
-        </div>
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => setFilterOpen((o) => !o)}
-            className={`flex items-center gap-1 rounded-lg border bg-card/95 px-2.5 py-2 text-xs font-medium shadow-sm backdrop-blur hover:bg-muted ${
-              excludePatterns.length > 0 ? "text-primary border-primary/40" : ""
-            }`}
-            title="Filter pages"
-          >
-            <Filter className="h-4 w-4" />
-            {excludePatterns.length > 0 && (
-              <span className="rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground">
-                {excludePatterns.length}
-              </span>
-            )}
-          </button>
-
-          {filterOpen && (
-            <div className="absolute right-0 top-full z-20 mt-2 w-72 rounded-lg border bg-card p-3 shadow-xl">
-              <div className="mb-2 text-xs font-semibold">Hide pages</div>
-              <form
-                className="flex gap-1.5"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  addPattern(patternDraft);
-                }}
+        <div className="ml-auto flex items-center gap-2">
+          {exploringSessionId ? (
+            <div className="flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/5 px-2.5 py-1 text-xs">
+              <Radar className="h-3.5 w-3.5 animate-pulse text-primary" />
+              <button
+                type="button"
+                onClick={() => setPanelHidden((h) => !h)}
+                className="font-medium text-primary hover:underline"
+                title={
+                  panelHidden ? "Show progress panel" : "Hide progress panel"
+                }
               >
-                <input
-                  value={patternDraft}
-                  onChange={(e) => setPatternDraft(e.target.value)}
-                  placeholder="/r/*"
-                  className="h-7 min-w-0 flex-1 rounded-md border bg-background px-2 font-mono text-xs outline-none focus:ring-1 focus:ring-ring"
-                />
-                <button
-                  type="submit"
-                  disabled={!patternDraft.trim()}
-                  className="flex h-7 items-center gap-1 rounded-md border bg-muted px-2 text-xs font-medium hover:bg-muted/70 disabled:opacity-50"
-                >
-                  <Plus className="h-3 w-3" /> Add
-                </button>
-              </form>
-              <p className="mt-1.5 text-[10px] text-muted-foreground">
-                Glob patterns against the page path — <code>*</code> matches
-                anything.
-              </p>
-
-              {excludePatterns.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1">
-                  {excludePatterns.map((p) => (
-                    <button
-                      key={p}
-                      type="button"
-                      onClick={() => removePattern(p)}
-                      className="group flex items-center gap-1 rounded-full border bg-muted px-2 py-0.5 font-mono text-[11px] hover:border-destructive/50"
-                      title="Remove filter"
-                    >
-                      {p}
-                      <X className="h-3 w-3 text-muted-foreground group-hover:text-destructive" />
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {suggestions.length > 0 && (
-                <div className="mt-2">
-                  <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                    Suggested
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {suggestions.map((p) => (
-                      <button
-                        key={p}
-                        type="button"
-                        onClick={() => addPattern(p)}
-                        className="flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 font-mono text-[11px] text-muted-foreground hover:bg-muted"
-                      >
-                        <Plus className="h-3 w-3" /> {p}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {filtered.hiddenCount > 0 && (
-                <div className="mt-2 text-[11px] text-muted-foreground">
-                  {filtered.hiddenCount} page
-                  {filtered.hiddenCount === 1 ? "" : "s"} hidden
-                </div>
-              )}
+                Exploring…
+              </button>
+              <span className="text-muted-foreground">
+                {exploreCount} screen{exploreCount === 1 ? "" : "s"} found
+              </span>
+              <button
+                type="button"
+                onClick={stopExploration}
+                className="flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-medium hover:bg-muted"
+                title="Stop the exploration"
+              >
+                <Square className="h-3 w-3" /> Stop
+              </button>
             </div>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={resetView}
-          className="flex items-center gap-1 rounded-lg border bg-card/95 px-2.5 py-2 text-xs font-medium shadow-sm backdrop-blur hover:bg-muted"
-          title="Reset view — clears filters, moved cards, and zoom"
-        >
-          <RotateCcw className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          onClick={refresh}
-          disabled={refreshing}
-          className="flex items-center gap-1 rounded-lg border bg-card/95 px-2.5 py-2 text-xs font-medium shadow-sm backdrop-blur hover:bg-muted disabled:opacity-60"
-          title="Rebuild the map"
-        >
-          <RefreshCw
-            className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
-          />
-        </button>
-        <button
-          type="button"
-          onClick={toggleFullscreen}
-          className="flex items-center gap-1 rounded-lg border bg-card/95 px-2.5 py-2 text-xs font-medium shadow-sm backdrop-blur hover:bg-muted"
-          title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
-        >
-          {isFullscreen ? (
-            <Minimize2 className="h-4 w-4" />
           ) : (
-            <Maximize2 className="h-4 w-4" />
-          )}
-        </button>
-      </div>
-
-      {hydrated && (
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onNodeClick={onNodeClick}
-          nodeTypes={nodeTypes}
-          nodesDraggable
-          onInit={(instance) => {
-            rfInstanceRef.current = instance;
-          }}
-          // Restore the last visit's pan/zoom; fall back to fitting the graph.
-          fitView={!viewportRef.current}
-          defaultViewport={viewportRef.current ?? undefined}
-          onMoveEnd={(_, viewport) => {
-            viewportRef.current = viewport;
-            persistState(excludePatterns, positionOverrides);
-          }}
-          onNodeDragStop={(_, node) => {
-            setPositionOverrides((prev) => ({
-              ...prev,
-              [node.id]: { x: node.position.x, y: node.position.y },
-            }));
-          }}
-          minZoom={0.05}
-          maxZoom={2}
-          proOptions={{ hideAttribution: true }}
-        >
-          <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
-          <Controls showInteractive={false} />
-          <MiniMap
-            pannable
-            zoomable
-            nodeColor={(n) =>
-              COVERAGE_COLOR[
-                ((n.data as PageNodeData)?.node?.coverageStatus ??
-                  "uncovered") as CoverageStatus
-              ]
-            }
-          />
-        </ReactFlow>
-      )}
-
-      {selected && (
-        <NodeDetailPanel
-          node={selected}
-          queued={queued.has(selected.path)}
-          requesting={requesting === selected.path}
-          qaAgentEnabled={qaAgentEnabled}
-          onRequestCoverage={onRequestCoverage}
-          onClose={() => setSelected(null)}
-        />
-      )}
-    </div>
-  );
-}
-
-// ── Detail panel (in-container so it renders in fullscreen too) ───────────────
-function NodeDetailPanel({
-  node,
-  queued,
-  requesting,
-  qaAgentEnabled,
-  onRequestCoverage,
-  onClose,
-}: {
-  node: AppMapNode;
-  queued: boolean;
-  requesting: boolean;
-  qaAgentEnabled: boolean;
-  onRequestCoverage: (node: AppMapNode) => void;
-  onClose: () => void;
-}) {
-  const covered = node.coverageStatus === "covered";
-  return (
-    <div className="absolute right-0 top-0 z-20 flex h-full w-80 flex-col border-l bg-card shadow-xl">
-      <div className="flex items-start justify-between gap-2 border-b p-3">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold">
-            {node.title ?? node.path}
-          </div>
-          <div className="truncate font-mono text-[11px] text-muted-foreground">
-            {node.path}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded p-1 text-muted-foreground hover:bg-muted"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-
-      <div className="flex-1 space-y-3 overflow-y-auto p-3 text-sm">
-        {node.screenshot ? (
-          <a
-            href={`/api/media${node.screenshot.path}`}
-            target="_blank"
-            rel="noreferrer"
-            className="block overflow-hidden rounded-md border"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={`/api/media${node.screenshot.path}`}
-              alt={node.path}
-              className="w-full object-cover"
-            />
-          </a>
-        ) : (
-          <div className="flex h-32 flex-col items-center justify-center gap-1 rounded-md border bg-muted text-muted-foreground">
-            <ImageOff className="h-6 w-6" />
-            <span className="text-xs">No screenshot captured yet</span>
-          </div>
-        )}
-
-        <Row label="Coverage">
-          <span
-            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium text-white"
-            style={{ backgroundColor: COVERAGE_COLOR[node.coverageStatus] }}
-          >
-            {COVERAGE_LABEL[node.coverageStatus]}
-          </span>
-        </Row>
-
-        <Row label="URL">
-          <a
-            href={node.url}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 break-all text-primary hover:underline"
-          >
-            {node.url} <ExternalLink className="h-3 w-3 shrink-0" />
-          </a>
-        </Row>
-
-        <Row label="Sources">
-          <div className="flex flex-wrap gap-1">
-            {node.sources.map((s) => (
-              <span
-                key={s}
-                className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground"
-              >
-                {s}
-              </span>
-            ))}
-            {node.isExtraPath && (
-              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] uppercase text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
-                extra path
-              </span>
-            )}
-          </div>
-        </Row>
-
-        {node.area && <Row label="Area">{node.area}</Row>}
-
-        {node.screenshot?.testName && (
-          <Row label="Covered by">
-            <span className="inline-flex items-center gap-1">
-              <Camera className="h-3 w-3" /> {node.screenshot.testName}
-            </span>
-          </Row>
-        )}
-
-        {node.apiEndpoints.length > 0 && (
-          <Row label="API calls">
-            <div className="space-y-0.5 font-mono text-[11px] text-muted-foreground">
-              {node.apiEndpoints.slice(0, 12).map((ep, i) => (
-                <div key={i} className="truncate">
-                  <span className="text-foreground">{ep.method}</span> {ep.path}
-                </div>
-              ))}
-            </div>
-          </Row>
-        )}
-      </div>
-
-      {!covered && (
-        <div className="border-t p-3">
-          {qaAgentEnabled ? (
             <button
               type="button"
-              disabled={queued || requesting}
-              onClick={() => onRequestCoverage(node)}
-              className="w-full rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+              onClick={() => setExploreOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
             >
-              {queued
-                ? "Queued for QA agent"
-                : requesting
-                  ? "Queuing…"
-                  : "Ask QA agent to cover this page"}
+              <Radar className="h-3.5 w-3.5" /> Explore app
+              {!qaAgentEnabled && <Lock className="h-3 w-3 opacity-70" />}
             </button>
-          ) : (
-            <a
-              href="/settings"
-              className="flex w-full items-center justify-center gap-1 rounded-md border bg-muted px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted/70"
-            >
-              <Lock className="h-4 w-4" /> QA agent coverage is a Pro feature
-            </a>
           )}
         </div>
-      )}
-    </div>
-  );
-}
-
-function Row({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-1">
-      <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
       </div>
-      <div>{children}</div>
+
+      {/* View content */}
+      <div className="relative flex flex-1 min-h-0 flex-col">
+        {view === "map" && (
+          <>
+            {/* Toolbar */}
+            <div
+              className={`absolute top-3 z-10 flex items-center gap-2 rounded-lg border bg-card/95 px-3 py-2 shadow-sm backdrop-blur ${
+                outlineOpen && tree ? "left-[268px]" : "left-3"
+              }`}
+            >
+              <Waypoints className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-semibold">App Map</span>
+              {hierarchyActive && (
+                <button
+                  type="button"
+                  onClick={() => onSetEntryRoot(null)}
+                  className="flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium text-primary hover:bg-muted"
+                  title="Clear the entry root and return to the free-form layout"
+                >
+                  <Home className="h-3 w-3" /> {entryRootId}
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+
+            {/* Legend + actions */}
+            <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
+              <div className="hidden items-center gap-2 rounded-lg border bg-card/95 px-3 py-2 text-[11px] shadow-sm backdrop-blur sm:flex">
+                {(["covered", "planned", "uncovered"] as CoverageStatus[]).map(
+                  (c) => (
+                    <span key={c} className="flex items-center gap-1">
+                      <span
+                        className="h-2.5 w-2.5 rounded-full"
+                        style={{ backgroundColor: COVERAGE_COLOR[c] }}
+                      />
+                      {COVERAGE_LABEL[c]}
+                    </span>
+                  ),
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setOutlineOpen((o) => !o)}
+                className={`flex items-center gap-1 rounded-lg border bg-card/95 px-2.5 py-2 text-xs font-medium shadow-sm backdrop-blur hover:bg-muted ${
+                  outlineOpen ? "text-primary border-primary/40" : ""
+                }`}
+                title="Toggle the page-hierarchy outline"
+              >
+                <PanelLeft className="h-4 w-4" />
+              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setFilterOpen((o) => !o)}
+                  className={`flex items-center gap-1 rounded-lg border bg-card/95 px-2.5 py-2 text-xs font-medium shadow-sm backdrop-blur hover:bg-muted ${
+                    excludePatterns.length > 0
+                      ? "text-primary border-primary/40"
+                      : ""
+                  }`}
+                  title="Filter pages"
+                >
+                  <Filter className="h-4 w-4" />
+                  {excludePatterns.length > 0 && (
+                    <span className="rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground">
+                      {excludePatterns.length}
+                    </span>
+                  )}
+                </button>
+
+                {filterOpen && (
+                  <div className="absolute right-0 top-full z-20 mt-2 w-72 rounded-lg border bg-card p-3 shadow-xl">
+                    <div className="mb-2 text-xs font-semibold">Hide pages</div>
+                    <form
+                      className="flex gap-1.5"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        addPattern(patternDraft);
+                      }}
+                    >
+                      <input
+                        value={patternDraft}
+                        onChange={(e) => setPatternDraft(e.target.value)}
+                        placeholder="/r/*"
+                        className="h-7 min-w-0 flex-1 rounded-md border bg-background px-2 font-mono text-xs outline-none focus:ring-1 focus:ring-ring"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!patternDraft.trim()}
+                        className="flex h-7 items-center gap-1 rounded-md border bg-muted px-2 text-xs font-medium hover:bg-muted/70 disabled:opacity-50"
+                      >
+                        <Plus className="h-3 w-3" /> Add
+                      </button>
+                    </form>
+                    <p className="mt-1.5 text-[10px] text-muted-foreground">
+                      Glob patterns against the page path — <code>*</code>{" "}
+                      matches anything.
+                    </p>
+
+                    {excludePatterns.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {excludePatterns.map((p) => (
+                          <button
+                            key={p}
+                            type="button"
+                            onClick={() => removePattern(p)}
+                            className="group flex items-center gap-1 rounded-full border bg-muted px-2 py-0.5 font-mono text-[11px] hover:border-destructive/50"
+                            title="Remove filter"
+                          >
+                            {p}
+                            <X className="h-3 w-3 text-muted-foreground group-hover:text-destructive" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {suggestions.length > 0 && (
+                      <div className="mt-2">
+                        <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                          Suggested
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {suggestions.map((p) => (
+                            <button
+                              key={p}
+                              type="button"
+                              onClick={() => addPattern(p)}
+                              className="flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 font-mono text-[11px] text-muted-foreground hover:bg-muted"
+                            >
+                              <Plus className="h-3 w-3" /> {p}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {filtered.hiddenCount > 0 && (
+                      <div className="mt-2 text-[11px] text-muted-foreground">
+                        {filtered.hiddenCount} page
+                        {filtered.hiddenCount === 1 ? "" : "s"} hidden
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={resetView}
+                className="flex items-center gap-1 rounded-lg border bg-card/95 px-2.5 py-2 text-xs font-medium shadow-sm backdrop-blur hover:bg-muted"
+                title="Reset view — clears filters, moved cards, entry root, and zoom"
+              >
+                <RotateCcw className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={refresh}
+                disabled={refreshing}
+                className="flex items-center gap-1 rounded-lg border bg-card/95 px-2.5 py-2 text-xs font-medium shadow-sm backdrop-blur hover:bg-muted disabled:opacity-60"
+                title="Rebuild the map"
+              >
+                <RefreshCw
+                  className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+                />
+              </button>
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                className="flex items-center gap-1 rounded-lg border bg-card/95 px-2.5 py-2 text-xs font-medium shadow-sm backdrop-blur hover:bg-muted"
+                title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+              >
+                {isFullscreen ? (
+                  <Minimize2 className="h-4 w-4" />
+                ) : (
+                  <Maximize2 className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+
+            {hydrated && (
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onNodeClick={onNodeClick}
+                nodeTypes={nodeTypes}
+                nodesDraggable
+                onInit={(instance) => {
+                  rfInstanceRef.current = instance;
+                }}
+                // Restore the last visit's pan/zoom; fall back to fitting the graph.
+                fitView={!viewportRef.current}
+                defaultViewport={viewportRef.current ?? undefined}
+                onMoveEnd={(_, viewport) => {
+                  viewportRef.current = viewport;
+                  persistState();
+                }}
+                onNodeDragStop={(_, node) => {
+                  setPositionOverrides((prev) => ({
+                    ...prev,
+                    [node.id]: { x: node.position.x, y: node.position.y },
+                  }));
+                }}
+                minZoom={0.05}
+                maxZoom={2}
+                proOptions={{ hideAttribution: true }}
+              >
+                <Background
+                  variant={BackgroundVariant.Dots}
+                  gap={20}
+                  size={1}
+                />
+                <Controls showInteractive={false} />
+                <MiniMap
+                  pannable
+                  zoomable
+                  nodeColor={(n) =>
+                    COVERAGE_COLOR[
+                      ((n.data as PageNodeData)?.node?.coverageStatus ??
+                        "uncovered") as CoverageStatus
+                    ]
+                  }
+                />
+              </ReactFlow>
+            )}
+
+            {outlineOpen && tree && (
+              <TreeOutline
+                tree={tree}
+                nodesById={nodesById}
+                selectedId={selected?.id ?? null}
+                onSelect={onOutlineSelect}
+              />
+            )}
+          </>
+        )}
+
+        {view === "screens" && (
+          <ScreensGallery nodes={filtered.nodes} onSelect={setSelected} />
+        )}
+
+        {view === "flows" && (
+          <FlowsView
+            flows={flows}
+            loading={flowsLoading}
+            onOpenFlow={openFlow}
+          />
+        )}
+
+        {exploringSessionId && !panelHidden && (
+          <ExploreProgressPanel
+            sessionId={exploringSessionId}
+            repositoryId={repositoryId}
+            onFinished={() => {
+              setExploringSessionId(null);
+              getAppMap({ branch })
+                .then((r) => {
+                  if (r.ok) setGraph(r.graph);
+                })
+                .catch(() => {});
+            }}
+            onClose={() => setPanelHidden(true)}
+          />
+        )}
+
+        {selected && (
+          <NodeDetailPanel
+            node={selected}
+            queued={queued.has(selected.path)}
+            requesting={requesting === selected.path}
+            qaAgentEnabled={qaAgentEnabled}
+            isEntryRoot={entryRootId === selected.id}
+            flows={flows}
+            onRequestCoverage={onRequestCoverage}
+            onSetEntryRoot={onSetEntryRoot}
+            onOpenFlow={openFlow}
+            onClose={() => setSelected(null)}
+          />
+        )}
+      </div>
+
+      {playingFlow && (
+        <FlowPlayer
+          key={`${playingFlow.id}:${playing?.stepIndex ?? 0}`}
+          flow={playingFlow}
+          initialStep={playing?.stepIndex ?? 0}
+          onClose={() => setPlaying(null)}
+        />
+      )}
+
+      <ExploreDialog
+        open={exploreOpen}
+        onOpenChange={setExploreOpen}
+        maxExplorers={maxExplorers}
+        qaAgentEnabled={qaAgentEnabled}
+        onLaunch={launchExploration}
+      />
     </div>
   );
 }

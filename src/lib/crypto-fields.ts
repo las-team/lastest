@@ -16,7 +16,12 @@
  */
 
 import { encrypt, decryptField, ENC_PREFIX } from "./crypto";
-import type { SetupAuthConfig, AgentSessionMetadata } from "./db/schema";
+import type {
+  SetupAuthConfig,
+  AgentSessionMetadata,
+  AgentKnowledge,
+  NewAgentKnowledge,
+} from "./db/schema";
 
 function encField(value: string): string {
   return value.startsWith(ENC_PREFIX) ? value : encrypt(value);
@@ -56,21 +61,53 @@ export function decryptAuthConfig(
   return out;
 }
 
-// ── agent_sessions.metadata.quickstartPassword ──────────────────────────────
-// Encrypts only the password sub-field; every other metadata field (including
-// the email) passes through untouched.
+// ── agent_sessions.metadata credential fields ───────────────────────────────
+// Encrypts the password sub-field and the Explore auth-context prose (which
+// routinely contains a password); every other metadata field (including the
+// email) passes through untouched.
 
 export function encryptSessionMetadata<
   T extends AgentSessionMetadata | null | undefined,
 >(meta: T): T {
-  if (!meta || meta.quickstartPassword == null) return meta;
-  if (meta.quickstartPassword.startsWith(ENC_PREFIX)) return meta;
-  return { ...meta, quickstartPassword: encrypt(meta.quickstartPassword) };
+  if (!meta) return meta;
+  let out = meta;
+  if (out.quickstartPassword != null) {
+    out = { ...out, quickstartPassword: encField(out.quickstartPassword) };
+  }
+  if (out.qaAuthContext != null) {
+    out = { ...out, qaAuthContext: encField(out.qaAuthContext) };
+  }
+  return out;
 }
 
 export function decryptSessionMetadata<
   T extends AgentSessionMetadata | null | undefined,
 >(meta: T): T {
-  if (!meta || meta.quickstartPassword == null) return meta;
-  return { ...meta, quickstartPassword: decryptField(meta.quickstartPassword) };
+  if (!meta) return meta;
+  let out = meta;
+  if (out.quickstartPassword != null) {
+    out = { ...out, quickstartPassword: decryptField(out.quickstartPassword) };
+  }
+  if (out.qaAuthContext != null) {
+    out = { ...out, qaAuthContext: decryptField(out.qaAuthContext) };
+  }
+  return out;
+}
+
+// ── agent_knowledge.credPassword ────────────────────────────────────────────
+// Explorer-agent knowledge notes may carry page-scoped login credentials.
+// Only the password is encrypted; credEmail stays plaintext (identifier).
+
+export function encryptKnowledgeRow<
+  T extends Pick<NewAgentKnowledge, "credPassword"> | null | undefined,
+>(row: T): T {
+  if (!row || row.credPassword == null) return row;
+  return { ...row, credPassword: encField(row.credPassword) };
+}
+
+export function decryptKnowledgeRow<
+  T extends Pick<AgentKnowledge, "credPassword"> | null | undefined,
+>(row: T): T {
+  if (!row || row.credPassword == null) return row;
+  return { ...row, credPassword: decryptField(row.credPassword) };
 }

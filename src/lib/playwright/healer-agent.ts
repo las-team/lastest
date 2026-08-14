@@ -255,13 +255,14 @@ export async function agentHealTests(
   failed: number;
   errors: string[];
 }> {
-  await requireRepoAccess(repositoryId);
+  const { team } = await requireRepoAccess(repositoryId);
   const branch = await getCurrentBranchForRepo(repositoryId);
   const errors: string[] = [];
   let fixed = 0;
   let failed = 0;
 
-  const { claimEmbeddedBrowserForAgent } = await import("@/server/actions/ai");
+  const { claimEmbeddedBrowserForAgent } =
+    await import("@/lib/eb/claim-for-agent");
   const { releasePoolEB } = await import("@/server/actions/embedded-sessions");
 
   // Process with concurrency limit of 3. Each concurrent heal claims its OWN
@@ -272,9 +273,10 @@ export async function agentHealTests(
     const batch = testIds.slice(i, i + CONCURRENCY);
     const results = await Promise.allSettled(
       batch.map(async (testId) => {
-        const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-          () => undefined,
-        );
+        const eb = await claimEmbeddedBrowserForAgent(
+          { billTeamId: team.id },
+          5 * 60 * 1000,
+        ).catch(() => undefined);
         if (!eb) {
           return {
             testId,

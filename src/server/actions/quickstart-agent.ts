@@ -38,7 +38,7 @@ import {
 import { createAndRunBuildCore, getBuildSummary } from "./builds";
 import { approveAllDiffs } from "./diffs";
 import { publishBuildShare } from "./public-shares";
-import { claimEmbeddedBrowserForAgent } from "./ai";
+import { claimEmbeddedBrowserForAgent } from "@/lib/eb/claim-for-agent";
 import { releasePoolEB, getEbPoolHealth } from "./embedded-sessions";
 import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
 import { db } from "@/lib/db";
@@ -521,9 +521,13 @@ async function runQsScoutPublic(
   // --cdp-endpoint, the exact in-host execution this codebase forbids). While
   // waiting, surface "queued" so the panel reflects the pool back-pressure.
   let claimErr: unknown;
-  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
-    mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
-  }).catch((e) => {
+  const eb = await claimEmbeddedBrowserForAgent(
+    { billTeamId: teamId },
+    5 * 60 * 1000,
+    () => {
+      mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+    },
+  ).catch((e) => {
     claimErr = e;
     return undefined;
   });
@@ -813,9 +817,13 @@ async function runQsScoutAuthed(
   // Hard-fail when no EB is available — never fall through to a host-process
   // Chromium (see runQsScoutPublic for the rationale).
   let claimErr: unknown;
-  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
-    mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
-  }).catch((e) => {
+  const eb = await claimEmbeddedBrowserForAgent(
+    { billTeamId: teamId },
+    5 * 60 * 1000,
+    () => {
+      mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+    },
+  ).catch((e) => {
     claimErr = e;
     return undefined;
   });

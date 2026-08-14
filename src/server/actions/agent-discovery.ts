@@ -5,7 +5,7 @@ import { requireRepoAccess } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { agentDiscoverAreas as runAgentDiscovery } from "@/lib/playwright/planner-agent";
 import { aiScanRoutes, type DiscoveredArea } from "./ai-routes";
-import { claimEmbeddedBrowserForAgent } from "./ai";
+import { claimEmbeddedBrowserForAgent } from "@/lib/eb/claim-for-agent";
 import { releasePoolEB } from "./embedded-sessions";
 
 /**
@@ -22,15 +22,16 @@ export async function discoverAreas(
   functionalAreas?: DiscoveredArea[];
   error?: string;
 }> {
-  await requireRepoAccess(repositoryId);
+  const { team } = await requireRepoAccess(repositoryId);
 
   // Get base URL for agent
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
   const baseUrl = envConfig?.baseUrl || "http://localhost:3000";
 
-  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-    () => undefined,
-  );
+  const eb = await claimEmbeddedBrowserForAgent(
+    { billTeamId: team.id },
+    5 * 60 * 1000,
+  ).catch(() => undefined);
 
   // No EB available — skip live browser exploration entirely (never fall
   // back to a host-process Chromium) and go straight to the AI code scan.

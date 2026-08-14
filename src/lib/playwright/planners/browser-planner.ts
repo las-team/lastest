@@ -28,13 +28,18 @@ export interface BrowserPlannerOptions {
   onLogCreated?: (logId: string) => void;
 }
 
-async function claimEB(): Promise<
-  { cdpUrl: string; runnerId: string } | undefined
-> {
+async function claimEB(
+  repositoryId: string,
+): Promise<{ cdpUrl: string; runnerId: string } | undefined> {
   try {
-    const { claimEmbeddedBrowserForAgent } =
-      await import("@/server/actions/ai");
-    return (await claimEmbeddedBrowserForAgent(5 * 60 * 1000)) ?? undefined;
+    const { claimEmbeddedBrowserForAgent, agentEbAttributionForRepo } =
+      await import("@/lib/eb/claim-for-agent");
+    return (
+      (await claimEmbeddedBrowserForAgent(
+        await agentEbAttributionForRepo(repositoryId),
+        5 * 60 * 1000,
+      )) ?? undefined
+    );
   } catch {
     return undefined;
   }
@@ -145,7 +150,7 @@ export async function runBrowserPlanner(
 
           // Each diver gets its own EB — they navigate concurrently and
           // cannot safely share one browser/CDP endpoint.
-          const eb = await claimEB();
+          const eb = await claimEB(repositoryId);
 
           const fallbackPlan = () =>
             [
@@ -232,7 +237,7 @@ async function runFallbackExploration(
   const start = Date.now();
   let promptLogId: string | undefined;
 
-  const eb = await claimEB();
+  const eb = await claimEB(repositoryId);
   if (!eb) {
     return {
       source: "browser",

@@ -21,130 +21,11 @@ import { agentCreateTest } from "@/lib/playwright/generator-agent";
 import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
 import { awardScore } from "@/server/actions/gamification";
 import type { AgentStepState } from "@/lib/db/schema";
+import { releasePoolEB } from "@/server/actions/embedded-sessions";
 import {
-  claimPoolEB,
-  claimOrProvisionPoolEB,
-  releasePoolEB,
-} from "@/server/actions/embedded-sessions";
-import { db } from "@/lib/db";
-import { embeddedSessions } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-
-/**
- * Probe an EB's CDP endpoint once. cdpUrl is `http://<host>:<cdpPort>` (a TCP
- * proxy in the pod forwards 0.0.0.0 → 127.0.0.1 where Chromium binds); Chromium
- * serves `/json/version` over it. Returns false on any error / non-2xx / timeout.
- */
-async function probeCdp(cdpUrl: string, timeoutMs = 2500): Promise<boolean> {
-  const base = cdpUrl.replace(/^ws/i, "http").replace(/\/+$/, "");
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${base}/json/version`, { signal: ctrl.signal });
-    return res.ok;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/**
- * Confirm a claimed EB's CDP endpoint is actually reachable before handing it to
- * an agent. After a `pnpm dev` restart (dead port-forward) or a dead pod, the DB
- * still holds a cdpUrl whose proxy is gone — pointing Playwright MCP at it makes
- * the agent fail with an opaque connect error (and no live screencast). Two quick
- * attempts so a transient blip doesn't evict a healthy EB.
- */
-async function isCdpReachable(cdpUrl: string): Promise<boolean> {
-  if (await probeCdp(cdpUrl)) return true;
-  await new Promise((r) => setTimeout(r, 250));
-  return probeCdp(cdpUrl);
-}
-
-/**
- * Claim an embedded browser from the pool for AI agent use.
- * Waits (polls) until an EB becomes available, up to maxWaitMs.
- * Returns CDP + stream URLs and the runnerId for release.
- * Caller MUST call releasePoolEB(runnerId) when done.
- */
-export async function claimEmbeddedBrowserForAgent(
-  maxWaitMs = 5 * 60 * 1000,
-  onQueued?: () => void,
-): Promise<
-  | {
-      cdpUrl: string;
-      streamUrl: string;
-      runnerId: string;
-      /** Provisioner instanceId; null for static-fleet EBs. */
-      instanceId: string | null;
-    }
-  | undefined
-> {
-  const deadline = Date.now() + maxWaitMs;
-  let notifiedQueued = false;
-  let firstAttempt = true;
-
-  while (Date.now() < deadline) {
-    // First attempt: try to claim OR provision (spawns a fresh EB Job if the
-    // pool has room and no idle EB is available). Subsequent attempts just
-    // poll for release — we don't want to keep launching fresh Jobs in a loop.
-    const poolEB = firstAttempt
-      ? await claimOrProvisionPoolEB()
-      : await claimPoolEB();
-    firstAttempt = false;
-    if (poolEB) {
-      // Look up the CDP/stream URLs from the session
-      const [session] = await db
-        .select({
-          cdpUrl: embeddedSessions.cdpUrl,
-          streamUrl: embeddedSessions.streamUrl,
-          instanceId: embeddedSessions.instanceId,
-        })
-        .from(embeddedSessions)
-        .where(eq(embeddedSessions.runnerId, poolEB.runnerId));
-
-      if (session?.cdpUrl && session?.streamUrl) {
-        if (await isCdpReachable(session.cdpUrl)) {
-          return {
-            cdpUrl: session.cdpUrl,
-            streamUrl: session.streamUrl,
-            runnerId: poolEB.runnerId,
-            instanceId: session.instanceId,
-          };
-        }
-        // Registered but its CDP endpoint is unreachable — a stale port-forward
-        // (post `pnpm dev` restart) or a dead pod. Handing this to an agent makes
-        // Playwright MCP fail opaquely. Release it (k8s mode tears the Job down
-        // and ensureWarmPool provisions a fresh one) and keep waiting.
-        console.warn(
-          `[AgentPool] Claimed EB ${poolEB.runnerId.slice(0, 8)} has an unreachable CDP endpoint (${session.cdpUrl}) — evicting and retrying`,
-        );
-        await releasePoolEB(poolEB.runnerId);
-      } else {
-        // Session not found or missing URLs — release and retry
-        await releasePoolEB(poolEB.runnerId);
-      }
-    }
-
-    // Notify caller on first queue (so UI can update status)
-    if (!notifiedQueued) {
-      notifiedQueued = true;
-      onQueued?.();
-      console.log(
-        `[AgentPool] All browsers busy, waiting for one to become available (timeout ${maxWaitMs / 1000}s)`,
-      );
-    }
-
-    // Poll every 3 seconds
-    await new Promise((r) => setTimeout(r, 3000));
-  }
-
-  console.warn(
-    `[AgentPool] Timed out waiting for an available browser after ${maxWaitMs / 1000}s`,
-  );
-  return undefined;
-}
+  claimEmbeddedBrowserForAgent,
+  agentEbAttributionForRepo,
+} from "@/lib/eb/claim-for-agent";
 
 async function getAIConfig(
   repositoryId?: string | null,
@@ -231,9 +112,10 @@ export async function aiEnhanceTest(
   userPrompt?: string,
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   const { agentEnhanceTest } = await import("@/lib/playwright/enhancer-agent");
-  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-    () => undefined,
-  );
+  const eb = await claimEmbeddedBrowserForAgent(
+    await agentEbAttributionForRepo(repositoryId),
+    5 * 60 * 1000,
+  ).catch(() => undefined);
   if (!eb) {
     return {
       success: false,
@@ -348,16 +230,20 @@ export async function startGenerateTestAgent(data: {
     (async () => {
       const startTime = Date.now();
       // Wait for an EB from the pool (queues if all busy)
-      const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
-        queries
-          .updateAgentSession(session.id, {
-            metadata: { ...session.metadata, queuedForBrowser: true } as Record<
-              string,
-              unknown
-            >,
-          })
-          .catch(() => {});
-      });
+      const eb = await claimEmbeddedBrowserForAgent(
+        { billTeamId: teamId || null },
+        5 * 60 * 1000,
+        () => {
+          queries
+            .updateAgentSession(session.id, {
+              metadata: {
+                ...session.metadata,
+                queuedForBrowser: true,
+              } as Record<string, unknown>,
+            })
+            .catch(() => {});
+        },
+      );
       if (!eb) {
         throw new Error(
           "No browsers available — all browsers are busy. Please try again later.",
@@ -580,16 +466,20 @@ export async function startGeneratePlaceholderTestAgent(data: {
     (async () => {
       const startTime = Date.now();
       // Wait for an EB from the pool (queues if all busy)
-      const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
-        queries
-          .updateAgentSession(session.id, {
-            metadata: { ...session.metadata, queuedForBrowser: true } as Record<
-              string,
-              unknown
-            >,
-          })
-          .catch(() => {});
-      });
+      const eb = await claimEmbeddedBrowserForAgent(
+        { billTeamId: teamId || null },
+        5 * 60 * 1000,
+        () => {
+          queries
+            .updateAgentSession(session.id, {
+              metadata: {
+                ...session.metadata,
+                queuedForBrowser: true,
+              } as Record<string, unknown>,
+            })
+            .catch(() => {});
+        },
+      );
       if (!eb) {
         throw new Error(
           "No browsers available — all browsers are busy. Please try again later.",
@@ -907,7 +797,7 @@ export async function healTest(
   repositoryId: string,
   testId: string,
 ): Promise<{ success: boolean; code?: string; error?: string }> {
-  await requireRepoAccess(repositoryId);
+  const { team } = await requireRepoAccess(repositoryId);
   const test = await queries.getTest(testId);
   if (!test) return { success: false, error: "Test not found" };
   if (test.repositoryId !== repositoryId) {
@@ -917,9 +807,10 @@ export async function healTest(
     };
   }
   const { agentHealTest } = await import("@/lib/playwright/healer-agent");
-  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-    () => undefined,
-  );
+  const eb = await claimEmbeddedBrowserForAgent(
+    { billTeamId: team.id },
+    5 * 60 * 1000,
+  ).catch(() => undefined);
   if (!eb) {
     return {
       success: false,
@@ -992,16 +883,20 @@ export async function startHealTestAgent(data: {
     // Fire-and-forget background execution
     (async () => {
       const startTime = Date.now();
-      const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
-        queries
-          .updateAgentSession(session.id, {
-            metadata: { ...session.metadata, queuedForBrowser: true } as Record<
-              string,
-              unknown
-            >,
-          })
-          .catch(() => {});
-      });
+      const eb = await claimEmbeddedBrowserForAgent(
+        { billTeamId: teamId || null },
+        5 * 60 * 1000,
+        () => {
+          queries
+            .updateAgentSession(session.id, {
+              metadata: {
+                ...session.metadata,
+                queuedForBrowser: true,
+              } as Record<string, unknown>,
+            })
+            .catch(() => {});
+        },
+      );
       if (!eb) {
         throw new Error(
           "No browsers available — all browsers are busy. Please try again later.",
@@ -1163,9 +1058,10 @@ export async function createTest(
   context: TestGenerationContext,
 ): Promise<{ success: boolean; code?: string; error?: string }> {
   const { agentCreateTest } = await import("@/lib/playwright/generator-agent");
-  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-    () => undefined,
-  );
+  const eb = await claimEmbeddedBrowserForAgent(
+    await agentEbAttributionForRepo(repositoryId),
+    5 * 60 * 1000,
+  ).catch(() => undefined);
   if (!eb) {
     return {
       success: false,
