@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { cn } from "@/lib/utils";
+import { cn } from "@lastest/ui";
 
 // Mobile / touch / narrow-viewport replacement for the desktop hover-wipe
 // `DiffSlider`. The wipe slider sets `touch-action: none` + captures the

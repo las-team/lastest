@@ -32,7 +32,9 @@
   },
   "devDependencies": {
     "@types/react": "^19",
+    "@types/react-dom": "^19",
     "react": "19.2.3",
+    "react-dom": "19.2.3",
     "typescript": "^5"
   },
   "license": "FSL-1.1-ALv2"

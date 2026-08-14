@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { claimPublicShare } from "@/server/actions/public-shares";
+import { claimPublicShare } from "../../actions";
 
 export function ClaimRunner({ slug }: { slug: string }) {
   const started = useRef(false);

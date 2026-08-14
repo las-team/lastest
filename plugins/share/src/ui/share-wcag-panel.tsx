@@ -11,8 +11,8 @@
 // it measures): semantic <ul>/<li>, severity conveyed by badge TEXT not color
 // alone, AA-contrast palette pairs in both themes, focus-visible styles on links,
 // and the score ring is announced via role="img" + aria-label.
-import type { ShareA11ySummary } from "@/lib/share/a11y-projection";
-import { publicShareGrade } from "@/lib/share/grade";
+import type { ShareA11ySummary } from "../a11y-projection";
+import { publicShareGrade } from "../grade";
 
 const IMPACT_LABEL: Record<string, string> = {
   critical: "Critical",

@@ -603,7 +603,8 @@ export interface DemoNoteSkippedRoute {
 // one of these per captured step (aligned to test_results.screenshots[] order)
 // describing what the agent does and what's visible on screen. Cue timing is
 // an EVEN SPLIT of the recording's duration_ms — we don't persist a real
-// per-step video timestamp (see captions.ts / src/lib/share/vtt.ts). `focus`
+// per-step video timestamp (see src/lib/demo-captions/captions.ts /
+// plugins/share/src/vtt.ts). `focus`
 // and `annotation` are captured now but only rendered by the (planned)
 // arrow/underline overlay; the v1 subtitle track ignores them.
 export interface VideoCaption {

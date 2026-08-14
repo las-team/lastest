@@ -23,9 +23,13 @@
  * all three entries are gone from the map below, and their violations with them.
  * `rca` is the first of RFC §9 phase 4 and went the same way; `app-map` is the
  * second, `launch` the third, `api-test` the fourth, `playground` the fifth,
- * `gamification` the sixth and `ci` the seventh — the last of which graduated
- * an entry that turned out to be two features, half of it core. See the `scm`
- * note in PSEUDO_PLUGINS below.
+ * `gamification` the sixth, `ci` the seventh — the last of which graduated
+ * an entry that turned out to be two features, half of it core, see the `scm`
+ * note in PSEUDO_PLUGINS below — and `share` the eighth, whose port (15
+ * methods) is the largest of any phase-4 plugin so far. `captions.ts` /
+ * `generate-captions.ts`, formerly under `src/lib/share/`, moved to
+ * `src/lib/demo-captions/` instead of the plugin — see the migration result
+ * doc for why.
  */
 
 /** Zone globs for the target layout. */
@@ -149,23 +153,23 @@ export const PSEUDO_PLUGINS = {
     components: ["src/components/qa-agent"],
   },
   demo: { lib: ["src/lib/demo"], actions: ["demo.ts", "demo-notes.ts"] },
-  share: {
-    lib: ["src/lib/share"],
-    actions: ["public-shares.ts"],
-    components: ["src/components/share"],
-  },
   // Was `gamification: { lib: [gamification, awards], … }`. The Beat-the-Bot
   // half graduated to `plugins/gamification/`; what is left is the *awards*
   // feature, which turned out to share nothing with it — no import in either
   // direction — and to be a different shape entirely: repo award tiers computed
   // from build/test/diff history, plus a badge SVG endpoint and a public page.
   //
-  // It also reads `public_shares`, which belongs to `share`. Costing its port
-  // before starting (recipe §1.5) put it at ~8 methods, six of them reads of
-  // core build/diff aggregates, plus that cross-feature read — so it wants
-  // `share` migrated, or a metrics capability, first. Splitting the map entry
-  // is the same lesson `launch` recorded: read a feature's import list, not its
-  // directory name.
+  // It also reads `public_shares`, which belonged to `share` and is now
+  // `@lastest/plugin-share`'s own `share_public_shares` table — `share`
+  // migrated (RFC §9 phase 4, eighth plugin) specifically so this dependency
+  // would be unblocked. `src/lib/db/queries/awards.ts` reaches it through
+  // `src/lib/core/share-reads.ts` rather than a direct import, the same
+  // inversion shape `gamification`'s core→feature edge used (recipe §1.6) —
+  // `src/lib/db/queries` is itself `CORE_SRC_PATHS` and may not import a
+  // plugin package directly. Costing this port before starting (recipe
+  // §1.5) put it at ~8 methods, six of them reads of core build/diff
+  // aggregates. Splitting the map entry is the same lesson `launch`
+  // recorded: read a feature's import list, not its directory name.
   awards: {
     lib: ["src/lib/awards"],
     actions: [],

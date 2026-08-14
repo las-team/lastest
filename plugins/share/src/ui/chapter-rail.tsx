@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Maximize2, Play } from "lucide-react";
-import { ScreenshotViewer } from "@/components/tests/screenshot-viewer";
-import { PLAYBACK_TIME_EVENT } from "@/components/replay-player";
+import { ScreenshotViewer } from "@lastest/ui";
+import { PLAYBACK_TIME_EVENT } from "@lastest/ui";
 
 export type Chapter = {
   src: string;

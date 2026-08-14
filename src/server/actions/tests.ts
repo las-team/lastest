@@ -18,7 +18,7 @@ import {
 import type { NewTest, NewFunctionalArea } from "@/lib/db/schema";
 import { getCurrentBranchForRepo } from "@/lib/git-utils";
 import { STORAGE_DIRS } from "@/lib/storage/paths";
-import { resolveResultVideoUrl } from "@/lib/share/video-fallback";
+import { resolveResultVideoUrl } from "@lastest/video-fallback";
 
 /**
  * Fetch all selector_stats rows for a test so the UI can display per-step

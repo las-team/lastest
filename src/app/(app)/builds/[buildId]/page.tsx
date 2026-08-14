@@ -10,7 +10,7 @@ import { BuildActionsClient } from "./build-actions-client";
 import { BuildPollingWrapper } from "./build-polling-wrapper";
 import { PublishShareDialog, type ShareRecord } from "./publish-share-dialog";
 import { getStreamUrlForRunner } from "@/server/actions/embedded-sessions";
-import { buildShareUrl } from "@/lib/share/slug";
+import { buildShareUrl, listPublicSharesForBuild } from "@lastest/plugin-share";
 import * as queries from "@/lib/db/queries";
 import { isVerifyPhaseEnabled } from "@/lib/verify/feature-flag";
 import Link from "next/link";
@@ -98,7 +98,7 @@ export default async function BuildPage({ params }: PageProps) {
   if (buildRecord && teamId && selectedRepo && buildRecord.testRunId) {
     const testRun = await queries.getTestRun(buildRecord.testRunId);
     if (testRun?.repositoryId === selectedRepo.id) {
-      const rows = await queries.listPublicSharesForBuild(buildId);
+      const rows = await listPublicSharesForBuild(buildId);
       shareRecords = rows.map((r) => ({
         id: r.id,
         slug: r.slug,

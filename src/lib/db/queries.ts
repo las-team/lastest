@@ -27,7 +27,8 @@ export * from "./queries/storage-states";
 export * from "./queries/schedules";
 export * from "./queries/activity-events";
 export * from "./queries/storage";
-export * from "./queries/public-shares";
+// public-shares moved to plugins/share/src/data/queries.ts (RFC §9 phase 4) —
+// import from @lastest/plugin-share instead.
 export * from "./queries/step-comparisons";
 export * from "./queries/inspector";
 export * from "./queries/change-maps";

@@ -32,7 +32,6 @@ import { db } from "@/lib/db";
 import * as queries from "@/lib/db/queries";
 import {
   builds,
-  publicShares,
   repositories,
   teams,
   testResults,
@@ -267,7 +266,7 @@ beforeAll(async () => {
 
   // NOTE: video_path is deliberately left NULL on the result row. That forces
   // the share page down `resolveTestVideoUrl()`'s disk-scan fallback
-  // (src/lib/share/video-fallback.ts, changed on this branch) — the branch §3
+  // (@lastest/video-fallback, changed on this branch) — the branch §3
   // could only observe as a substring in the HTML.
   videoFile = path.join(
     VIDEO_ROOT,

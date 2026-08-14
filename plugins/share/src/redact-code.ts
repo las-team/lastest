@@ -7,6 +7,10 @@
  * This is a best-effort textual scrub, not a parser. It errs toward redacting:
  * a false positive shows a `•••` where a value used to be; a false negative
  * leaks a credential. When in doubt, mask.
+ *
+ * Kept as the plugin's own file rather than promoted to `libs/` — it has no
+ * consumer outside this page (`plugin-migration-recipe.md` §5: promotion is
+ * for code more than one feature needs).
  */
 
 const MASK = "•••";

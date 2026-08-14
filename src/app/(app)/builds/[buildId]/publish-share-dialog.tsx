@@ -25,8 +25,8 @@ import {
   revokePublicShare,
   listBuildShares,
   listTestShares,
-} from "@/server/actions/public-shares";
-import { buildShareUrl } from "@/lib/share/slug";
+  buildShareUrl,
+} from "@lastest/plugin-share";
 import { toast } from "sonner";
 
 export interface ShareRecord {

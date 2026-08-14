@@ -7,10 +7,7 @@
  */
 
 import * as queries from "@/lib/db/queries";
-import {
-  generateVideoCaptions,
-  type CaptionStepInput,
-} from "@/lib/share/captions";
+import { generateVideoCaptions, type CaptionStepInput } from "./captions";
 import type {
   CapturedScreenshot,
   DemoNotes,

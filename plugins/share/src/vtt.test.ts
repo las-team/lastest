@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { captionsToVtt, msToVttTimestamp } from "./vtt";
-import type { VideoCaption } from "@/lib/db/schema";
+import type { VideoCaption } from "./types";
 
 function cap(p: Partial<VideoCaption>): VideoCaption {
   return {

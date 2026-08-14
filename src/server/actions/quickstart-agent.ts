@@ -14,7 +14,7 @@ import type {
   PwAgentType,
   TestSetupOverrides,
 } from "@/lib/db/schema";
-import { resolveTestVideoUrl } from "@/lib/share/video-fallback";
+import { resolveTestVideoUrl } from "@lastest/video-fallback";
 import { isQuickstartEnabled, gateReasonHint } from "@/lib/quickstart/gating";
 import {
   renderAuthSetupCode,
@@ -41,7 +41,7 @@ import {
 } from "@/lib/quickstart/step-definitions";
 import { createAndRunBuildCore, getBuildSummary } from "./builds";
 import { approveAllDiffs } from "./diffs";
-import { publishBuildShare } from "./public-shares";
+import { publishBuildShare } from "@lastest/plugin-share";
 import { claimEmbeddedBrowserForAgent } from "./ai";
 import { releasePoolEB, getEbPoolHealth } from "./embedded-sessions";
 import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";

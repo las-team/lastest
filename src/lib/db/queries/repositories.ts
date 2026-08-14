@@ -33,7 +33,6 @@ import {
   csvDataSources,
   functionalAreas,
   activityEvents,
-  publicShares,
   remoteDebugSessions,
 } from "../schema";
 import type {
@@ -354,7 +353,9 @@ export async function deleteRepository(id: string) {
       .delete(plannedScreenshots)
       .where(eq(plannedScreenshots.repositoryId, id));
     await tx.delete(activityEvents).where(eq(activityEvents.repositoryId, id));
-    await tx.delete(publicShares).where(eq(publicShares.repositoryId, id));
+    // publicShares moved to plugins/share/src/schema.ts (RFC §9 phase 4) —
+    // its rows are reaped by the plugin's onRepoDeleted hook, driven by
+    // `cascadePluginDeletion` below, not by this transaction.
     await tx
       .delete(remoteDebugSessions)
       .where(eq(remoteDebugSessions.repositoryId, id));

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Maximize2 } from "lucide-react";
-import { ScreenshotViewer } from "@/components/tests/screenshot-viewer";
+import { ScreenshotViewer } from "@lastest/ui";
 
 type Step = { src: string; label: string };
 

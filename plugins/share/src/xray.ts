@@ -5,7 +5,7 @@
  * — this caps it to the handful worth annotating so only a small payload crosses
  * the wire to the client overlay.
  */
-import type { DomSnapshotElement, DomDiffResult } from "@/lib/db/schema";
+import type { DomSnapshotElement, DomDiffResult } from "@lastest/eb-protocol";
 
 export type XrayRole = "heading" | "region" | "action" | "field" | "other";
 

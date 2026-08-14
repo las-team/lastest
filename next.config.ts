@@ -40,6 +40,8 @@ const nextConfig: NextConfig = {
     "@lastest/page-map",
     "@lastest/url-canonical",
     "@lastest/ui",
+    "@lastest/playback",
+    "@lastest/video-fallback",
     "@lastest/plugin-events",
     "@lastest/plugin-api-test",
     "@lastest/plugin-app-map",
@@ -49,6 +51,7 @@ const nextConfig: NextConfig = {
     "@lastest/plugin-launch",
     "@lastest/plugin-playground",
     "@lastest/plugin-rca",
+    "@lastest/plugin-share",
   ],
   outputFileTracingIncludes: {
     "/terms": ["./src/content/legal/terms.md"],

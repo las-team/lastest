@@ -9,6 +9,7 @@ import { gamificationPlugin } from "@lastest/plugin-gamification";
 import { launchPlugin } from "@lastest/plugin-launch";
 import { playgroundPlugin } from "@lastest/plugin-playground";
 import { rcaPlugin } from "@lastest/plugin-rca";
+import { sharePlugin } from "@lastest/plugin-share";
 import type { resolveRegistry } from "@lastest/kernel";
 
 /**
@@ -41,4 +42,5 @@ export const MANIFESTS: Parameters<typeof resolveRegistry>[0] = [
   playgroundPlugin,
   gamificationPlugin,
   ciPlugin,
+  sharePlugin,
 ];

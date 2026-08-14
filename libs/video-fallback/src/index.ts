@@ -11,7 +11,14 @@ const VIDEO_ROOT = path.join(process.cwd(), "storage", "videos");
  * match) and returns the public `/videos/...` URL — rewritten to
  * /api/media/videos/... by next.config, already public behind proxy.ts.
  * Returns null on any error (missing dir, no match).
+ *
+ * A `libs/*` package rather than a plugin host method: it touches no core
+ * table, no auth boundary and no credential — just a filesystem convention
+ * two features (the share page and `runTests`' result-row backfill in
+ * `src/server/actions/tests.ts`) both need to reproduce
+ * (`docs/architecture/plugin-migration-recipe.md` §5).
  */
+
 /**
  * Exact-file variant of `resolveTestVideoUrl` for a specific result row: the
  * EB names recordings `<testRunId>-<testId>.webm`, so when a row's

@@ -1,8 +1,8 @@
 "use client";
 
 import { useId, useState } from "react";
-import type { DomDiffResult, DomSnapshotElement } from "@/lib/db/schema";
-import type { XrayElement } from "@/lib/share/xray";
+import type { DomDiffResult, DomSnapshotElement } from "@lastest/eb-protocol";
+import type { XrayElement } from "../xray";
 
 // Ported from the authenticated Verify > DOM tab, in two modes:
 //  - "diff":  draws each changed element's bounding box on the step's current

@@ -2,7 +2,6 @@ import { and, desc, eq, gte, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { db } from "../index";
 import {
   builds,
-  publicShares,
   repoAwards,
   repositories,
   tests,
@@ -10,6 +9,11 @@ import {
   visualDiffs,
 } from "../schema";
 import type { NewRepoAward, RepoAward } from "../schema";
+import {
+  getLatestPublicShareSlug,
+  getShareContextBySlug,
+  listLatestPublicSharesForRepositories,
+} from "@/lib/core/share-reads";
 
 export async function getRepoAward(
   repositoryId: string,
@@ -59,14 +63,7 @@ export async function getRepoAwardBySlug(slug: string): Promise<{
   repo: { id: string; fullName: string; owner: string; name: string } | null;
   award: RepoAward | null;
 } | null> {
-  const [shareRow] = await db
-    .select({
-      slug: publicShares.slug,
-      targetDomain: publicShares.targetDomain,
-      repositoryId: publicShares.repositoryId,
-    })
-    .from(publicShares)
-    .where(eq(publicShares.slug, slug));
+  const shareRow = await getShareContextBySlug(slug);
   if (!shareRow) return null;
 
   const repoId = shareRow.repositoryId;
@@ -266,20 +263,7 @@ export async function getTeamTrophyRoom(teamId: string): Promise<
   const awardByRepo = new Map(awards.map((a) => [a.repositoryId, a]));
 
   // Latest public share slug per repo, used as the proof link.
-  const shares = await db
-    .select({
-      repositoryId: publicShares.repositoryId,
-      slug: publicShares.slug,
-      createdAt: publicShares.createdAt,
-    })
-    .from(publicShares)
-    .where(
-      sql`${publicShares.repositoryId} IN (${sql.join(
-        repoIds.map((id) => sql`${id}`),
-        sql`, `,
-      )}) AND ${publicShares.status} = 'public'`,
-    )
-    .orderBy(desc(publicShares.createdAt));
+  const shares = await listLatestPublicSharesForRepositories(repoIds);
   const slugByRepo = new Map<string, string>();
   for (const s of shares) {
     if (s.repositoryId && !slugByRepo.has(s.repositoryId)) {
@@ -297,16 +281,5 @@ export async function getTeamTrophyRoom(teamId: string): Promise<
 export async function getLatestProofShareSlug(
   repositoryId: string,
 ): Promise<string | null> {
-  const [row] = await db
-    .select({ slug: publicShares.slug })
-    .from(publicShares)
-    .where(
-      and(
-        eq(publicShares.repositoryId, repositoryId),
-        eq(publicShares.status, "public"),
-      ),
-    )
-    .orderBy(desc(publicShares.createdAt))
-    .limit(1);
-  return row?.slug ?? null;
+  return getLatestPublicShareSlug(repositoryId);
 }

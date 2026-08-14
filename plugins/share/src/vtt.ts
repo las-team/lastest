@@ -1,4 +1,4 @@
-import type { VideoCaption } from "@/lib/db/schema";
+import type { VideoCaption } from "./types";
 
 // Build a WebVTT document from time-coded captions for the share-page <video>
 // subtitle track. Pure + side-effect-free so it's unit-testable and can run in

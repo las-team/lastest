@@ -4,10 +4,18 @@ import { stat } from "fs/promises";
 import { Readable } from "stream";
 import * as queries from "@/lib/db/queries";
 import { resolveStoragePath } from "@/lib/storage/paths";
-import { isValidShareSlug } from "@/lib/share/slug";
-import { resolveTestVideoUrl } from "@/lib/share/video-fallback";
+import { resolveTestVideoUrl } from "@lastest/video-fallback";
 import { parseByteRange } from "@/lib/http/byte-range";
-import type { CapturedScreenshot, PublicShare } from "@/lib/db/schema";
+import type { CapturedScreenshot } from "@/lib/db/schema";
+import {
+  getActiveBaselinesForTest,
+  resolveShareRenderBuild,
+} from "@/lib/core/share-host";
+import {
+  getPublicShareBySlug,
+  isValidShareSlug,
+  type PublicShare,
+} from "@lastest/plugin-share";
 
 const CONTENT_TYPES: Record<string, string> = {
   ".png": "image/png",
@@ -33,7 +41,7 @@ function normalize(p: string): string {
 // to read arbitrary storage files.
 async function buildAllowedPaths(
   share: PublicShare,
-  build: Awaited<ReturnType<typeof queries.resolveShareBuild>>,
+  build: Awaited<ReturnType<typeof resolveShareRenderBuild>>,
 ): Promise<Set<string>> {
   const allowed = new Set<string>();
 
@@ -107,7 +115,7 @@ async function buildAllowedPaths(
     }
   }
   for (const tid of baselineTestIds) {
-    const baselines = await queries.getActiveBaselinesForTest(tid);
+    const baselines = await getActiveBaselinesForTest(tid);
     for (const b of baselines) {
       if (b.imagePath) allowed.add(normalize(b.imagePath));
     }
@@ -140,7 +148,10 @@ async function getAllowedPaths(
   // than 404ing every fresh image until the TTL lapses. The resolver is a
   // single indexed query, far cheaper than the per-request scan this cache
   // was introduced to avoid.
-  const build = await queries.resolveShareBuild(share);
+  const build = await resolveShareRenderBuild({
+    buildId: share.buildId,
+    testId: share.testId,
+  });
   const cacheKey = `${slug}:${build?.id ?? "none"}`;
 
   const hit = allowedPathsCache.get(cacheKey);
@@ -170,7 +181,7 @@ export async function GET(
     return new Response("Bad Request", { status: 400 });
   }
 
-  const share = await queries.getPublicShareBySlug(slug);
+  const share = await getPublicShareBySlug(slug);
   if (!share || share.status !== "public") {
     return new Response("Not Found", { status: 404 });
   }

@@ -191,59 +191,21 @@ export type NewActivityEvent = typeof activityEvents.$inferInsert;
 // nothing was reaping them before.
 
 // ============================================
-// Public Shares (Campaign Landing Pages)
+// Public Shares — MOVED OUT.
 // ============================================
-// An operator on a build detail page can publish a public share, producing
-// a short URL (lastest.cloud/r/:slug) that shows the build's artifacts to
-// unauthenticated visitors. A "claim" signs the visitor up and copies the
-// test definition into their new team. The share itself remains owned by
-// the publishing team — copy-on-claim keeps the public URL stable forever.
-
-export type PublicShareStatus = "public" | "revoked";
-
-// Distinguishes an outreach demo share (a QuickStart walkthrough published to
-// pitch a founder — run-to-run diffs are inter-run noise, not findings) from a
-// genuine regression share (real before/after findings). The presentation layer
-// keys almost everything off this: demo shares suppress inter-run diff chips and
-// change counts, regression shares render them as today. Defaults to
-// "regression" so pre-existing shares and the operator build-detail flow are
-// unaffected; QuickStart publishes with "demo".
-export type PublicShareKind = "regression" | "demo";
-
-export const publicShares = pgTable(
-  "public_shares",
-  {
-    id: text("id").primaryKey(),
-    // 22-char URL-safe token (~128 bits of entropy) — the public handle.
-    slug: text("slug").notNull().unique(),
-    buildId: text("build_id").notNull(),
-    testId: text("test_id"),
-    repositoryId: text("repository_id"),
-    ownerTeamId: text("owner_team_id"),
-    publishedByUserId: text("published_by_user_id"),
-    status: text("status")
-      .$type<PublicShareStatus>()
-      .notNull()
-      .default("public"),
-    kind: text("kind").$type<PublicShareKind>().notNull().default("regression"),
-    targetDomain: text("target_domain"),
-    claimedByTeamId: text("claimed_by_team_id"),
-    claimedByUserId: text("claimed_by_user_id"),
-    claimedAt: timestamp("claimed_at"),
-    viewCount: integer("view_count").notNull().default(0),
-    lastViewedAt: timestamp("last_viewed_at"),
-    revokedAt: timestamp("revoked_at"),
-    createdAt: timestamp("created_at"),
-  },
-  (table) => [
-    index("idx_public_shares_build").on(table.buildId),
-    index("idx_public_shares_owner_team").on(table.ownerTeamId),
-  ],
-);
-
-export type PublicShare = typeof publicShares.$inferSelect;
-
-export type NewPublicShare = typeof publicShares.$inferInsert;
+// `public_shares` and its types now live in `plugins/share/src/schema.ts`
+// (RFC §9 phase 4), renamed `share_public_shares` — `core/data`'s
+// `validateSchemaNamespace` requires the `<id>_` prefix, and this table
+// never had one (`plugin-migration-recipe.md` §2.4).
+//
+// No FK was dropped: `buildId`, `testId`, `repositoryId`, `ownerTeamId`,
+// `publishedByUserId`, `claimedByTeamId`, `claimedByUserId` were always
+// convention-only references, the same finding `gamification` made. Team and
+// repo deletion reach these rows through the plugin's `onTeamDeleted`/
+// `onRepoDeleted` hooks — a genuine fix (nothing reaped them before), not a
+// replacement for a cascade that used to run. `scripts/migrate.js` performs
+// the rename before `drizzle-kit push`, which cannot see a rename and would
+// drop-and-create instead.
 
 // ---------------------------------------------------------------------------
 // Awards — "Prove your app is not AI slop" campaign

@@ -33,6 +33,7 @@ import { configureGamification } from "@lastest/plugin-gamification";
 import { configureLaunch } from "@lastest/plugin-launch";
 import { configurePlayground } from "@lastest/plugin-playground";
 import { configureRca } from "@lastest/plugin-rca";
+import { configureShare } from "@lastest/plugin-share";
 
 import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
 import * as queries from "@/lib/db/queries";
@@ -54,6 +55,7 @@ import { appLaunchHost } from "@/lib/core/launch-host";
 import { appPlaygroundHost } from "@/lib/core/playground-host";
 import { appRcaHost } from "@/lib/core/rca-host";
 import { appReposHost } from "@/lib/core/repos-host";
+import { appShareHost } from "@/lib/core/share-host";
 import { appStorageHost } from "@/lib/core/storage-host";
 import { appTestsHost } from "@/lib/core/tests-host";
 
@@ -234,6 +236,13 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
   // — while its deletion hook and its GitLab webhook gate run with no session
   // and take the handle straight from the slot. See `plugins/ci/src/wiring.ts`.
   configureCi({ runtime, host: appCiHost, data: data.capability("ci") });
+  // Tenanted (every row carries an ownerTeamId), but no `runtime`: every
+  // action authorizes through `ShareHost.requireRepoAccess`/
+  // `requireTeamAccess`, which return more than `PluginContext` carries
+  // (user id, user email, team name, repo name) — a `contextFor()` call
+  // would still need a second host call to fill that gap, so the host does
+  // both in one. See `plugins/share/src/wiring.ts`.
+  configureShare({ host: appShareHost, data: data.capability("share") });
 
   // Core raises `tests` domain notifications through a port it owns; this is
   // where the feature that listens gets attached. `createTest` used to

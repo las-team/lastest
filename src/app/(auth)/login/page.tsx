@@ -13,7 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { AuthBrandHeader } from "@/components/auth/auth-brand-header";
 import { OAuthButtons } from "@/components/auth/oauth-buttons";
 import type { SocialProvider } from "@/lib/auth/social-providers";
-import { isValidShareSlug } from "@/lib/share/slug";
+import { isValidShareSlug } from "@lastest/plugin-share";
 import {
   checkEmailExists,
   recordRegistrationConsent,

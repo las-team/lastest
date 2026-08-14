@@ -4,7 +4,7 @@
  * JSONB (sample `html`, every node) to a public page — only the rule id, human
  * text, impact, counts, deque help URL, and ONE truncated sample per rule.
  */
-import type { BuildA11yViolationRow } from "@/lib/db/queries/builds";
+import type { BuildA11yViolationRow } from "./types";
 
 export interface ShareA11yRule {
   id: string;

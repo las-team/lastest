@@ -90,8 +90,15 @@ import { checkRateLimit } from "@/lib/rate-limit/endpoint-bucket";
 import {
   generateAndStoreCaptionsForBuild,
   storeCaptionsForBuild,
-} from "@/lib/share/generate-captions";
-import type { VideoCaption } from "@/lib/db/schema";
+} from "@/lib/demo-captions/generate-captions";
+import type { VideoCaption } from "@lastest/plugin-share";
+import {
+  getPublicShareById,
+  listPublicSharesForBuild,
+  listPublicSharesForTest,
+  publishBuildShare,
+  revokePublicShareById,
+} from "@lastest/plugin-share";
 import { getPluginRuntime } from "@/lib/core/runtime";
 
 // Helper to verify API auth. `getCurrentSession` already handles both cookie
@@ -297,7 +304,7 @@ async function verifyShareOwnership(
   shareId: string,
   session: { team?: { id: string } | null },
 ) {
-  const share = await queries.getPublicShareById(shareId);
+  const share = await getPublicShareById(shareId);
   if (!share) return { ok: false, share: null } as const;
   if (!session.team || share.ownerTeamId !== session.team.id) {
     return { ok: false, share: null } as const;
@@ -890,7 +897,7 @@ export async function GET(
         }
       }
       if (subResource === "shares") {
-        const shares = await queries.listPublicSharesForTest(id);
+        const shares = await listPublicSharesForTest(id);
         return NextResponse.json(shares);
       }
       const [enriched] = await enrichTestsWithStatus([test]);
@@ -1129,7 +1136,7 @@ export async function GET(
         if (!(await verifyBuildOwnership(id, session))) {
           return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
-        const shares = await queries.listPublicSharesForBuild(id);
+        const shares = await listPublicSharesForBuild(id);
         return NextResponse.json(shares);
       }
 
@@ -2339,8 +2346,6 @@ export async function POST(
       const body = await request.json().catch(() => ({}));
       const scopedTestId =
         typeof body?.scopedTestId === "string" ? body.scopedTestId : null;
-      const { publishBuildShare } =
-        await import("@/server/actions/public-shares");
       const result = await publishBuildShare(id, { scopedTestId });
       return NextResponse.json(result, { status: 201 });
     }
@@ -3365,7 +3370,7 @@ export async function DELETE(
       if (!ok) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
-      await queries.revokePublicShareById(id);
+      await revokePublicShareById(id);
       return NextResponse.json({ success: true });
     }
 

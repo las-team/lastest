@@ -609,12 +609,62 @@ async function migrateCiTables() {
   }
 }
 
+// `public_shares` became `@lastest/plugin-share`'s own table (RFC §9 phase
+// 4), renamed for the `share_` prefix `core/data` requires — same shape as
+// `GAMIFICATION_RENAMES`, and for the same reason `drizzle-kit push` cannot
+// see a rename. No FK cleanup needed afterward: `buildId`/`testId`/
+// `repositoryId`/`ownerTeamId`/`publishedByUserId`/`claimedByTeamId`/
+// `claimedByUserId` were always convention-only references, never
+// constrained — the same finding `gamification` made.
+const SHARE_RENAMES = [["public_shares", "share_public_shares"]];
+
+async function migrateShareTables() {
+  if (!process.env.DATABASE_URL) return;
+  let sql;
+  try {
+    sql = require("postgres")(process.env.DATABASE_URL);
+
+    const tableExists = async (name) => {
+      const rows = await sql`
+        select exists (
+          select 1 from information_schema.tables
+          where table_schema = 'public' and table_name = ${name}
+        ) as exists`;
+      return rows[0]?.exists ?? false;
+    };
+    const rowCount = async (name) => {
+      const rows = await sql.unsafe(
+        `select count(*)::text as n from "${name}"`,
+      );
+      return Number(rows[0]?.n ?? 0);
+    };
+
+    for (const [from, to] of SHARE_RENAMES) {
+      if (!(await tableExists(from))) continue;
+      if (await tableExists(to)) {
+        if ((await rowCount(to)) > 0) {
+          console.log(`[migrate] ${from} -> ${to}: already migrated`);
+          continue;
+        }
+        await sql.unsafe(`drop table "${to}"`);
+      }
+      await sql.unsafe(`alter table "${from}" rename to "${to}"`);
+      console.log(`[migrate] renamed ${from} -> ${to}`);
+    }
+  } catch (e) {
+    console.warn("[migrate] share table migration skipped:", e.message);
+  } finally {
+    if (sql) await sql.end();
+  }
+}
+
 async function main() {
   await preCreate();
   await migrateExplorerTables();
   await migrateA11yBaselineOwnership();
   await migrateGamificationTables();
   await migrateCiTables();
+  await migrateShareTables();
   await dropPluginUserForeignKeys();
   await nullOrphans();
   await bumpPoolDefaults();

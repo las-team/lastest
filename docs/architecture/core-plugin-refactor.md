@@ -1,9 +1,10 @@
 # RFC: Core + Plugins
 
 **Status:** phases 0–3 landed. Phase 4 in progress — `rca`, `app-map`,
-`launch`, `api-test`, `playground`, `gamification` and `ci` done, `url-diff`
-resolved as core, the credential half of `scm` reclassified as core, 10
-pseudo-plugins to go.
+`launch`, `api-test`, `playground`, `gamification`, `ci` and `share` done,
+`url-diff` resolved as core, the credential half of `scm` reclassified as
+core, 9 pseudo-plugins to go (`share`'s captions half moved to
+`src/lib/demo-captions/`, unmigrated, not counted as a plugin).
 **Author:** planning doc
 **Supersedes:** nothing
 
@@ -28,14 +29,15 @@ pseudo-plugins to go.
 > - **Phase 3 — done.** `CheckLayer` is a registry; `design-system` and `a11y`
 >   are check-layer plugins. Both are table-light, and `design-system` proved
 >   the no-schema shape (manifest + host port, no `ctx` at all).
-> - **Phase 4 — in progress. 7 of 13 plugins done.** `rca`
+> - **Phase 4 — in progress. 8 of 13 plugins done.** `rca`
 >   ([result](./rca-migration-result.md)), `app-map`
 >   ([result](./app-map-migration-result.md)), `launch`
 >   ([result](./launch-migration-result.md)), `api-test`
 >   ([result](./api-test-migration-result.md)), `playground`
 >   ([result](./playground-migration-result.md)), `gamification`
->   ([result](./gamification-migration-result.md)) and `ci`
->   ([result](./ci-migration-result.md)) have landed. `url-diff` did
+>   ([result](./gamification-migration-result.md)), `ci`
+>   ([result](./ci-migration-result.md)) and `share`
+>   ([result](./share-migration-result.md)) have landed. `url-diff` did
 >   not go to a plugin at all — it was **reclassified as core**: its in-app page
 >   and sidebar entry were removed, and what is left has no user surface and
 >   exists only to serve the documented `POST /api/v1/snapshot` and
@@ -43,7 +45,48 @@ pseudo-plugins to go.
 >   reading of `core-scope.md` §2. The repeatable procedure is written down in
 >   [`plugin-migration-recipe.md`](./plugin-migration-recipe.md) — read that,
 >   not §9 below, before migrating the next feature.
->   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21 → 20 → 20**.
+>   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21 → 20 → 20 → 19**.
+>
+>   **`share` is the largest host port yet (15 methods) and the first one
+>   costed deliberately *at* recipe §1.5's own stop line rather than under
+>   it.** The port would have been ~20 (past the line) except for two cuts
+>   made for independent reasons, not to hit a number: video-fallback moved
+>   to a `libs/` package instead of becoming a host method (it had zero
+>   `@/…` imports and, unnoticed until this migration, an existing second
+>   consumer outside the feature — see
+>   [`share-migration-result.md`](./share-migration-result.md) §5), and
+>   captions authoring (`src/lib/share/captions.ts`,
+>   `generate-captions.ts`) turned out not to be this feature at all —
+>   its action module was never listed under `share`'s `PSEUDO_PLUGINS`
+>   entry, only its lib files were, and reading the consumer list rather
+>   than the directory (§4 of the result doc) sent it to
+>   `src/lib/demo-captions/` instead, unmigrated. Without both cuts, the
+>   "is this worth doing yet" call in §1.5 would have gone the other way.
+>
+>   It is also the first migration to hit recipe §1.6's exact hazard in the
+>   *reverse* direction. `gamification` found *core calling a feature*
+>   (`createTest()` → `@/lib/gamification/hooks`); moving `share`'s table out
+>   from under `src/lib/db/queries/awards.ts` (itself `CORE_SRC_PATHS`, since
+>   it lives under `src/lib/db`) would have forced the opposite edge — *core
+>   reaching forward into a plugin* — had `awards.ts` kept importing
+>   `@lastest/plugin-share` directly. The fix is the same shape as
+>   `gamification`'s inversion, not a new mechanism: `src/lib/core/
+>   share-reads.ts` re-exports three of the plugin's own read functions, and
+>   `awards.ts` calls those instead. One iteration of that file got it
+>   wrong first — it called `getPluginRuntime()` defensively, which pulled
+>   the *entire* composition root into `@/lib/db/queries`'s import graph
+>   (nearly every module in the app) and broke an unrelated test's manual
+>   mock. The fix: never import `./runtime` from a file that exists to be
+>   called *from* the query layer — the same boot-order guarantee every
+>   host already relies on covers it for free.
+>
+>   A structural-typing finding worth carrying into any future
+>   `AwardBadgeRow`-shaped render prop: a narrowed type has to satisfy
+>   everything *downstream* of the plugin, not just what the plugin itself
+>   reads. `RepoAward` needed all 9 fields copied, not the 4 the share page
+>   touches, because the render prop hands the value to a component in
+>   `src/components/awards/` typed against the real, wide `RepoAward` —
+>   a trimmed copy fails to type-check at exactly that boundary.
 >
 >   **`ci` is the first entry in the map that turned out to be two features, and
 >   the finding is about §1.6 of the recipe rather than about CI.** §6.3 lists

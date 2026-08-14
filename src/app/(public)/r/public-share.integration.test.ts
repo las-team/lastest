@@ -17,7 +17,8 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { v4 as uuid } from "uuid";
-import { generateShareSlug } from "@/lib/share/slug";
+import { generateShareSlug, type VideoCaption } from "@lastest/plugin-share";
+import { sharePublicShares } from "@lastest/plugin-share/schema";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -25,7 +26,6 @@ import { db } from "@/lib/db";
 import {
   builds,
   buildDemoNotes,
-  publicShares,
   repositories,
   teams,
   testResults,
@@ -33,7 +33,37 @@ import {
   tests,
 } from "@/lib/db/schema";
 import * as queries from "@/lib/db/queries";
-import type { VideoCaption } from "@/lib/db/schema";
+
+/**
+ * `share_public_shares` lives in `plugins/share/src/schema.ts` now, reached
+ * at runtime only through the plugin's wired `DataCapability`. This test
+ * runs as a separate process against a live dev server (`pnpm
+ * test:integration`), not inside the app's plugin runtime, so it inserts
+ * fixture rows directly via the same raw `db` handle it already uses for
+ * `builds`/`repositories`/`teams` — legitimate for test fixture setup, not a
+ * production code path.
+ */
+async function createPublicShareFixture(data: {
+  slug: string;
+  buildId: string;
+  testId: string;
+  repositoryId: string;
+  ownerTeamId: string;
+  targetDomain: string;
+}) {
+  await db.insert(sharePublicShares).values({
+    id: uuid(),
+    slug: data.slug,
+    buildId: data.buildId,
+    testId: data.testId,
+    repositoryId: data.repositoryId,
+    ownerTeamId: data.ownerTeamId,
+    status: "public",
+    kind: "regression",
+    targetDomain: data.targetDomain,
+    createdAt: new Date(),
+  });
+}
 
 const APP_ORIGIN = process.env.LASTEST_URL || "http://localhost:3000";
 const VIDEO_ROOT = path.join(process.cwd(), "storage", "videos");
@@ -146,31 +176,25 @@ beforeAll(async () => {
   await writeFile(webmPath, Buffer.from("fake-webm-bytes"));
 
   // --- Shares ---
-  const shareA = await queries.createPublicShare({
-    slug: generateShareSlug(),
+  slugA = generateShareSlug();
+  await createPublicShareFixture({
+    slug: slugA,
     buildId: buildAId,
     testId: testAId,
     repositoryId,
     ownerTeamId: teamId,
-    publishedByUserId: null,
-    status: "public",
-    kind: "regression",
     targetDomain: "example.test",
   });
-  slugA = shareA.slug;
 
-  const shareB = await queries.createPublicShare({
-    slug: generateShareSlug(),
+  slugB = generateShareSlug();
+  await createPublicShareFixture({
+    slug: slugB,
     buildId: buildBId,
     testId: testBId,
     repositoryId,
     ownerTeamId: teamId,
-    publishedByUserId: null,
-    status: "public",
-    kind: "regression",
     targetDomain: "example.test",
   });
-  slugB = shareB.slug;
 
   // Captions only on build A, so A/B diverge on the <track>/vtt route too.
   const captions: VideoCaption[] = [
@@ -190,8 +214,8 @@ afterAll(async () => {
   await rm(webmPath, { force: true }).catch(() => {});
   await db.delete(buildDemoNotes).where(eq(buildDemoNotes.buildId, buildAId));
   await db
-    .delete(publicShares)
-    .where(eq(publicShares.repositoryId, repositoryId));
+    .delete(sharePublicShares)
+    .where(eq(sharePublicShares.repositoryId, repositoryId));
   await db.delete(testResults).where(eq(testResults.testId, testAId));
   await db.delete(testResults).where(eq(testResults.testId, testBId));
   await db.delete(builds).where(eq(builds.id, buildAId));

@@ -100,6 +100,9 @@ importers:
       '@lastest/page-map':
         specifier: workspace:*
         version: link:libs/page-map
+      '@lastest/playback':
+        specifier: workspace:*
+        version: link:libs/playback
       '@lastest/plugin-a11y':
         specifier: workspace:*
         version: link:plugins/a11y
@@ -133,6 +136,9 @@ importers:
       '@lastest/plugin-rca':
         specifier: workspace:*
         version: link:plugins/rca
+      '@lastest/plugin-share':
+        specifier: workspace:*
+        version: link:plugins/share
       '@lastest/pool-service':
         specifier: workspace:*
         version: link:packages/pool-service
@@ -151,6 +157,9 @@ importers:
       '@lastest/url-canonical':
         specifier: workspace:*
         version: link:libs/url-canonical
+      '@lastest/video-fallback':
+        specifier: workspace:*
+        version: link:libs/video-fallback
       '@modelcontextprotocol/sdk':
         specifier: ^1.28.0
         version: 1.29.0(zod@4.4.3)
@@ -502,6 +511,16 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  libs/playback:
+    dependencies:
+      '@lastest/eb-protocol':
+        specifier: workspace:*
+        version: link:../../packages/eb-protocol
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
   libs/route-scan:
     dependencies:
       '@lastest/github':
@@ -565,9 +584,6 @@ importers:
       lucide-react:
         specifier: ^0.562.0
         version: 0.562.0(react@19.2.3)
-      react-dom:
-        specifier: 19.2.3
-        version: 19.2.3(react@19.2.3)
       tailwind-merge:
         specifier: ^3.4.0
         version: 3.4.0
@@ -575,15 +591,30 @@ importers:
       '@types/react':
         specifier: ^19
         version: 19.2.8
+      '@types/react-dom':
+        specifier: ^19
+        version: 19.2.3(@types/react@19.2.8)
       react:
         specifier: 19.2.3
         version: 19.2.3
+      react-dom:
+        specifier: 19.2.3
+        version: 19.2.3(react@19.2.3)
       typescript:
         specifier: ^5
         version: 5.9.3
 
   libs/url-canonical:
     devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  libs/video-fallback:
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.30
       typescript:
         specifier: ^5
         version: 5.9.3
@@ -1137,6 +1168,58 @@ importers:
       lucide-react:
         specifier: ^0.562.0
         version: 0.562.0(react@19.2.3)
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: 19.2.3
+        version: 19.2.3
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/share:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/core-data':
+        specifier: workspace:*
+        version: link:../../core/data
+      '@lastest/eb-protocol':
+        specifier: workspace:*
+        version: link:../../packages/eb-protocol
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@lastest/playback':
+        specifier: workspace:*
+        version: link:../../libs/playback
+      '@lastest/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      '@lastest/video-fallback':
+        specifier: workspace:*
+        version: link:../../libs/video-fallback
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8)
+      jszip:
+        specifier: ^3.10.1
+        version: 3.10.1
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      uuid:
+        specifier: '>=11.1.1'
+        version: 13.0.2
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.8
       next:
         specifier: 16.2.11
         version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
