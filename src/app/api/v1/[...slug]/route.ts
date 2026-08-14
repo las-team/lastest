@@ -1271,17 +1271,21 @@ export async function GET(
     }
 
     // Ranger session: GET /api/v1/ranger/:sessionId
+    //
+    // Tenancy is the plugin action's: `getRangerSession` resolves scope
+    // through the kernel and returns null for another team's session, so
+    // there is no team check to duplicate here — same pattern as `explorer`.
     if (resource === "ranger" && id) {
-      const sessionRow = await queries.getAgentSession(id);
-      if (!sessionRow || sessionRow.kind !== "ranger") {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
-      }
-      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
+      await getPluginRuntime();
+      const { getRangerSession } =
+        await import("@lastest/plugin-ranger/actions");
+      const sessionRow = await getRangerSession(id);
+      if (!sessionRow) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       return NextResponse.json({
         id: sessionRow.id,
-        kind: sessionRow.kind,
+        kind: "ranger",
         repositoryId: sessionRow.repositoryId,
         status: sessionRow.status,
         currentStepId: sessionRow.currentStepId,
@@ -2543,7 +2547,8 @@ export async function POST(
         viewport?: { width: number; height: number };
       };
       try {
-        const { startRanger } = await import("@/server/actions/ranger-agent");
+        await getPluginRuntime();
+        const { startRanger } = await import("@lastest/plugin-ranger/actions");
         const result = await startRanger(id, {
           url: typeof body.url === "string" ? body.url : undefined,
           viewport: body.viewport,
@@ -3390,17 +3395,23 @@ export async function DELETE(
     }
 
     // Cancel Ranger session: DELETE /api/v1/ranger/:sessionId
+    //
+    // `cancelRanger` throws `RangerSessionNotFoundError` for a session outside
+    // the caller's team, so existence and tenancy are one check — the same
+    // shape as the explorer cancel handler below.
     if (resource === "ranger" && id) {
-      const sessionRow = await queries.getAgentSession(id);
-      if (!sessionRow || sessionRow.kind !== "ranger") {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      await getPluginRuntime();
+      const { cancelRanger } = await import("@lastest/plugin-ranger/actions");
+      const { RangerSessionNotFoundError } =
+        await import("@lastest/plugin-ranger/errors");
+      try {
+        return NextResponse.json(await cancelRanger(id));
+      } catch (err) {
+        if (err instanceof RangerSessionNotFoundError) {
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
+        }
+        throw err;
       }
-      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
-      }
-      const { cancelRanger } = await import("@/server/actions/ranger-agent");
-      const result = await cancelRanger(id);
-      return NextResponse.json(result);
     }
 
     // Cancel Explorer session: DELETE /api/v1/explorer/:sessionId

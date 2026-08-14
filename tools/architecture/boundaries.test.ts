@@ -212,11 +212,13 @@ describe("split-PR check", () => {
   });
 
   it("counts a src/lib/playwright change as core only, not as a feature", () => {
-    // Until the §6.2 split lands the directory is mixed and core-owned; treating
-    // its plugin-destined files as feature code would make every change to it
-    // look like a split-PR violation.
-    const z = classify(["src/lib/playwright/ranger.ts"]);
-    expect(z.todayCore).toEqual(["src/lib/playwright/ranger.ts"]);
+    // Until the §6.2 split lands for the rest of the directory it stays mixed
+    // and core-owned; treating its plugin-destined files as feature code would
+    // make every change to it look like a split-PR violation. `ranger.ts` was
+    // the example here until `ranger` graduated to `plugins/` (RFC §9 phase 4,
+    // tenth plugin) — `debug-recorder.ts` is `recorder`'s, not yet migrated.
+    const z = classify(["src/lib/playwright/debug-recorder.ts"]);
+    expect(z.todayCore).toEqual(["src/lib/playwright/debug-recorder.ts"]);
     expect(z.todayPlugin).toEqual([]);
   });
 

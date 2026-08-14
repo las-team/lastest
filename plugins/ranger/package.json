@@ -1,0 +1,32 @@
+{
+  "name": "@lastest/plugin-ranger",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ranger: an MCP-triggered, EB-backed live page scout. Navigates a URL on a core-issued browser and returns a rendered (SPA-aware) page map — watchable live via the activity feed.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./actions": "./src/actions.ts",
+    "./errors": "./src/errors.ts",
+    "./host": "./src/host.ts",
+    "./schema": "./src/schema.ts",
+    "./wiring": "./src/wiring.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lastest/contracts": "workspace:*",
+    "@lastest/core-data": "workspace:*",
+    "@lastest/kernel": "workspace:*",
+    "@lastest/page-map": "workspace:*",
+    "drizzle-orm": "^0.45.2"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "vitest": "^4.1.0"
+  },
+  "license": "FSL-1.1-ALv2"
+}

@@ -31,6 +31,10 @@
  * `src/lib/demo-captions/` instead of the plugin — see the migration result
  * doc for why. `awards` is the ninth, an 8-method port `share`'s migration
  * was done partly to unblock — see `docs/architecture/awards-migration-result.md`.
+ * `ranger` is the tenth, and the first out of the §6.2 `src/lib/playwright`
+ * split: one method (`assertSafeOutboundUrl`) and one table (`ranger_sessions`,
+ * replacing its slice of the shared `agent_sessions` — the same move `explorer`
+ * made first). See `docs/architecture/ranger-migration-result.md`.
  */
 
 /** Zone globs for the target layout. */
@@ -219,11 +223,11 @@ export const PSEUDO_PLUGINS = {
     actions: ["quickstart-agent.ts"],
     components: ["src/components/quickstart"],
   },
-  ranger: {
-    lib: [],
-    files: ["src/lib/playwright/ranger.ts"],
-    actions: ["ranger-agent.ts"],
-  },
+  // `ranger` graduated to `plugins/ranger/` (RFC §9 phase 4, tenth plugin) —
+  // see `docs/architecture/ranger-migration-result.md`. The first plugin out
+  // of the §6.2 split: `src/lib/playwright/ranger.ts` is deleted, not left as
+  // a re-export, so `src/lib/playwright` now has three `files` owners instead
+  // of four.
 };
 
 /**

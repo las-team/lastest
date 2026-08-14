@@ -18,7 +18,13 @@ whether *core* imports the feature), §2.4 (check your table names) and a second
 gave §1.6 its three possible outcomes (invert / reclassify / stop), added §1.7
 (an empty `contextFor()` may already be your `currentActor`), extended §2.1 to
 "check what each dropped FK points at", generalised §6's page rule to API
-routes, and split §8's action-id count into two distinct signals.
+routes, and split §8's action-id count into two distinct signals; and after
+[`ranger`](./ranger-migration-result.md), which added a fourth reason a
+`"use server"` file can register zero action ids (§8: nothing in the plugin
+is ever called from a client component, not the S1 re-export trap) and a
+note on §1.5: a low port count does not mean a low-cost migration when the
+old code was borrowing shared infrastructure (an unmigrated neighbour's
+table) rather than reaching into core.
 **Audience:** whoever migrates the next feature out of `src/` into `plugins/<id>/`.
 
 This is the *how*. The *why* is [`core-plugin-refactor.md`](./core-plugin-refactor.md)
@@ -68,10 +74,21 @@ comes out that high, the feature is a thin *orchestration of* core rather than
 a consumer of it, and the real task is extracting the core module it
 orchestrates, as its own PR, first.
 
-Measured so far: `playground` **3** (done), `launch` **4** (done), `api-test`
-**5** (done), `rca` **6** (done), `app-map` **9** (done), `gamification` **9**
-(done), `ci` **9** (done), `url-diff` **~22** (never migrated — reclassified as
-core, RFC §9 phase 4).
+Measured so far: `ranger` **1** (done), `playground` **3** (done), `launch`
+**4** (done), `api-test` **5** (done), `rca` **6** (done), `app-map` **9**
+(done), `gamification` **9** (done), `ci` **9** (done), `url-diff` **~22**
+(never migrated — reclassified as core, RFC §9 phase 4).
+
+> **A port of 1 is not proof of a cheap migration.** `ranger` costed lowest
+> of anything migrated so far and came out 369 lines heavier, not lighter,
+> because the count only sees calls into *core* — it is blind to
+> infrastructure the old code was borrowing from a shared, still-unmigrated
+> table (`agent_sessions`, three other agents' rows). `explorer` already set
+> the precedent that a plugin able to own its session data gets its own
+> table rather than keep sharing one; `ranger` is the second time that bill
+> came due, and the first time it showed up on a plugin whose *host port*
+> gave no warning of it. See
+> [`ranger-migration-result.md`](./ranger-migration-result.md) §1.
 
 > **Group by *what each method is*, not only by how many collapse together.**
 > `api-test`'s five grouped into three — one security boundary, two authorized

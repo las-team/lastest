@@ -33,6 +33,7 @@ import { configureExplorer } from "@lastest/plugin-explorer";
 import { configureGamification } from "@lastest/plugin-gamification";
 import { configureLaunch } from "@lastest/plugin-launch";
 import { configurePlayground } from "@lastest/plugin-playground";
+import { configureRanger } from "@lastest/plugin-ranger";
 import { configureRca } from "@lastest/plugin-rca";
 import { configureShare } from "@lastest/plugin-share";
 
@@ -55,6 +56,7 @@ import { createAppJobsHost } from "@/lib/core/jobs-host";
 import { MANIFESTS } from "@/lib/core/manifests";
 import { appLaunchHost } from "@/lib/core/launch-host";
 import { appPlaygroundHost } from "@/lib/core/playground-host";
+import { appRangerHost } from "@/lib/core/ranger-host";
 import { appRcaHost } from "@/lib/core/rca-host";
 import { appReposHost } from "@/lib/core/repos-host";
 import { appShareHost } from "@/lib/core/share-host";
@@ -251,6 +253,15 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
   // lookup) would benefit from a `PluginContext`. See
   // `plugins/awards/src/wiring.ts`.
   configureAwards({ host: appAwardsHost, data: data.capability("awards") });
+  // Tenanted *and* wired with a `runtime`, same shape as `explorer`/`ci`:
+  // `startRanger`/`getRangerSession`/`cancelRanger` call `contextFor(rangerPlugin,
+  // { repositoryId })`, and the deletion hook takes `data` straight from the
+  // slot. See `plugins/ranger/src/wiring.ts`.
+  configureRanger({
+    runtime,
+    host: appRangerHost,
+    data: data.capability("ranger"),
+  });
 
   // Core raises `tests` domain notifications through a port it owns; this is
   // where the feature that listens gets attached. `createTest` used to

@@ -1,9 +1,9 @@
 # RFC: Core + Plugins
 
 **Status:** phases 0–3 landed. Phase 4 in progress — `rca`, `app-map`,
-`launch`, `api-test`, `playground`, `gamification`, `ci`, `share` and `awards`
-done, `url-diff` resolved as core, the credential half of `scm` reclassified as
-core, 8 pseudo-plugins to go (`share`'s captions half moved to
+`launch`, `api-test`, `playground`, `gamification`, `ci`, `share`, `awards`
+and `ranger` done, `url-diff` resolved as core, the credential half of `scm`
+reclassified as core, 7 pseudo-plugins to go (`share`'s captions half moved to
 `src/lib/demo-captions/`, unmigrated, not counted as a plugin).
 **Author:** planning doc
 **Supersedes:** nothing
@@ -29,7 +29,7 @@ core, 8 pseudo-plugins to go (`share`'s captions half moved to
 > - **Phase 3 — done.** `CheckLayer` is a registry; `design-system` and `a11y`
 >   are check-layer plugins. Both are table-light, and `design-system` proved
 >   the no-schema shape (manifest + host port, no `ctx` at all).
-> - **Phase 4 — in progress. 9 of 13 plugins done.** `rca`
+> - **Phase 4 — in progress. 10 of 13 plugins done.** `rca`
 >   ([result](./rca-migration-result.md)), `app-map`
 >   ([result](./app-map-migration-result.md)), `launch`
 >   ([result](./launch-migration-result.md)), `api-test`
@@ -37,8 +37,9 @@ core, 8 pseudo-plugins to go (`share`'s captions half moved to
 >   ([result](./playground-migration-result.md)), `gamification`
 >   ([result](./gamification-migration-result.md)), `ci`
 >   ([result](./ci-migration-result.md)), `share`
->   ([result](./share-migration-result.md)) and `awards`
->   ([result](./awards-migration-result.md)) have landed. `url-diff` did
+>   ([result](./share-migration-result.md)), `awards`
+>   ([result](./awards-migration-result.md)) and `ranger`
+>   ([result](./ranger-migration-result.md)) have landed. `url-diff` did
 >   not go to a plugin at all — it was **reclassified as core**: its in-app page
 >   and sidebar entry were removed, and what is left has no user surface and
 >   exists only to serve the documented `POST /api/v1/snapshot` and
@@ -46,7 +47,45 @@ core, 8 pseudo-plugins to go (`share`'s captions half moved to
 >   reading of `core-scope.md` §2. The repeatable procedure is written down in
 >   [`plugin-migration-recipe.md`](./plugin-migration-recipe.md) — read that,
 >   not §9 below, before migrating the next feature.
->   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21 → 20 → 20 → 19 → 19**.
+>   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21 → 20 → 20 → 19 → 19 → 18**.
+>
+>   **`ranger` is the first plugin out of the §6.2 `src/lib/playwright` split,
+>   and the first migration whose cost was dominated by infrastructure its
+>   old code got for free by sharing it with three still-unmigrated agents.**
+>   The host port is one method — the fourth verbatim declaration of
+>   `assertSafeOutboundUrl`, after `explorer`, `app-map` and `api-test` — so by
+>   recipe §1.5 alone this reads like the cheapest migration yet. It was not:
+>   369 old lines became 676, because `explorer` set the precedent that a
+>   plugin able to own its session data stops sharing the polymorphic
+>   `agent_sessions` table and gets its own, and a table costs a schema file
+>   and a deletion hook the old code never had to pay for. **§1.5's port count
+>   measures what a feature needs from core; it does not measure what a
+>   feature was borrowing from its neighbours.** Both are real costs, and only
+>   one of them shows up before you start.
+>
+>   It is also a positive instance of recipe §1.6's check paying for itself in
+>   the other direction: grepping core for `demo` — the RFC's original next
+>   pick — before costing it found that `src/lib/demo`'s two files are called
+>   exclusively from core-classified auth/onboarding code and its two actions
+>   have zero callers anywhere in the app. That pseudo-plugin is not a
+>   migration candidate at all; see
+>   [`ranger-migration-result.md`](./ranger-migration-result.md) §2 for the
+>   detail, left unresolved here rather than folded into this PR.
+>
+>   Two smaller findings. **Migrating onto `ctx.browser.withBrowser` closed a
+>   quota gap nobody was trying to close**: the hand-rolled claim path had no
+>   run-minute check and no hold-time ceiling, and `core/browser`'s host
+>   happens to wrap the identical pool-claim primitives the old code called
+>   directly, so both arrived for free. And **a `"use server"` file can be the
+>   wrong shape even with zero re-exports in it** — `actions.ts` initially
+>   carried the directive out of habit (every other actions.ts in the repo
+>   has it) and registered zero action ids in
+>   `server-reference-manifest.json`, not because of the S1 re-export trap
+>   (recipe §6) but because nothing in the plugin is ever called from a
+>   client component. Dropping the directive is the `launch` precedent
+>   applied one level down: a plugin's only surface being a route rather than
+>   a page argues against `"use server"` even when the route lives in the
+>   package that calls it rather than in the plugin itself.
 >
 >   **`awards` is the plugin `share` was migrated ahead of schedule to
 >   unblock, and the estimate held exactly.** `gamification`'s result doc
