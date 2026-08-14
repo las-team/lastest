@@ -11,7 +11,7 @@
  * Multipliers (during Bug Blitz) are applied in awardScore at write time.
  */
 
-import type { ScoreEventKind } from "@/lib/db/schema";
+import type { ScoreEventKind } from "../schema";
 
 export interface ScoreRule {
   /** Base point delta (pre-multiplier). Negative = penalty. */

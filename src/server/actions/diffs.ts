@@ -18,7 +18,8 @@ import {
   STORAGE_DIRS,
   toRelativePath,
 } from "@/lib/storage/paths";
-import { awardScore } from "@/server/actions/gamification";
+import { awardScore } from "@lastest/plugin-gamification/actions";
+import * as gamificationReads from "@lastest/plugin-gamification/reads";
 import { createVisualDiffIssue } from "@/lib/integrations/github-issues";
 import { buildVisualDiffBody } from "@/lib/integrations/github-issue-body";
 import { approveDiffCore, rejectDiffCore } from "@/lib/diff/core";
@@ -44,7 +45,7 @@ export async function approveDiff(diffId: string, approvedBy?: string) {
       console.error("[gamification] diff_approved_as_change failed", err),
     );
 
-    queries
+    gamificationReads
       .getTestCreator(diffBefore.testId)
       .then((creator) => {
         if (!creator) return;
@@ -743,7 +744,7 @@ export async function addDiffTodo(diffId: string, description: string) {
       console.error("[gamification] diff_todo_triage failed", err),
     );
 
-    queries
+    gamificationReads
       .getTestCreator(diff.testId)
       .then((creator) => {
         if (!creator) return;

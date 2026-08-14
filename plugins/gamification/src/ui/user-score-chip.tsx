@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { Star, Zap } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { getViewerGamificationSnapshot } from "@/server/actions/gamification";
+import { cn } from "@lastest/ui";
+import { getViewerGamificationSnapshot } from "../actions";
 
 interface Snapshot {
   seasonId: string;

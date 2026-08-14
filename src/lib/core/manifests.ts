@@ -4,6 +4,7 @@ import { appMapPlugin } from "@lastest/plugin-app-map";
 import { designSystemPlugin } from "@lastest/plugin-design-system";
 import { eventsPlugin } from "@lastest/plugin-events";
 import { explorerPlugin } from "@lastest/plugin-explorer";
+import { gamificationPlugin } from "@lastest/plugin-gamification";
 import { launchPlugin } from "@lastest/plugin-launch";
 import { playgroundPlugin } from "@lastest/plugin-playground";
 import { rcaPlugin } from "@lastest/plugin-rca";
@@ -37,4 +38,5 @@ export const MANIFESTS: Parameters<typeof resolveRegistry>[0] = [
   launchPlugin,
   apiTestPlugin,
   playgroundPlugin,
+  gamificationPlugin,
 ];

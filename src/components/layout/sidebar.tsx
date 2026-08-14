@@ -31,7 +31,7 @@ import {
 import { QueueIndicator } from "@/components/queue/queue-indicator";
 import { ActivityFeedIndicator } from "@/components/activity-feed/activity-feed-indicator-client";
 import { UserMenu } from "@/components/auth/user-menu";
-import { InlineScore } from "@/components/gamification/user-score-chip";
+import { InlineScore } from "@lastest/plugin-gamification/ui/score-chip";
 import { SidebarQuickActions } from "./sidebar-quick-actions";
 import { hasQaAgentAccess } from "@/lib/billing/feature-access";
 import type { Repository, User, Team, EmbeddedSession } from "@/lib/db/schema";

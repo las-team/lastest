@@ -28,7 +28,6 @@ export * from "./queries/fixtures";
 export * from "./queries/storage-states";
 export * from "./queries/schedules";
 export * from "./queries/activity-events";
-export * from "./queries/gamification";
 export * from "./queries/storage";
 export * from "./queries/public-shares";
 export * from "./queries/step-comparisons";

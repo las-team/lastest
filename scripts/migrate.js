@@ -465,10 +465,74 @@ async function dropPluginUserForeignKeys() {
   }
 }
 
+// The six Beat-the-Bot tables became `@lastest/plugin-gamification`'s own
+// (RFC §9 phase 4). Unlike every migration before it, five of them had to be
+// **renamed**: `core/data` requires a plugin's tables to carry its id as a
+// prefix, and only `gamification_seasons` already did.
+//
+// This is the step that must not be skipped. `drizzle-kit push` cannot see a
+// rename — it compares names, finds `bots` absent from the schema and
+// `gamification_bots` missing from the database, and resolves that by dropping
+// the first and creating the second. Every score, achievement and bot row in
+// the product would go with it.
+//
+// Idempotent: skips a table that is already gone, and skips a destination that
+// already holds rows. A destination that exists but is *empty* is what a `push`
+// run before this one leaves behind, and is safe to drop.
+const GAMIFICATION_RENAMES = [
+  ["bots", "gamification_bots"],
+  ["bug_blitz_events", "gamification_bug_blitz_events"],
+  ["score_events", "gamification_score_events"],
+  ["user_scores", "gamification_user_scores"],
+  ["achievements", "gamification_achievements"],
+];
+
+async function migrateGamificationTables() {
+  if (!process.env.DATABASE_URL) return;
+  let sql;
+  try {
+    sql = require("postgres")(process.env.DATABASE_URL);
+
+    const tableExists = async (name) => {
+      const rows = await sql`
+        select exists (
+          select 1 from information_schema.tables
+          where table_schema = 'public' and table_name = ${name}
+        ) as exists`;
+      return rows[0]?.exists ?? false;
+    };
+    const rowCount = async (name) => {
+      const rows = await sql.unsafe(
+        `select count(*)::text as n from "${name}"`,
+      );
+      return Number(rows[0]?.n ?? 0);
+    };
+
+    for (const [from, to] of GAMIFICATION_RENAMES) {
+      if (!(await tableExists(from))) continue;
+      if (await tableExists(to)) {
+        if ((await rowCount(to)) > 0) {
+          console.log(`[migrate] ${from} -> ${to}: already migrated`);
+          continue;
+        }
+        // Empty destination is what a prior `push` left behind. Safe to drop.
+        await sql.unsafe(`drop table "${to}"`);
+      }
+      await sql.unsafe(`alter table "${from}" rename to "${to}"`);
+      console.log(`[migrate] renamed ${from} -> ${to}`);
+    }
+  } catch (e) {
+    console.warn("[migrate] gamification rename skipped:", e.message);
+  } finally {
+    if (sql) await sql.end();
+  }
+}
+
 async function main() {
   await preCreate();
   await migrateExplorerTables();
   await migrateA11yBaselineOwnership();
+  await migrateGamificationTables();
   await dropPluginUserForeignKeys();
   await nullOrphans();
   await bumpPoolDefaults();

@@ -75,7 +75,8 @@ import {
   approveAllDiffsCore,
   getDiffCore,
 } from "@/lib/diff/core";
-import { awardScore } from "@/server/actions/gamification";
+import { awardScore } from "@lastest/plugin-gamification/actions";
+import * as gamificationReads from "@lastest/plugin-gamification/reads";
 import { getCurrentSession } from "@/lib/auth";
 import { startUrlDiff } from "@/server/actions/url-diff";
 import { captureUrl, loadCaptureFromDisk } from "@/lib/url-diff/capture";
@@ -2089,7 +2090,10 @@ export async function POST(
         }
       }
       // Stamp MCP bot as creator when available, so gamification & attribution work
-      const mcpBot = await queries.getBotByKind(session.team!.id, "mcp_server");
+      const mcpBot = await gamificationReads.getBotByKind(
+        session.team!.id,
+        "mcp_server",
+      );
       const created = await queries.createTest({
         repositoryId,
         name,
@@ -2239,7 +2243,10 @@ export async function POST(
           { status: 422 },
         );
       }
-      const mcpBot = await queries.getBotByKind(session.team!.id, "mcp_server");
+      const mcpBot = await gamificationReads.getBotByKind(
+        session.team!.id,
+        "mcp_server",
+      );
       const name =
         body.name?.trim() || `${gen.definition.method} ${gen.definition.url}`;
       const { renderApiDefinitionForCode } =
@@ -3302,7 +3309,10 @@ export async function PUT(
       if (updates.code && test.isPlaceholder && test.repositoryId) {
         const repo = await queries.getRepository(test.repositoryId);
         if (repo?.teamId) {
-          const mcpBot = await queries.getBotByKind(repo.teamId, "mcp_server");
+          const mcpBot = await gamificationReads.getBotByKind(
+            repo.teamId,
+            "mcp_server",
+          );
           if (mcpBot) {
             // Stamp bot as creator for future regression/flake attribution
             queries

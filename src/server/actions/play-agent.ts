@@ -11,7 +11,8 @@ import type {
 } from "@/lib/db/schema";
 import { createAndRunBuild } from "./builds";
 import { approveAllDiffs } from "./diffs";
-import { awardScore } from "./gamification";
+import { awardScore } from "@lastest/plugin-gamification/actions";
+import * as gamificationReads from "@lastest/plugin-gamification/reads";
 import { getCurrentBranchForRepo } from "@/lib/git-utils";
 import { getBuildSummary } from "./builds";
 import { startRemoteRouteScan } from "./scanner";
@@ -1914,7 +1915,10 @@ async function runGenerate(
   }> = [];
 
   // Look up the play_agent bot so test-creation points go to the bot, not the user
-  const playAgentBot = await queries.getBotByKind(teamId, "play_agent");
+  const playAgentBot = await gamificationReads.getBotByKind(
+    teamId,
+    "play_agent",
+  );
 
   if (targetAreas.length > 0) {
     const { agentCreateTest, groupScenariosForGeneration } =

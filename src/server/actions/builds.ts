@@ -52,7 +52,8 @@ import {
   STORAGE_ROOT,
   toRelativePath,
 } from "@/lib/storage/paths";
-import { awardScore } from "@/server/actions/gamification";
+import { awardScore } from "@lastest/plugin-gamification/actions";
+import * as gamificationReads from "@lastest/plugin-gamification/reads";
 import { compareBranches } from "@/lib/github/content";
 import { findAffectedTests } from "@/lib/smart-selection/file-matcher";
 
@@ -968,7 +969,9 @@ async function runBuildAsync(
           try {
             const repo = await queries.getRepository(repoId);
             if (!repo?.teamId) return;
-            const creator = await queries.getTestCreator(result.testId);
+            const creator = await gamificationReads.getTestCreator(
+              result.testId,
+            );
             if (!creator) return;
             await awardScore({
               teamId: repo.teamId,

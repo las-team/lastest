@@ -22,7 +22,7 @@
  * first to have done so; `design-system` and `a11y` followed in RFC §9 phase 3 —
  * all three entries are gone from the map below, and their violations with them.
  * `rca` is the first of RFC §9 phase 4 and went the same way; `app-map` is the
- * second, `launch` the third, `api-test` the fourth and `playground` the fifth.
+ * second, `launch` the third, `api-test` the fourth, `playground` the fifth and `gamification` the sixth.
  */
 
 /** Zone globs for the target layout. */
@@ -136,10 +136,22 @@ export const PSEUDO_PLUGINS = {
     actions: ["public-shares.ts"],
     components: ["src/components/share"],
   },
-  gamification: {
-    lib: ["src/lib/gamification", "src/lib/awards"],
-    actions: ["gamification.ts"],
-    components: ["src/components/gamification", "src/components/awards"],
+  // Was `gamification: { lib: [gamification, awards], … }`. The Beat-the-Bot
+  // half graduated to `plugins/gamification/`; what is left is the *awards*
+  // feature, which turned out to share nothing with it — no import in either
+  // direction — and to be a different shape entirely: repo award tiers computed
+  // from build/test/diff history, plus a badge SVG endpoint and a public page.
+  //
+  // It also reads `public_shares`, which belongs to `share`. Costing its port
+  // before starting (recipe §1.5) put it at ~8 methods, six of them reads of
+  // core build/diff aggregates, plus that cross-feature read — so it wants
+  // `share` migrated, or a metrics capability, first. Splitting the map entry
+  // is the same lesson `launch` recorded: read a feature's import list, not its
+  // directory name.
+  awards: {
+    lib: ["src/lib/awards"],
+    actions: [],
+    components: ["src/components/awards"],
   },
   "data-sources": {
     lib: ["src/lib/csv", "src/lib/google-sheets"],

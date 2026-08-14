@@ -243,6 +243,33 @@ export async function getUsersByIds(ids: string[]) {
     .where(inArray(users.id, ids));
 }
 
+/**
+ * The public slice of a batch of users, including avatar and email.
+ *
+ * Added for `src/lib/core/gamification-host.ts`: the season leaderboard used to
+ * `select name/email/avatar from users` inside the feature's own query module,
+ * and falls back to email when a member has no display name. A plugin may not
+ * read a core table (`core-scope.md` §6), so the read became one batched lookup
+ * on this side of the boundary.
+ *
+ * Separate from `getUsersByIds` (the board APIs' name-only lookup) rather than
+ * widening it: those boards are *public*, and an email must not become
+ * reachable from them by someone adding a field here. Two callers with two
+ * different disclosure rules want two functions.
+ */
+export async function getUserProfilesByIds(ids: string[]) {
+  if (ids.length === 0) return [];
+  return db
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      avatarUrl: users.avatarUrl,
+    })
+    .from(users)
+    .where(inArray(users.id, ids));
+}
+
 export async function getUserByEmail(email: string) {
   const [row] = await db
     .select()

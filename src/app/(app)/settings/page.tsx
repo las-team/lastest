@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import * as queries from "@/lib/db/queries";
+import * as gamification from "@lastest/plugin-gamification/reads";
 import { getCurrentSession } from "@/lib/auth";
 import { Github, Check, X, Users, Bot, Mail, Terminal } from "lucide-react";
 
@@ -153,8 +154,8 @@ export default async function SettingsPage({
   const [activeGamificationSeason, activeBugBlitz] =
     session?.team?.gamificationEnabled && teamId
       ? await Promise.all([
-          queries.getActiveSeason(teamId),
-          queries.getActiveBugBlitz(teamId),
+          gamification.getActiveSeason(teamId),
+          gamification.getActiveBugBlitz(teamId),
         ])
       : [null, null];
 

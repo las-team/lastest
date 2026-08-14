@@ -118,6 +118,9 @@ importers:
       '@lastest/plugin-explorer':
         specifier: workspace:*
         version: link:plugins/explorer
+      '@lastest/plugin-gamification':
+        specifier: workspace:*
+        version: link:plugins/gamification
       '@lastest/plugin-launch':
         specifier: workspace:*
         version: link:plugins/launch
@@ -954,6 +957,43 @@ importers:
         version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       react:
         specifier: 19.2.3
+        version: 19.2.3
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/gamification:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/core-data':
+        specifier: workspace:*
+        version: link:../../core/data
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@lastest/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8)
+      uuid:
+        specifier: '>=11.1.1'
+        version: 13.0.2
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.8
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: ^19
         version: 19.2.3
       typescript:
         specifier: ^5

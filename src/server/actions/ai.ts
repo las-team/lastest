@@ -20,7 +20,8 @@ import { revalidatePath } from "next/cache";
 import { getCurrentBranchForRepo } from "@/lib/git-utils";
 import { agentCreateTest } from "@/lib/playwright/generator-agent";
 import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
-import { awardScore } from "@/server/actions/gamification";
+import { awardScore } from "@lastest/plugin-gamification/actions";
+import * as gamificationReads from "@lastest/plugin-gamification/reads";
 import type { AgentStepState } from "@/lib/db/schema";
 import {
   claimPoolEB,
@@ -401,7 +402,7 @@ export async function startGenerateTestAgent(data: {
           );
         }
 
-        const generateBot = await queries.getBotByKind(
+        const generateBot = await gamificationReads.getBotByKind(
           teamId,
           "generate_agent",
         );
@@ -656,7 +657,7 @@ export async function startGeneratePlaceholderTestAgent(data: {
         );
 
         // Award test_created points to generate_agent bot
-        const generateBot = await queries.getBotByKind(
+        const generateBot = await gamificationReads.getBotByKind(
           teamId,
           "generate_agent",
         );

@@ -1,116 +1,33 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { toast } from "sonner";
+import {
+  CelebrationToasts,
+  type CelebrationEvent,
+} from "@lastest/plugin-gamification/ui/celebration-listener";
+
 import { useActivityFeedContextSafe } from "@/components/activity-feed/activity-feed-provider-client";
 
 /**
- * Subscribes to the existing activity-feed event stream and fires celebratory
- * sonner toasts on gamification events. Duplicates are deduped via the event id.
+ * App-side glue between the activity feed and the gamification plugin's
+ * celebration toasts.
  *
- * Mount this inside <ActivityFeedProvider> so it shares the SSE connection —
- * no extra polling or websocket needed.
+ * The plugin cannot read `ActivityFeedProvider`'s React context — a plugin may
+ * not import app code — and it should not: which events exist and how they
+ * arrive is the feed's business. What *is* the plugin's business is which of
+ * them deserve a toast and what that toast says, and that is what
+ * `CelebrationToasts` owns.
+ *
+ * Mount inside <ActivityFeedProvider> so it shares the SSE connection — no
+ * extra polling or websocket needed.
  */
 export function CelebrationListener() {
   const ctx = useActivityFeedContextSafe();
-  const seenIds = useRef<Set<string>>(new Set());
-  const initialSeedDone = useRef(false);
-
-  useEffect(() => {
-    if (!ctx) return;
-    if (!ctx.historyLoaded) return; // wait until history is loaded before seeding
-
-    // On the first run, seed seenIds with all existing events (history loaded on mount)
-    // so we don't replay old toasts. Only show toasts for events arriving after this point.
-    if (!initialSeedDone.current) {
-      initialSeedDone.current = true;
-      for (const event of ctx.events) {
-        seenIds.current.add(event.id);
-      }
-      return;
-    }
-
-    for (const event of ctx.events) {
-      if (seenIds.current.has(event.id)) continue;
-      seenIds.current.add(event.id);
-
-      // Only react to gamification event types
-      switch (event.eventType) {
-        case "score:awarded": {
-          const delta = Number(
-            (event.detail as Record<string, unknown> | null)?.delta ?? 0,
-          );
-          if (delta <= 0) break;
-          toast.success(
-            <span className="font-mono tracking-wider">
-              <span className="text-primary font-bold">+{delta}</span> ★{" "}
-              {event.summary.replace(/ \([^)]+\)$/, "")}
-            </span>,
-            { duration: 3500 },
-          );
-          break;
-        }
-        case "score:penalty": {
-          const delta = Number(
-            (event.detail as Record<string, unknown> | null)?.delta ?? 0,
-          );
-          toast(
-            <span className="font-mono tracking-wider text-orange-600 dark:text-orange-400">
-              {delta} · {event.summary.replace(/ \([^)]+\)$/, "")}
-            </span>,
-            { duration: 2500 },
-          );
-          break;
-        }
-        case "achievement:unlocked": {
-          toast.success(
-            <span className="font-mono tracking-wider">
-              🏆 <span className="font-bold">ACHIEVEMENT UNLOCKED</span>
-              <div className="text-xs opacity-80">{event.summary}</div>
-            </span>,
-            { duration: 5000 },
-          );
-          break;
-        }
-        case "beat_the_bot": {
-          const detail = (event.detail as Record<string, unknown> | null) ?? {};
-          const botName = String(detail.botName ?? "Bot");
-          const beatBy = Number(detail.beatBy ?? 0);
-          toast.success(
-            <span className="font-mono tracking-wider">
-              ★{" "}
-              <span className="font-bold">
-                YOU BEAT {botName.toUpperCase()}
-              </span>
-              <div className="text-xs opacity-80">by {beatBy} points</div>
-            </span>,
-            {
-              duration: 8000,
-              action: {
-                label: "Share",
-                onClick: () => {
-                  const text = `I beat ${botName} by ${beatBy} points on Lastest ★`;
-                  navigator.clipboard.writeText(text).then(
-                    () => toast.success("Copied to clipboard"),
-                    () => toast.error("Could not copy"),
-                  );
-                },
-              },
-            },
-          );
-          break;
-        }
-        case "season:started":
-        case "blitz:started": {
-          toast(
-            <span className="font-mono tracking-wider">{event.summary}</span>,
-            { duration: 5000 },
-          );
-          break;
-        }
-      }
-    }
-  }, [ctx, ctx?.events, ctx?.historyLoaded]);
-
-  return null;
+  if (!ctx) return null;
+  // The assertion that the narrowed `CelebrationEvent` in the plugin still
+  // matches the feed's real event shape. If the feed's type drifts, this stops
+  // compiling here rather than silently mis-rendering there.
+  const events = ctx.events satisfies readonly CelebrationEvent[];
+  return (
+    <CelebrationToasts events={events} historyLoaded={ctx.historyLoaded} />
+  );
 }

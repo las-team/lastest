@@ -3,7 +3,8 @@
 import * as queries from "@/lib/db/queries";
 import { requireRepoAccess, getCurrentSession } from "@/lib/auth";
 import { approveDiffCore } from "@/lib/diff/core";
-import { awardScore } from "@/server/actions/gamification";
+import { awardScore } from "@lastest/plugin-gamification/actions";
+import * as gamificationReads from "@lastest/plugin-gamification/reads";
 import { revalidatePath } from "next/cache";
 import type {
   EvidenceLayer,
@@ -121,7 +122,7 @@ export async function decideLayer(
             console.error("[gamification] diff_approved_as_change failed", err),
           );
           const teamId = session.team.id;
-          queries
+          gamificationReads
             .getTestCreator(diffBefore.testId)
             .then((creator) => {
               if (!creator) return;

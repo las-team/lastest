@@ -44,6 +44,7 @@ const nextConfig: NextConfig = {
     "@lastest/plugin-api-test",
     "@lastest/plugin-app-map",
     "@lastest/plugin-explorer",
+    "@lastest/plugin-gamification",
     "@lastest/plugin-launch",
     "@lastest/plugin-playground",
     "@lastest/plugin-rca",

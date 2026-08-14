@@ -167,24 +167,31 @@ describe("P2 spot-check — Analytics/Impact", () => {
 });
 
 describe("P2 spot-check — Gamification / Leaderboard / Awards", () => {
+  // Gamification moved to `@lastest/plugin-gamification` (RFC §9 phase 4), so
+  // these go through the plugin's read surface instead of the query barrel.
+  // That surface resolves its database handle from the wiring slot, which
+  // `getPluginRuntime()` fills — hence the boot here. The season create/end
+  // round trip is gone with the move: writing a season is an admin *action*
+  // that authorizes through the host, and this fixture has no session. The
+  // leaderboard is exercised against an unknown season id instead, which is
+  // the more interesting shape anyway — it must still return the team's
+  // members and bots at zero rather than an empty array.
+  beforeAll(async () => {
+    const { getPluginRuntime } = await import("@/lib/core/runtime");
+    await getPluginRuntime();
+  });
+
   it("season + leaderboard + award queries return sane shapes with no data", async () => {
-    const active = await queries.getActiveSeason(teamId);
+    const gamification = await import("@lastest/plugin-gamification/reads");
+
+    const active = await gamification.getActiveSeason(teamId);
     expect(active).toBeNull(); // no season created for this fresh team
 
-    const seasons = await queries.listSeasons(teamId);
+    const seasons = await gamification.listSeasons(teamId);
     expect(Array.isArray(seasons)).toBe(true);
 
-    // Real season, so getSeasonLeaderboard has something to compute over.
-    const season = await queries.createSeason({
-      teamId,
-      name: "P2 spot-check season",
-      status: "active",
-      startsAt: new Date(),
-      endsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    });
-    const leaderboard = await queries.getSeasonLeaderboard(season.id, teamId);
+    const leaderboard = await gamification.getSeasonLeaderboard(uuid(), teamId);
     expect(Array.isArray(leaderboard)).toBe(true);
-    await queries.endSeasonById(season.id);
 
     const award = await queries.getRepoAward(repositoryId);
     expect(award).toBeFalsy(); // no award computed for this fresh repo — not a crash

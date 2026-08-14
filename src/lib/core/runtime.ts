@@ -28,6 +28,7 @@ import { configureAppMap } from "@lastest/plugin-app-map";
 import { configureDesignSystem } from "@lastest/plugin-design-system";
 import { configureEvents } from "@lastest/plugin-events";
 import { configureExplorer } from "@lastest/plugin-explorer";
+import { configureGamification } from "@lastest/plugin-gamification";
 import { configureLaunch } from "@lastest/plugin-launch";
 import { configurePlayground } from "@lastest/plugin-playground";
 import { configureRca } from "@lastest/plugin-rca";
@@ -44,6 +45,7 @@ import { appDesignSystemHost } from "@/lib/core/design-system-host";
 import { entitlementsFor } from "@/lib/core/entitlements";
 import { appEventsHost } from "@/lib/core/events-host";
 import { appExplorerHost } from "@/lib/core/explorer-host";
+import { appGamificationHost } from "@/lib/core/gamification-host";
 import { createAppJobsHost } from "@/lib/core/jobs-host";
 import { MANIFESTS } from "@/lib/core/manifests";
 import { appLaunchHost } from "@/lib/core/launch-host";
@@ -217,6 +219,13 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
     host: appPlaygroundHost,
     data: data.capability("playground"),
   });
+  // Tenanted, but likewise no `runtime`: every caller of `awardScore` supplies
+  // a team it has already authorized, and `resolveScope` is documented not to
+  // accept a request-supplied `teamId`. See `plugins/gamification/src/wiring.ts`.
+  configureGamification({
+    host: appGamificationHost,
+    data: data.capability("gamification"),
+  });
 
   // Core raises `tests` domain notifications through a port it owns; this is
   // where the feature that listens gets attached. `createTest` used to
@@ -227,7 +236,8 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
   // Boot-time registration is what makes this equivalent to the old dynamic
   // import: `src/instrumentation.ts` awaits `getPluginRuntime()` before the
   // server handles a request, so no `createTest` can outrun it.
-  const { onTestCreated } = await import("@/lib/gamification/hooks");
+  const { onTestCreated } =
+    await import("@lastest/plugin-gamification/actions");
   setTestCreatedListener(onTestCreated);
 
   cached = { runtime, data, registry };
