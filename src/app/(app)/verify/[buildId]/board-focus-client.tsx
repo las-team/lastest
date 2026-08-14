@@ -108,6 +108,7 @@ export interface VisualDiffLite {
 export interface TestResultLite {
   id: string;
   testId: string | null;
+  testRunId: string | null;
   status: string | null;
   errorMessage: string | null;
   durationMs: number | null;
@@ -134,6 +135,16 @@ export interface TestResultLite {
   domSnapshot: import("@/lib/db/schema").DomSnapshotData | null;
   // E1: headless API results (null for browser tests).
   apiResult: import("@/lib/db/schema").ApiTestResultData | null;
+  // ── Interactive playback + State tab (specs 27/28) ─────────────────────
+  /** Recording path — RunPane embeds the step-synced player when set. */
+  videoPath: string | null;
+  /** Per-step start/end on the video clock (EB runs). */
+  stepTimings: import("@/lib/db/schema").StepTiming[] | null;
+  /** Timestamped console entries (alongside the flat consoleErrors). */
+  consoleEntries: import("@/lib/db/schema").ConsoleEntry[] | null;
+  /** End-of-run cookies + localStorage snapshot — the State tab diffs this
+   *  against the baseline run's snapshot. */
+  storageStateSnapshot: import("@/lib/db/schema").StorageStateSnapshot | null;
 }
 
 export interface VerifyFilters {
@@ -195,6 +206,10 @@ interface BoardFocusClientProps {
    *  review panel can render every token tile, not just those that
    *  appear in violations. */
   repoDesignSystem: import("@/lib/db/schema").DesignSystemConfig | null;
+  /** Early Adopter gate for the spec-28 annotated player (see
+   *  `@/lib/playback/feature-flag`). When false the Run pane renders no
+   *  recording card at all — its pre-spec-28 state. */
+  interactivePlayback?: boolean;
 }
 
 type Mode = "board" | "focus";
@@ -326,6 +341,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     perf: CheckModeT;
     url: CheckModeT;
     api: CheckModeT;
+    storage: CheckModeT;
   };
   const DEFAULT_CHECK_MODES: CheckModeMapT = {
     visual: "enforce",
@@ -338,6 +354,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     perf: "log",
     url: "log",
     api: "enforce",
+    storage: "log",
   };
   const [checkModes, setCheckModes] =
     useState<CheckModeMapT>(DEFAULT_CHECK_MODES);
@@ -1254,6 +1271,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
             violations: props.designSystemViolations,
             config: props.repoDesignSystem,
           }}
+          interactivePlayback={props.interactivePlayback ?? false}
         />
       )}
 

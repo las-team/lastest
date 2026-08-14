@@ -23,6 +23,7 @@ import {
   Gauge,
   Link as LinkIcon,
   Webhook,
+  Database,
 } from "lucide-react";
 import { savePlaywrightSettings } from "@/server/actions/settings";
 import {
@@ -117,6 +118,13 @@ const LAYERS: LayerMeta[] = [
     icon: Webhook,
     description:
       "Headless HTTP request + response assertions (API-type tests). A failed status/schema/body assertion gates the step.",
+  },
+  {
+    id: "storage",
+    name: "State",
+    icon: Database,
+    description:
+      "Diff end-of-run cookies + localStorage against the baseline run. Capture is always on; informational — never fails a test.",
   },
 ];
 

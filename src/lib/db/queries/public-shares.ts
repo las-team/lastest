@@ -8,6 +8,8 @@ import {
   visualDiffs,
   testResults,
   stepComparisons,
+  repositories,
+  teams,
 } from "../schema";
 import type {
   NewPublicShare,
@@ -15,6 +17,7 @@ import type {
   PublicShareKind,
   Baseline,
   CapturedScreenshot,
+  StepTiming,
   DomDiffResult,
   StepComparisonEvidence,
   StepVerdict,
@@ -297,6 +300,25 @@ export interface PublicShareContext {
   testRun: typeof testRuns.$inferSelect | null;
 }
 
+/**
+ * Feature flags of the team that owns a share's repository. A public share
+ * page has no session, so per-team gating (e.g. the spec-28 annotated player)
+ * reads the OWNER's flags instead of the anonymous viewer's. One join —
+ * the share page is server-rendered on every request.
+ */
+export async function getShareOwnerTeamFlags(
+  repositoryId: string | null | undefined,
+): Promise<{ earlyAdopterMode: boolean } | null> {
+  if (!repositoryId) return null;
+  const [row] = await db
+    .select({ earlyAdopterMode: teams.earlyAdopterMode })
+    .from(repositories)
+    .innerJoin(teams, eq(repositories.teamId, teams.id))
+    .where(eq(repositories.id, repositoryId))
+    .limit(1);
+  return row ? { earlyAdopterMode: row.earlyAdopterMode ?? false } : null;
+}
+
 export async function getActiveBaselinesForTest(
   testId: string,
 ): Promise<Baseline[]> {
@@ -407,6 +429,7 @@ export type ShareTestResult = {
   durationMs: number | null;
   screenshots: CapturedScreenshot[] | null;
   webVitals: WebVitalsSample[] | null;
+  stepTimings: StepTiming[] | null;
 };
 
 // Slim step-comparison projection for share rendering. Drops issue/reviewer
@@ -481,6 +504,7 @@ export async function getShareDataBySlug(
           durationMs: testResults.durationMs,
           screenshots: testResults.screenshots,
           webVitals: testResults.webVitals,
+          stepTimings: testResults.stepTimings,
         })
         .from(testResults)
         .where(

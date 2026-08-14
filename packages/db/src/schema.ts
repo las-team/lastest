@@ -32,6 +32,8 @@ import type {
   StorageStateSnapshot,
   UrlTrajectoryStep,
   WebVitalsSample,
+  StepTiming,
+  ConsoleEntry,
 } from "@lastest/eb-protocol";
 export type {
   DomSnapshotElement,
@@ -46,6 +48,8 @@ export type {
   StorageStateSnapshot,
   UrlTrajectoryStep,
   WebVitalsSample,
+  StepTiming,
+  ConsoleEntry,
 };
 
 export type TriageClassification =
@@ -71,6 +75,9 @@ export interface NetworkRequest {
   failed?: boolean;
   errorText?: string;
   startTime?: number;
+  /** ms since recording start (video clock). Set by EB runs; lets timeline
+   *  consumers place the request without epoch math. */
+  atMs?: number;
   requestHeaders?: Record<string, string>;
   responseHeaders?: Record<string, string>;
   postData?: string;
@@ -321,6 +328,7 @@ export interface TestPlaywrightOverrides {
   perfMode?: "enforce" | "log" | "disable";
   urlMode?: "enforce" | "log" | "disable";
   apiMode?: "enforce" | "log" | "disable";
+  storageMode?: "enforce" | "log" | "disable";
   acceptAnyCertificate?: boolean;
   maxParallelTests?: number;
   baseUrl?: string;
@@ -771,6 +779,9 @@ export const testResults = pgTable("test_results", {
   viewport: text("viewport"), // e.g., '1920x1080'
   browser: text("browser").default("chromium"),
   consoleErrors: jsonb("console_errors").$type<string[]>(),
+  // Timestamped console capture (video clock). Additive alongside
+  // consoleErrors — see ConsoleEntry.
+  consoleEntries: jsonb("console_entries").$type<ConsoleEntry[]>(),
   networkRequests: jsonb("network_requests").$type<NetworkRequest[]>(),
   downloads: jsonb("downloads").$type<DownloadRecord[]>(),
   a11yViolations: jsonb("a11y_violations").$type<A11yViolation[]>(),
@@ -826,6 +837,9 @@ export const testResults = pgTable("test_results", {
   storageStateSnapshot: jsonb(
     "storage_state_snapshot",
   ).$type<StorageStateSnapshot>(),
+  // Per-step start/end on the video clock — powers the annotated scrubber and
+  // step-synced evidence panes. Null for legacy/local runs.
+  stepTimings: jsonb("step_timings").$type<StepTiming[]>(),
 });
 
 // Repository provider type
@@ -1431,6 +1445,7 @@ export const playwrightSettings = pgTable("playwright_settings", {
   perfMode: text("perf_mode"), // web vitals capture
   urlMode: text("url_mode"), // URL trajectory comparison
   apiMode: text("api_mode"), // API-test request/response assertions (E1)
+  storageMode: text("storage_mode"), // end-of-run storage state diff (cookies + localStorage)
   createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 });
@@ -1950,7 +1965,9 @@ export const teams = pgTable("teams", {
    *  This is the dedicated gate; it replaces inferring availability from whether
    *  an AI key/provider happens to be configured. */
   builtInAiEnabled: boolean("built_in_ai_enabled").default(false),
-  gamificationEnabled: boolean("gamification_enabled").default(true),
+  /** Leaderboard / seasons / Bug Blitz. Opt-in — new teams start with it off
+   *  and enable it in Settings → Features. */
+  gamificationEnabled: boolean("gamification_enabled").default(false),
   /** Verify phase (v1.14+) — when true, /verify is the primary surface and
    *  appears as the first sidebar entry. /run and /review are demoted. */
   verifyPhaseEnabled: boolean("verify_phase_enabled").default(true),
@@ -4482,7 +4499,8 @@ export type EvidenceLayer =
   | "url"
   | "perf"
   | "variable"
-  | "api";
+  | "api"
+  | "storage";
 
 export interface EvidenceItem {
   layer: EvidenceLayer;
@@ -4611,6 +4629,25 @@ export interface VariableDiffSummary {
   }>;
 }
 
+/** One changed entry in the end-of-run storage state diff (State tab).
+ *  `key` is "domain path name" for cookies, "origin name" for localStorage.
+ *  Values are never included — snapshots carry hashes, not raw values. */
+export interface StorageStateDiffEntry {
+  key: string;
+  change: "added" | "removed" | "changed";
+  detail?: string;
+}
+
+/** Current run's end-of-run cookies + localStorage diffed against the
+ *  baseline run's snapshot (web analogue of a "files touched" pane). */
+export interface StorageStateDiffSummary {
+  cookies: StorageStateDiffEntry[];
+  localStorage: StorageStateDiffEntry[];
+  addedCount: number;
+  removedCount: number;
+  changedCount: number;
+}
+
 export interface StepComparisonEvidence {
   visual?: {
     pixelDifference: number;
@@ -4625,6 +4662,7 @@ export interface StepComparisonEvidence {
   url?: UrlTrajectoryDiffSummary;
   perf?: PerfDiffSummary;
   variable?: VariableDiffSummary;
+  storageState?: StorageStateDiffSummary;
 }
 
 export type StepIssueState = "open" | "auto" | "linked" | "closed";

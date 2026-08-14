@@ -73,6 +73,7 @@ export async function resolveCaptionTarget(
     steps: (candidate.screenshots ?? []).map((s) => ({
       path: s.path,
       label: s.label ?? null,
+      atMs: s.atMs ?? null,
     })),
     uxSummary: existing?.uxSummary || null,
   };

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Maximize2, Play } from "lucide-react";
 import { ScreenshotViewer } from "@/components/tests/screenshot-viewer";
+import { PLAYBACK_TIME_EVENT } from "@/components/replay-player";
 
 export type Chapter = {
   src: string;
@@ -32,6 +33,12 @@ function formatTime(sec: number): string {
  */
 export function ChapterRail({ chapters }: { chapters: Chapter[] }) {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
+  // Chapter containing the current playback position (ReplayPlayer broadcasts
+  // it as a document event — see PLAYBACK_TIME_EVENT). null until playback.
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const listRef = useRef<HTMLOListElement | null>(null);
+  const userScrolledAtRef = useRef(0);
+  const programmaticScrollAtRef = useRef(0);
 
   useEffect(() => {
     if (openIndex == null) return;
@@ -41,6 +48,36 @@ export function ChapterRail({ chapters }: { chapters: Chapter[] }) {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [openIndex]);
+
+  useEffect(() => {
+    const onTime = (e: Event) => {
+      const ms = (e as CustomEvent<{ ms: number }>).detail?.ms;
+      if (!Number.isFinite(ms)) return;
+      const sec = ms / 1000;
+      let idx: number | null = null;
+      for (let i = 0; i < chapters.length; i++) {
+        const at = chapters[i]!.atSec;
+        if (at != null && at <= sec) idx = i;
+      }
+      setActiveIndex(idx);
+    };
+    document.addEventListener(PLAYBACK_TIME_EVENT, onTime);
+    return () => document.removeEventListener(PLAYBACK_TIME_EVENT, onTime);
+  }, [chapters]);
+
+  // Follow playback with a horizontal scroll — but yield to the user for a
+  // few seconds after they scroll the rail themselves.
+  useEffect(() => {
+    if (activeIndex == null) return;
+    if (performance.now() - userScrolledAtRef.current < 4000) return;
+    const el = listRef.current?.children[activeIndex] as
+      | HTMLElement
+      | undefined;
+    if (el) {
+      programmaticScrollAtRef.current = performance.now();
+      el.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }, [activeIndex]);
 
   if (chapters.length === 0) return null;
   const anySeekable = chapters.some((c) => c.atSec != null);
@@ -53,12 +90,27 @@ export function ChapterRail({ chapters }: { chapters: Chapter[] }) {
           {anySeekable ? "· click a step to jump to it" : "· click to enlarge"}
         </span>
       </h2>
-      <ol className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+      <ol
+        ref={listRef}
+        onScroll={() => {
+          // scrollIntoView also fires onScroll — only count human scrolls.
+          if (performance.now() - programmaticScrollAtRef.current > 300) {
+            userScrolledAtRef.current = performance.now();
+          }
+        }}
+        className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1"
+      >
         {chapters.map((c, i) => {
           const seekable = c.atSec != null;
+          const isActive = i === activeIndex;
           return (
             <li key={c.src + i} className="shrink-0">
-              <div className="group relative w-40 rounded-md border bg-card p-1">
+              <div
+                className={
+                  "group relative w-40 rounded-md border bg-card p-1 transition-shadow" +
+                  (isActive ? " border-primary/60 ring-2 ring-primary/40" : "")
+                }
+              >
                 {/* Seek target — carries data-seek so <ReplayPlayer> seeks the
                     recording on click. Falls back to opening the lightbox when
                     the chapter has no known offset. */}
