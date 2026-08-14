@@ -95,6 +95,9 @@ export function NotificationSettingsCard({
     useState<IssueTrackerProvider>(
       (settings.issueTrackerProvider as IssueTrackerProvider) || "github",
     );
+  const [issueAssignee, setIssueAssignee] = useState(
+    settings.issueAssignee || "",
+  );
   const [customWebhookHeaders, setCustomWebhookHeaders] = useState<
     Array<{ key: string; value: string }>
   >(() => {
@@ -133,6 +136,7 @@ export function NotificationSettingsCard({
     customWebhookHeaders: settings.customWebhookHeaders || "",
     issueTrackerProvider:
       (settings.issueTrackerProvider as IssueTrackerProvider) || "github",
+    issueAssignee: settings.issueAssignee || "",
   });
 
   // Convert headers array to JSON string
@@ -163,6 +167,7 @@ export function NotificationSettingsCard({
         customWebhookMethod,
         customWebhookHeaders: headersJson,
         issueTrackerProvider,
+        issueAssignee: issueAssignee.trim() || null,
       });
       toast.success("Notification settings saved");
     });
@@ -179,6 +184,7 @@ export function NotificationSettingsCard({
     customWebhookMethod,
     headersJson,
     issueTrackerProvider,
+    issueAssignee,
   ]);
 
   // Auto-save with debounce - only when values differ from original props
@@ -195,7 +201,8 @@ export function NotificationSettingsCard({
       customWebhookUrl !== orig.customWebhookUrl ||
       customWebhookMethod !== orig.customWebhookMethod ||
       (headersJson || "") !== orig.customWebhookHeaders ||
-      issueTrackerProvider !== orig.issueTrackerProvider;
+      issueTrackerProvider !== orig.issueTrackerProvider ||
+      issueAssignee !== orig.issueAssignee;
 
     if (!hasChanges) return;
 
@@ -224,6 +231,7 @@ export function NotificationSettingsCard({
     customWebhookMethod,
     headersJson,
     issueTrackerProvider,
+    issueAssignee,
     doSave,
   ]);
 
@@ -440,6 +448,23 @@ export function NotificationSettingsCard({
               </p>
             )}
           </div>
+          {issueTrackerProvider === "github" && (
+            <div className="space-y-2">
+              <Label htmlFor="issueAssignee">Auto-assign to</Label>
+              <Input
+                id="issueAssignee"
+                placeholder="github-username (e.g. your AI engineer bot)"
+                value={issueAssignee}
+                onChange={(e) => setIssueAssignee(e.target.value)}
+                className="w-64"
+              />
+              <p className="text-xs text-muted-foreground">
+                Every issue Lastest files is assigned to this GitHub user, so an
+                AI engineer can pick it up immediately. Leave empty to skip
+                assignment.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Custom Webhook */}

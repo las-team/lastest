@@ -1861,6 +1861,11 @@ export const notificationSettings = pgTable("notification_settings", {
   issueTrackerProvider: text("issue_tracker_provider")
     .default("github")
     .notNull(),
+  // GitHub login auto-assigned to every issue Lastest files (visual diff +
+  // verify cases). Point it at your AI engineer bot (e.g. copilot, devin) so
+  // filed regressions are picked up without a human dispatcher. Null = no
+  // auto-assignment. Invalid logins are dropped by GitHub, not an error.
+  issueAssignee: text("issue_assignee"),
   createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 });
@@ -1877,6 +1882,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS = {
   customWebhookEnabled: false,
   customWebhookMethod: "POST" as const,
   issueTrackerProvider: "github" as IssueTrackerProvider,
+  issueAssignee: null as string | null,
 };
 
 // Selector statistics for optimizing fallback strategy
