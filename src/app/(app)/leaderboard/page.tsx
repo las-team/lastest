@@ -1,15 +1,14 @@
 import { notFound } from "next/navigation";
 import { headers } from "next/headers";
 import { getCurrentSession } from "@/lib/auth";
-import * as queries from "@/lib/db/queries";
-import { getTeamTrophyRoom } from "@/lib/db/queries/awards";
+import { getTeamTrophyRoom } from "@lastest/plugin-awards";
 import * as gamification from "@lastest/plugin-gamification/reads";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Trophy, Zap, Bot as BotIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { TrophyRoom } from "@/components/awards/trophy-room";
+import { TrophyRoom } from "@lastest/plugin-awards/ui/trophy-room";
 
 export const dynamic = "force-dynamic";
 

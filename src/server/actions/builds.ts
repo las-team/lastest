@@ -1615,10 +1615,10 @@ async function runBuildAsync(
 
     // Fire-and-forget Lastest awards recompute. Updates the repo's tier and
     // category badges based on the latest build. Tier only downgrades on a
-    // confirmed regression — see src/lib/awards/criteria.ts.
+    // confirmed regression — see plugins/awards/src/domain/criteria.ts.
     if (repositoryId) {
       const repoId = repositoryId;
-      import("@/lib/awards/recompute")
+      import("@lastest/plugin-awards")
         .then(({ recomputeRepoAward }) => {
           recomputeRepoAward(repoId).catch((e) => {
             console.error(`[awards] recompute failed for repo ${repoId}:`, e);

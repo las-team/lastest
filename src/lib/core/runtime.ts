@@ -25,6 +25,7 @@ import { sql } from "@lastest/db";
 import { configureA11y } from "@lastest/plugin-a11y";
 import { configureApiTest } from "@lastest/plugin-api-test";
 import { configureAppMap } from "@lastest/plugin-app-map";
+import { configureAwards } from "@lastest/plugin-awards";
 import { configureCi } from "@lastest/plugin-ci";
 import { configureDesignSystem } from "@lastest/plugin-design-system";
 import { configureEvents } from "@lastest/plugin-events";
@@ -42,6 +43,7 @@ import { getLogger } from "@/lib/logger";
 import { createAiFactory } from "@/lib/core/ai-capability";
 import { appApiTestHost } from "@/lib/core/api-test-host";
 import { appAppMapHost } from "@/lib/core/app-map-host";
+import { appAwardsHost } from "@/lib/core/awards-host";
 import { appBrowserHost } from "@/lib/core/browser-host";
 import { appCiHost } from "@/lib/core/ci-host";
 import { appDesignSystemHost } from "@/lib/core/design-system-host";
@@ -243,6 +245,12 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
   // would still need a second host call to fill that gap, so the host does
   // both in one. See `plugins/share/src/wiring.ts`.
   configureShare({ host: appShareHost, data: data.capability("share") });
+  // Tenanted (every row hangs off a repo), but no `runtime`, for the same
+  // reason as `gamification`: none of its three call paths (a build-
+  // completion trigger, an already-authorized team read, an anonymous slug
+  // lookup) would benefit from a `PluginContext`. See
+  // `plugins/awards/src/wiring.ts`.
+  configureAwards({ host: appAwardsHost, data: data.capability("awards") });
 
   // Core raises `tests` domain notifications through a port it owns; this is
   // where the feature that listens gets attached. `createTest` used to

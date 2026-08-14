@@ -1,4 +1,4 @@
-import type { AwardCategories, AwardTier } from "@/lib/db/schema";
+import type { AwardCategories, AwardTier } from "../schema";
 
 export const TIER_ORDER: AwardTier[] = [
   "none",

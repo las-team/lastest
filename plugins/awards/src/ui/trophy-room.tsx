@@ -4,8 +4,9 @@ import { useState } from "react";
 import Link from "next/link";
 import { Check, ChevronDown, Copy, Lock } from "lucide-react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
-import type { AwardCategories, AwardTier, RepoAward } from "@/lib/db/schema";
+import { cn } from "@lastest/ui";
+
+import type { AwardCategories, AwardTier, RepoAward } from "../schema";
 import { SplitShield } from "./badges";
 import { DeltaMark } from "./delta-mark";
 

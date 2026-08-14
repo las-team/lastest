@@ -1,4 +1,4 @@
-import type { AwardTier } from "@/lib/db/schema";
+import type { AwardTier } from "./schema";
 
 // ============================================================
 // Lastest badge SVG renderer, matches the embeddable-badge design

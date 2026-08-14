@@ -1,19 +1,5 @@
 import { v4 as uuid } from "uuid";
-import type {
-  AwardCategories,
-  AwardTier,
-  NewRepoAward,
-  RepoAward,
-} from "@/lib/db/schema";
-import {
-  getLatestProofShareSlug,
-  getRecentCompletedBuildsForRepo,
-  getRejectedDiffCountForRepo,
-  getRejectedDiffCountForRepoSince,
-  getRepoAward,
-  getRepoTestCount,
-  upsertRepoAward,
-} from "@/lib/db/queries/awards";
+
 import {
   applyDowngradeRule,
   computeCategories,
@@ -22,27 +8,31 @@ import {
   maxTier,
   type BuildSnapshot,
   type RecomputeInput,
-} from "./criteria";
+} from "./domain/criteria";
+import { db } from "./data/db";
+import { getRepoAward, upsertRepoAward } from "./data/queries";
+import type { AwardTier, NewRepoAward, RepoAward } from "./schema";
+import { awardsWiring } from "./wiring";
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
 function toSnapshot(row: {
   id: string;
-  total_tests: number | null;
-  passed_count: number | null;
-  failed_count: number | null;
-  changes_detected: number | null;
-  flaky_count: number | null;
-  a11y_score: number | null;
-  a11y_critical_count: number | null;
+  totalTests: number | null;
+  passedCount: number | null;
+  failedCount: number | null;
+  changesDetected: number | null;
+  flakyCount: number | null;
+  a11yScore: number | null;
+  a11yCriticalCount: number | null;
 }): BuildSnapshot {
-  const totalTests = row.total_tests ?? 0;
-  const passedCount = row.passed_count ?? 0;
-  const failedCount = row.failed_count ?? 0;
-  const changesDetected = row.changes_detected ?? 0;
-  const flakyCount = row.flaky_count ?? 0;
-  const a11yScore = row.a11y_score ?? 0;
-  const a11yCriticalCount = row.a11y_critical_count ?? 0;
+  const totalTests = row.totalTests ?? 0;
+  const passedCount = row.passedCount ?? 0;
+  const failedCount = row.failedCount ?? 0;
+  const changesDetected = row.changesDetected ?? 0;
+  const flakyCount = row.flakyCount ?? 0;
+  const a11yScore = row.a11yScore ?? 0;
+  const a11yCriticalCount = row.a11yCriticalCount ?? 0;
   // "clean pass": every test passed (no real failures), no unresolved visual changes,
   // and no flakes either. Flakes alone don't downgrade the tier but they DO
   // disqualify the build from counting toward gold's 5-clean streak.
@@ -77,28 +67,48 @@ function countConsecutiveNonFlakyFailures(snaps: BuildSnapshot[]): number {
   return n;
 }
 
+const TIER_RANK: Record<AwardTier, number> = {
+  none: 0,
+  starter: 1,
+  bronze: 2,
+  silver: 3,
+  gold: 4,
+};
+function rank(t: AwardTier): number {
+  return TIER_RANK[t];
+}
+
 /**
  * Recompute the award row for a repo from current DB state. Idempotent.
- * Returns the resulting row, or null if no completed build exists yet (no row written).
+ * Returns the resulting row, or null if no completed build exists yet (no row
+ * written).
  *
- * Safe to fire-and-forget from the executor, DB errors thrown by callers
- * should be logged, not propagated.
+ * Safe to fire-and-forget from the executor; DB errors thrown by callers
+ * should be logged, not propagated. Called from `builds.ts` with a
+ * `repositoryId` it has already resolved — see `wiring.ts` for why this
+ * plugin does not build a `PluginContext` for that call.
  */
 export async function recomputeRepoAward(
   repositoryId: string,
 ): Promise<RepoAward | null> {
-  const [testCount, recentRows, rejectedAll, rejectedRecent, prior, proofSlug] =
-    await Promise.all([
-      getRepoTestCount(repositoryId),
-      getRecentCompletedBuildsForRepo(repositoryId, 5),
-      getRejectedDiffCountForRepo(repositoryId),
-      getRejectedDiffCountForRepoSince(
-        repositoryId,
-        Date.now() - THIRTY_DAYS_MS,
-      ),
-      getRepoAward(repositoryId),
-      getLatestProofShareSlug(repositoryId),
-    ]);
+  const { host } = awardsWiring();
+
+  const [
+    testCount,
+    recentRows,
+    rejectedAll,
+    rejectedRecent,
+    prior,
+    shareSlugs,
+  ] = await Promise.all([
+    host.getTestCount(repositoryId),
+    host.getRecentCompletedBuilds(repositoryId, 5),
+    host.getRejectedDiffCount(repositoryId),
+    host.getRejectedDiffCount(repositoryId, Date.now() - THIRTY_DAYS_MS),
+    getRepoAward(db(), repositoryId),
+    host.resolveLatestShareSlugs([repositoryId]),
+  ]);
+  const proofSlug = shareSlugs.get(repositoryId) ?? null;
 
   if (recentRows.length === 0) {
     // No completed builds yet, nothing to award.
@@ -131,7 +141,7 @@ export async function recomputeRepoAward(
   });
   const priorHighest: AwardTier = prior?.highestTier ?? "none";
   const highestTier = maxTier(priorHighest, currentTier);
-  const categories: AwardCategories = computeCategories(input);
+  const categories = computeCategories(input);
 
   const isDowngrade =
     priorCurrent !== currentTier && rank(currentTier) < rank(priorCurrent);
@@ -159,16 +169,5 @@ export async function recomputeRepoAward(
     lastDowngradeReason: downgradeReason,
   };
 
-  return upsertRepoAward(data);
-}
-
-const TIER_RANK: Record<AwardTier, number> = {
-  none: 0,
-  starter: 1,
-  bronze: 2,
-  silver: 3,
-  gold: 4,
-};
-function rank(t: AwardTier): number {
-  return TIER_RANK[t];
+  return upsertRepoAward(db(), data);
 }

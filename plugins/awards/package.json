@@ -1,0 +1,40 @@
+{
+  "name": "@lastest/plugin-awards",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Repo award tiers (\"Prove your app is not AI slop\"): tier + category badges computed from build/test/diff history, a public criteria page, an embeddable badge SVG endpoint, and the team trophy room.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./api/badge": "./src/api/badge.ts",
+    "./host": "./src/host.ts",
+    "./page": "./src/ui/page.tsx",
+    "./schema": "./src/schema.ts",
+    "./ui/badges": "./src/ui/badges.tsx",
+    "./ui/trophy-room": "./src/ui/trophy-room.tsx",
+    "./wiring": "./src/wiring.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lastest/contracts": "workspace:*",
+    "@lastest/core-data": "workspace:*",
+    "@lastest/kernel": "workspace:*",
+    "@lastest/ui": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "lucide-react": "^0.562.0",
+    "sonner": "^2.0.7",
+    "uuid": "^11.0.5"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "next": "16.2.11",
+    "react": "^19",
+    "typescript": "^5",
+    "vitest": "^4.1.0"
+  },
+  "license": "FSL-1.1-ALv2"
+}

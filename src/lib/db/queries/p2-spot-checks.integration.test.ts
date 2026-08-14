@@ -183,6 +183,7 @@ describe("P2 spot-check — Gamification / Leaderboard / Awards", () => {
 
   it("season + leaderboard + award queries return sane shapes with no data", async () => {
     const gamification = await import("@lastest/plugin-gamification/reads");
+    const awards = await import("@lastest/plugin-awards");
 
     const active = await gamification.getActiveSeason(teamId);
     expect(active).toBeNull(); // no season created for this fresh team
@@ -193,7 +194,7 @@ describe("P2 spot-check — Gamification / Leaderboard / Awards", () => {
     const leaderboard = await gamification.getSeasonLeaderboard(uuid(), teamId);
     expect(Array.isArray(leaderboard)).toBe(true);
 
-    const award = await queries.getRepoAward(repositoryId);
+    const award = await awards.getRepoAward(repositoryId);
     expect(award).toBeFalsy(); // no award computed for this fresh repo — not a crash
   });
 });

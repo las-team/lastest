@@ -1,9 +1,9 @@
 # RFC: Core + Plugins
 
 **Status:** phases 0–3 landed. Phase 4 in progress — `rca`, `app-map`,
-`launch`, `api-test`, `playground`, `gamification`, `ci` and `share` done,
-`url-diff` resolved as core, the credential half of `scm` reclassified as
-core, 9 pseudo-plugins to go (`share`'s captions half moved to
+`launch`, `api-test`, `playground`, `gamification`, `ci`, `share` and `awards`
+done, `url-diff` resolved as core, the credential half of `scm` reclassified as
+core, 8 pseudo-plugins to go (`share`'s captions half moved to
 `src/lib/demo-captions/`, unmigrated, not counted as a plugin).
 **Author:** planning doc
 **Supersedes:** nothing
@@ -29,15 +29,16 @@ core, 9 pseudo-plugins to go (`share`'s captions half moved to
 > - **Phase 3 — done.** `CheckLayer` is a registry; `design-system` and `a11y`
 >   are check-layer plugins. Both are table-light, and `design-system` proved
 >   the no-schema shape (manifest + host port, no `ctx` at all).
-> - **Phase 4 — in progress. 8 of 13 plugins done.** `rca`
+> - **Phase 4 — in progress. 9 of 13 plugins done.** `rca`
 >   ([result](./rca-migration-result.md)), `app-map`
 >   ([result](./app-map-migration-result.md)), `launch`
 >   ([result](./launch-migration-result.md)), `api-test`
 >   ([result](./api-test-migration-result.md)), `playground`
 >   ([result](./playground-migration-result.md)), `gamification`
 >   ([result](./gamification-migration-result.md)), `ci`
->   ([result](./ci-migration-result.md)) and `share`
->   ([result](./share-migration-result.md)) have landed. `url-diff` did
+>   ([result](./ci-migration-result.md)), `share`
+>   ([result](./share-migration-result.md)) and `awards`
+>   ([result](./awards-migration-result.md)) have landed. `url-diff` did
 >   not go to a plugin at all — it was **reclassified as core**: its in-app page
 >   and sidebar entry were removed, and what is left has no user surface and
 >   exists only to serve the documented `POST /api/v1/snapshot` and
@@ -45,7 +46,30 @@ core, 9 pseudo-plugins to go (`share`'s captions half moved to
 >   reading of `core-scope.md` §2. The repeatable procedure is written down in
 >   [`plugin-migration-recipe.md`](./plugin-migration-recipe.md) — read that,
 >   not §9 below, before migrating the next feature.
->   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21 → 20 → 20 → 19**.
+>   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21 → 20 → 20 → 19 → 19**.
+>
+>   **`awards` is the plugin `share` was migrated ahead of schedule to
+>   unblock, and the estimate held exactly.** `gamification`'s result doc
+>   costed it at "~8 methods, six of them core aggregate reads and one a
+>   cross-feature read that wants `share` migrated first" before either
+>   migration existed; the actual port came in at 8. The interesting part is
+>   the shape of the unblocking: `awards` reads `share`'s latest-slug data and
+>   `share`'s `ShareHost.getRepoAward` reads `awards`'s table right back — a
+>   genuine two-way dependency between two features that may not import each
+>   other. Both directions go through `src/lib/core/`
+>   (`share-reads.ts`/`awards-host.ts` one way, `awards`'s own exports called
+>   from `share-host.ts` the other), and neither needed `./runtime` — the
+>   boot-order argument `share-reads.ts` already carried covered both
+>   directions without being re-derived. It is also the fourth migration in a
+>   row to need a table rename (`repo_awards` → `awards_repo_awards`) *and*
+>   the second to need a real FK dropped by catalogue lookup rather than
+>   merely a convention-only reference — `ci`'s shape, not `gamification`'s or
+>   `share`'s. See [`awards-migration-result.md`](./awards-migration-result.md)
+>   for the wiring shape (`gamification`'s "no `runtime`" pattern, arrived at
+>   independently for badge/public-page anonymity rather than
+>   pre-authorized-team reasoning alone) and the one component
+>   (`AwardBadgeRow`) that stayed in the app as a render prop for `share`
+>   while the primitives it renders with moved to the plugin.
 >
 >   **`share` is the largest host port yet (15 methods) and the first one
 >   costed deliberately *at* recipe §1.5's own stop line rather than under

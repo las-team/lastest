@@ -13,6 +13,7 @@ import type {
   ShareTeamActor,
 } from "@lastest/plugin-share/host";
 import type { DemoNotes, VideoCaption } from "@lastest/plugin-share";
+import { getRepoAward as awardsGetRepoAward } from "@lastest/plugin-awards";
 
 import type { DomDiffResult } from "@lastest/eb-protocol";
 
@@ -515,7 +516,14 @@ export const appShareHost: ShareHost = {
   },
 
   async getRepoAward(repositoryId: string): Promise<RepoAward | null> {
-    const award = await queries.getRepoAward(repositoryId);
+    // Cross-feature read into `@lastest/plugin-awards`'s own table — the
+    // mirror image of `resolveShareSlug`/`resolveLatestShareSlugs` on
+    // `AwardsHost`, which read share's table the same way. Both directions
+    // go through `src/lib/core/` rather than importing one plugin from the
+    // other. Boot order: `getRepoAward` never runs before `getPluginRuntime()`
+    // has configured both plugins, the same guarantee every other host relies
+    // on.
+    const award = await awardsGetRepoAward(repositoryId);
     return (award as RepoAward | undefined) ?? null;
   },
 

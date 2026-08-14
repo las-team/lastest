@@ -2,9 +2,9 @@
  * Product surface around the core: gamification, launch, sharing, feedback.
  *
  * Activity feed, seasons and scoring, achievements, public share links, the
- * Launch directory, playground progress, per-repo awards and the in-app bug
- * report widget. Like `agents`, RFC §7 marks this for extraction into plugins;
- * no core table references anything in here.
+ * Launch directory, playground progress and the in-app bug report widget.
+ * Like `agents`, RFC §7 marks this for extraction into plugins; no core table
+ * references anything in here.
  */
 
 import {
@@ -21,8 +21,6 @@ import {
 import type { BotKind, PwAgentType } from "./shared";
 
 import { teams, users } from "./identity";
-
-import { repositories } from "./repos";
 
 // ── Bug Reports ──────────────────────────────────────────────────────────────
 
@@ -211,56 +209,17 @@ export type NewActivityEvent = typeof activityEvents.$inferInsert;
 // Awards — "Prove your app is not AI slop" campaign
 // ---------------------------------------------------------------------------
 //
-// Per-repository tier + category badges. Tier ratchets upward and only
-// downgrades on a confirmed regression (user-rejected visual diff, or
-// non-flaky test failure across two consecutive builds). Flaky failures,
-// in-flight builds, and unresolved/open diffs do not downgrade.
+// MOVED OUT. `repo_awards` (renamed `awards_repo_awards` for the `<id>_`
+// prefix `core/data` requires), `AwardTier` and `AwardCategories` now live in
+// `plugins/awards/src/schema.ts` (RFC §9 phase 4, ninth plugin) — the tier +
+// category badge feature is a plugin, and `core-scope.md` §6 says core does
+// not know what a plugin stores or where.
 //
-// The badge SVG endpoint resolves a publicShares.slug -> repository -> award
-// row, so the embed URL stays stable while the underlying state stays live.
-
-export type AwardTier = "none" | "starter" | "bronze" | "silver" | "gold";
-
-export interface AwardCategories {
-  a11y: boolean;
-  allPassing: boolean;
-  zeroDrift: boolean;
-}
-
-export const repoAwards = pgTable(
-  "repo_awards",
-  {
-    id: text("id").primaryKey(),
-    repositoryId: text("repository_id")
-      .notNull()
-      .references(() => repositories.id, { onDelete: "cascade" })
-      .unique(),
-    currentTier: text("current_tier")
-      .$type<AwardTier>()
-      .notNull()
-      .default("none"),
-    highestTier: text("highest_tier")
-      .$type<AwardTier>()
-      .notNull()
-      .default("none"),
-    categories: jsonb("categories").$type<AwardCategories>().notNull(),
-    proofShareSlug: text("proof_share_slug"),
-    lastBuildId: text("last_build_id"),
-    earnedAt: timestamp("earned_at")
-      .$defaultFn(() => new Date())
-      .notNull(),
-    lastRecomputedAt: timestamp("last_recomputed_at")
-      .$defaultFn(() => new Date())
-      .notNull(),
-    lastDowngradeAt: timestamp("last_downgrade_at"),
-    lastDowngradeReason: text("last_downgrade_reason"),
-  },
-  (table) => [index("idx_repo_awards_tier").on(table.currentTier)],
-);
-
-export type RepoAward = typeof repoAwards.$inferSelect;
-
-export type NewRepoAward = typeof repoAwards.$inferInsert;
+// The FK to `repositories.id` (`onDelete: "cascade"`) is gone with it;
+// repository deletion now reaches this row through the plugin's
+// `onRepoDeleted` hook. `proofShareSlug` and `lastBuildId` were always
+// convention-only references (no FK, even before the move) — nothing changes
+// about them.
 
 // ============================================
 // Launch directory (launch.lastest.cloud)

@@ -658,6 +658,78 @@ async function migrateShareTables() {
   }
 }
 
+// `repo_awards` became `@lastest/plugin-awards`'s own table (RFC §9 phase 4,
+// ninth plugin), renamed for the `awards_` prefix `core/data` requires — same
+// shape as `GAMIFICATION_RENAMES`/`CI_RENAMES`, and for the same reason
+// `drizzle-kit push` cannot see a rename: it would drop `repo_awards`, create
+// `awards_repo_awards` empty, and take every earned tier with it.
+//
+// Unlike `share`, this one DOES carry a real FK to a core table
+// (`repository_id -> repositories.id ON DELETE CASCADE`), which
+// `core-scope.md` §6 forbids a plugin from declaring. Dropped by catalogue
+// lookup after the rename, the same shape `migrateCiTables` uses — implicitly
+// -created constraint names differ between environments, so `pg_constraint`
+// is the only reliable way to find it. `deletion.ts`'s `onRepoDeleted` is
+// what replaces the cascade from here on.
+const AWARDS_RENAMES = [["repo_awards", "awards_repo_awards"]];
+
+async function migrateAwardsTables() {
+  if (!process.env.DATABASE_URL) return;
+  let sql;
+  try {
+    sql = require("postgres")(process.env.DATABASE_URL);
+
+    const tableExists = async (name) => {
+      const rows = await sql`
+        select exists (
+          select 1 from information_schema.tables
+          where table_schema = 'public' and table_name = ${name}
+        ) as exists`;
+      return rows[0]?.exists ?? false;
+    };
+    const rowCount = async (name) => {
+      const rows = await sql.unsafe(
+        `select count(*)::text as n from "${name}"`,
+      );
+      return Number(rows[0]?.n ?? 0);
+    };
+
+    for (const [from, to] of AWARDS_RENAMES) {
+      if (!(await tableExists(from))) continue;
+      if (await tableExists(to)) {
+        if ((await rowCount(to)) > 0) {
+          console.log(`[migrate] ${from} -> ${to}: already migrated`);
+          continue;
+        }
+        await sql.unsafe(`drop table "${to}"`);
+      }
+      await sql.unsafe(`alter table "${from}" rename to "${to}"`);
+      console.log(`[migrate] renamed ${from} -> ${to}`);
+    }
+
+    // Then the FK into `repositories`, by catalogue lookup — `ALTER TABLE …
+    // RENAME` carries constraints across, so this runs after the rename and
+    // looks it up under the new table name.
+    const fks = await sql`
+      select rel.relname as table_name, ref.relname as points_at,
+             con.conname as name
+        from pg_constraint con
+        join pg_class rel on rel.oid = con.conrelid
+        join pg_class ref on ref.oid = con.confrelid
+       where con.contype = 'f'
+         and ref.relname = 'repositories'
+         and rel.relname = 'awards_repo_awards'`;
+    for (const { table_name: table, points_at: target, name } of fks) {
+      await sql.unsafe(`alter table ${table} drop constraint "${name}"`);
+      console.log(`[migrate] ${table}: dropped FK ${name} (-> ${target})`);
+    }
+  } catch (e) {
+    console.warn("[migrate] awards table migration skipped:", e.message);
+  } finally {
+    if (sql) await sql.end();
+  }
+}
+
 async function main() {
   await preCreate();
   await migrateExplorerTables();
@@ -665,6 +737,7 @@ async function main() {
   await migrateGamificationTables();
   await migrateCiTables();
   await migrateShareTables();
+  await migrateAwardsTables();
   await dropPluginUserForeignKeys();
   await nullOrphans();
   await bumpPoolDefaults();

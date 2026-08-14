@@ -1,5 +1,5 @@
-import type { RepoAward } from "@/lib/db/schema";
-import { SplitShield } from "./badges";
+import type { RepoAward } from "@lastest/plugin-awards";
+import { SplitShield } from "@lastest/plugin-awards/ui/badges";
 
 const TIER_TONE_MAP = {
   none: { tone: "ink" as const, value: "not yet" },
