@@ -13,6 +13,7 @@
  */
 export { Badge, badgeVariants } from "./badge";
 export { Button, buttonVariants } from "./button";
+export { Checkbox } from "./checkbox";
 export {
   Card,
   CardAction,
@@ -38,9 +39,16 @@ export {
 export { HoverCard, HoverCardContent, HoverCardTrigger } from "./hover-card";
 export { Input } from "./input";
 export { Label } from "./label";
+export {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+  PopoverTrigger,
+} from "./popover";
 export { Progress } from "./progress";
 export { Separator } from "./separator";
 export { Slider } from "./slider";
+export { Switch } from "./switch";
 export {
   Select,
   SelectContent,
