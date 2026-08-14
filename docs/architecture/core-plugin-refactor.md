@@ -1,8 +1,8 @@
 # RFC: Core + Plugins
 
 **Status:** phases 0–3 landed. Phase 4 in progress — `rca`, `app-map`,
-`launch`, `api-test` and `playground` done, `url-diff` resolved as core,
-8 plugins to go.
+`launch`, `api-test`, `playground` and `gamification` done, `url-diff` resolved
+as core, 8 plugins to go.
 **Author:** planning doc
 **Supersedes:** nothing
 
@@ -27,12 +27,13 @@
 > - **Phase 3 — done.** `CheckLayer` is a registry; `design-system` and `a11y`
 >   are check-layer plugins. Both are table-light, and `design-system` proved
 >   the no-schema shape (manifest + host port, no `ctx` at all).
-> - **Phase 4 — in progress. 5 of 13 plugins done.** `rca`
+> - **Phase 4 — in progress. 6 of 13 plugins done.** `rca`
 >   ([result](./rca-migration-result.md)), `app-map`
 >   ([result](./app-map-migration-result.md)), `launch`
 >   ([result](./launch-migration-result.md)), `api-test`
->   ([result](./api-test-migration-result.md)) and `playground`
->   ([result](./playground-migration-result.md)) have landed. `url-diff` did
+>   ([result](./api-test-migration-result.md)), `playground`
+>   ([result](./playground-migration-result.md)) and `gamification`
+>   ([result](./gamification-migration-result.md)) have landed. `url-diff` did
 >   not go to a plugin at all — it was **reclassified as core**: its in-app page
 >   and sidebar entry were removed, and what is left has no user surface and
 >   exists only to serve the documented `POST /api/v1/snapshot` and
@@ -40,7 +41,43 @@
 >   reading of `core-scope.md` §2. The repeatable procedure is written down in
 >   [`plugin-migration-recipe.md`](./plugin-migration-recipe.md) — read that,
 >   not §9 below, before migrating the next feature.
->   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21**.
+>   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21 → 20**.
+>
+>   **`gamification` is the first feature that *core was calling*, and that is
+>   the coupling nothing counted.** `createTest()` in `src/lib/db/queries/tests.ts`
+>   ended with `import("@/lib/gamification/hooks")` — core reaching into a
+>   feature, the one direction §3 forbids outright. `pnpm arch` never saw it,
+>   because the walker builds its patterns from what a *plugin* may not import
+>   and nothing inspects core's imports at all. So the strongest edge in the
+>   feature was invisible to the burndown, to ESLint and to the graph test, and
+>   it made the feature unmigratable as it stood: a package cannot be imported
+>   from inside the query layer without making core depend on it. Inverting it
+>   (core declares a port, the composition root registers the listener) was the
+>   blocking core PR ahead of the migration. **Recipe §1.6 is now the check:
+>   grep core for the feature's name before costing anything.**
+>
+>   Two more findings worth carrying. **The `<id>_` table prefix had been free
+>   five times running, and it was luck** — five of gamification's six tables
+>   needed renaming, and `drizzle-kit push` cannot see a rename: it drops the
+>   old table and creates the new one, silently, under `--force`. Two of the old
+>   names (`achievements`, `user_scores`) were generic enough to read like core
+>   concepts, which is a better argument for the prefix rule than collision
+>   avoidance. And **`export type { … }` inside a `"use server"` module compiles
+>   to a runtime action export** and fails the production build on every page —
+>   a sibling of the known `export { x } from …` trap, caught by `pnpm build`
+>   alone after `types` and `lint` both passed.
+>
+>   It also produced the clearest statement yet of a *missing* capability rather
+>   than a missing method. `ctx.events` exists and this is the first migrated
+>   feature that genuinely wants it — every award writes an activity row — and
+>   it cannot have it. A capability needs a `ContextScope`, and `awardScore` is
+>   called from six app sites that hold an already-authorized `teamId`, which
+>   `resolveScope` documents as background-paths-only precisely because
+>   honouring it from a request would be a tenancy escape. What is missing is a
+>   way to pass core a team the *caller has already authorized*, distinct from
+>   one it is asked to trust blindly. That is a kernel change with a security
+>   argument attached, so it is exactly the kind of thing that must not ride
+>   along inside a feature PR.
 >
 >   **`playground` is the first migration whose port is worth building core
 >   for, and it took two plugins to prove it.** Three methods — the smallest
@@ -53,8 +90,9 @@
 >   a rate-limit capability would retire *both* ports completely — six methods,
 >   two plugins, zero left. Neither made that case alone. This is §1.5's
 >   "group by what each method is" taken to its endpoint, and it is the thing
->   to build before `share`, `gamification` and the rest of the user-scoped
->   list, which will otherwise each write a third copy.
+>   to build before `share` and the rest of the user-scoped list, which will
+>   otherwise each write another copy. (`gamification` landed next and wrote
+>   four more — see above.)
 >
 >   It is also where **`launch`'s deferred core question got closed the way the
 >   process intends.** That migration ended by noting nothing in the manifest
@@ -76,7 +114,8 @@
 >   `playground` needed *no* deletion-related core change, because `launch`
 >   had already paid for `onUserDeleted`, the `"user"` `DeletionTarget` and the
 >   `cascadePluginDeletion` call. Second plugin of a shape, materially cheaper
->   than the first. Expect the same for `share` and `gamification`.
+>   than the first. `gamification` confirmed it from the other side: it needed no
+>   `tenancy` work at all, because that had already landed.
 >
 >   One rule generalised out of it, now recipe §3.2: **when `core-scope.md` §6
 >   makes you delete a join to a core table, check the join type.** A
@@ -845,6 +884,14 @@ earlier PR** — which is exactly the workflow being asked for.
 >   anyone else. The one place it hurt was a single `leftJoin(users)` for a
 >   comment author's display name — one join across the boundary cost one host
 >   method and one extra round trip. Count *joins to core tables*, not tables.
+> - **Grep core for the feature's name before costing the port.** A
+>   core→feature import is invisible to `pnpm arch` — the walker inspects what
+>   plugins import, not what core does — and it is blocking, because a package
+>   cannot be imported from inside the query layer. `gamification` had one and
+>   it was the largest single item in the migration. Recipe §1.6.
+> - **Check the table names against the `<id>_` prefix rule.** Free five times
+>   running, then five renames in one feature. `drizzle-kit push` resolves a
+>   rename by dropping and recreating.
 > - **Compare your port to the ports that already exist, method by method.**
 >   `playground`'s three are all in `launch`'s four. A port that duplicates
 >   another plugin's entirely is not four items of debt and three more — it is

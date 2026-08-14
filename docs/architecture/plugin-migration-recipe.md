@@ -11,7 +11,10 @@ plugin that persists into core tables), §3.1 (write the guard into the port
 method) and the shape rule in §3; and after
 [`playground`](./playground-migration-result.md), which closed §2.2's open
 question (`tenancy` is now a manifest field the kernel enforces) and sharpened
-§1.5 (compare your port to the ports that exist) and §3.2.
+§1.5 (compare your port to the ports that exist) and §3.2; and after
+[`gamification`](./gamification-migration-result.md), which added §1.6 (check
+whether *core* imports the feature), §2.4 (check your table names) and a second
+`"use server"` trap in §6.
 **Audience:** whoever migrates the next feature out of `src/` into `plugins/<id>/`.
 
 This is the *how*. The *why* is [`core-plugin-refactor.md`](./core-plugin-refactor.md)
@@ -62,8 +65,9 @@ a consumer of it, and the real task is extracting the core module it
 orchestrates, as its own PR, first.
 
 Measured so far: `playground` **3** (done), `launch` **4** (done), `api-test`
-**5** (done), `rca` **6** (done), `app-map` **9** (done), `url-diff` **~22**
-(never migrated — reclassified as core, RFC §9 phase 4).
+**5** (done), `rca` **6** (done), `app-map` **9** (done), `gamification` **9**
+(done), `url-diff` **~22** (never migrated — reclassified as core, RFC §9
+phase 4).
 
 > **Group by *what each method is*, not only by how many collapse together.**
 > `api-test`'s five grouped into three — one security boundary, two authorized
@@ -86,6 +90,13 @@ Measured so far: `playground` **3** (done), `launch` **4** (done), `api-test`
 > plugins. **If a method you are about to declare already exists verbatim in
 > another plugin's `host.ts`, say so in your result doc.** Neither plugin alone
 > made that case; together they do.
+>
+> `gamification` then added four more identity shapes — "who is calling", "is
+> this an admin of this team", "who are these ids", "who is in this team" —
+> bringing the total to **seven methods across three plugins**. That has stopped
+> being a pattern worth noting and is now a costed piece of work with a known
+> payoff. Build it before `share`, which has the same user-scoped surface and
+> will otherwise write a fourth copy.
 >
 > Two smaller rules from the same comparison. Where the two differ, **the
 > *wider* signature is usually the right one**: `PlaygroundHost.rateLimit`
@@ -141,6 +152,39 @@ Measured so far: `playground` **3** (done), `launch` **4** (done), `api-test`
 > imports by seven. Before trusting a grep-based survey, run
 > `file <path>`: anything reported as `data` rather than `text` is invisible to
 > your search. `grep -a` reads it correctly.
+
+## 1.6 Check whether *core* imports the feature. `pnpm arch` does not.
+
+The walker builds its patterns from what a **plugin** may not import. Nothing
+inspects what **core** imports, so a core→feature edge — the one direction RFC
+§3 forbids outright — is invisible to the burndown, to ESLint and to the graph
+test.
+
+`gamification` had one. `createTest()` in `src/lib/db/queries/tests.ts` ended
+with `import("@/lib/gamification/hooks")`, written as a dynamic import to break
+a module-eval cycle rather than to hide anything, and it made the feature
+*unmigratable* as it stood: a package cannot be imported from inside the query
+layer without making core depend on it.
+
+Before costing the port, run:
+
+```
+grep -rn '<feature>' src/lib/db src/lib/execution src/lib/eb src/lib/diff \
+                     src/lib/verify src/lib/auth src/lib/ws
+```
+
+If anything comes back, that is a **blocking core PR** ahead of the migration —
+the same class as `launch`'s `onUserDeleted`, not the optional class as
+`playground`'s `tenancy`. The shape that worked: core declares a port
+(`src/lib/db/test-hooks.ts`), the composition root registers the feature's
+listener inside `getPluginRuntime()`, and `src/instrumentation.ts` already
+awaits that at boot so nothing can outrun the registration.
+
+> **While you are there, check for *relative* cross-feature imports in the
+> files you are about to delete.** `src/server/actions/play-agent.ts` held
+> `import { awardScore } from "./gamification"`, uncounted because `play-agent`
+> is not a pseudo-plugin so no rule applied in either direction. It was found
+> by `pnpm types` after the target was deleted, which is luck, not process.
 
 ## 2. Pick the shape: does the plugin own tables?
 
@@ -268,6 +312,36 @@ Two things to decide when you hit this:
   of, sitting in a core column, is the promote case (§6.1 row one) — six
   API-test types went to `@lastest/eb-protocol` and the core schema re-exports
   them, so no app import path changed.
+
+### 2.4 Check your table names against the `<id>_` rule before you plan
+
+`core/data`'s `validateSchemaNamespace` refuses to boot a plugin whose tables
+are not prefixed with its id. Every migration up to `playground` got that for
+free — `launch_*`, `a11y_*`, `explorer_*`, `playground_achievements` were all
+already namespaced — and "no rename, no backfill, no drop/recreate risk" had
+started to read like a property of the process. It was luck.
+
+`gamification` had to rename five of six:
+
+```
+bots             -> gamification_bots
+bug_blitz_events -> gamification_bug_blitz_events
+score_events     -> gamification_score_events
+user_scores      -> gamification_user_scores
+achievements     -> gamification_achievements
+```
+
+**`drizzle-kit push` cannot see a rename.** It compares names, finds the old
+table absent from the schema and the new one missing from the database, and
+resolves that by dropping the first and creating the second — silently, with
+`--force`, taking every row. The rename has to happen in `scripts/migrate.js`
+*before* push, following `EXPLORER_RENAMES` / `migrateGamificationTables()`:
+idempotent, skipping a destination that already holds rows and dropping one a
+prior push left behind empty.
+
+> Two of gamification's old names, `achievements` and `user_scores`, were
+> generic enough to read like core concepts. They never were. That ambiguity is
+> a better argument for the prefix rule than "namespaces prevent collisions".
 
 ## 3. The host port — the honest escape hatch
 
@@ -430,9 +504,17 @@ worth as much as a migration, so grep for these before designing anything.
 - **Server actions:** a `"use server"` module inside a `transpilePackages`
   package produces real, dispatchable action ids. Export them from
   `plugins/<id>/src/actions.ts`. No codegen, no shim.
-  *Gotcha:* `export { x } from "pkg"` inside a `"use server"` file compiles to a
-  module with **no exports** — declare wrapper functions if you ever need to
-  re-export.
+
+  **The rule that covers both known traps: a `"use server"` module exports
+  async functions and nothing else.**
+  - `export { x } from "pkg"` compiles to a module with **no exports** —
+    declare wrapper functions if you ever need to re-export.
+  - `export type { A, B };` compiles to a **runtime action export**, and the
+    production build then fails on every page with
+    `Export A doesn't exist in target module`. Next.js assigns an action id per
+    export name before types are erased, then cannot resolve them. `pnpm types`
+    and `pnpm lint` both pass; only `pnpm build` catches it. Put types on a
+    non-action module and re-export from `index.ts` (`gamification`).
 - **Route pages:** the page component lives in the package
   (`plugins/<id>/src/ui/page.tsx`, exported as `./page`). The app's
   `src/app/(app)/<path>/page.tsx` keeps only the *composition* — resolving the

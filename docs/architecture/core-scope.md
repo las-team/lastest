@@ -143,6 +143,14 @@ deletion.
 >   replacing an `innerJoin` to a core table with a host lookup loses an
 >   existence predicate that is invisible in the column list — see
 >   [`plugin-migration-recipe.md`](./plugin-migration-recipe.md) §3.2.
+> - **A hook is not always *replacing* a cascade.** `plugins/gamification`'s
+>   six tables carried no FK to `teams` at all before they moved — `team_id`
+>   was already one of the 104 convention-only references §7 counts — so
+>   deleting a team had been leaving every score event and achievement behind
+>   since the feature shipped. Its `onTeamDeleted` is a bug fix the migration
+>   surfaced, not a regression it prevented. When §7 calls convention-only
+>   references "the existing norm here, not a novelty", this is the price of
+>   that norm: nobody notices until something forces an inventory.
 
 Precedent that this is workable: the schema already has **104 `*_id` columns
 with no FK constraint** (§7). Convention-only references are the existing norm
