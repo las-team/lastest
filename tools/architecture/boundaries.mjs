@@ -22,7 +22,10 @@
  * first to have done so; `design-system` and `a11y` followed in RFC §9 phase 3 —
  * all three entries are gone from the map below, and their violations with them.
  * `rca` is the first of RFC §9 phase 4 and went the same way; `app-map` is the
- * second, `launch` the third, `api-test` the fourth, `playground` the fifth and `gamification` the sixth.
+ * second, `launch` the third, `api-test` the fourth, `playground` the fifth,
+ * `gamification` the sixth and `ci` the seventh — the last of which graduated
+ * an entry that turned out to be two features, half of it core. See the `scm`
+ * note in PSEUDO_PLUGINS below.
  */
 
 /** Zone globs for the target layout. */
@@ -88,6 +91,21 @@ export const CORE_SRC_PATHS = [
   // public API is core by any reading of core-scope.md §2 — it is the thing
   // other people build against.
   "src/lib/url-diff",
+  // What is left of `src/lib/github` and `src/lib/gitlab` after
+  // `@lastest/plugin-ci` took the CI-configuration half (RFC §9 phase 4):
+  // OAuth authorize/exchange/refresh, encrypted token resolution, webhook
+  // signature verification, and repo-content reads. Every one of those is a
+  // credential boundary or is imported by something that is —
+  // `src/lib/auth/auth.ts`, `src/lib/ai/codebase-intelligence.ts`,
+  // `src/lib/change-map/compute.ts` — so `core-scope.md` §2 puts them in core
+  // and the `scm` PSEUDO_PLUGINS entry is gone rather than shrunk.
+  //
+  // The plugin half (`github/actions.ts`, `github/workflow-yaml.ts`,
+  // `gitlab/pipelines.ts`, `gitlab/ci-yaml.ts`) had exactly one consumer each:
+  // its own action module. Reading the import lists rather than the directory
+  // names is what made the split obvious — the same lesson `launch` recorded.
+  "src/lib/github",
+  "src/lib/gitlab",
   // The core half of the §6.2 split. The plugin half is enumerated per plugin
   // below; anything not named there stays core by default.
   "src/lib/playwright",
@@ -157,10 +175,18 @@ export const PSEUDO_PLUGINS = {
     lib: ["src/lib/csv", "src/lib/google-sheets"],
     actions: ["csv-sources.ts", "google-sheets.ts", "spec-import.ts"],
   },
-  scm: {
-    lib: ["src/lib/github", "src/lib/gitlab"],
-    actions: ["github-actions.ts", "gitlab-pipelines.ts"],
-  },
+  // `scm` is gone, and it is the first entry to graduate as **two things**.
+  // RFC §6.3 mapped it to all of `src/lib/github` + `src/lib/gitlab` + two
+  // action modules; reading the import lists split it cleanly:
+  //
+  //   - CI configuration (workflow/CI-file generation, provider REST calls,
+  //     the two config tables, the settings cards) → `plugins/ci/`.
+  //   - OAuth, tokens, webhook verification, repo-content reads → core. They
+  //     are listed in CORE_SRC_PATHS above; see the comment there.
+  //
+  // The plugin is named `ci`, not `scm`, deliberately: core now owns the
+  // source-control *credentials*, so a plugin called `scm` would be a lie about
+  // where the boundary is.
   scheduling: {
     lib: ["src/lib/scheduling"],
     actions: ["schedules.ts", "scanner.ts"],

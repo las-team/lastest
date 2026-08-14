@@ -1,6 +1,7 @@
 import { a11yPlugin } from "@lastest/plugin-a11y";
 import { apiTestPlugin } from "@lastest/plugin-api-test";
 import { appMapPlugin } from "@lastest/plugin-app-map";
+import { ciPlugin } from "@lastest/plugin-ci";
 import { designSystemPlugin } from "@lastest/plugin-design-system";
 import { eventsPlugin } from "@lastest/plugin-events";
 import { explorerPlugin } from "@lastest/plugin-explorer";
@@ -39,4 +40,5 @@ export const MANIFESTS: Parameters<typeof resolveRegistry>[0] = [
   apiTestPlugin,
   playgroundPlugin,
   gamificationPlugin,
+  ciPlugin,
 ];

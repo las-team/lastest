@@ -25,6 +25,7 @@ import { sql } from "@lastest/db";
 import { configureA11y } from "@lastest/plugin-a11y";
 import { configureApiTest } from "@lastest/plugin-api-test";
 import { configureAppMap } from "@lastest/plugin-app-map";
+import { configureCi } from "@lastest/plugin-ci";
 import { configureDesignSystem } from "@lastest/plugin-design-system";
 import { configureEvents } from "@lastest/plugin-events";
 import { configureExplorer } from "@lastest/plugin-explorer";
@@ -41,6 +42,7 @@ import { createAiFactory } from "@/lib/core/ai-capability";
 import { appApiTestHost } from "@/lib/core/api-test-host";
 import { appAppMapHost } from "@/lib/core/app-map-host";
 import { appBrowserHost } from "@/lib/core/browser-host";
+import { appCiHost } from "@/lib/core/ci-host";
 import { appDesignSystemHost } from "@/lib/core/design-system-host";
 import { entitlementsFor } from "@/lib/core/entitlements";
 import { appEventsHost } from "@/lib/core/events-host";
@@ -226,6 +228,12 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
     host: appGamificationHost,
     data: data.capability("gamification"),
   });
+  // Tenanted *and* wired with a `runtime`, which no plugin before it needed
+  // both of alongside a `data`. Its actions call `contextFor(ciPlugin)` with no
+  // scope request at all — `resolveScope` falls through to `requireTeamAccess()`
+  // — while its deletion hook and its GitLab webhook gate run with no session
+  // and take the handle straight from the slot. See `plugins/ci/src/wiring.ts`.
+  configureCi({ runtime, host: appCiHost, data: data.capability("ci") });
 
   // Core raises `tests` domain notifications through a port it owns; this is
   // where the feature that listens gets attached. `createTest` used to

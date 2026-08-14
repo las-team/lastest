@@ -14,7 +14,11 @@ question (`tenancy` is now a manifest field the kernel enforces) and sharpened
 §1.5 (compare your port to the ports that exist) and §3.2; and after
 [`gamification`](./gamification-migration-result.md), which added §1.6 (check
 whether *core* imports the feature), §2.4 (check your table names) and a second
-`"use server"` trap in §6.
+`"use server"` trap in §6; and after [`ci`](./ci-migration-result.md), which
+gave §1.6 its three possible outcomes (invert / reclassify / stop), added §1.7
+(an empty `contextFor()` may already be your `currentActor`), extended §2.1 to
+"check what each dropped FK points at", generalised §6's page rule to API
+routes, and split §8's action-id count into two distinct signals.
 **Audience:** whoever migrates the next feature out of `src/` into `plugins/<id>/`.
 
 This is the *how*. The *why* is [`core-plugin-refactor.md`](./core-plugin-refactor.md)
@@ -66,8 +70,8 @@ orchestrates, as its own PR, first.
 
 Measured so far: `playground` **3** (done), `launch` **4** (done), `api-test`
 **5** (done), `rca` **6** (done), `app-map` **9** (done), `gamification` **9**
-(done), `url-diff` **~22** (never migrated — reclassified as core, RFC §9
-phase 4).
+(done), `ci` **9** (done), `url-diff` **~22** (never migrated — reclassified as
+core, RFC §9 phase 4).
 
 > **Group by *what each method is*, not only by how many collapse together.**
 > `api-test`'s five grouped into three — one security boundary, two authorized
@@ -153,6 +157,12 @@ phase 4).
 > `file <path>`: anything reported as `data` rather than `text` is invisible to
 > your search. `grep -a` reads it correctly.
 
+> **Count the API route too, before you assume it re-exports.** `ci`'s GitLab
+> webhook handler needed six extra host methods to live in the package
+> (pull-request bookkeeping, build triggering, replay protection) — a 9-method
+> port would have become 15. It stayed in the app and the plugin exposes a
+> four-question *gate* instead. See §6.2.
+
 ## 1.6 Check whether *core* imports the feature. `pnpm arch` does not.
 
 The walker builds its patterns from what a **plugin** may not import. Nothing
@@ -173,12 +183,56 @@ grep -rn '<feature>' src/lib/db src/lib/execution src/lib/eb src/lib/diff \
                      src/lib/verify src/lib/auth src/lib/ws
 ```
 
-If anything comes back, that is a **blocking core PR** ahead of the migration —
-the same class as `launch`'s `onUserDeleted`, not the optional class as
-`playground`'s `tenancy`. The shape that worked: core declares a port
+If anything comes back, **do not assume it is a blocking core PR.** There are
+three resolutions and only the first is:
+
+| What you found | Resolution | Cost | Precedent |
+| --- | --- | --- | --- |
+| Core genuinely calls the feature | **Invert it** — core declares a port, the composition root registers the listener | blocking core PR | `gamification` |
+| What core calls was never the feature — it is a boundary misfiled under the feature's directory | **Reclassify it** — leave the code where it is, add the path to `CORE_SRC_PATHS` **and to CODEOWNERS**, and migrate only the rest | no code moves | `ci` |
+| The feature is a thin orchestration *of* core | **Stop** — extract the core module first | separate, earlier PR | `url-diff` |
+
+Tell them apart the same way §5 tells a library from a feature: **read the
+module's import list and its consumer list.** `ci`'s eleven-call-site hit looked
+like the worst case and was the cheapest — `src/lib/github/oauth.ts` and
+`content.ts` are imported by `src/lib/auth/auth.ts` and `src/lib/ai/` because
+they *are* core (OAuth exchange, encrypted token resolution, webhook signature
+verification), while every CI-configuration module had exactly one consumer: its
+own action module. One `PSEUDO_PLUGINS` entry, two destinations.
+
+For the inversion case, the shape that worked: core declares a port
 (`src/lib/db/test-hooks.ts`), the composition root registers the feature's
 listener inside `getPluginRuntime()`, and `src/instrumentation.ts` already
 awaits that at boot so nothing can outrun the registration.
+
+For the reclassification case, **the CODEOWNERS half is not optional.**
+`tools/architecture/boundaries.test.ts` asserts every `CORE_SRC_PATHS` entry is
+owner-protected and will fail `pnpm test` if you forget — which is the point:
+calling something core without a review gate makes the classification
+meaningless.
+
+## 1.7 Before declaring a `currentActor`, try an empty `contextFor()`
+
+Four migrations in a row declared a host method for "who is calling"
+(`launch`/`playground`'s `resolveActor`, `gamification`'s `currentActor`). `ci`
+did not need one, and the reason generalises to any **team-scoped** feature:
+
+```ts
+const ctx = await runtime.contextFor(ciPlugin);   // no scope request at all
+const teamId = ctx.team.id;                       // session-authorized
+```
+
+`resolveScope` falls through to the app's `requireTeamAccess()` when the request
+carries neither `repositoryId` nor `teamId`, so `ctx.team.id` is a
+session-authorized tenant that **no argument influenced**. `explorer` and
+`app-map` pass a `repositoryId` because their work hangs off a repo; if yours
+hangs off a *team*, pass nothing.
+
+What this does **not** cover is *role*. RBAC capabilities are not on
+`PluginContext` and should not be, so an admin-only action still needs
+`host.requireTeamAdmin()` — shaped as "give me the authorized team id" per §3.1.
+That method is now declared verbatim in two plugins, and `core/identity` would
+retire eight identity methods across four.
 
 > **While you are there, check for *relative* cross-feature imports in the
 > files you are about to delete.** `src/server/actions/play-agent.ts` held
@@ -212,6 +266,7 @@ regression that nothing catches.
 | --- | --- | --- |
 | a tenant | `onTeamDeleted` / `onRepoDeleted` | `explorer_knowledge`, `a11y_baselines` |
 | a person | `onUserDeleted` | `launch_votes`, `launch_comments` |
+| something else entirely | **none exists** — say so | `ci_*.runner_id` → `runners` |
 
 **Deleting a user does not delete their team.** So a team hook never fires for
 user-scoped rows, and the FK you are removing (`REFERENCES users(id) ON DELETE
@@ -234,6 +289,23 @@ select rel.relname as tbl, ref.relname as points_at, con.confdeltype
 Note also that a hook can be *stricter* than the FK it replaces, and usually
 should be: `ON DELETE CASCADE` removed launch's vote rows but left the
 denormalized `upvote_count` stale. The hook recomputes it.
+
+**And read the `confdeltype` column, not just `confrelid`.** The query above
+returns *what each FK points at* and *what it did*, and `ci` is where both
+mattered:
+
+| Dropped FK | `confdeltype` | Consequence |
+| --- | --- | --- |
+| `team_id -> teams.id` | `r` (**restrict**) | Not a cascade at all — it *refused* to delete a team with configs. Replacing it with `onTeamDeleted` is a **behaviour change**, and the right one (`core-scope.md` §6: a plugin must not veto a tenant deletion) — but say so, do not call it a preservation. |
+| `repository_id -> repositories.id` | `c` (cascade) | The ordinary case. `onRepoDeleted`. |
+| `runner_id -> runners.id` | `n` (set null) | **`DeletionTarget` has no case for a runner.** No hook can fire, so the config is left pointing at an id that does not resolve. |
+
+The third row is the one to watch for: a target outside team/repo/user leaves a
+gap the framework cannot close. Write it into `host.ts` and `deletion.ts` and
+say how bad it is (`ci`'s is contained — the panel already renders the missing
+runner as *"not found in database"* — and the honest fix is a fourth
+`DeletionTarget`, a core PR). **Do not bolt a fourth target onto a migration
+PR**; that is exactly the §7.2 split `playground`'s `tenancy` demonstrated.
 
 ### 2.2 A plugin does not have to be tenanted at all — declare it
 
@@ -321,7 +393,13 @@ free — `launch_*`, `a11y_*`, `explorer_*`, `playground_achievements` were all
 already namespaced — and "no rename, no backfill, no drop/recreate risk" had
 started to read like a property of the process. It was luck.
 
-`gamification` had to rename five of six:
+`gamification` had to rename five of six, and `ci` both of two — so this is now
+the **expected** case, not the exception. `ci`'s stakes were higher than a
+leaderboard's: `gitlab_pipeline_configs.webhook_secret` cannot be re-derived,
+because the matching value lives in the customer's GitLab project hook, so a
+silent drop/recreate turns every subsequent delivery into a 401.
+
+`gamification`'s five:
 
 ```
 bots             -> gamification_bots
@@ -526,15 +604,14 @@ worth as much as a migration, so grep for these before designing anything.
   is not there yet moves in — definition to `libs/ui`, re-export shim left at
   `src/components/ui/<name>.tsx` so no app import changes. `libs/` carries no
   CODEOWNERS gate, so this is not a core PR.
-- **API routes work the same way, and are usually a *bare* re-export.** The
+- **API routes work the same way, and are *sometimes* a bare re-export.** The
   handlers live in the package (`plugins/<id>/src/api/handlers.ts`) and
   `src/app/api/.../route.ts` re-exports them by name — Next.js discovers route
   handlers by named export, so `export { GET, POST } from "@lastest/plugin-<id>/api"`
   is what it wants. (This is *not* the S1 `"use server"` trap above; that one
-  applies only to `"use server"` files.) Unlike a page there is normally
-  nothing to compose — no selected repository, no plan gate, no app UI — so the
-  app side keeps only the file-system routing plus `export const dynamic`. See
+  applies only to `"use server"` files.) See
   `src/app/api/v1/launch/[...path]/route.ts`, 16 lines for a 681-line handler.
+  But see §6.2 before assuming yours is that shape.
 - **App UI a plugin cannot import goes down as a prop.** `app-map` handed its
   live-progress panel down as `exploreProgressPanel` (a `ComponentType`) and
   qa-agent's cancel action as `onCancelExploration`, the same way
@@ -557,6 +634,40 @@ drifts, the host file stops type-checking. Promoting *another* feature's
 payload types ahead of that feature's own migration is presumptuous — and
 narrowing is why `app-map` needed no core change at all.
 
+### 6.2 A route moves only if the route is mostly the feature's
+
+`launch`'s route was a bare re-export because every line of the handler was
+launch's. `ci`'s GitLab webhook is the opposite ratio and **stayed in the app.**
+
+Count it the way §1.5 says to count anything: moving the handler into the
+package needed `getRepositoryByGitlabProjectId`, `getPullRequestByBranch`,
+`createPullRequest`, `updatePullRequest`, `createAndRunBuild` and
+`markWebhookSeen` — **six** extra host methods, taking a 9-method port to 15,
+to drag pull-request bookkeeping across a boundary it has no reason to cross.
+
+Read the handler and split it by *owner*, not by file:
+
+| The handler does | Owner |
+| --- | --- |
+| resolve the repository, record the merge request, trigger the build, replay protection | core |
+| what shared secret should this have been signed with; is this event enabled; is this branch in the filter; is delivery `ci_file` or `webhook` | the plugin |
+
+So the plugin exports a **gate** (`plugins/ci/src/webhook.ts`) that answers its
+four questions and nothing else, and the app route composes. That is §6's page
+rule one level up: *the plugin owns the placement, the app owns the thing
+placed* becomes **the plugin answers its own questions, the app composes.**
+
+Two details worth copying:
+
+- **The gate returns the *expected* secret; the route does the
+  `timingSafeEqual`.** The plugin never sees the presented token, because
+  comparing secrets is core's job.
+- **The gate has no session**, so it takes its `DataCapability` from the wiring
+  slot rather than `contextFor` — the same route a deletion hook takes (§2.2).
+  Resolving the config is what *establishes* the tenant, so a `teamId` argument
+  would be circular; that is the one place a plugin query legitimately takes no
+  team.
+
 ## 7. Registration checklist
 
 | File | Edit |
@@ -570,6 +681,8 @@ narrowing is why `app-map` needed no core change at all.
 | `src/lib/core/ai-capability.ts` | if you declare `capabilities: ["ai"]`: add your `AIActionType` to `ACTION_TYPES` |
 | `scripts/migrate.js` | if tables moved: drop the FKs to core tables *by catalogue lookup*, before `drizzle-kit push` |
 | `tools/architecture/boundaries.mjs` | **delete** the `PSEUDO_PLUGINS` entry |
+| `tools/architecture/boundaries.mjs` | if you reclassified anything as core (§1.6): add it to `CORE_SRC_PATHS` |
+| `.github/CODEOWNERS` | **required** for every path you added to `CORE_SRC_PATHS` — the graph test fails otherwise |
 | `tools/architecture/baseline.json` | regenerate with `pnpm arch:baseline` — but see below |
 
 `drizzle.config.ts` needs no edit — it already globs `plugins/*/src/schema.ts`.
@@ -612,8 +725,20 @@ console.log(Object.values(m.node).filter(v =>
 ```
 
 That number must equal the number of exported actions. `app-map` expected 5 and
-got 5. A silently-empty result is what the S1 re-export trap looks like from
-the outside.
+got 5. **A mismatch is two different findings depending on its shape:**
+
+| Result | Means | Do |
+| --- | --- | --- |
+| **zero** ids | the S1 re-export trap — the module compiled to no exports at all | declare the actions locally (§6) |
+| **fewer, but not zero** | the missing ones are unreachable from any client boundary, so Next.js minted no id — i.e. **dead actions** | delete them |
+
+`ci` came back 10 for 13, and all three without ids had been dead *before* the
+migration: the settings page read its configs through the query layer and both
+YAML previews are computed client-side, so each was a live RPC endpoint
+maintained for no caller. A `"use server"` export nobody dispatches is not
+neutral — it is an unauthenticated-by-default entry point you are not thinking
+about. Server-component reads belong in a plain `reads.ts` instead
+(`gamification`, `ci`), which is also what a server component actually wants.
 
 **A plugin with no actions needs a different check.** `launch` exports none —
 its only surface is a REST route — so the manifest count is vacuously zero.

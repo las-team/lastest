@@ -386,8 +386,10 @@ export async function deleteRepository(id: string) {
 
     // 13. Finally the repo itself. Cascades: agentSessions, buildSchedules,
     //     composeConfigs, defaultSetupSteps, defaultTeardownSteps,
-    //     githubIssues, gitlabPipelineConfigs, storageStates, testFixtures,
-    //     testSpecs.
+    //     githubIssues, storageStates, testFixtures, testSpecs.
+    //     (`gitlabPipelineConfigs` used to be in this list; it became
+    //     `ci_gitlab_pipeline_configs` and is reaped by the ci plugin's
+    //     `onRepoDeleted` hook below instead.)
     await tx.delete(repositories).where(eq(repositories.id, id));
   });
 

@@ -21,8 +21,6 @@ export * from "./queries/runners";
 export * from "./queries/integrations";
 export * from "./queries/csv-sources";
 export * from "./queries/misc";
-export * from "./queries/github-actions";
-export * from "./queries/gitlab-pipelines";
 export * from "./queries/analytics";
 export * from "./queries/fixtures";
 export * from "./queries/storage-states";

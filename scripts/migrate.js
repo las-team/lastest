@@ -528,11 +528,93 @@ async function migrateGamificationTables() {
   }
 }
 
+// The two CI-provider config tables became `@lastest/plugin-ci`'s own
+// (RFC §9 phase 4). Both had to be renamed for the `ci_` prefix `core/data`
+// requires — the second migration in a row that did, after `gamification`.
+//
+// Same reason it must not be skipped: `drizzle-kit push` cannot see a rename.
+// It would drop `github_action_configs`, create `ci_github_action_configs`, and
+// take every customer's deployed workflow config with it — including
+// `gitlab_pipeline_configs.webhook_secret`, whose counterpart lives in the
+// customer's GitLab project hook and cannot be re-derived. Losing that side
+// turns every subsequent delivery into a 401 until someone redeploys by hand.
+//
+// Idempotent in the same way as the two above: skips a source that is already
+// gone, skips a destination that already holds rows, and drops an *empty*
+// destination (what a `push` run before this one leaves behind).
+const CI_RENAMES = [
+  ["github_action_configs", "ci_github_action_configs"],
+  ["gitlab_pipeline_configs", "ci_gitlab_pipeline_configs"],
+];
+
+async function migrateCiTables() {
+  if (!process.env.DATABASE_URL) return;
+  let sql;
+  try {
+    sql = require("postgres")(process.env.DATABASE_URL);
+
+    const tableExists = async (name) => {
+      const rows = await sql`
+        select exists (
+          select 1 from information_schema.tables
+          where table_schema = 'public' and table_name = ${name}
+        ) as exists`;
+      return rows[0]?.exists ?? false;
+    };
+    const rowCount = async (name) => {
+      const rows = await sql.unsafe(
+        `select count(*)::text as n from "${name}"`,
+      );
+      return Number(rows[0]?.n ?? 0);
+    };
+
+    for (const [from, to] of CI_RENAMES) {
+      if (!(await tableExists(from))) continue;
+      if (await tableExists(to)) {
+        if ((await rowCount(to)) > 0) {
+          console.log(`[migrate] ${from} -> ${to}: already migrated`);
+          continue;
+        }
+        await sql.unsafe(`drop table "${to}"`);
+      }
+      await sql.unsafe(`alter table "${from}" rename to "${to}"`);
+      console.log(`[migrate] renamed ${from} -> ${to}`);
+    }
+
+    // Then the three FKs into core, by catalogue lookup for the same reason
+    // `dropPluginUserForeignKeys` does it that way: push would drop them by
+    // name, and implicitly-created names differ between environments.
+    //
+    // `ALTER TABLE … RENAME` carries constraints across, so this runs *after*
+    // the renames and looks them up under the new table names.
+    const fks = await sql`
+      select rel.relname as table_name, ref.relname as points_at,
+             con.conname as name
+        from pg_constraint con
+        join pg_class rel on rel.oid = con.conrelid
+        join pg_class ref on ref.oid = con.confrelid
+       where con.contype = 'f'
+         and ref.relname in ('teams', 'runners', 'repositories')
+         and rel.relname in (
+           'ci_github_action_configs', 'ci_gitlab_pipeline_configs'
+         )`;
+    for (const { table_name: table, points_at: target, name } of fks) {
+      await sql.unsafe(`alter table ${table} drop constraint "${name}"`);
+      console.log(`[migrate] ${table}: dropped FK ${name} (-> ${target})`);
+    }
+  } catch (e) {
+    console.warn("[migrate] ci table migration skipped:", e.message);
+  } finally {
+    if (sql) await sql.end();
+  }
+}
+
 async function main() {
   await preCreate();
   await migrateExplorerTables();
   await migrateA11yBaselineOwnership();
   await migrateGamificationTables();
+  await migrateCiTables();
   await dropPluginUserForeignKeys();
   await nullOrphans();
   await bumpPoolDefaults();

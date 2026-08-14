@@ -97,8 +97,6 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
   - `storage-states.ts` — browser storage state management
   - `runners.ts` — runners, runner commands
   - `integrations.ts` — spec imports, google sheets, compose, agent sessions
-  - `gitlab-pipelines.ts` — GitLab pipeline configs
-  - `github-actions.ts` — GitHub Actions integration
   - `csv-sources.ts` — CSV test-data sources
   - `fixtures.ts` — test fixtures
   - `gamification.ts` / `awards.ts` — seasons, Bug Blitz, leaderboard scoring; repo awards
@@ -128,6 +126,7 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 - `packages/embedded-browser/` — containerized browser with CDP live streaming
 - `packages/ocr-service/` — Tesseract OCR container, the ONLY OCR backend (no in-process Tesseract in the app); app-side facade in `src/lib/ocr/` requires `OCR_SERVICE_URL` — unset means OCR features are disabled. The service wakes on demand and auto-sleeps after idle
 - `packages/vscode-extension/` — VS Code extension (esbuild)
+- `plugins/ci/` — CI provider integration (`@lastest/plugin-ci`): GitHub Actions workflow + GitLab pipeline config, YAML generation, deployment to the customer's repo, setup validation. Owns `ci_github_action_configs` / `ci_gitlab_pipeline_configs`. The OAuth/token/webhook-verification half of `src/lib/{github,gitlab}` stayed in core — see `docs/architecture/ci-migration-result.md`
 
 ## Billing (Stripe)
 

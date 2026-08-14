@@ -1,8 +1,9 @@
 # RFC: Core + Plugins
 
 **Status:** phases 0–3 landed. Phase 4 in progress — `rca`, `app-map`,
-`launch`, `api-test`, `playground` and `gamification` done, `url-diff` resolved
-as core, 8 plugins to go.
+`launch`, `api-test`, `playground`, `gamification` and `ci` done, `url-diff`
+resolved as core, the credential half of `scm` reclassified as core, 10
+pseudo-plugins to go.
 **Author:** planning doc
 **Supersedes:** nothing
 
@@ -27,13 +28,14 @@ as core, 8 plugins to go.
 > - **Phase 3 — done.** `CheckLayer` is a registry; `design-system` and `a11y`
 >   are check-layer plugins. Both are table-light, and `design-system` proved
 >   the no-schema shape (manifest + host port, no `ctx` at all).
-> - **Phase 4 — in progress. 6 of 13 plugins done.** `rca`
+> - **Phase 4 — in progress. 7 of 13 plugins done.** `rca`
 >   ([result](./rca-migration-result.md)), `app-map`
 >   ([result](./app-map-migration-result.md)), `launch`
 >   ([result](./launch-migration-result.md)), `api-test`
 >   ([result](./api-test-migration-result.md)), `playground`
->   ([result](./playground-migration-result.md)) and `gamification`
->   ([result](./gamification-migration-result.md)) have landed. `url-diff` did
+>   ([result](./playground-migration-result.md)), `gamification`
+>   ([result](./gamification-migration-result.md)) and `ci`
+>   ([result](./ci-migration-result.md)) have landed. `url-diff` did
 >   not go to a plugin at all — it was **reclassified as core**: its in-app page
 >   and sidebar entry were removed, and what is left has no user surface and
 >   exists only to serve the documented `POST /api/v1/snapshot` and
@@ -41,7 +43,47 @@ as core, 8 plugins to go.
 >   reading of `core-scope.md` §2. The repeatable procedure is written down in
 >   [`plugin-migration-recipe.md`](./plugin-migration-recipe.md) — read that,
 >   not §9 below, before migrating the next feature.
->   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21 → 20**.
+>   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21 → 20 → 20**.
+>
+>   **`ci` is the first entry in the map that turned out to be two features, and
+>   the finding is about §1.6 of the recipe rather than about CI.** §6.3 lists
+>   one plugin, `scm` = `src/lib/github` + `src/lib/gitlab` + two action
+>   modules. Grepping core for the feature's name — the check `gamification`
+>   forced — came back with `src/lib/auth/auth.ts`, `src/lib/ai/`,
+>   `src/lib/change-map/` and eleven more call sites, which on the gamification
+>   reading is a large blocking core PR. It was not one, because **core was not
+>   calling a feature; it was calling the part of `src/lib/github` that had been
+>   misfiled as a feature.** Every module in the credential half (OAuth
+>   exchange/refresh, encrypted token resolution, webhook signature
+>   verification, repo-content reads) is a boundary `core-scope.md` §2 puts in
+>   core without argument, and every module in the CI half had exactly one
+>   consumer: its own action module. Nothing moved and nothing inverted — the
+>   map was wrong. So a §1.6 hit has **three** possible resolutions, not one:
+>   *invert* (`gamification`, blocking core PR), *reclassify* (`ci`, no code
+>   moves) or *stop* (`url-diff`, extract the core module first). Treating them
+>   all as the first would have priced this migration at roughly double.
+>
+>   It also produced the first *reduction* in what a port needs. Every
+>   user-scoped plugin so far declared a `currentActor`-shaped host method;
+>   this one does not, because its actions call `contextFor(ciPlugin)` with **no
+>   scope request at all** and `resolveScope` falls through to
+>   `requireTeamAccess()`. The team arrives from the session, authorized, with
+>   nothing for an argument to influence — which was sitting in the kernel the
+>   whole time. `requireTeamAdmin` is still a port method (role is not on
+>   `PluginContext` and should not be), and it is now the **fifth** copy of the
+>   `core/identity` gap: eight methods across four plugins.
+>
+>   Two smaller rules generalised out of it. **Recipe §8's action-id count
+>   catches dead actions, not only the S1 trap** — it came back 10 for 13
+>   exports, and the three missing were `"use server"` endpoints nothing had
+>   dispatched *before* the migration either. A zero means the re-export trap; a
+>   *partial* mismatch means dead RPC. And **§6's page rule generalises to API
+>   routes**: this is the first route that is not a bare re-export, because six
+>   of its seven concerns are core's. `launch` handed the whole request over;
+>   here the plugin answers four questions about a config row and the app
+>   composes. The deciding test is not "is it a route" but *what fraction of the
+>   handler belongs to the feature* — moving it wholesale would have taken the
+>   port from 9 to 15.
 >
 >   **`gamification` is the first feature that *core was calling*, and that is
 >   the coupling nothing counted.** `createTest()` in `src/lib/db/queries/tests.ts`
@@ -819,6 +861,21 @@ In rough order of increasing pain: `rca`, `url-diff`, `app-map`, `share`, `launc
 `gamification`, `playground`, `api-test`, `demo`, `data-sources`, `scm`,
 `scheduling`, then the `src/lib/playwright` split (§6.2), then `qa-agent` last —
 by which point the contract will have been through a dozen features.
+
+> **`scm` did not exist as a single feature.** Half of it — OAuth
+> exchange/refresh, encrypted token resolution, webhook signature verification,
+> repo-content reads — is a credential boundary that `src/lib/auth/auth.ts`
+> itself imports, so it was reclassified as core and stayed put. The other half
+> became `@lastest/plugin-ci` (**9 host methods** for ~5,700 vertical LOC,
+> 3,510 of it React). The plugin is named `ci` rather than `scm` because core
+> now owns the source-control credentials, and a package called `scm` would
+> misdescribe where the boundary is.
+>
+> Two entries on this list have now split in two — `gamification` into
+> Beat-the-Bot + `awards`, and `scm` into core + `ci`. **Read the import lists
+> before trusting an entry's boundaries**, not just its size or its name; the
+> map was written from directory names and both times that was wrong in the same
+> direction (one entry, two things).
 
 > **`url-diff` was never migrated — it was reclassified as core.** Counted
 > before starting it: its host port would need **~22 methods** for ~1,000 LOC of

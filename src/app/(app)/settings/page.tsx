@@ -61,9 +61,13 @@ import {
   ConnectGithubButton,
   ReconnectGithubLink,
 } from "@/components/settings/connect-github-button";
-import { GithubActionsCard } from "@/components/settings/github-actions-card-client";
+import { GithubActionsCard } from "@lastest/plugin-ci/ui/github-card";
+import {
+  listGithubActionConfigs,
+  listGitlabPipelineConfigs,
+} from "@lastest/plugin-ci/reads";
 import { ConnectGitlabButton } from "@/components/settings/connect-gitlab-button";
-import { GitlabPipelinesCard } from "@/components/settings/gitlab-pipelines-card-client";
+import { GitlabPipelinesCard } from "@lastest/plugin-ci/ui/gitlab-card";
 import { ScheduleManagerCard } from "@/components/settings/schedule-manager-client";
 import { DiagramThumbnail } from "@/components/ui/diagram-thumbnail";
 import { TestMigrationCard } from "@/components/settings/test-migration-card";
@@ -105,8 +109,8 @@ export default async function SettingsPage({
     runners,
     sysRunners,
   ] = await Promise.all([
-    teamId ? queries.getGithubActionConfigs(teamId) : [],
-    teamId ? queries.getGitlabPipelineConfigs(teamId) : [],
+    teamId ? listGithubActionConfigs(teamId) : [],
+    teamId ? listGitlabPipelineConfigs(teamId) : [],
     teamId ? queries.getRepositoriesByTeam(teamId) : [],
     getRunners(),
     getSystemRunners(),
@@ -486,7 +490,10 @@ export default async function SettingsPage({
         />
       </div>
 
-      {/* GitHub Actions */}
+      {/* GitHub Actions. `connectAccountButton` and `flowDiagram` go down as
+          props because the plugin may not import app components — the OAuth
+          connect flow is core's (it holds the credential) and DiagramThumbnail
+          is built on next/image. Recipe §6. */}
       <div id="github-actions">
         <GithubActionsCard
           configs={githubActionConfigs}
@@ -494,6 +501,15 @@ export default async function SettingsPage({
           repos={teamRepos}
           hasGithubAccount={!!githubAccount}
           githubUsername={githubAccount?.githubUsername ?? null}
+          connectAccountButton={<ConnectGithubButton />}
+          flowDiagram={
+            <DiagramThumbnail
+              src="/docs/development-flow.png"
+              alt="Development & Review Flow — from code push to production with visual validation"
+              width={480}
+              height={120}
+            />
+          }
         />
       </div>
 
@@ -503,6 +519,7 @@ export default async function SettingsPage({
           runners={runners}
           repos={teamRepos}
           hasGitlabAccount={!!gitlabAccount}
+          connectAccountButton={<ConnectGitlabButton />}
         />
       </div>
     </>

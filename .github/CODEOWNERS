@@ -55,6 +55,12 @@
 # (`POST /api/v1/snapshot`, `POST /api/v1/diff`). See boundaries.mjs.
 /src/lib/url-diff/              @ewyct
 /src/server/actions/url-diff.ts @ewyct
+# What is left of the old `scm` pseudo-plugin after `@lastest/plugin-ci` took the
+# CI-configuration half: OAuth authorize/exchange/refresh, encrypted token
+# resolution, webhook signature verification, repo-content reads. Credential
+# boundaries, and `src/lib/auth/auth.ts` imports them.
+/src/lib/github/                @ewyct
+/src/lib/gitlab/                @ewyct
 /src/lib/utils.ts               @ewyct
 /src/lib/logger.ts              @ewyct
 /src/lib/crypto.ts              @ewyct

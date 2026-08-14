@@ -33,9 +33,10 @@ export * from "./schema/shared";
 export * from "./schema/identity";
 // Repositories, connected SCM accounts, pull requests, filed issues.
 export * from "./schema/repos";
-// GitHub Actions / GitLab pipeline config. Its own module because keeping it in
-// `repos` is what creates the identity ⇄ repos and repos ⇄ runs cycles.
-export * from "./schema/scm";
+// (`schema/scm.ts` — GitHub Actions / GitLab pipeline config — is gone: it
+//  moved to `plugins/ci/src/schema.ts` in RFC §9 phase 4. Its own module was
+//  always the seam; extracting it also removed the identity ⇄ repos and
+//  repos ⇄ runs cycles `pnpm schema:graph` used to report.)
 // Test definitions, versions, results, routes, fixtures, per-test caches.
 export * from "./schema/tests";
 // Builds, schedules, runners, background jobs, build-level artifacts.
