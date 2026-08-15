@@ -2,10 +2,12 @@
 
 **Status:** phases 0–3 landed. Phase 4 in progress — `rca`, `app-map`,
 `launch`, `api-test`, `playground`, `gamification`, `ci`, `share`, `awards`,
-`ranger` and `recorder` done, `url-diff` resolved as core, the credential half
-of `scm` reclassified as core, 6 pseudo-plugins to go (`share`'s captions half
-moved to `src/lib/demo-captions/`, unmigrated, not counted as a plugin;
-`demo` itself is not a plugin either — see `ranger-migration-result.md` §2).
+`ranger`, `recorder` and `data-sources` done, `url-diff` resolved as core, the
+credential half of `scm` reclassified as core, 6 pseudo-plugins to go
+(`share`'s captions half moved to `src/lib/demo-captions/`, unmigrated, not
+counted as a plugin; `demo` itself is not a plugin either — see
+`ranger-migration-result.md` §2; `spec-import` split out of `data-sources`,
+unmigrated — see `data-sources-migration-result.md` §1).
 **Author:** planning doc
 **Supersedes:** nothing
 
@@ -30,7 +32,7 @@ moved to `src/lib/demo-captions/`, unmigrated, not counted as a plugin;
 > - **Phase 3 — done.** `CheckLayer` is a registry; `design-system` and `a11y`
 >   are check-layer plugins. Both are table-light, and `design-system` proved
 >   the no-schema shape (manifest + host port, no `ctx` at all).
-> - **Phase 4 — in progress. 11 of 13 plugins done.** `rca`
+> - **Phase 4 — in progress. 12 of 13 plugins done.** `rca`
 >   ([result](./rca-migration-result.md)), `app-map`
 >   ([result](./app-map-migration-result.md)), `launch`
 >   ([result](./launch-migration-result.md)), `api-test`
@@ -40,8 +42,9 @@ moved to `src/lib/demo-captions/`, unmigrated, not counted as a plugin;
 >   ([result](./ci-migration-result.md)), `share`
 >   ([result](./share-migration-result.md)), `awards`
 >   ([result](./awards-migration-result.md)), `ranger`
->   ([result](./ranger-migration-result.md)) and `recorder`
->   ([result](./recorder-migration-result.md)) have landed. `url-diff` did
+>   ([result](./ranger-migration-result.md)), `recorder`
+>   ([result](./recorder-migration-result.md)) and `data-sources`
+>   ([result](./data-sources-migration-result.md)) have landed. `url-diff` did
 >   not go to a plugin at all — it was **reclassified as core**: its in-app page
 >   and sidebar entry were removed, and what is left has no user surface and
 >   exists only to serve the documented `POST /api/v1/snapshot` and
@@ -49,7 +52,11 @@ moved to `src/lib/demo-captions/`, unmigrated, not counted as a plugin;
 >   reading of `core-scope.md` §2. The repeatable procedure is written down in
 >   [`plugin-migration-recipe.md`](./plugin-migration-recipe.md) — read that,
 >   not §9 below, before migrating the next feature.
->   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21 → 20 → 20 → 19 → 19 → 18 → 14**.
+>   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21 → 20 → 20 → 19 → 19 → 18 → 14 → 14**.
+>   `data-sources` is the third migration in a row to graduate without moving
+>   the number — its coupling to core was through the query layer (allowed)
+>   and, once found, through a core→feature *type* import invisible to the
+>   walker in the other direction (recipe §1.6; see below).
 >
 >   **`recorder` is the second plugin out of the §6.2 `src/lib/playwright`
 >   split, and the first migration to produce a new `libs/` package out of
@@ -75,6 +82,52 @@ moved to `src/lib/demo-captions/`, unmigrated, not counted as a plugin;
 >   [`recorder-migration-result.md`](./recorder-migration-result.md) §5 for
 >   the exact grouping and what a future `RunnerChannelCapability` would
 >   retire.
+>
+>   **`data-sources` is the third entry the map got wrong, and this time it
+>   was wrong three ways at once, not two.** RFC §6.3 maps it to `lib/csv`,
+>   `lib/google-sheets` and three action modules including `spec-import.ts`.
+>   Reading import lists split it three ways: the parsing/REST-client code was
+>   pure and promoted to `libs/csv`/`libs/google-sheets` before the plugin PR
+>   (recipe §5); the Google Sheets OAuth refresh was a credential boundary and
+>   stayed core, but — unlike `github`/`gitlab` OAuth — with exactly one
+>   caller, so it became a few lines in a host file rather than a new
+>   `CORE_SRC_PATHS` entry; and `spec-import.ts` turned out to share no table,
+>   type or import with the other two in either direction — it is AI test
+>   generation, not a data source, and its own port would run past recipe
+>   §1.5's stop line (~20+ core calls). Left as its own uncosted
+>   `PSEUDO_PLUGINS["spec-import"]` entry rather than migrated or dropped from
+>   the burndown silently. See
+>   [`data-sources-migration-result.md`](./data-sources-migration-result.md)
+>   §1.
+>
+>   It is also the first plugin to declare `capabilities: ["storage"]`, and
+>   the first to own both a table and a blob at once — which found a gap
+>   `DeletionHook` was never built for: `StorageCapability` is scoped to
+>   `(teamId, pluginId)` at construction from a `ContextScope`, and a deletion
+>   hook has neither. The fix is the same shape `data/db.ts` already uses for
+>   the table half (the wiring slot carries the raw `StorageHost`, and the
+>   hook builds a scoped capability once it knows which team it is deleting
+>   for), but nothing generalizes it yet — recorded as a capability gap for
+>   whichever plugin next combines `schema` and `storage`. See §3 of the
+>   result doc.
+>
+>   And it is the second migration (after `gamification`) to hit a
+>   core→feature edge invisible to `pnpm arch` — but in the *type* direction
+>   rather than the *call* direction. `src/lib/execution/executor.ts` (core)
+>   needed `GoogleSheetsDataSource`/`CsvDataSource` to resolve
+>   `{{sheet:}}`/`{{csv:}}` references in test code, and once those types moved
+>   into the plugin's schema, importing them from core would have been exactly
+>   the edge `gamification` inverted — except type-only, so `pnpm arch`'s
+>   import-pattern walker would not have caught it even if it checked core's
+>   imports at all (recipe §1.6 already knew it didn't check the *call*
+>   direction; this is the same blind spot on the *type* direction). Resolved
+>   two ways: the executor's own signatures were narrowed to `libs/csv`'s
+>   `CsvSourceLike` / `libs/google-sheets`'s `SheetSourceLike` (recipe §6.1,
+>   the type belongs to core's own resolution logic, not to the plugin), and
+>   the DB read itself went through a `src/lib/core/data-sources-reads.ts`
+>   re-export of the plugin's own `reads.ts` — the exact shape
+>   `share-reads.ts` set for `awards`, reused here for a core consumer instead
+>   of a sibling plugin.
 >
 >   **`ranger` is the first plugin out of the §6.2 `src/lib/playwright` split,
 >   and the first migration whose cost was dominated by infrastructure its

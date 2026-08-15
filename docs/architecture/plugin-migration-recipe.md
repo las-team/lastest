@@ -24,7 +24,11 @@ routes, and split §8's action-id count into two distinct signals; and after
 is ever called from a client component, not the S1 re-export trap) and a
 note on §1.5: a low port count does not mean a low-cost migration when the
 old code was borrowing shared infrastructure (an unmigrated neighbour's
-table) rather than reaching into core.
+table) rather than reaching into core; and after
+[`data-sources`](./data-sources-migration-result.md), which found a
+core→feature edge in the *type* direction (§1.6.1) invisible to `pnpm arch`
+for the same reason the *call* direction is, and a capability gap for any
+future plugin that combines `schema` and `storage` (§2.5).
 **Audience:** whoever migrates the next feature out of `src/` into `plugins/<id>/`.
 
 This is the *how*. The *why* is [`core-plugin-refactor.md`](./core-plugin-refactor.md)
@@ -74,10 +78,11 @@ comes out that high, the feature is a thin *orchestration of* core rather than
 a consumer of it, and the real task is extracting the core module it
 orchestrates, as its own PR, first.
 
-Measured so far: `ranger` **1** (done), `playground` **3** (done), `launch`
-**4** (done), `api-test` **5** (done), `rca` **6** (done), `app-map` **9**
-(done), `gamification` **9** (done), `ci` **9** (done), `url-diff` **~22**
-(never migrated — reclassified as core, RFC §9 phase 4).
+Measured so far: `ranger` **1** (done), `playground` **3** (done),
+`data-sources` **3** (done), `launch` **4** (done), `api-test` **5** (done),
+`rca` **6** (done), `app-map` **9** (done), `gamification` **9** (done), `ci`
+**9** (done), `url-diff` **~22** (never migrated — reclassified as core, RFC
+§9 phase 4).
 
 > **A port of 1 is not proof of a cheap migration.** `ranger` costed lowest
 > of anything migrated so far and came out 369 lines heavier, not lighter,
@@ -227,6 +232,41 @@ For the reclassification case, **the CODEOWNERS half is not optional.**
 owner-protected and will fail `pnpm test` if you forget — which is the point:
 calling something core without a review gate makes the classification
 meaningless.
+
+### 1.6.1 The same blind spot exists in the *type* direction
+
+§1.6 is about core *calling* a feature. A quieter version of the same
+problem: core *typing against* a feature's data shape. `data-sources` hit it
+because `src/lib/execution/executor.ts` (core) resolves
+`{{sheet:}}`/`{{csv:}}` references in test code and had always imported
+`GoogleSheetsDataSource`/`CsvDataSource` from `@/lib/db/schema` to do it. Once
+those tables — and their types — moved into the plugin's own `schema.ts`,
+core importing them back (even `import type`) would be exactly the edge §1.6
+forbids, just erased at runtime instead of failing a boot-order check. `pnpm
+arch` would not have caught it: the walker matches import *specifiers*, and a
+type-only import is still a specifier.
+
+Two independent fixes, not one — check both:
+
+- **Narrow core's own signatures to what core actually needs.** The executor
+  never touched `id`/`teamId`/timestamps, only the fields its resolver
+  functions use. `libs/csv`'s `CsvSourceLike` and `libs/google-sheets`'s
+  `SheetSourceLike` (already promoted per §5) were the right type for the
+  executor to hold — a structural subset the plugin's real row type
+  satisfies for free, no cast required. This is recipe §6.1's table applied
+  to a *consumer* outside the plugin rather than to the plugin itself: the
+  type belongs to the shared reference-resolution logic, not to core's
+  domain, so it lives in the lib either side already depends on.
+- **Route the actual DB read through a `-reads.ts` re-export**, the same
+  shape `share-reads.ts` set up for `awards`' cross-plugin read. The
+  plugin's own `reads.ts` already exposes unscoped functions (same route the
+  deletion hook takes — no session, handle straight from the wiring slot);
+  `src/lib/core/data-sources-reads.ts` re-exports two of them for the
+  executor, narrowed to the lib types above. Same rule as `share-reads.ts`:
+  do not import `./runtime` here — `src/instrumentation.ts` already awaits
+  `getPluginRuntime()` before serving a request, so the wiring exists by the
+  time this runs, and pulling in the composition root would be circular in
+  spirit.
 
 ## 1.7 Before declaring a `currentActor`, try an empty `contextFor()`
 
@@ -437,6 +477,33 @@ prior push left behind empty.
 > Two of gamification's old names, `achievements` and `user_scores`, were
 > generic enough to read like core concepts. They never were. That ambiguity is
 > a better argument for the prefix rule than "namespaces prevent collisions".
+
+### 2.5 A plugin that owns both a table and a blob needs a second deletion route
+
+`ctx.storage` (`capabilities: ["storage"]`) is scoped to `(teamId, pluginId)`
+at construction — built from a resolved `ContextScope` inside `buildContext`,
+same as every other capability. A deletion hook has no `ContextScope` (it is
+why every hook already takes `ctx.data` straight from the wiring slot instead
+of a built `PluginContext`), and nothing inside `core/storage` itself reaps a
+team's prefix when the team is deleted. `data-sources` is the first plugin to
+declare `storage`, so this was invisible until it needed both at once.
+
+The fix, from `plugins/data-sources/src/deletion.ts`: the wiring slot carries
+the **raw `StorageHost`** (not a capability), and the hook constructs a
+scoped `StorageCapability` on demand —
+`createStorageCapability(wiring().storageHost, { pluginId, teamId })` — once
+it knows which team it is deleting for. `onTeamDeleted(teamId)` has that for
+free; `onRepoDeleted(repositoryId)` does not, so it groups the repo's rows by
+`teamId` first (a repo's rows are never split across teams in practice, but
+the code does not assume it). Delete by each row's own derived key rather
+than `storage.list("")`, so a second, unrelated use of the same namespace
+later can't be swept by a wildcard.
+
+This is not yet a kernel-level fix — it is a per-plugin `deletion.ts` pattern
+to copy, not a capability. Worth promoting to a `DeletionHook` argument (core
+hands the hook a pre-scoped `StorageCapability` for the team/repo being
+deleted) once a second plugin needs it; one data point does not justify the
+kernel change RFC §7.2 asks core PRs to earn.
 
 ## 3. The host port — the honest escape hatch
 
