@@ -58,6 +58,9 @@ importers:
       '@lastest/ai-kit':
         specifier: workspace:*
         version: link:libs/ai-kit
+      '@lastest/analytics':
+        specifier: workspace:*
+        version: link:libs/analytics
       '@lastest/contracts':
         specifier: workspace:*
         version: link:core/contracts
@@ -154,6 +157,9 @@ importers:
       '@lastest/plugin-recorder':
         specifier: workspace:*
         version: link:plugins/recorder
+      '@lastest/plugin-scheduling':
+        specifier: workspace:*
+        version: link:plugins/scheduling
       '@lastest/plugin-share':
         specifier: workspace:*
         version: link:plugins/share
@@ -511,11 +517,20 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  libs/analytics:
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
   libs/cron:
     devDependencies:
       typescript:
         specifier: ^5
         version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
 
   libs/csv:
     devDependencies:
@@ -1378,6 +1393,52 @@ importers:
       uuid:
         specifier: '>=11.1.1'
         version: 13.0.2
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.8
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: 19.2.3
+        version: 19.2.3
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/scheduling:
+    dependencies:
+      '@lastest/analytics':
+        specifier: workspace:*
+        version: link:../../libs/analytics
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/core-data':
+        specifier: workspace:*
+        version: link:../../core/data
+      '@lastest/cron':
+        specifier: workspace:*
+        version: link:../../libs/cron
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@lastest/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8)
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
     devDependencies:
       '@types/react':
         specifier: ^19

@@ -2,12 +2,14 @@
 
 **Status:** phases 0–3 landed. Phase 4 in progress — `rca`, `app-map`,
 `launch`, `api-test`, `playground`, `gamification`, `ci`, `share`, `awards`,
-`ranger`, `recorder` and `data-sources` done, `url-diff` resolved as core, the
-credential half of `scm` reclassified as core, 6 pseudo-plugins to go
-(`share`'s captions half moved to `src/lib/demo-captions/`, unmigrated, not
-counted as a plugin; `demo` itself is not a plugin either — see
-`ranger-migration-result.md` §2; `spec-import` split out of `data-sources`,
-unmigrated — see `data-sources-migration-result.md` §1).
+`ranger`, `recorder`, `data-sources` and `scheduling` done, `url-diff`
+resolved as core, the credential half of `scm` reclassified as core, 6
+pseudo-plugins to go (`share`'s captions half moved to
+`src/lib/demo-captions/`, unmigrated, not counted as a plugin; `demo` itself
+is not a plugin either — see `ranger-migration-result.md` §2; `spec-import`
+split out of `data-sources`, unmigrated — see
+`data-sources-migration-result.md` §1; `route-scan` split out of
+`scheduling`, unmigrated — see `scheduling-migration-result.md` §3).
 **Author:** planning doc
 **Supersedes:** nothing
 
@@ -32,7 +34,7 @@ unmigrated — see `data-sources-migration-result.md` §1).
 > - **Phase 3 — done.** `CheckLayer` is a registry; `design-system` and `a11y`
 >   are check-layer plugins. Both are table-light, and `design-system` proved
 >   the no-schema shape (manifest + host port, no `ctx` at all).
-> - **Phase 4 — in progress. 12 of 13 plugins done.** `rca`
+> - **Phase 4 — in progress. 13 of 14 plugins done.** `rca`
 >   ([result](./rca-migration-result.md)), `app-map`
 >   ([result](./app-map-migration-result.md)), `launch`
 >   ([result](./launch-migration-result.md)), `api-test`
@@ -43,8 +45,9 @@ unmigrated — see `data-sources-migration-result.md` §1).
 >   ([result](./share-migration-result.md)), `awards`
 >   ([result](./awards-migration-result.md)), `ranger`
 >   ([result](./ranger-migration-result.md)), `recorder`
->   ([result](./recorder-migration-result.md)) and `data-sources`
->   ([result](./data-sources-migration-result.md)) have landed. `url-diff` did
+>   ([result](./recorder-migration-result.md)), `data-sources`
+>   ([result](./data-sources-migration-result.md)) and `scheduling`
+>   ([result](./scheduling-migration-result.md)) have landed. `url-diff` did
 >   not go to a plugin at all — it was **reclassified as core**: its in-app page
 >   and sidebar entry were removed, and what is left has no user surface and
 >   exists only to serve the documented `POST /api/v1/snapshot` and
@@ -52,11 +55,45 @@ unmigrated — see `data-sources-migration-result.md` §1).
 >   reading of `core-scope.md` §2. The repeatable procedure is written down in
 >   [`plugin-migration-recipe.md`](./plugin-migration-recipe.md) — read that,
 >   not §9 below, before migrating the next feature.
->   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21 → 20 → 20 → 19 → 19 → 18 → 14 → 14**.
+>   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21 → 20 → 20 → 19 → 19 → 18 → 14 → 14 → 13**.
 >   `data-sources` is the third migration in a row to graduate without moving
 >   the number — its coupling to core was through the query layer (allowed)
 >   and, once found, through a core→feature *type* import invisible to the
 >   walker in the other direction (recipe §1.6; see below).
+>
+>   **`scheduling` is the thirteenth, and the second migration (after `ci`) to
+>   find that its map entry named a file that was misfiled two directories
+>   deep, not just two features deep.** `src/lib/scheduling/scheduler.ts` sat
+>   next to the feature's own `cron.ts` by directory convention, but three of
+>   its four tick handlers dispatch *other* plugins' triggers — `core/jobs`'s
+>   own `worker.ts` and `plugins/launch/src/domain/cohort-engine.ts` both
+>   already described it, in their own doc comments, as "the app's
+>   scheduler" *before this migration existed*. Reclassified (§1.6) to
+>   `src/lib/core/scheduler.ts` — the composition root, not a new
+>   `CORE_SRC_PATHS` entry, since the file's whole job is importing every
+>   plugin, which is what the composition root is for. Only the one handler
+>   that was genuinely the feature's own moved in substance, becoming a call
+>   into the plugin's `dispatchDueSchedules()` — the same call shape
+>   `dispatchDueExplorerTriggers`/`processLaunchCohorts` already used. The
+>   map's second action module, `scanner.ts`, was never this feature either
+>   (repository route discovery against core's `routes`/`tests` tables, ~25
+>   core calls, nothing shared with schedules/cron) and split into its own
+>   uncosted `PSEUDO_PLUGINS["route-scan"]` entry, the `spec-import` move
+>   again. Costed at **1 host method**, `ranger`'s tier, once both
+>   misattributions were subtracted. See
+>   [`scheduling-migration-result.md`](./scheduling-migration-result.md) §2–3.
+>
+>   It is also the second migration (after `ci`) to delete a core auth helper
+>   outright rather than port it: `requireScheduleOwnership` read the
+>   feature's own table directly from `src/lib/auth/ownership.ts`, which
+>   would have made core import a plugin once the table moved. Replaced by
+>   `contextFor()` plus a two-line ownership check inside the plugin's own
+>   action — recipe §3.1's "swallow the guard into the write" taken one step
+>   further: here the *whole helper* disappears rather than moving inside a
+>   host method, because the row it read was never core's to begin with. And
+>   recipe §8's action-id count found a second dead action in a row (after
+>   `ci`'s three) — `updateScheduleAction`, unreachable from any client
+>   before the migration too, deleted rather than carried forward.
 >
 >   **`recorder` is the second plugin out of the §6.2 `src/lib/playwright`
 >   split, and the first migration to produce a new `libs/` package out of

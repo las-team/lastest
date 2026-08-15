@@ -1,9 +1,9 @@
 {
   "$comment": "Burndown ratchet for docs/architecture/core-plugin-refactor.md §7. Counts may only decrease. Regenerate with: pnpm arch:baseline",
-  "total": 14,
+  "total": 13,
   "byRule": {
     "browser": 4,
-    "cross-plugin": 6,
+    "cross-plugin": 5,
     "db": 3,
     "pool-service": 1
   },
@@ -15,7 +15,6 @@
     "qa-agent::cross-plugin": 3,
     "quickstart::browser": 1,
     "quickstart::db": 1,
-    "quickstart::pool-service": 1,
-    "scheduling::cross-plugin": 1
+    "quickstart::pool-service": 1
   }
 }

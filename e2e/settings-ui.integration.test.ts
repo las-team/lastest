@@ -7,12 +7,11 @@
  * exercised end to end." These three steps are the part of that gap that
  * genuinely cannot be closed any other way:
  *
- *  - step 12 (§2.13) — `src/lib/scheduling/cron.ts` is now a re-export shim
- *    over `libs/cron`. §2.18 diffed the shim and exercised dispatch, but
- *    `PRESET_SCHEDULES` is consumed by a *client* component
- *    (`schedule-manager-client.tsx`) that imports it through the shim and
- *    renders it into a Radix Select. A broken re-export there is invisible to
- *    a server-side test and fatal in the browser.
+ *  - step 12 (§2.13) — `plugins/scheduling/src/ui/schedule-manager.tsx`
+ *    imports `PRESET_SCHEDULES` straight from `@lastest/cron` and renders it
+ *    into a Radix Select. §2.18 diffed the (now-retired) app-side shim and
+ *    exercised dispatch, but a broken import in the client bundle is
+ *    invisible to a server-side test and fatal in the browser.
  *  - step 13 (§2.9) — `hasQaAgentAccess(plan, billingEnabled)` is called from
  *    both a server component (`/qa-agent/page.tsx`) and a client component
  *    (`sidebar.tsx`, which receives `billingEnabled` as a prop precisely
@@ -36,8 +35,9 @@ import { eq } from "drizzle-orm";
 import type { Locator, Page } from "playwright";
 
 import { db } from "@/lib/db";
-import { buildSchedules, repositories, teams, users } from "@/lib/db/schema";
+import { repositories, teams, users } from "@/lib/db/schema";
 import * as queries from "@/lib/db/queries";
+import { schedulingBuildSchedules } from "@lastest/plugin-scheduling/schema";
 
 import {
   BASE_URL,
@@ -226,8 +226,8 @@ describe("§4 step 12 — scheduled runs, preset + custom cron", () => {
 
     const [row] = await db
       .select()
-      .from(buildSchedules)
-      .where(eq(buildSchedules.repositoryId, repoId));
+      .from(schedulingBuildSchedules)
+      .where(eq(schedulingBuildSchedules.repositoryId, repoId));
     expect(row?.cronExpression).toBe("0 */6 * * *");
     // `getNextRunTime` ran server-side through the same shim.
     expect(row?.nextRunAt).toBeInstanceOf(Date);
@@ -270,8 +270,8 @@ describe("§4 step 12 — scheduled runs, preset + custom cron", () => {
     expect(
       await db
         .select()
-        .from(buildSchedules)
-        .where(eq(buildSchedules.repositoryId, repoId)),
+        .from(schedulingBuildSchedules)
+        .where(eq(schedulingBuildSchedules.repositoryId, repoId)),
     ).toHaveLength(1);
 
     // Now a valid custom expression — one `describeCron` has no preset for.
@@ -300,8 +300,8 @@ describe("§4 step 12 — scheduled runs, preset + custom cron", () => {
 
     const rows = await db
       .select()
-      .from(buildSchedules)
-      .where(eq(buildSchedules.repositoryId, repoId));
+      .from(schedulingBuildSchedules)
+      .where(eq(schedulingBuildSchedules.repositoryId, repoId));
     expect(rows.map((r) => r.cronExpression).sort()).toEqual([
       "0 */6 * * *",
       "37 4 * * 2",

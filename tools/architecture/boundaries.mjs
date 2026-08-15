@@ -52,6 +52,22 @@
  * `src/lib/core/data-sources-host.ts` rather than `CORE_SRC_PATHS` (it has
  * exactly one caller, unlike `github`/`gitlab` OAuth). See
  * `docs/architecture/data-sources-migration-result.md`.
+ * `scheduling` is the thirteenth: recurring build schedules and the
+ * settings-page cron UI. Its map entry named two action modules;
+ * `scanner.ts` was never this feature (zero shared table/type/import with
+ * schedules/cron in either direction — it is route discovery and smoke-test
+ * generation) and split into its own uncosted
+ * `PSEUDO_PLUGINS["route-scan"]` entry below, the same call `data-sources`
+ * made for `spec-import.ts`. The costed part was cheap — **1 host
+ * method**, `ranger`'s tier — but `src/lib/scheduling/scheduler.ts`, sitting
+ * next to it by directory convention, was not this feature either: three of
+ * its four tick handlers dispatch *other* plugins' triggers, and
+ * `core/jobs`'s own `worker.ts` already documented it as "the app's
+ * scheduler" before this migration existed. Reclassified (§1.6) to
+ * `src/lib/core/scheduler.ts` rather than left in place with a
+ * `CORE_SRC_PATHS` entry, since it is composition-root code, not a
+ * standalone boundary module. See
+ * `docs/architecture/scheduling-migration-result.md`.
  */
 
 /** Zone globs for the target layout. */
@@ -144,7 +160,6 @@ export const CORE_SRC_PATHS = [
  * is a decision for whoever migrates it.
  */
 export const UNCLASSIFIED_SRC_PATHS = [
-  "src/lib/analytics",
   "src/lib/change-map",
   "src/lib/email",
   "src/lib/integrations",
@@ -209,9 +224,21 @@ export const PSEUDO_PLUGINS = {
   // The plugin is named `ci`, not `scm`, deliberately: core now owns the
   // source-control *credentials*, so a plugin called `scm` would be a lie about
   // where the boundary is.
-  scheduling: {
-    lib: ["src/lib/scheduling"],
-    actions: ["schedules.ts", "scanner.ts"],
+  //
+  // `scheduling` graduated to `plugins/scheduling/` (RFC §9 phase 4,
+  // thirteenth plugin) — see
+  // `docs/architecture/scheduling-migration-result.md`. Its map entry named
+  // two action modules; only `schedules.ts` was this feature. `scanner.ts`
+  // shares no table, type or import with schedules/cron in either
+  // direction — it is repository route discovery, functional-area creation
+  // and smoke-test generation against core's `routes`/`functionalAreas`/
+  // `tests` tables, with a port that would run past recipe §1.5's stop line.
+  // It gets its own entry below, uncosted, rather than migrating with them
+  // or being silently dropped from the burndown — the same call
+  // `data-sources` made for `spec-import.ts`.
+  "route-scan": {
+    lib: [],
+    actions: ["scanner.ts"],
   },
   // §6.2 — the `src/lib/playwright` split. `lib` stays empty; these plugins own
   // named files inside a directory that is otherwise core.

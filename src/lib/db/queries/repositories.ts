@@ -383,12 +383,14 @@ export async function deleteRepository(id: string) {
       .set({ selectedRepositoryId: null })
       .where(eq(gitlabAccounts.selectedRepositoryId, id));
 
-    // 13. Finally the repo itself. Cascades: agentSessions, buildSchedules,
+    // 13. Finally the repo itself. Cascades: agentSessions,
     //     composeConfigs, defaultSetupSteps, defaultTeardownSteps,
     //     githubIssues, storageStates, testFixtures, testSpecs.
     //     (`gitlabPipelineConfigs` used to be in this list; it became
     //     `ci_gitlab_pipeline_configs` and is reaped by the ci plugin's
-    //     `onRepoDeleted` hook below instead.)
+    //     `onRepoDeleted` hook below instead. `buildSchedules` likewise
+    //     became `scheduling_build_schedules`, reaped by the scheduling
+    //     plugin's `onRepoDeleted` hook.)
     await tx.delete(repositories).where(eq(repositories.id, id));
   });
 

@@ -40,7 +40,7 @@ import { createDeletionHook } from "./deletion";
  *   and the `server-reference-manifest` count in
  *   `plugin-migration-recipe.md` §8 is not the gate here. `pnpm build`
  *   resolving the route is.
- * - **One timed entry point.** `src/lib/scheduling/scheduler.ts` calls
+ * - **One timed entry point.** `src/lib/core/scheduler.ts` calls
  *   `processLaunchCohorts()` on its 60s tick, imported from
  *   `@lastest/plugin-launch/cohorts`.
  */

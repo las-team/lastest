@@ -33,6 +33,7 @@ const nextConfig: NextConfig = {
     "@lastest/core-jobs",
     "@lastest/core-storage",
     "@lastest/ai-kit",
+    "@lastest/analytics",
     "@lastest/cron",
     "@lastest/csv",
     "@lastest/github",
@@ -58,6 +59,7 @@ const nextConfig: NextConfig = {
     "@lastest/plugin-ranger",
     "@lastest/plugin-rca",
     "@lastest/plugin-recorder",
+    "@lastest/plugin-scheduling",
     "@lastest/plugin-share",
   ],
   outputFileTracingIncludes: {

@@ -23,7 +23,8 @@ export * from "./queries/misc";
 export * from "./queries/analytics";
 export * from "./queries/fixtures";
 export * from "./queries/storage-states";
-export * from "./queries/schedules";
+// build_schedules moved to plugins/scheduling/src/data/queries.ts (RFC §9
+// phase 4) — import from @lastest/plugin-scheduling instead.
 export * from "./queries/activity-events";
 export * from "./queries/storage";
 // public-shares moved to plugins/share/src/data/queries.ts (RFC §9 phase 4) —

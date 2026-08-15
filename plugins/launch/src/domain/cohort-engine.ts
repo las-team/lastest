@@ -8,7 +8,7 @@
  * tick.
  *
  * `processLaunchCohorts()` is the plugin's one *exported* entry point that the
- * app calls on a timer — `src/lib/scheduling/scheduler.ts` imports it from
+ * app calls on a timer — `src/lib/core/scheduler.ts` imports it from
  * `@lastest/plugin-launch/cohorts`. It resolves its own database handle from
  * the wiring slot, because a cron tick has no request and no scope. That it
  * needs no `ctx` is the same fact as everything else about this plugin: the

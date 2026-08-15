@@ -28,7 +28,12 @@ table) rather than reaching into core; and after
 [`data-sources`](./data-sources-migration-result.md), which found a
 core→feature edge in the *type* direction (§1.6.1) invisible to `pnpm arch`
 for the same reason the *call* direction is, and a capability gap for any
-future plugin that combines `schema` and `storage` (§2.5).
+future plugin that combines `schema` and `storage` (§2.5); and after
+[`scheduling`](./scheduling-migration-result.md), which added a second
+"reclassify" destination to §1.6 (a misfiled file that is itself
+composition-root-shaped moves to `src/lib/core/`, not into a new
+`CORE_SRC_PATHS` entry) and a second consecutive dead-action finding to §8,
+after `ci`'s three.
 **Audience:** whoever migrates the next feature out of `src/` into `plugins/<id>/`.
 
 This is the *how*. The *why* is [`core-plugin-refactor.md`](./core-plugin-refactor.md)
@@ -78,11 +83,11 @@ comes out that high, the feature is a thin *orchestration of* core rather than
 a consumer of it, and the real task is extracting the core module it
 orchestrates, as its own PR, first.
 
-Measured so far: `ranger` **1** (done), `playground` **3** (done),
-`data-sources` **3** (done), `launch` **4** (done), `api-test` **5** (done),
-`rca` **6** (done), `app-map` **9** (done), `gamification` **9** (done), `ci`
-**9** (done), `url-diff` **~22** (never migrated — reclassified as core, RFC
-§9 phase 4).
+Measured so far: `ranger` **1** (done), `scheduling` **1** (done),
+`playground` **3** (done), `data-sources` **3** (done), `launch` **4** (done),
+`api-test` **5** (done), `rca` **6** (done), `app-map` **9** (done),
+`gamification` **9** (done), `ci` **9** (done), `url-diff` **~22** (never
+migrated — reclassified as core, RFC §9 phase 4).
 
 > **A port of 1 is not proof of a cheap migration.** `ranger` costed lowest
 > of anything migrated so far and came out 369 lines heavier, not lighter,
@@ -212,6 +217,7 @@ three resolutions and only the first is:
 | --- | --- | --- | --- |
 | Core genuinely calls the feature | **Invert it** — core declares a port, the composition root registers the listener | blocking core PR | `gamification` |
 | What core calls was never the feature — it is a boundary misfiled under the feature's directory | **Reclassify it** — leave the code where it is, add the path to `CORE_SRC_PATHS` **and to CODEOWNERS**, and migrate only the rest | no code moves | `ci` |
+| What core (and another plugin) calls was never the feature — it is composition-root code (it imports plugins itself) misfiled under the feature's directory | **Reclassify it** — move to `src/lib/core/`; no `CORE_SRC_PATHS`/CODEOWNERS entry, because composition-root code already needs neither (no existing `-host.ts` file has one) | one file moves, unchanged in shape | `scheduling` |
 | The feature is a thin orchestration *of* core | **Stop** — extract the core module first | separate, earlier PR | `url-diff` |
 
 Tell them apart the same way §5 tells a library from a feature: **read the
@@ -227,11 +233,27 @@ For the inversion case, the shape that worked: core declares a port
 listener inside `getPluginRuntime()`, and `src/instrumentation.ts` already
 awaits that at boot so nothing can outrun the registration.
 
-For the reclassification case, **the CODEOWNERS half is not optional.**
-`tools/architecture/boundaries.test.ts` asserts every `CORE_SRC_PATHS` entry is
-owner-protected and will fail `pnpm test` if you forget — which is the point:
-calling something core without a review gate makes the classification
-meaningless.
+For the reclassification case, **the CODEOWNERS half is not optional** —
+*when the destination is `CORE_SRC_PATHS`.* `tools/architecture/boundaries.test.ts`
+asserts every `CORE_SRC_PATHS` entry is owner-protected and will fail
+`pnpm test` if you forget — which is the point: calling something core
+without a review gate makes the classification meaningless.
+
+**`scheduling` found a second reclassification shape the table above keeps
+separate.** `ci`'s misfiled files (`src/lib/github/oauth.ts`, `content.ts`)
+are boundary code — they belong in the same tier as `src/lib/auth`, just not
+where the map put them, so they need the review gate `CORE_SRC_PATHS` +
+CODEOWNERS provides. `src/lib/scheduling/scheduler.ts` was a different kind
+of misfile: not a boundary, but the composition root's own tick loop, which
+already imports two other plugins (`@lastest/plugin-launch/cohorts`,
+`@lastest/plugin-explorer/actions`) and was documented as doing so — by
+*their* migrations, in *their* doc comments — before this one existed. Code
+that is already shaped like `src/lib/core/runtime.ts` belongs next to it, and
+`src/lib/core/*` needs no new CODEOWNERS entry because none of its existing
+files (every plugin's `*-host.ts`, `runtime.ts` itself) have one either. Ask
+this question to tell the two apart: *does the misfiled code import a
+plugin itself?* If yes, it is composition-root-shaped, not boundary-shaped,
+and the destination is `src/lib/core/`, not `CORE_SRC_PATHS`.
 
 ### 1.6.1 The same blind spot exists in the *type* direction
 

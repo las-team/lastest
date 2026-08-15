@@ -811,6 +811,77 @@ async function migrateDataSourcesTables() {
   }
 }
 
+// `build_schedules` became `@lastest/plugin-scheduling`'s own table (RFC §9
+// phase 4, thirteenth plugin), renamed for the `scheduling_` prefix
+// `core/data` requires — same shape as `AWARDS_RENAMES`/`DATA_SOURCES_RENAMES`,
+// and for the same reason `drizzle-kit push` cannot see a rename: it would
+// drop `build_schedules`, create `scheduling_build_schedules` empty, and take
+// every configured recurring run with it.
+//
+// This one DOES carry a real FK to a core table
+// (`repository_id -> repositories.id ON DELETE CASCADE`), which
+// `core-scope.md` §6 forbids a plugin from declaring. Dropped by catalogue
+// lookup after the rename, the same shape `migrateAwardsTables` uses.
+// `deletion.ts`'s `onRepoDeleted` is what replaces the cascade from here on.
+const SCHEDULING_RENAMES = [["build_schedules", "scheduling_build_schedules"]];
+
+async function migrateSchedulingTables() {
+  if (!process.env.DATABASE_URL) return;
+  let sql;
+  try {
+    sql = require("postgres")(process.env.DATABASE_URL);
+
+    const tableExists = async (name) => {
+      const rows = await sql`
+        select exists (
+          select 1 from information_schema.tables
+          where table_schema = 'public' and table_name = ${name}
+        ) as exists`;
+      return rows[0]?.exists ?? false;
+    };
+    const rowCount = async (name) => {
+      const rows = await sql.unsafe(
+        `select count(*)::text as n from "${name}"`,
+      );
+      return Number(rows[0]?.n ?? 0);
+    };
+
+    for (const [from, to] of SCHEDULING_RENAMES) {
+      if (!(await tableExists(from))) continue;
+      if (await tableExists(to)) {
+        if ((await rowCount(to)) > 0) {
+          console.log(`[migrate] ${from} -> ${to}: already migrated`);
+          continue;
+        }
+        await sql.unsafe(`drop table "${to}"`);
+      }
+      await sql.unsafe(`alter table "${from}" rename to "${to}"`);
+      console.log(`[migrate] renamed ${from} -> ${to}`);
+    }
+
+    // Then the FK into `repositories`, by catalogue lookup — `ALTER TABLE …
+    // RENAME` carries constraints across, so this runs after the rename and
+    // looks it up under the new table name.
+    const fks = await sql`
+      select rel.relname as table_name, ref.relname as points_at,
+             con.conname as name
+        from pg_constraint con
+        join pg_class rel on rel.oid = con.conrelid
+        join pg_class ref on ref.oid = con.confrelid
+       where con.contype = 'f'
+         and ref.relname = 'repositories'
+         and rel.relname = 'scheduling_build_schedules'`;
+    for (const { table_name: table, points_at: target, name } of fks) {
+      await sql.unsafe(`alter table ${table} drop constraint "${name}"`);
+      console.log(`[migrate] ${table}: dropped FK ${name} (-> ${target})`);
+    }
+  } catch (e) {
+    console.warn("[migrate] scheduling table migration skipped:", e.message);
+  } finally {
+    if (sql) await sql.end();
+  }
+}
+
 async function main() {
   await preCreate();
   await migrateExplorerTables();
@@ -820,6 +891,7 @@ async function main() {
   await migrateShareTables();
   await migrateAwardsTables();
   await migrateDataSourcesTables();
+  await migrateSchedulingTables();
   await dropPluginUserForeignKeys();
   await nullOrphans();
   await bumpPoolDefaults();

@@ -1,11 +1,41 @@
 /**
- * Server-side build scheduler.
- * Runs a 60-second interval that checks for due schedules and triggers builds.
+ * Server-side tick loop. Runs a 60-second interval that fires whatever is
+ * due: build schedules, QA agent triggers, explorer triggers, launch
+ * cohorts.
+ *
+ * ### Why this lives here and not in a plugin
+ *
+ * This file used to be `src/lib/scheduling/scheduler.ts`, sitting next to
+ * the build-schedule feature by directory convention. Reading its import and
+ * consumer lists (recipe §1.6) found the opposite of what the directory
+ * suggested: three of its four handlers dispatch *other* features' triggers
+ * — `processLaunchCohorts` (`@lastest/plugin-launch/cohorts`) and
+ * `dispatchDueExplorerTriggers` (`@lastest/plugin-explorer/actions`, dynamic
+ * import) — and `core/jobs`'s own `worker.ts` already documented this file
+ * as "the app's scheduler" before this move, in someone else's package.
+ * `plugins/launch/src/domain/cohort-engine.ts` calls it exactly that too.
+ *
+ * A §1.6 "reclassify": nothing here moved into the scheduling plugin except
+ * the one handler that was genuinely its own
+ * (`processDueBuildSchedules`, now a call into
+ * `@lastest/plugin-scheduling/actions`'s `dispatchDueSchedules`) — the same
+ * call shape `processLaunchCohorts` and `dispatchDueExplorerTriggers`
+ * already used. Everything else is unchanged in shape, only in address.
+ *
+ * `src/lib/core/` is the composition root (`runtime.ts`'s own doc comment):
+ * the one place allowed to import every plugin, because it is where core's
+ * ports meet the app's implementations. This file is the same kind of
+ * object — a tick loop that knows about every registered timer — so it
+ * belongs next to `runtime.ts`, not gated behind a new `CORE_SRC_PATHS`
+ * entry the way `ci`'s reclassified OAuth files were (those stayed in place
+ * under `src/lib/github`/`src/lib/gitlab`; this file had no legitimate
+ * owner to stay in place *as*).
  */
 
-import * as queries from "@/lib/db/queries";
-import { getNextRunTime } from "./cron";
 import { processLaunchCohorts } from "@lastest/plugin-launch/cohorts";
+import { getNextRunTime } from "@lastest/cron";
+
+import * as queries from "@/lib/db/queries";
 
 let started = false;
 let intervalId: ReturnType<typeof setInterval> | null = null;
@@ -26,7 +56,7 @@ export function ensureSchedulerStarted() {
 
   intervalId = setInterval(async () => {
     try {
-      await processDueSchedules();
+      await processDueBuildSchedules();
     } catch (error) {
       console.error("[scheduler] Error processing due schedules:", error);
     }
@@ -63,64 +93,34 @@ export function stopScheduler() {
   started = false;
 }
 
-let processing = false;
+let schedulesProcessing = false;
 
-async function processDueSchedules() {
-  if (processing) return; // Prevent concurrent ticks
-  processing = true;
-
+/** Fire due build schedules. The plugin's own dispatcher owns the query, the
+ *  trigger sequence and re-arming; this only has to wire the runtime first,
+ *  the same reason `processDueExplorerTriggers` below does. */
+async function processDueBuildSchedules() {
+  if (schedulesProcessing) return;
+  schedulesProcessing = true;
   try {
-    const dueSchedules = await queries.getDueSchedules();
-
-    for (const schedule of dueSchedules) {
-      try {
-        // Compute next run time BEFORE triggering (prevents double-fire)
-        const nextRunAt = getNextRunTime(schedule.cronExpression, new Date());
-
-        // Import dynamically to avoid circular dependencies
-        const { createAndRunBuildFromCI } =
-          await import("@/server/actions/builds");
-
-        const result = await createAndRunBuildFromCI({
-          triggerType: "scheduled",
-          repositoryId: schedule.repositoryId,
-          runnerId: schedule.runnerId || "auto",
-          gitBranch: schedule.gitBranch || undefined,
-        });
-
-        if (result.buildId) {
-          await queries.markScheduleRun(schedule.id, result.buildId, nextRunAt);
-        }
-
-        console.log(
-          `[scheduler] Triggered build ${result.buildId} for schedule "${schedule.name}"`,
-        );
-      } catch (error) {
-        console.error(
-          `[scheduler] Failed to run schedule "${schedule.name}":`,
-          error,
-        );
-        await queries.incrementScheduleFailures(schedule.id);
-
-        // Still advance nextRunAt so we don't retry immediately
-        try {
-          const nextRunAt = getNextRunTime(schedule.cronExpression, new Date());
-          await queries.updateBuildSchedule(schedule.id, { nextRunAt });
-        } catch {
-          // Ignore — schedule may have been disabled by incrementScheduleFailures
-        }
-      }
+    const { getPluginRuntime } = await import("@/lib/core/runtime");
+    await getPluginRuntime();
+    const { dispatchDueSchedules } =
+      await import("@lastest/plugin-scheduling/actions");
+    const fired = await dispatchDueSchedules();
+    if (fired > 0) {
+      console.log(`[scheduler] Triggered ${fired} scheduled build(s)`);
     }
   } finally {
-    processing = false;
+    schedulesProcessing = false;
   }
 }
 
 let qaProcessing = false;
 
-/** Fire due QA agent cron triggers. Mirrors processDueSchedules: nextRunAt is
- *  advanced BEFORE starting so a slow run can't double-fire; a busy agent
- *  means the fire is skipped (startQaAgentFromTrigger reports why). */
+/** Fire due QA agent cron triggers. Mirrors processDueBuildSchedules:
+ *  nextRunAt is advanced BEFORE starting so a slow run can't double-fire; a
+ *  busy agent means the fire is skipped (startQaAgentFromTrigger reports
+ *  why). */
 async function processDueQaTriggers() {
   if (qaProcessing) return;
   qaProcessing = true;

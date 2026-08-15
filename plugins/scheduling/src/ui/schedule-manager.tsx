@@ -1,46 +1,41 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Button } from "@/components/ui/button";
 import {
+  Badge,
+  Button,
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  Input,
+  Label,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogFooter,
-} from "@/components/ui/dialog";
+  Switch,
+} from "@lastest/ui";
 import { CalendarClock, Play, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { PRESET_SCHEDULES, type PresetScheduleKey } from "@lastest/cron";
+import { Events, track } from "@lastest/analytics";
+
 import {
   createScheduleAction,
   deleteScheduleAction,
   getSchedulesAction,
   toggleScheduleAction,
   triggerScheduleNowAction,
-} from "@/server/actions/schedules";
-import { PRESET_SCHEDULES } from "@/lib/scheduling/cron";
-import type { PresetScheduleKey } from "@/lib/scheduling/cron";
-import { track } from "@/lib/analytics/umami";
-import { Events } from "@/lib/analytics/events";
+} from "../actions";
 
 interface ScheduleWithDescription {
   id: string;

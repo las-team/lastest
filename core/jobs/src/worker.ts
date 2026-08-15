@@ -1,7 +1,7 @@
 /**
  * The worker-side half — claiming due jobs and driving `PluginRuntime.dispatch`.
  *
- * Not the interval itself. `src/lib/scheduling/scheduler.ts` already owns a
+ * Not the interval itself. `src/lib/core/scheduler.ts` already owns a
  * single 60-second-tick loop pattern for this app; the composition root calls
  * `processDueJobs` from a tick of its own, the same way it calls
  * `processDueExplorerTriggers`. Keeping the loop out of this package is what

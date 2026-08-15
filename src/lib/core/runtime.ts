@@ -37,6 +37,7 @@ import { configurePlayground } from "@lastest/plugin-playground";
 import { configureRanger } from "@lastest/plugin-ranger";
 import { configureRca } from "@lastest/plugin-rca";
 import { configureRecorder } from "@lastest/plugin-recorder";
+import { configureScheduling } from "@lastest/plugin-scheduling";
 import { configureShare } from "@lastest/plugin-share";
 
 import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
@@ -63,6 +64,7 @@ import { appRangerHost } from "@/lib/core/ranger-host";
 import { appRcaHost } from "@/lib/core/rca-host";
 import { appRecorderHost } from "@/lib/core/recorder-host";
 import { appReposHost } from "@/lib/core/repos-host";
+import { appSchedulingHost } from "@/lib/core/scheduling-host";
 import { appShareHost } from "@/lib/core/share-host";
 import { appStorageHost } from "@/lib/core/storage-host";
 import { appTestsHost } from "@/lib/core/tests-host";
@@ -285,6 +287,16 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
     data: data.capability("data-sources"),
     storageHost: appStorageHost,
   });
+  // Tenanted *and* wired with a `runtime`, same shape as `explorer`/`ci`/
+  // `ranger`: the settings-page CRUD actions call `contextFor(schedulingPlugin,
+  // { repositoryId })`; the deletion hook and the scheduler-tick dispatcher
+  // (`dispatchDueSchedules`) take `data` straight from the slot, since neither
+  // has a session to build a context from. See `plugins/scheduling/src/wiring.ts`.
+  configureScheduling({
+    runtime,
+    host: appSchedulingHost,
+    data: data.capability("scheduling"),
+  });
 
   // Core raises `tests` domain notifications through a port it owns; this is
   // where the feature that listens gets attached. `createTest` used to
@@ -305,7 +317,7 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
 
 /**
  * One tick of the plugin job worker. Call from an interval, the same way
- * `src/lib/scheduling/scheduler.ts` calls `processDueExplorerTriggers` — kept
+ * `src/lib/core/scheduler.ts` calls `processDueExplorerTriggers` — kept
  * out of that file because nothing depends on it yet (no plugin declares
  * `capabilities: ["jobs"]`), so wiring the interval itself is deferred to
  * whoever registers the first job handler. This function is what they call.

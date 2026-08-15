@@ -13,6 +13,7 @@ import { playgroundPlugin } from "@lastest/plugin-playground";
 import { rangerPlugin } from "@lastest/plugin-ranger";
 import { rcaPlugin } from "@lastest/plugin-rca";
 import { recorderPlugin } from "@lastest/plugin-recorder";
+import { schedulingPlugin } from "@lastest/plugin-scheduling";
 import { sharePlugin } from "@lastest/plugin-share";
 import type { resolveRegistry } from "@lastest/kernel";
 
@@ -51,4 +52,5 @@ export const MANIFESTS: Parameters<typeof resolveRegistry>[0] = [
   rangerPlugin,
   recorderPlugin,
   dataSourcesPlugin,
+  schedulingPlugin,
 ];

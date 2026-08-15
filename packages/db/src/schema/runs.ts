@@ -224,32 +224,10 @@ export const pluginJobs = pgTable(
 export type PluginJob = typeof pluginJobs.$inferSelect;
 export type NewPluginJob = typeof pluginJobs.$inferInsert;
 
-// Build schedules for recurring test runs
-export const buildSchedules = pgTable("build_schedules", {
-  id: text("id").primaryKey(),
-  repositoryId: text("repository_id")
-    .references(() => repositories.id, { onDelete: "cascade" })
-    .notNull(),
-  name: text("name").notNull(),
-  enabled: boolean("enabled").default(true),
-  cronExpression: text("cron_expression").notNull(),
-  timezone: text("timezone").default("UTC"),
-  runnerId: text("runner_id"),
-  testIds: jsonb("test_ids").$type<string[]>(),
-  suiteId: text("suite_id"),
-  gitBranch: text("git_branch"),
-  nextRunAt: timestamp("next_run_at"),
-  lastRunAt: timestamp("last_run_at"),
-  lastBuildId: text("last_build_id"),
-  consecutiveFailures: integer("consecutive_failures").default(0),
-  maxConsecutiveFailures: integer("max_consecutive_failures").default(5),
-  createdAt: timestamp("created_at"),
-  updatedAt: timestamp("updated_at"),
-});
-
-export type BuildSchedule = typeof buildSchedules.$inferSelect;
-
-export type NewBuildSchedule = typeof buildSchedules.$inferInsert;
+// Build schedules for recurring test runs moved to
+// plugins/scheduling/src/schema.ts (RFC §9 phase 4, thirteenth plugin,
+// scheduling_build_schedules) — see
+// docs/architecture/scheduling-migration-result.md.
 
 // ============================================
 // Runners Table (Remote Execution)

@@ -69,7 +69,7 @@ import {
 } from "@lastest/plugin-ci/reads";
 import { ConnectGitlabButton } from "@/components/settings/connect-gitlab-button";
 import { GitlabPipelinesCard } from "@lastest/plugin-ci/ui/gitlab-card";
-import { ScheduleManagerCard } from "@/components/settings/schedule-manager-client";
+import { ScheduleManagerCard } from "@lastest/plugin-scheduling/ui/schedule-manager";
 import { DiagramThumbnail } from "@/components/ui/diagram-thumbnail";
 import { TestMigrationCard } from "@/components/settings/test-migration-card";
 import { EmailPreferencesCard } from "@/components/settings/email-preferences-client";

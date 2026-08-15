@@ -4,7 +4,7 @@ import {
   getNextRunTime,
   describeCron,
   PRESET_SCHEDULES,
-} from "./cron";
+} from "./index";
 
 describe("Cron Utilities", () => {
   describe("isValidCron", () => {

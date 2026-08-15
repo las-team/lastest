@@ -13,7 +13,7 @@ import { getCurrentSession } from "@/lib/auth";
 import { subscribeToJobEvents, type JobEvent } from "@/lib/ws/job-events";
 import { cleanupStaleJobs } from "@/server/actions/jobs";
 import { processPoolQueue } from "@/server/actions/embedded-sessions";
-import { ensureSchedulerStarted } from "@/lib/scheduling/scheduler";
+import { ensureSchedulerStarted } from "@/lib/core/scheduler";
 import type { BackgroundJob } from "@/lib/db/schema";
 
 export const dynamic = "force-dynamic";

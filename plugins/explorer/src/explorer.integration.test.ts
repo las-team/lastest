@@ -13,7 +13,7 @@
  * request/session, which is what a Vitest process is. It therefore also
  * doubles as the committed test for §3's Scheduling row's explorer-trigger
  * dispatch half (the regular scheduled-run half lives in
- * `src/lib/scheduling/scheduler.integration.test.ts`).
+ * `plugins/scheduling/src/scheduling.integration.test.ts`).
  *
  * Second half of this file: after the migration doc's rename script
  * (`scripts/migrate-explorer-plugin-tables.ts`), explorer's tables are
@@ -146,7 +146,7 @@ describe("explorer — full session via a due cron trigger (also §3's Schedulin
     expect(trigger.nextRunAt!.getTime()).toBeLessThan(Date.now());
 
     // The literal call a live scheduler tick makes
-    // (`processDueExplorerTriggers` in `src/lib/scheduling/scheduler.ts`).
+    // (`processDueExplorerTriggers` in `src/lib/core/scheduler.ts`).
     const fired = await dispatchDueExplorerTriggers();
     expect(fired).toBeGreaterThanOrEqual(1);
 
