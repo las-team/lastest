@@ -35,6 +35,7 @@ const nextConfig: NextConfig = {
     "@lastest/ai-kit",
     "@lastest/cron",
     "@lastest/github",
+    "@lastest/recording-codegen",
     "@lastest/route-scan",
     "@lastest/test-templates",
     "@lastest/page-map",
@@ -53,6 +54,7 @@ const nextConfig: NextConfig = {
     "@lastest/plugin-playground",
     "@lastest/plugin-ranger",
     "@lastest/plugin-rca",
+    "@lastest/plugin-recorder",
     "@lastest/plugin-share",
   ],
   outputFileTracingIncludes: {

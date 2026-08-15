@@ -8,11 +8,8 @@
  * recorder's `RecordingEvent` and a debug `CodeGenEvent` (after adaptation)
  * satisfy. See `codeGenEventToStepCardEvent` for the debug adapter.
  */
-import type {
-  StepCardEvent,
-  StepCardSelector,
-} from "@/components/recording/step-card";
-import type { CodeGenEvent } from "@/lib/playwright/event-to-code";
+import type { StepCardEvent, StepCardSelector } from "./ui/step-card";
+import type { CodeGenEvent } from "@lastest/recording-codegen/event-to-code";
 
 export type KeyboardModifier = "Alt" | "Control" | "Shift" | "Meta";
 

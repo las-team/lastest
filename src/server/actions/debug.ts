@@ -21,8 +21,8 @@ import {
   removeInlineReplayCursorPath,
   parseSteps,
   spliceRecordedSteps,
-} from "@/lib/playwright/debug-parser";
-import { eventsToCodeLines } from "@/lib/playwright/event-to-code";
+} from "@lastest/recording-codegen/debug-parser";
+import { eventsToCodeLines } from "@lastest/recording-codegen/event-to-code";
 import { stripTypeAnnotations } from "@/lib/playwright/types";
 import { queueCommandToDB } from "@/app/api/ws/runner/route";
 import {

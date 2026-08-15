@@ -89,7 +89,10 @@ import {
   getJobStatus,
   getTestRunStepState,
 } from "@/server/actions/runs";
-import { extractTestBody, parseSteps } from "@/lib/playwright/debug-parser";
+import {
+  extractTestBody,
+  parseSteps,
+} from "@lastest/recording-codegen/debug-parser";
 import {
   PlaybackTimeline,
   type StepResultsMap,

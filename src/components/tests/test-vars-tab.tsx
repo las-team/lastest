@@ -21,7 +21,10 @@ import { AI_VAR_PRESETS } from "@/lib/vars/ai-presets";
 import { VarEditDialog } from "./var-edit-dialog";
 import { CsvSourcesSettingsCard } from "@/components/settings/csv-sources-settings-card";
 import { GoogleSheetsSettingsCard } from "@/components/settings/google-sheets-settings-card";
-import { extractTestBody, parseSteps } from "@/lib/playwright/debug-parser";
+import {
+  extractTestBody,
+  parseSteps,
+} from "@lastest/recording-codegen/debug-parser";
 import { collectExtractableSelectors } from "@/lib/playwright/extractable-selector";
 import { cn } from "@/lib/utils";
 

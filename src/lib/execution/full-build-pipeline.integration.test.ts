@@ -92,7 +92,7 @@ import { approveDiffCore, rejectDiffCore } from "@/lib/diff/core";
 import {
   eventsToCodeLines,
   type CodeGenEvent,
-} from "@/lib/playwright/event-to-code";
+} from "@lastest/recording-codegen/event-to-code";
 import {
   effectiveVerdict,
   mergeWithTestOverrides,

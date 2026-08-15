@@ -1,15 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  TooltipProvider,
+  Button,
+} from "@lastest/ui";
 import {
   StepCard,
   type StepCardEvent,
   type StepCardSelectorMatch,
-} from "@/components/recording/step-card";
+} from "./step-card";
 import { ChevronLeft, ChevronRight, Wand2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 export interface TraceScrubProps {
   events: StepCardEvent[];

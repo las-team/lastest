@@ -4,7 +4,7 @@ import {
   recommendPriorityFromAnalysis,
   isMeaningful,
 } from "./selector-analysis";
-import { DEFAULT_SELECTOR_PRIORITY } from "@/lib/db/schema";
+import { DEFAULT_SELECTOR_PRIORITY } from "./types";
 
 describe("analyzeHtmlForSelectors", () => {
   it("counts attribute-based selector candidates", () => {

@@ -1,0 +1,22 @@
+{
+  "name": "@lastest/recording-codegen",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pure, dependency-free code generation for recorded/debug browser actions: event list → Playwright test body (event-to-code) and debug-session step parsing/splicing (debug-parser). Shared by core's executor/assertion-parser and the recorder plugin — the third tier of docs/architecture/core-scope.md §3.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./event-to-code": "./src/event-to-code.ts",
+    "./debug-parser": "./src/debug-parser.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "vitest": "^4.1.0"
+  },
+  "license": "FSL-1.1-ALv2"
+}

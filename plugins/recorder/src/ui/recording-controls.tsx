@@ -1,19 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
+  Button,
+  Input,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@/components/ui/popover";
+} from "@lastest/ui";
 import {
   Play,
   Pause,
@@ -34,7 +32,7 @@ import type {
   WaitSelectorCondition,
   WaitParams,
   AssertionType,
-} from "@/lib/playwright/types";
+} from "../types";
 
 export type AssertionKind = AssertionType;
 

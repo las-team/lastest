@@ -137,7 +137,7 @@ export interface DebugState {
     | "completed"
     | "error";
   currentStepIndex: number;
-  steps: import("@/lib/playwright/debug-parser").DebugStep[];
+  steps: import("@lastest/recording-codegen/debug-parser").DebugStep[];
   stepResults: StepResult[];
   code: string;
   error?: string;
@@ -154,10 +154,10 @@ export interface DebugState {
   // Raw recorder events delivered exactly once, on the state tick right
   // after stop_recording finishes — drained server-side in
   // consumeStopRecording, never persisted onward.
-  pendingRecordingEvents?: import("@/lib/playwright/event-to-code").CodeGenEvent[];
+  pendingRecordingEvents?: import("@lastest/recording-codegen/event-to-code").CodeGenEvent[];
   // Live, not-yet-spliced recording buffer reported on every tick while
   // recording so the UI can render the timeline as actions happen.
-  recordingEvents?: import("@/lib/playwright/event-to-code").CodeGenEvent[];
+  recordingEvents?: import("@lastest/recording-codegen/event-to-code").CodeGenEvent[];
 }
 
 export type DebugCommand =

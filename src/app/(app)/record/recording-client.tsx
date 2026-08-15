@@ -34,7 +34,7 @@ import {
   getOrCreateFunctionalArea,
   getRecordingStatus,
   clearLastCompletedSession,
-} from "@/server/actions/recording";
+} from "@lastest/plugin-recorder/actions";
 import {
   listStorageStates,
   saveStorageState,
@@ -94,18 +94,18 @@ import {
   type ExtraStep,
 } from "@/components/setup/recording-setup-picker";
 import { RecordingTutorialOverlay } from "@/components/recording-tutorial/recording-tutorial-overlay";
-import { RecordingTimeline } from "@/components/recording/recording-timeline";
+import { RecordingTimeline } from "@lastest/plugin-recorder/ui/recording-timeline";
 import {
   RecordingControls,
   WaitPopoverBody,
-} from "@/components/recording/recording-controls";
-import { StepCard } from "@/components/recording/step-card";
-import { TraceScrub } from "@/components/recording/trace-scrub";
+} from "@lastest/plugin-recorder/ui/recording-controls";
+import { StepCard } from "@lastest/plugin-recorder/ui/step-card";
+import { TraceScrub } from "@lastest/plugin-recorder/ui/trace-scrub";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   getEventDescription,
   isActionReplayable,
-} from "@/lib/recording/timeline-events";
+} from "@lastest/plugin-recorder/timeline-events";
 import { track } from "@/lib/analytics/umami";
 import { Events } from "@/lib/analytics/events";
 
@@ -740,7 +740,6 @@ export function RecordingClient({
           repositoryId,
           "auto",
           setupOptions,
-          selectedStorageStateId ?? undefined,
         );
 
         if (result.error) {
@@ -939,7 +938,14 @@ export function RecordingClient({
         setGeneratedCode(session.generatedCode);
         setRequiredCapabilities(session.requiredCapabilities ?? null);
         setCapturedStorageState(session.capturedStorageState ?? null);
-        setDomSnapshot(session.domSnapshot ?? null);
+        // The plugin treats `domSnapshot` opaquely (recorder never reads its
+        // shape, only passes it through); the app knows the real one.
+        setDomSnapshot(
+          (session.domSnapshot as
+            | import("@/lib/db/schema").DomSnapshotData
+            | null
+            | undefined) ?? null,
+        );
       } else {
         // No session payload — bail back to setup rather than stranding the
         // user on a permanent "Wrapping up…" skeleton.

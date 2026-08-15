@@ -26,13 +26,11 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@/components/ui/popover";
-import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { promoteSelector } from "@/server/actions/recording";
+} from "@lastest/ui";
+import { promoteSelector } from "../actions";
 import { toast } from "sonner";
 
 export interface StepCardSelector {

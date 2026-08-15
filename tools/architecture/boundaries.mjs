@@ -34,7 +34,14 @@
  * `ranger` is the tenth, and the first out of the §6.2 `src/lib/playwright`
  * split: one method (`assertSafeOutboundUrl`) and one table (`ranger_sessions`,
  * replacing its slice of the shared `agent_sessions` — the same move `explorer`
- * made first). See `docs/architecture/ranger-migration-result.md`.
+ * made first). See `docs/architecture/ranger-migration-result.md`. `recorder`
+ * is the eleventh, and the second out of the §6.2 split: `event-to-code.ts`
+ * and `debug-parser.ts`, formerly listed under its `files`, turned out to be
+ * core's own code (imported by `execution/executor.ts` and
+ * `playwright/assertion-parser.ts`) misfiled next to the feature that
+ * happened to use them too — both are pure, so they went to
+ * `libs/recording-codegen` rather than into the plugin or into
+ * `CORE_SRC_PATHS`. See `docs/architecture/recorder-migration-result.md`.
  */
 
 /** Zone globs for the target layout. */
@@ -190,16 +197,14 @@ export const PSEUDO_PLUGINS = {
   },
   // §6.2 — the `src/lib/playwright` split. `lib` stays empty; these plugins own
   // named files inside a directory that is otherwise core.
-  recorder: {
-    lib: ["src/lib/recording"],
-    files: [
-      "src/lib/playwright/debug-recorder.ts",
-      "src/lib/playwright/event-to-code.ts",
-      "src/lib/playwright/debug-parser.ts",
-    ],
-    actions: ["recording.ts"],
-    components: ["src/components/recording"],
-  },
+  //
+  // `recorder` graduated to `plugins/recorder/` (RFC §9 phase 4, eleventh
+  // plugin) — see `docs/architecture/recorder-migration-result.md`. Its
+  // `debug-recorder.ts` was deleted rather than migrated (zero callers,
+  // confirmed dead); `event-to-code.ts` and `debug-parser.ts` went to
+  // `libs/recording-codegen`, not the plugin — both are pure and core's own
+  // `execution/executor.ts` / `playwright/assertion-parser.ts` import them
+  // too.
   "authoring-ai": {
     lib: [],
     files: [

@@ -35,6 +35,7 @@ import { configureLaunch } from "@lastest/plugin-launch";
 import { configurePlayground } from "@lastest/plugin-playground";
 import { configureRanger } from "@lastest/plugin-ranger";
 import { configureRca } from "@lastest/plugin-rca";
+import { configureRecorder } from "@lastest/plugin-recorder";
 import { configureShare } from "@lastest/plugin-share";
 
 import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
@@ -58,6 +59,7 @@ import { appLaunchHost } from "@/lib/core/launch-host";
 import { appPlaygroundHost } from "@/lib/core/playground-host";
 import { appRangerHost } from "@/lib/core/ranger-host";
 import { appRcaHost } from "@/lib/core/rca-host";
+import { appRecorderHost } from "@/lib/core/recorder-host";
 import { appReposHost } from "@/lib/core/repos-host";
 import { appShareHost } from "@/lib/core/share-host";
 import { appStorageHost } from "@/lib/core/storage-host";
@@ -212,6 +214,10 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
     data: data.capability("explorer"),
   });
   configureDesignSystem(appDesignSystemHost);
+  // No `runtime` — recorder declares no `capabilities`, so it holds no
+  // `PluginContext`. Every action's auth guard lives on the host
+  // (`host.requireRecordingAccess()`) instead. See `plugins/recorder/src/host.ts`.
+  configureRecorder(appRecorderHost);
   configureA11y({ runtime, data: data.capability("a11y") });
   configureRca({ runtime, host: appRcaHost });
   configureAppMap({ runtime, host: appAppMapHost });

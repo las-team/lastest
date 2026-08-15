@@ -1,0 +1,42 @@
+{
+  "name": "@lastest/plugin-recorder",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser recording: the /record flow and the test debug \"record from here\" view. A recording becomes a row in the core `tests` table, so this plugin owns no storage of its own — its live session state is reached through RecorderHost.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./actions": "./src/actions.ts",
+    "./host": "./src/host.ts",
+    "./selector-analysis": "./src/selector-analysis.ts",
+    "./timeline-events": "./src/timeline-events.ts",
+    "./types": "./src/types.ts",
+    "./wiring": "./src/wiring.ts",
+    "./ui/step-card": "./src/ui/step-card.tsx",
+    "./ui/recording-timeline": "./src/ui/recording-timeline.tsx",
+    "./ui/recording-controls": "./src/ui/recording-controls.tsx",
+    "./ui/trace-scrub": "./src/ui/trace-scrub.tsx"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lastest/eb-protocol": "workspace:*",
+    "@lastest/kernel": "workspace:*",
+    "@lastest/recording-codegen": "workspace:*",
+    "@lastest/ui": "workspace:*",
+    "lucide-react": "^0.562.0",
+    "sonner": "^2.0.7",
+    "uuid": "^13.0.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "next": "16.2.11",
+    "react": "19.2.3",
+    "typescript": "^5",
+    "vitest": "^4.1.0"
+  },
+  "license": "FSL-1.1-ALv2"
+}

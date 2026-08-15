@@ -1,4 +1,4 @@
-import type { SelectorConfig, SelectorType } from "@/lib/db/schema";
+import type { SelectorConfig, SelectorType } from "./types";
 
 /**
  * Static selector analysis for the "Analyze before record" flow.

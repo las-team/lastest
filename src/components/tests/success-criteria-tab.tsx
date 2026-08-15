@@ -24,7 +24,7 @@ import {
   parseSteps,
   extractEditableValue,
   type DebugStep,
-} from "@/lib/playwright/debug-parser";
+} from "@lastest/recording-codegen/debug-parser";
 import { parseAssertions } from "@/lib/playwright/assertion-parser";
 import { parseExtractableSelector } from "@/lib/playwright/extractable-selector";
 import { Variable } from "lucide-react";

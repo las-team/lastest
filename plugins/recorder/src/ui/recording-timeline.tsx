@@ -1,12 +1,12 @@
 "use client";
 
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { StepCard, type StepCardEvent } from "@/components/recording/step-card";
+import { TooltipProvider } from "@lastest/ui";
+import { StepCard, type StepCardEvent } from "./step-card";
 import {
   getEventDescription,
   isActionReplayable,
   type TimelineEvent,
-} from "@/lib/recording/timeline-events";
+} from "../timeline-events";
 
 interface RecordingTimelineProps {
   events: StepCardEvent[];

@@ -54,7 +54,10 @@ import {
   getCsvDataSources,
   getSelectorStatsForTest,
 } from "@/lib/db/queries";
-import { extractTestBody, parseSteps } from "@/lib/playwright/debug-parser";
+import {
+  extractTestBody,
+  parseSteps,
+} from "@lastest/recording-codegen/debug-parser";
 import {
   resolveVarReferencesAsync,
   pickRowsForVariables,

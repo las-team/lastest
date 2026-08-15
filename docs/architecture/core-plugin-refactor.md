@@ -1,10 +1,11 @@
 # RFC: Core + Plugins
 
 **Status:** phases 0–3 landed. Phase 4 in progress — `rca`, `app-map`,
-`launch`, `api-test`, `playground`, `gamification`, `ci`, `share`, `awards`
-and `ranger` done, `url-diff` resolved as core, the credential half of `scm`
-reclassified as core, 7 pseudo-plugins to go (`share`'s captions half moved to
-`src/lib/demo-captions/`, unmigrated, not counted as a plugin).
+`launch`, `api-test`, `playground`, `gamification`, `ci`, `share`, `awards`,
+`ranger` and `recorder` done, `url-diff` resolved as core, the credential half
+of `scm` reclassified as core, 6 pseudo-plugins to go (`share`'s captions half
+moved to `src/lib/demo-captions/`, unmigrated, not counted as a plugin;
+`demo` itself is not a plugin either — see `ranger-migration-result.md` §2).
 **Author:** planning doc
 **Supersedes:** nothing
 
@@ -29,7 +30,7 @@ reclassified as core, 7 pseudo-plugins to go (`share`'s captions half moved to
 > - **Phase 3 — done.** `CheckLayer` is a registry; `design-system` and `a11y`
 >   are check-layer plugins. Both are table-light, and `design-system` proved
 >   the no-schema shape (manifest + host port, no `ctx` at all).
-> - **Phase 4 — in progress. 10 of 13 plugins done.** `rca`
+> - **Phase 4 — in progress. 11 of 13 plugins done.** `rca`
 >   ([result](./rca-migration-result.md)), `app-map`
 >   ([result](./app-map-migration-result.md)), `launch`
 >   ([result](./launch-migration-result.md)), `api-test`
@@ -38,8 +39,9 @@ reclassified as core, 7 pseudo-plugins to go (`share`'s captions half moved to
 >   ([result](./gamification-migration-result.md)), `ci`
 >   ([result](./ci-migration-result.md)), `share`
 >   ([result](./share-migration-result.md)), `awards`
->   ([result](./awards-migration-result.md)) and `ranger`
->   ([result](./ranger-migration-result.md)) have landed. `url-diff` did
+>   ([result](./awards-migration-result.md)), `ranger`
+>   ([result](./ranger-migration-result.md)) and `recorder`
+>   ([result](./recorder-migration-result.md)) have landed. `url-diff` did
 >   not go to a plugin at all — it was **reclassified as core**: its in-app page
 >   and sidebar entry were removed, and what is left has no user surface and
 >   exists only to serve the documented `POST /api/v1/snapshot` and
@@ -47,7 +49,32 @@ reclassified as core, 7 pseudo-plugins to go (`share`'s captions half moved to
 >   reading of `core-scope.md` §2. The repeatable procedure is written down in
 >   [`plugin-migration-recipe.md`](./plugin-migration-recipe.md) — read that,
 >   not §9 below, before migrating the next feature.
->   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21 → 20 → 20 → 19 → 19 → 18**.
+>   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21 → 20 → 20 → 19 → 19 → 18 → 14**.
+>
+>   **`recorder` is the second plugin out of the §6.2 `src/lib/playwright`
+>   split, and the first migration to produce a new `libs/` package out of
+>   files that were never the feature's own.** `event-to-code.ts` and
+>   `debug-parser.ts` sat under `PSEUDO_PLUGINS["recorder"].files` by
+>   directory convention; their consumer lists said otherwise — core's own
+>   `execution/executor.ts` and `playwright/assertion-parser.ts` import them,
+>   alongside five app-level consumers that have nothing to do with
+>   recording. Both are pure (zero imports of their own), which is recipe
+>   §5's mechanical test for "promote to `libs/`" — and `libs/recording-codegen`
+>   is what both core and the plugin now import, rather than either
+>   reclassifying two guard-nothing files into `CORE_SRC_PATHS` or leaving
+>   core with a `plugin-recorder` dependency. It is also the third migration
+>   to find a **confirmed-dead file** sitting next to real feature code
+>   (`debug-recorder.ts`, 651 lines, zero callers anywhere) — grep for the
+>   *directory* had found it three separate times before anyone grepped for
+>   its *exports*. And it is the first migration whose host port crosses
+>   recipe §1.5's ~15-method line honestly: nineteen methods, but they group
+>   into five debt items, and ten of the nineteen are one new capability
+>   shape nothing has needed before — a runner-driven, WS-streamed recording
+>   session, which fits neither `ctx.browser.withBrowser`'s short-lived
+>   server-held `Page` model nor a plain core-table capability. See
+>   [`recorder-migration-result.md`](./recorder-migration-result.md) §5 for
+>   the exact grouping and what a future `RunnerChannelCapability` would
+>   retire.
 >
 >   **`ranger` is the first plugin out of the §6.2 `src/lib/playwright` split,
 >   and the first migration whose cost was dominated by infrastructure its
