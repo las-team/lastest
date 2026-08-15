@@ -36,7 +36,6 @@ import type {
   EmbeddedSession,
   SpecImport,
   TestFixture,
-  CsvDataSource,
   Repository,
 } from "@/lib/db/schema";
 
@@ -332,19 +331,4 @@ export async function requireTestFixtureOwnership(fixtureId: string): Promise<{
   if (!fixture.repositoryId) forbid("Test fixture has no repository binding");
   await assertRepoTeam(fixture.repositoryId, session.team.id);
   return { session, fixture };
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// CSV Data Source (also used for Google Sheets sources)
-
-export async function requireDataSourceOwnership(dsId: string): Promise<{
-  session: SessionWithTeam;
-  dataSource: CsvDataSource;
-}> {
-  const session = await requireTeamAccess();
-  const dataSource = await queries.getCsvDataSource(dsId);
-  if (!dataSource) forbid("Data source not found");
-  if (!dataSource.repositoryId) forbid("Data source has no repository binding");
-  await assertRepoTeam(dataSource.repositoryId, session.team.id);
-  return { session, dataSource };
 }

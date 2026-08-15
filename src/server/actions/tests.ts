@@ -18,6 +18,10 @@ import {
 import type { NewTest, NewFunctionalArea } from "@/lib/db/schema";
 import { getCurrentBranchForRepo } from "@/lib/git-utils";
 import { STORAGE_DIRS } from "@/lib/storage/paths";
+import {
+  listCsvDataSources,
+  listGoogleSheetsDataSources,
+} from "@lastest/plugin-data-sources/reads";
 import { resolveResultVideoUrl } from "@lastest/video-fallback";
 
 /**
@@ -511,8 +515,8 @@ export async function getTestDetailData(
     repoId ? queries.getDefaultSetupSteps(repoId) : Promise.resolve([]),
     repoId ? queries.getTestsByRepo(repoId) : Promise.resolve([]),
     repoId ? queries.getSetupScripts(repoId) : Promise.resolve([]),
-    repoId ? queries.getGoogleSheetsDataSources(repoId) : Promise.resolve([]),
-    repoId ? queries.getCsvDataSources(repoId) : Promise.resolve([]),
+    repoId ? listGoogleSheetsDataSources(repoId) : Promise.resolve([]),
+    repoId ? listCsvDataSources(repoId) : Promise.resolve([]),
     queries.getGoogleSheetsAccount(session.team.id),
     repoId ? queries.getPlaywrightSettings(repoId) : Promise.resolve(null),
     repoId ? queries.getDiffSensitivitySettings(repoId) : Promise.resolve(null),

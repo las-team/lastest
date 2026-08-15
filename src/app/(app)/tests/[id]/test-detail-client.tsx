@@ -114,13 +114,15 @@ import type {
   TestVersion,
   PlannedScreenshot,
   SetupScript,
-  GoogleSheetsDataSource,
-  CsvDataSource,
   A11yViolation,
   StabilizationSettings,
   DiffSensitivitySettings,
   TestSpec,
 } from "@/lib/db/schema";
+import type {
+  CsvDataSource,
+  GoogleSheetsDataSource,
+} from "@lastest/plugin-data-sources";
 import {
   DEFAULT_STABILIZATION_SETTINGS,
   DEFAULT_DIFF_THRESHOLDS,
@@ -139,8 +141,8 @@ import { TestStepsTab } from "@/components/tests/success-criteria-tab";
 import { StepCriteriaTab } from "@/components/tests/step-criteria-tab";
 import { TestVarsTab } from "@/components/tests/test-vars-tab";
 import type { ScreenshotGroup } from "@/server/actions/tests";
-import { SheetDataPreview } from "@/components/test-data/sheet-data-preview";
-import { SheetReferenceInserter } from "@/components/test-data/sheet-reference-inserter";
+import { SheetDataPreview } from "@lastest/plugin-data-sources/ui/sheet-data-preview";
+import { SheetReferenceInserter } from "@lastest/plugin-data-sources/ui/sheet-reference-inserter";
 import { VarReferenceInserter } from "@/components/test-data/var-reference-inserter";
 import {
   BrowserViewer,

@@ -27,6 +27,7 @@ import {
 } from "@/lib/db/schema";
 import * as queries from "@/lib/db/queries";
 import { classifyBuildDiffs } from "@lastest/plugin-rca";
+import { dataSourcesCsvSources } from "@lastest/plugin-data-sources/schema";
 
 import { appRcaHost } from "@/lib/core/rca-host";
 import { parseAssertions } from "@/lib/playwright/assertion-parser";
@@ -95,7 +96,11 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (csvSourceId) await queries.deleteCsvDataSource(csvSourceId);
+  if (csvSourceId) {
+    await db
+      .delete(dataSourcesCsvSources)
+      .where(eq(dataSourcesCsvSources.id, csvSourceId));
+  }
   await db.delete(testResults).where(eq(testResults.testRunId, runId));
   await db.delete(builds).where(eq(builds.id, buildId));
   await db.delete(testRuns).where(eq(testRuns.id, runId));
@@ -114,7 +119,13 @@ describe("P2 spot-check — RCA", () => {
 
 describe("P2 spot-check — CSV data sources", () => {
   it("creates, reads, and deletes a CSV data source", async () => {
-    const created = await queries.createCsvDataSource({
+    // Table lives in `@lastest/plugin-data-sources` now (RFC §9 phase 4,
+    // twelfth plugin) — a plain drizzle table object, not a connection, so
+    // importing it here to spot-check persistence is the same move the rest
+    // of this file makes against core tables directly.
+    csvSourceId = uuid();
+    await db.insert(dataSourcesCsvSources).values({
+      id: csvSourceId,
       repositoryId,
       teamId,
       alias: `p2csv${uuid().slice(0, 6)}`,
@@ -126,14 +137,19 @@ describe("P2 spot-check — CSV data sources", () => {
       ],
       rowCount: 2,
     });
-    csvSourceId = created.id;
 
-    const fetched = await queries.getCsvDataSource(created.id);
+    const [fetched] = await db
+      .select()
+      .from(dataSourcesCsvSources)
+      .where(eq(dataSourcesCsvSources.id, csvSourceId));
     expect(fetched?.cachedData).toHaveLength(2);
     expect(fetched?.cachedHeaders).toEqual(["name", "email"]);
 
-    const list = await queries.getCsvDataSources(repositoryId);
-    expect(list.some((s) => s.id === created.id)).toBe(true);
+    const list = await db
+      .select()
+      .from(dataSourcesCsvSources)
+      .where(eq(dataSourcesCsvSources.repositoryId, repositoryId));
+    expect(list.some((s) => s.id === csvSourceId)).toBe(true);
   });
 });
 

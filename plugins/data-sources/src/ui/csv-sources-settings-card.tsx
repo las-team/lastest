@@ -7,9 +7,10 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+  Button,
+  Badge,
+  cn,
+} from "@lastest/ui";
 import {
   FileSpreadsheet,
   RefreshCw,
@@ -21,8 +22,7 @@ import {
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { CsvDataBrowser } from "./csv-data-browser";
-import { cn } from "@/lib/utils";
-import type { CsvDataSource } from "@/lib/db/schema";
+import type { CsvDataSource } from "../schema";
 
 interface CsvSourcesSettingsCardProps {
   dataSources: CsvDataSource[];
@@ -82,10 +82,10 @@ export function CsvSourcesSettingsCard({
   const handleSync = async (id: string) => {
     setSyncingId(id);
     try {
-      const { syncCsvSource } = await import("@/server/actions/csv-sources");
+      const { syncCsvSource } = await import("../actions");
       const res = await syncCsvSource(id);
       if (res.success) {
-        toast.success("CSV reloaded from disk");
+        toast.success("CSV reloaded from storage");
         await refresh();
       } else {
         toast.error(res.error || "Sync failed");
@@ -104,7 +104,7 @@ export function CsvSourcesSettingsCard({
       return;
     setDeletingId(id);
     try {
-      const { deleteCsvSource } = await import("@/server/actions/csv-sources");
+      const { deleteCsvSource } = await import("../actions");
       await deleteCsvSource(id);
       toast.success("CSV source deleted");
       await refresh();

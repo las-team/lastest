@@ -15,9 +15,11 @@ import type {
   AssertionResult,
   CapturedScreenshot,
   TestVariable,
-  GoogleSheetsDataSource,
-  CsvDataSource,
 } from "@/lib/db/schema";
+import type {
+  CsvDataSource,
+  GoogleSheetsDataSource,
+} from "@lastest/plugin-data-sources";
 import { cn } from "@/lib/utils";
 import {
   extractTestBody,

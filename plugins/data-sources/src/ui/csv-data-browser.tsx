@@ -8,13 +8,13 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+  Button,
+  Input,
+  Label,
+} from "@lastest/ui";
 import { FileSpreadsheet, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { parseCsv } from "@/lib/csv/api";
+import { parseCsv } from "@lastest/csv";
 
 export interface CsvDataBrowserProps {
   open: boolean;
@@ -107,7 +107,7 @@ export function CsvDataBrowser({
     setSubmitting(true);
     try {
       const buf = new Uint8Array(await file.arrayBuffer());
-      const { uploadCsvSource } = await import("@/server/actions/csv-sources");
+      const { uploadCsvSource } = await import("../actions");
       const res = await uploadCsvSource(repositoryId, alias, buf, file.name);
       if (!res.success) {
         toast.error(res.error || "Upload failed");

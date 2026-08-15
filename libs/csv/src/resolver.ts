@@ -1,10 +1,24 @@
 /**
  * CSV data reference resolver. Resolves {{csv:alias.column[row]}} references
- * against cached CsvDataSource rows. Mirrors src/lib/google-sheets/resolver.ts.
+ * against cached data-source rows. Mirrors src/lib/google-sheets/resolver.ts.
+ *
+ * Takes a narrowed `CsvSourceLike` rather than importing the DB's
+ * `CsvDataSource` — this package has no `@/…` import at all (recipe §5); the
+ * caller's row already satisfies the shape structurally.
  */
 
 import { findCsvReferences } from "./api";
-import type { CsvDataSource } from "@/lib/db/schema";
+
+export interface CsvSourceLike {
+  alias: string;
+  filename: string;
+  cachedHeaders: string[] | null;
+  cachedData: string[][] | null;
+  /** Total parsed row count — may exceed `cachedData.length` when a large
+   * file's cache was truncated. Callers doing cursor arithmetic (e.g.
+   * increment-mode variables) need this, not the cached length. */
+  rowCount: number;
+}
 
 export interface ResolvedCsvReference {
   fullMatch: string;
@@ -28,14 +42,14 @@ function colLetterToIndex(letters: string): number {
 
 export function resolveCsvReferences(
   code: string,
-  dataSources: CsvDataSource[],
+  dataSources: CsvSourceLike[],
 ): CsvResolveResult {
   const refs = findCsvReferences(code);
   const resolved: ResolvedCsvReference[] = [];
   const errors: string[] = [];
   let resolvedCode = code;
 
-  const sourceByAlias = new Map<string, CsvDataSource>();
+  const sourceByAlias = new Map<string, CsvSourceLike>();
   for (const ds of dataSources) sourceByAlias.set(ds.alias, ds);
 
   for (const { fullMatch, reference } of refs) {
@@ -118,10 +132,10 @@ export function resolveCsvReferences(
 
 export function previewCsvReferences(
   code: string,
-  dataSources: CsvDataSource[],
+  dataSources: CsvSourceLike[],
 ) {
   const refs = findCsvReferences(code);
-  const sourceByAlias = new Map<string, CsvDataSource>();
+  const sourceByAlias = new Map<string, CsvSourceLike>();
   for (const ds of dataSources) sourceByAlias.set(ds.alias, ds);
 
   return refs.map(({ fullMatch, reference }) => {

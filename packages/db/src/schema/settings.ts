@@ -598,54 +598,13 @@ export interface SheetColumnInfo {
   sampleValues: string[]; // First few values for preview
 }
 
-// Google Sheets data sources - linked spreadsheets for test data
-export const googleSheetsDataSources = pgTable("google_sheets_data_sources", {
-  id: text("id").primaryKey(),
-  repositoryId: text("repository_id").references(() => repositories.id),
-  teamId: text("team_id").references(() => teams.id),
-  googleSheetsAccountId: text("google_sheets_account_id").references(
-    () => googleSheetsAccounts.id,
-  ),
-  spreadsheetId: text("spreadsheet_id").notNull(), // Google Sheets document ID
-  spreadsheetName: text("spreadsheet_name").notNull(), // Document title
-  sheetName: text("sheet_name").notNull(), // Tab/sheet name within the spreadsheet
-  sheetGid: integer("sheet_gid"), // Sheet tab GID
-  alias: text("alias").notNull(), // Short name used in test references (e.g. "users", "products")
-  headerRow: integer("header_row").default(1), // Which row contains column headers (1-based)
-  dataRange: text("data_range"), // Optional fixed range like "A1:D100"
-  cachedHeaders: jsonb("cached_headers").$type<string[]>(),
-  cachedData: jsonb("cached_data").$type<string[][]>(), // Cached rows of data
-  lastSyncedAt: timestamp("last_synced_at"),
-  createdAt: timestamp("created_at"),
-  updatedAt: timestamp("updated_at"),
-});
-
-export type GoogleSheetsDataSource =
-  typeof googleSheetsDataSources.$inferSelect;
-
-export type NewGoogleSheetsDataSource =
-  typeof googleSheetsDataSources.$inferInsert;
-
-// CSV data sources - uploaded CSV files cached as repo-scoped tabular data.
-// Mirrors googleSheetsDataSources: alias-keyed, cachedHeaders + cachedData, referenced via {{csv:alias.col[row]}} or via TestVariable.sourceAlias.
-export const csvDataSources = pgTable("csv_data_sources", {
-  id: text("id").primaryKey(),
-  repositoryId: text("repository_id").references(() => repositories.id),
-  teamId: text("team_id").references(() => teams.id),
-  alias: text("alias").notNull(), // unique per repo
-  filename: text("filename").notNull(),
-  storagePath: text("storage_path"), // optional persisted file path
-  cachedHeaders: jsonb("cached_headers").$type<string[]>().notNull(),
-  cachedData: jsonb("cached_data").$type<string[][]>().notNull(),
-  rowCount: integer("row_count").notNull().default(0),
-  lastSyncedAt: timestamp("last_synced_at"),
-  createdAt: timestamp("created_at"),
-  updatedAt: timestamp("updated_at"),
-});
-
-export type CsvDataSource = typeof csvDataSources.$inferSelect;
-
-export type NewCsvDataSource = typeof csvDataSources.$inferInsert;
+// `googleSheetsDataSources` / `csvDataSources` moved to
+// `plugins/data-sources/src/schema.ts` (RFC §9 phase 4, twelfth plugin) as
+// `data_sources_google_sheets` / `data_sources_csv_sources`. Only the OAuth
+// credential row (`googleSheetsAccounts`, above) stayed here — resolving and
+// refreshing it is a boundary (`src/lib/core/data-sources-host.ts`), the same
+// split `ci`'s migration made for GitHub/GitLab. See
+// `docs/architecture/data-sources-migration-result.md`.
 
 // ============================================
 // Compose Configs (per-branch build configuration)

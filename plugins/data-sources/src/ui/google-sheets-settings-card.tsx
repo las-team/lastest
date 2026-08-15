@@ -7,16 +7,16 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+  Button,
+  Badge,
+} from "@lastest/ui";
 import { Sheet, RefreshCw, Trash2, Plus, Table2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   disconnectGoogleSheets,
   deleteDataSource,
   syncDataSource,
-} from "@/server/actions/google-sheets";
+} from "../actions";
 import { useRouter } from "next/navigation";
 import { SheetDataBrowser } from "./sheet-data-browser";
 

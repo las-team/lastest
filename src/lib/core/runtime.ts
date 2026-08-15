@@ -27,6 +27,7 @@ import { configureApiTest } from "@lastest/plugin-api-test";
 import { configureAppMap } from "@lastest/plugin-app-map";
 import { configureAwards } from "@lastest/plugin-awards";
 import { configureCi } from "@lastest/plugin-ci";
+import { configureDataSources } from "@lastest/plugin-data-sources";
 import { configureDesignSystem } from "@lastest/plugin-design-system";
 import { configureEvents } from "@lastest/plugin-events";
 import { configureExplorer } from "@lastest/plugin-explorer";
@@ -48,6 +49,7 @@ import { appAppMapHost } from "@/lib/core/app-map-host";
 import { appAwardsHost } from "@/lib/core/awards-host";
 import { appBrowserHost } from "@/lib/core/browser-host";
 import { appCiHost } from "@/lib/core/ci-host";
+import { appDataSourcesHost } from "@/lib/core/data-sources-host";
 import { appDesignSystemHost } from "@/lib/core/design-system-host";
 import { entitlementsFor } from "@/lib/core/entitlements";
 import { appEventsHost } from "@/lib/core/events-host";
@@ -267,6 +269,21 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
     runtime,
     host: appRangerHost,
     data: data.capability("ranger"),
+  });
+  // Tenanted *and* wired with a `runtime`, same shape as `explorer`/`ci`:
+  // repo-scoped actions (CSV upload, sheet import) call `contextFor(
+  // dataSourcesPlugin, { repositoryId })`; the three account-level actions
+  // (list/connect-info/disconnect) call it with no scope request, same as
+  // `ci`'s `read()`. `storageHost` is new — this is the first plugin to
+  // declare `capabilities: ["storage"]`, and its deletion hook needs a raw
+  // `StorageHost` to build a team-scoped `StorageCapability` from, since a
+  // deletion hook has no `ctx` to pull one from. See
+  // `plugins/data-sources/src/wiring.ts` and `deletion.ts`.
+  configureDataSources({
+    runtime,
+    host: appDataSourcesHost,
+    data: data.capability("data-sources"),
+    storageHost: appStorageHost,
   });
 
   // Core raises `tests` domain notifications through a port it owns; this is

@@ -3,6 +3,7 @@ import { apiTestPlugin } from "@lastest/plugin-api-test";
 import { appMapPlugin } from "@lastest/plugin-app-map";
 import { awardsPlugin } from "@lastest/plugin-awards";
 import { ciPlugin } from "@lastest/plugin-ci";
+import { dataSourcesPlugin } from "@lastest/plugin-data-sources";
 import { designSystemPlugin } from "@lastest/plugin-design-system";
 import { eventsPlugin } from "@lastest/plugin-events";
 import { explorerPlugin } from "@lastest/plugin-explorer";
@@ -49,4 +50,5 @@ export const MANIFESTS: Parameters<typeof resolveRegistry>[0] = [
   awardsPlugin,
   rangerPlugin,
   recorderPlugin,
+  dataSourcesPlugin,
 ];

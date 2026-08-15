@@ -1,10 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@lastest/ui";
 import { Table2, AlertCircle, ArrowRight } from "lucide-react";
-import { previewSheetReferences } from "@/lib/google-sheets/resolver";
-import type { GoogleSheetsDataSource } from "@/lib/db/schema";
+import { previewSheetReferences } from "@lastest/google-sheets";
+import type { GoogleSheetsDataSource } from "../schema";
 
 interface SheetDataPreviewProps {
   code: string;

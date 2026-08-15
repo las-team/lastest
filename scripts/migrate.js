@@ -730,6 +730,87 @@ async function migrateAwardsTables() {
   }
 }
 
+// `csv_data_sources` and `google_sheets_data_sources` became
+// `@lastest/plugin-data-sources`'s own tables (RFC §9 phase 4, twelfth
+// plugin), renamed for the `data_sources_` prefix `core/data` requires —
+// same shape as `CI_RENAMES`/`AWARDS_RENAMES`, and for the same reason
+// `drizzle-kit push` cannot see a rename: it would drop each source table,
+// create its replacement empty, and take every team's cached CSV/sheet data
+// with it.
+//
+// Both tables carried FKs into `teams`/`repositories`, which
+// `core-scope.md` §6 forbids a plugin from declaring — dropped by catalogue
+// lookup after the rename. `google_sheets_data_sources` also pointed at
+// `google_sheets_accounts` (the OAuth credential table, which stays core);
+// that FK goes too, convention-only from here. `deletion.ts`'s
+// `onTeamDeleted`/`onRepoDeleted` are what replace the cascades.
+const DATA_SOURCES_RENAMES = [
+  ["csv_data_sources", "data_sources_csv_sources"],
+  ["google_sheets_data_sources", "data_sources_google_sheets"],
+];
+
+async function migrateDataSourcesTables() {
+  if (!process.env.DATABASE_URL) return;
+  let sql;
+  try {
+    sql = require("postgres")(process.env.DATABASE_URL);
+
+    const tableExists = async (name) => {
+      const rows = await sql`
+        select exists (
+          select 1 from information_schema.tables
+          where table_schema = 'public' and table_name = ${name}
+        ) as exists`;
+      return rows[0]?.exists ?? false;
+    };
+    const rowCount = async (name) => {
+      const rows = await sql.unsafe(
+        `select count(*)::text as n from "${name}"`,
+      );
+      return Number(rows[0]?.n ?? 0);
+    };
+
+    for (const [from, to] of DATA_SOURCES_RENAMES) {
+      if (!(await tableExists(from))) continue;
+      if (await tableExists(to)) {
+        if ((await rowCount(to)) > 0) {
+          console.log(`[migrate] ${from} -> ${to}: already migrated`);
+          continue;
+        }
+        await sql.unsafe(`drop table "${to}"`);
+      }
+      await sql.unsafe(`alter table "${from}" rename to "${to}"`);
+      console.log(`[migrate] renamed ${from} -> ${to}`);
+    }
+
+    // Then the FKs into core (teams/repositories/google_sheets_accounts), by
+    // catalogue lookup for the same reason `migrateCiTables` does it that
+    // way: push would drop them by name, and implicitly-created names differ
+    // between environments. `ALTER TABLE … RENAME` carries constraints
+    // across, so this runs after the renames and looks them up under the new
+    // table names.
+    const fks = await sql`
+      select rel.relname as table_name, ref.relname as points_at,
+             con.conname as name
+        from pg_constraint con
+        join pg_class rel on rel.oid = con.conrelid
+        join pg_class ref on ref.oid = con.confrelid
+       where con.contype = 'f'
+         and ref.relname in ('teams', 'repositories', 'google_sheets_accounts')
+         and rel.relname in (
+           'data_sources_csv_sources', 'data_sources_google_sheets'
+         )`;
+    for (const { table_name: table, points_at: target, name } of fks) {
+      await sql.unsafe(`alter table ${table} drop constraint "${name}"`);
+      console.log(`[migrate] ${table}: dropped FK ${name} (-> ${target})`);
+    }
+  } catch (e) {
+    console.warn("[migrate] data-sources table migration skipped:", e.message);
+  } finally {
+    if (sql) await sql.end();
+  }
+}
+
 async function main() {
   await preCreate();
   await migrateExplorerTables();
@@ -738,6 +819,7 @@ async function main() {
   await migrateCiTables();
   await migrateShareTables();
   await migrateAwardsTables();
+  await migrateDataSourcesTables();
   await dropPluginUserForeignKeys();
   await nullOrphans();
   await bumpPoolDefaults();

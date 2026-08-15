@@ -47,7 +47,8 @@ import { getRunners, getSystemRunners } from "@/server/actions/runners";
 import { listSystemEmbeddedSessions } from "@/server/actions/embedded-sessions";
 import { listApiTokens } from "@/server/actions/api-tokens";
 import { ApiTokensSection } from "@/components/api-tokens/api-tokens-section";
-import { GoogleSheetsSettingsCard } from "@/components/settings/google-sheets-settings-card";
+import { GoogleSheetsSettingsCard } from "@lastest/plugin-data-sources/ui/google-sheets-card";
+import { listGoogleSheetsDataSources } from "@lastest/plugin-data-sources/reads";
 import { TestingTemplateSelector } from "@/components/settings/testing-template-selector";
 import { AutoApproveToggle } from "@/components/settings/auto-approve-toggle";
 import { EarlyAdopterToggle } from "@/components/settings/early-adopter-toggle";
@@ -139,7 +140,7 @@ export default async function SettingsPage({
   const googleSheetsAccount = currentUser?.teamId
     ? await queries.getGoogleSheetsAccount(currentUser.teamId)
     : null;
-  const googleSheetsDataSources = await queries.getGoogleSheetsDataSources(
+  const googleSheetsDataSources = await listGoogleSheetsDataSources(
     selectedRepo?.id,
   );
 

@@ -5,47 +5,28 @@ import {
   pickRowsForVariables,
   resolveAssignedValues,
 } from "./resolver";
-import type {
-  TestVariable,
-  GoogleSheetsDataSource,
-  CsvDataSource,
-} from "@/lib/db/schema";
+import type { TestVariable } from "@/lib/db/schema";
+import type { CsvSourceLike } from "@lastest/csv";
+import type { SheetSourceLike } from "@lastest/google-sheets";
 
-const csvSource: CsvDataSource = {
-  id: "csv-1",
-  repositoryId: "r1",
-  teamId: "t1",
+const csvSource: CsvSourceLike = {
   alias: "users",
   filename: "users.csv",
-  storagePath: null,
   cachedHeaders: ["email", "name"],
   cachedData: [
     ["alice@x.test", "Alice"],
     ["bob@x.test", "Bob"],
   ],
   rowCount: 2,
-  lastSyncedAt: new Date(),
-  createdAt: new Date(),
-  updatedAt: new Date(),
 };
 
-const sheetSource: GoogleSheetsDataSource = {
-  id: "gs-1",
-  repositoryId: "r1",
-  teamId: "t1",
-  googleSheetsAccountId: "a1",
-  spreadsheetId: "sid",
+const sheetSource: SheetSourceLike = {
   spreadsheetName: "Sheet1",
   sheetName: "Sheet1",
-  sheetGid: null,
   alias: "orders",
   headerRow: 1,
-  dataRange: null,
   cachedHeaders: ["order_id"],
   cachedData: [["ord-001"]],
-  lastSyncedAt: new Date(),
-  createdAt: new Date(),
-  updatedAt: new Date(),
 };
 
 describe("resolveVarReferences", () => {

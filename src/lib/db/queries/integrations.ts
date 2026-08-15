@@ -7,14 +7,12 @@ import {
 import {
   specImports,
   googleSheetsAccounts,
-  googleSheetsDataSources,
   composeConfigs,
   agentSessions,
 } from "../schema";
 import type {
   NewSpecImport,
   NewGoogleSheetsAccount,
-  NewGoogleSheetsDataSource,
   NewComposeConfig,
   NewAgentSession,
   AgentSessionKind,
@@ -167,113 +165,20 @@ export async function updateGoogleSheetsAccountTokens(
 }
 
 export async function deleteGoogleSheetsAccount(teamId: string) {
-  // Delete all data sources first
+  // Does not touch plugins/data-sources' rows — imported data sources are
+  // left in place, the same way disconnecting GitHub does not delete a
+  // repo's CI config. See `DataSourcesHost.disconnectGoogleSheets`.
   const account = await getGoogleSheetsAccount(teamId);
   if (account) {
-    await db
-      .delete(googleSheetsDataSources)
-      .where(eq(googleSheetsDataSources.googleSheetsAccountId, account.id));
     await db
       .delete(googleSheetsAccounts)
       .where(eq(googleSheetsAccounts.id, account.id));
   }
 }
 
-// Data Sources
-
-export async function getGoogleSheetsDataSources(repositoryId?: string | null) {
-  if (!repositoryId) return [];
-  return db
-    .select()
-    .from(googleSheetsDataSources)
-    .where(eq(googleSheetsDataSources.repositoryId, repositoryId));
-}
-
-export async function getGoogleSheetsDataSource(id: string) {
-  const [row] = await db
-    .select()
-    .from(googleSheetsDataSources)
-    .where(eq(googleSheetsDataSources.id, id));
-  return row || null;
-}
-
-export async function getGoogleSheetsDataSourceByAlias(
-  repositoryId: string,
-  alias: string,
-) {
-  const [row] = await db
-    .select()
-    .from(googleSheetsDataSources)
-    .where(
-      and(
-        eq(googleSheetsDataSources.repositoryId, repositoryId),
-        eq(googleSheetsDataSources.alias, alias),
-      ),
-    );
-  return row || null;
-}
-
-export async function createGoogleSheetsDataSource(data: {
-  repositoryId: string;
-  teamId: string;
-  googleSheetsAccountId: string;
-  spreadsheetId: string;
-  spreadsheetName: string;
-  sheetName: string;
-  sheetGid?: number | null;
-  alias: string;
-  headerRow?: number;
-  dataRange?: string | null;
-  cachedHeaders?: string[] | null;
-  cachedData?: string[][] | null;
-}) {
-  const id = uuid();
-  const now = new Date();
-  const newSource: NewGoogleSheetsDataSource = {
-    id,
-    repositoryId: data.repositoryId,
-    teamId: data.teamId,
-    googleSheetsAccountId: data.googleSheetsAccountId,
-    spreadsheetId: data.spreadsheetId,
-    spreadsheetName: data.spreadsheetName,
-    sheetName: data.sheetName,
-    sheetGid: data.sheetGid,
-    alias: data.alias,
-    headerRow: data.headerRow ?? 1,
-    dataRange: data.dataRange,
-    cachedHeaders: data.cachedHeaders,
-    cachedData: data.cachedData,
-    lastSyncedAt: now,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  await db.insert(googleSheetsDataSources).values(newSource);
-  return { ...newSource };
-}
-
-export async function updateGoogleSheetsDataSource(
-  id: string,
-  data: Partial<{
-    alias: string;
-    headerRow: number;
-    dataRange: string | null;
-    cachedHeaders: string[] | null;
-    cachedData: string[][] | null;
-    lastSyncedAt: Date;
-  }>,
-) {
-  await db
-    .update(googleSheetsDataSources)
-    .set({ ...data, updatedAt: new Date() })
-    .where(eq(googleSheetsDataSources.id, id));
-}
-
-export async function deleteGoogleSheetsDataSource(id: string) {
-  await db
-    .delete(googleSheetsDataSources)
-    .where(eq(googleSheetsDataSources.id, id));
-}
+// Data source rows (googleSheetsDataSources / csvDataSources) moved to
+// plugins/data-sources/src/schema.ts (RFC §9 phase 4, twelfth plugin). See
+// docs/architecture/data-sources-migration-result.md.
 
 // ============================================
 // Compose Configs

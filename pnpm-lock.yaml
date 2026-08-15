@@ -82,6 +82,9 @@ importers:
       '@lastest/cron':
         specifier: workspace:*
         version: link:libs/cron
+      '@lastest/csv':
+        specifier: workspace:*
+        version: link:libs/csv
       '@lastest/db':
         specifier: workspace:*
         version: link:packages/db
@@ -91,6 +94,9 @@ importers:
       '@lastest/github':
         specifier: workspace:*
         version: link:libs/github
+      '@lastest/google-sheets':
+        specifier: workspace:*
+        version: link:libs/google-sheets
       '@lastest/kernel':
         specifier: workspace:*
         version: link:core/kernel
@@ -118,6 +124,9 @@ importers:
       '@lastest/plugin-ci':
         specifier: workspace:*
         version: link:plugins/ci
+      '@lastest/plugin-data-sources':
+        specifier: workspace:*
+        version: link:plugins/data-sources
       '@lastest/plugin-design-system':
         specifier: workspace:*
         version: link:plugins/design-system
@@ -508,7 +517,28 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  libs/csv:
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.30
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
   libs/github:
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.30
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  libs/google-sheets:
     devDependencies:
       '@types/node':
         specifier: ^20
@@ -1021,6 +1051,55 @@ importers:
       '@types/libsodium-wrappers':
         specifier: ^0.8.2
         version: 0.8.2
+      '@types/react':
+        specifier: ^19
+        version: 19.2.8
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: ^19
+        version: 19.2.3
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/data-sources:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/core-data':
+        specifier: workspace:*
+        version: link:../../core/data
+      '@lastest/core-storage':
+        specifier: workspace:*
+        version: link:../../core/storage
+      '@lastest/csv':
+        specifier: workspace:*
+        version: link:../../libs/csv
+      '@lastest/google-sheets':
+        specifier: workspace:*
+        version: link:../../libs/google-sheets
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@lastest/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8)
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+    devDependencies:
       '@types/react':
         specifier: ^19
         version: 19.2.8

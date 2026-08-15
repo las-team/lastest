@@ -29,8 +29,6 @@ import {
   specImports,
   setupScripts,
   setupConfigs,
-  googleSheetsDataSources,
-  csvDataSources,
   functionalAreas,
   activityEvents,
   remoteDebugSessions,
@@ -345,10 +343,10 @@ export async function deleteRepository(id: string) {
     await tx.delete(specImports).where(eq(specImports.repositoryId, id));
     await tx.delete(setupScripts).where(eq(setupScripts.repositoryId, id));
     await tx.delete(setupConfigs).where(eq(setupConfigs.repositoryId, id));
-    await tx
-      .delete(googleSheetsDataSources)
-      .where(eq(googleSheetsDataSources.repositoryId, id));
-    await tx.delete(csvDataSources).where(eq(csvDataSources.repositoryId, id));
+    // googleSheetsDataSources/csvDataSources moved to
+    // plugins/data-sources/src/schema.ts (RFC §9 phase 4) — reaped by the
+    // plugin's onRepoDeleted hook, driven by `cascadePluginDeletion` below,
+    // not by this transaction.
     await tx
       .delete(plannedScreenshots)
       .where(eq(plannedScreenshots.repositoryId, id));

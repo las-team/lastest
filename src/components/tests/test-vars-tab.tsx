@@ -12,15 +12,15 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Plus, Pencil, Trash2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
+import type { TestVariable } from "@/lib/db/schema";
 import type {
-  TestVariable,
-  GoogleSheetsDataSource,
   CsvDataSource,
-} from "@/lib/db/schema";
+  GoogleSheetsDataSource,
+} from "@lastest/plugin-data-sources";
 import { AI_VAR_PRESETS } from "@/lib/vars/ai-presets";
 import { VarEditDialog } from "./var-edit-dialog";
-import { CsvSourcesSettingsCard } from "@/components/settings/csv-sources-settings-card";
-import { GoogleSheetsSettingsCard } from "@/components/settings/google-sheets-settings-card";
+import { CsvSourcesSettingsCard } from "@lastest/plugin-data-sources/ui/csv-sources-card";
+import { GoogleSheetsSettingsCard } from "@lastest/plugin-data-sources/ui/google-sheets-card";
 import {
   extractTestBody,
   parseSteps,

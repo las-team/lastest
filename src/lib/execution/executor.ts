@@ -50,10 +50,12 @@ import {
   acknowledgeResults,
   getRunnerCommandById,
   getTestFixtures,
-  getGoogleSheetsDataSources,
-  getCsvDataSources,
   getSelectorStatsForTest,
 } from "@/lib/db/queries";
+import {
+  csvDataSourcesForRepo,
+  googleSheetsDataSourcesForRepo,
+} from "@/lib/core/data-sources-reads";
 import {
   extractTestBody,
   parseSteps,
@@ -64,13 +66,12 @@ import {
   resolveAssignedValuesAsync,
   type AIVarRuntime,
 } from "@/lib/vars/resolver";
-import { resolveSheetReferences } from "@/lib/google-sheets/resolver";
-import { resolveCsvReferences } from "@/lib/csv/resolver";
-import type {
-  GoogleSheetsDataSource,
-  CsvDataSource,
-  TestVariable,
-} from "@/lib/db/schema";
+import {
+  resolveSheetReferences,
+  type SheetSourceLike,
+} from "@lastest/google-sheets";
+import { resolveCsvReferences, type CsvSourceLike } from "@lastest/csv";
+import type { TestVariable } from "@/lib/db/schema";
 import { getAISettings } from "@/lib/db/queries";
 import { generateWithAI, type AIProviderConfig } from "@/lib/ai";
 import { buildAIVarPrompt, sanitizeAIVarOutput } from "@/lib/vars/ai-presets";
@@ -159,8 +160,8 @@ async function buildAIVarRuntime(
  */
 async function resolveTestCodeForRunner(
   test: Test,
-  gsheetSources: GoogleSheetsDataSource[],
-  csvSources: CsvDataSource[],
+  gsheetSources: SheetSourceLike[],
+  csvSources: CsvSourceLike[],
   ai: AIVarRuntime | null,
 ): Promise<{
   resolvedCode: string;
@@ -695,10 +696,10 @@ async function executeViaRunner(
 
   // Load gsheet/csv sources once for this run — used to resolve {{sheet:}}, {{csv:}}, {{var:}} tokens.
   const gsheetSources = options.repositoryId
-    ? await getGoogleSheetsDataSources(options.repositoryId)
+    ? await googleSheetsDataSourcesForRepo(options.repositoryId)
     : [];
   const csvSources = options.repositoryId
-    ? await getCsvDataSources(options.repositoryId)
+    ? await csvDataSourcesForRepo(options.repositoryId)
     : [];
 
   // Resolve the diff-sensitivity text-diff toggle once per run. The EB pod

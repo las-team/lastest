@@ -1,11 +1,22 @@
 /**
- * Google Sheets data reference resolver.
- * Resolves {{sheet:alias.column[row]}} references in test code
- * using cached data from GoogleSheetsDataSources.
+ * Google Sheets data reference resolver. Resolves {{sheet:alias.column[row]}}
+ * references in test code using cached data from Google Sheets data sources.
+ *
+ * Takes a narrowed `SheetSourceLike` rather than importing the DB's
+ * `GoogleSheetsDataSource` — this package has no `@/…` import at all (recipe
+ * §5); the caller's row already satisfies the shape structurally.
  */
 
-import { findSheetReferences } from "./api";
-import type { GoogleSheetsDataSource } from "@/lib/db/schema";
+import { findSheetReferences } from "./parse";
+
+export interface SheetSourceLike {
+  alias: string;
+  spreadsheetName: string;
+  sheetName: string;
+  headerRow: number | null;
+  cachedHeaders: string[] | null;
+  cachedData: string[][] | null;
+}
 
 export interface ResolvedReference {
   fullMatch: string;
@@ -25,7 +36,7 @@ export interface ResolveResult {
  */
 export function resolveSheetReferences(
   code: string,
-  dataSources: GoogleSheetsDataSource[],
+  dataSources: SheetSourceLike[],
 ): ResolveResult {
   const refs = findSheetReferences(code);
   const resolved: ResolvedReference[] = [];
@@ -33,7 +44,7 @@ export function resolveSheetReferences(
   let resolvedCode = code;
 
   // Build a lookup map by alias
-  const sourceByAlias = new Map<string, GoogleSheetsDataSource>();
+  const sourceByAlias = new Map<string, SheetSourceLike>();
   for (const ds of dataSources) {
     sourceByAlias.set(ds.alias, ds);
   }
@@ -156,7 +167,7 @@ export function resolveSheetReferences(
  */
 export function previewSheetReferences(
   code: string,
-  dataSources: GoogleSheetsDataSource[],
+  dataSources: SheetSourceLike[],
 ): Array<{
   fullMatch: string;
   alias: string;
@@ -174,7 +185,7 @@ export function previewSheetReferences(
   };
 }> {
   const refs = findSheetReferences(code);
-  const sourceByAlias = new Map<string, GoogleSheetsDataSource>();
+  const sourceByAlias = new Map<string, SheetSourceLike>();
   for (const ds of dataSources) {
     sourceByAlias.set(ds.alias, ds);
   }

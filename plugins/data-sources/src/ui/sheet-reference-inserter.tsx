@@ -9,12 +9,12 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+  Button,
+  Input,
+  Label,
+} from "@lastest/ui";
 import { Table2, Copy, Check } from "lucide-react";
-import type { GoogleSheetsDataSource } from "@/lib/db/schema";
+import type { GoogleSheetsDataSource } from "../schema";
 
 interface SheetReferenceInserterProps {
   dataSources: GoogleSheetsDataSource[];

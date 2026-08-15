@@ -8,10 +8,10 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+  Button,
+  Input,
+  Label,
+} from "@lastest/ui";
 import {
   Loader2,
   FileSpreadsheet,
@@ -25,7 +25,7 @@ import {
   getSpreadsheetDetails,
   previewSheetData,
   importSheetDataSource,
-} from "@/server/actions/google-sheets";
+} from "../actions";
 
 type Step = "list" | "sheets" | "preview" | "import";
 

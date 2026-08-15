@@ -42,6 +42,16 @@
  * happened to use them too — both are pure, so they went to
  * `libs/recording-codegen` rather than into the plugin or into
  * `CORE_SRC_PATHS`. See `docs/architecture/recorder-migration-result.md`.
+ * `data-sources` is the twelfth: cached, alias-keyed CSV/Google-Sheets test
+ * data. Its map entry named three files; `spec-import.ts` was never this
+ * feature (zero shared table/type/import with csv/google-sheets in either
+ * direction — it is AI story extraction and test generation) and split into
+ * its own uncosted `PSEUDO_PLUGINS["spec-import"]` entry below rather than
+ * migrating with them. The Google Sheets OAuth token refresh — the one
+ * credential-touching piece inside the migrated files — moved to
+ * `src/lib/core/data-sources-host.ts` rather than `CORE_SRC_PATHS` (it has
+ * exactly one caller, unlike `github`/`gitlab` OAuth). See
+ * `docs/architecture/data-sources-migration-result.md`.
  */
 
 /** Zone globs for the target layout. */
@@ -175,9 +185,17 @@ export const PSEUDO_PLUGINS = {
   // to unblock the two-way cross-read this feature needed with `share`'s own
   // table — see `src/lib/core/share-reads.ts` and
   // `src/lib/core/awards-host.ts`.
-  "data-sources": {
-    lib: ["src/lib/csv", "src/lib/google-sheets"],
-    actions: ["csv-sources.ts", "google-sheets.ts", "spec-import.ts"],
+  // `data-sources` graduated to `plugins/data-sources/` (RFC §9 phase 4,
+  // twelfth plugin) — see `docs/architecture/data-sources-migration-result.md`.
+  // Its map entry named three files; only two of them were this feature.
+  // `spec-import.ts` shares no table, type or import with csv/google-sheets
+  // in either direction — it is AI-driven user-story extraction and test
+  // generation, not a data source — so it did not move with them. It gets
+  // its own entry below, uncosted, rather than being silently dropped from
+  // the burndown.
+  "spec-import": {
+    lib: [],
+    actions: ["spec-import.ts"],
   },
   // `scm` is gone, and it is the first entry to graduate as **two things**.
   // RFC §6.3 mapped it to all of `src/lib/github` + `src/lib/gitlab` + two

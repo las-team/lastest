@@ -19,7 +19,6 @@ export * from "./queries/auth";
 export * from "./queries/setup";
 export * from "./queries/runners";
 export * from "./queries/integrations";
-export * from "./queries/csv-sources";
 export * from "./queries/misc";
 export * from "./queries/analytics";
 export * from "./queries/fixtures";
