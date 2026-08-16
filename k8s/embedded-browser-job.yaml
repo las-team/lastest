@@ -1,8 +1,10 @@
 # Reference template for a single on-demand Embedded Browser Job.
 #
-# The pool service provisioner (packages/pool-service/src/provisioner.ts) constructs the spec
-# programmatically via the Kubernetes REST API, but this file documents the
-# exact shape and is usable for manual `kubectl apply` during bring-up / debug.
+# The pool service provisioner (packages/pool-service/src/provisioner.ts)
+# constructs the spec programmatically via the Kubernetes REST API and is the
+# source of truth; this file is a close-enough reference for manual
+# `kubectl apply` during bring-up / debug. Keep ports/env in sync with
+# jobSpec() when they change there.
 #
 # Key invariants:
 #   - One Job per browser per test (1 test per EB).
@@ -93,12 +95,16 @@ spec:
             - name: CDP_PORT
               value: "9222"
           ports:
+            # Mirrors jobSpec() in packages/pool-service/src/provisioner.ts —
+            # keep in sync when ports change there.
             - containerPort: 9222
-              name: cdp
+              name: cdp-local # Chromium's own CDP, localhost-only
             - containerPort: 9223
               name: stream
             - containerPort: 9224
               name: health
+            - containerPort: 9232
+              name: cdp # TCP proxy exposing CDP across the cluster (agent/MCP)
           resources:
             requests:
               cpu: "1000m"

@@ -100,9 +100,11 @@ YAML
   fi
 fi
 
-# 2. Namespace + RBAC. EB Jobs spawned by the host provisioner inherit the
-#    default ServiceAccount; the RBAC file is applied for parity with the
-#    Olares deployment topology and to keep the namespace shape consistent.
+# 2. Namespace + RBAC. namespace.yaml also patches the namespace default SA
+#    to deny token automount — EB Jobs hold no SA token (the host provisioner
+#    itself authenticates to the cluster via the host's kubeconfig, not a pod
+#    mount). The RBAC file is applied for parity with the Olares deployment
+#    topology and to keep the namespace shape consistent.
 #    No in-cluster Secrets are needed — the host provisioner inlines
 #    SYSTEM_EB_TOKEN / LASTEST_URL into each Job's env directly.
 echo "==> Applying namespace + RBAC"
