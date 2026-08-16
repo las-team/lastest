@@ -38,6 +38,10 @@ spec:
         lastest.dev/eb-instance: INSTANCE_ID
     spec:
       restartPolicy: Never
+      # EBs run untrusted user/AI-authored test code and need no access to the
+      # Kubernetes API — never mount the namespace default ServiceAccount
+      # token (mirrors the provisioner in packages/pool-service/src/provisioner.ts).
+      automountServiceAccountToken: false
       # Mirror the image's non-root pwuser (uid 1001) at the orchestrator layer.
       # The EB image's Dockerfile sets USER pwuser; this locks it down so a
       # misconfigured image rebuild can't silently run untrusted web content

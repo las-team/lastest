@@ -175,6 +175,15 @@ describe("tenant priority classes", () => {
   });
 });
 
+describe("jobSpec pod hardening", () => {
+  it("never mounts the namespace ServiceAccount token — EB code is untrusted and needs no cluster API access", () => {
+    const spec = jobSpec("eb-1", "eb-1") as {
+      spec: { template: { spec: Record<string, unknown> } };
+    };
+    expect(spec.spec.template.spec.automountServiceAccountToken).toBe(false);
+  });
+});
+
 describe("prewarmForBuild in process mode", () => {
   it("is a no-op — a 1-test build must spawn exactly one EB via its claim", async () => {
     expect(await prewarmForBuild(3)).toBe(0);

@@ -578,6 +578,11 @@ export function jobSpec(
         },
         spec: {
           restartPolicy: "Never",
+          // EBs run untrusted user/AI-authored test code and need no access to
+          // the Kubernetes API — never mount the namespace default
+          // ServiceAccount token, so an over-permissioned default SA (or a
+          // sandbox escape) can't reach the cluster API.
+          automountServiceAccountToken: false,
           // Per-tenant scheduling priority. Omitted (cluster default applies)
           // unless the deployment configured the classes — see
           // `priorityClassNameFor`.
