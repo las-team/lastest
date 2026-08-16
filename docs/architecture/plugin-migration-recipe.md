@@ -33,7 +33,12 @@ future plugin that combines `schema` and `storage` (§2.5); and after
 "reclassify" destination to §1.6 (a misfiled file that is itself
 composition-root-shaped moves to `src/lib/core/`, not into a new
 `CORE_SRC_PATHS` entry) and a second consecutive dead-action finding to §8,
-after `ci`'s three.
+after `ci`'s three; and after the **stopped** `authoring-ai` attempt
+([`authoring-ai-migration-result.md`](./authoring-ai-migration-result.md)),
+which added §1.6.2 (a pseudo-plugin's files importing *another* pseudo-plugin
+or an orphaned, unmapped one — not core) and a note on §3 (check the current
+core contract before assuming an RFC-sketched escape hatch was actually
+built).
 **Audience:** whoever migrates the next feature out of `src/` into `plugins/<id>/`.
 
 This is the *how*. The *why* is [`core-plugin-refactor.md`](./core-plugin-refactor.md)
@@ -290,6 +295,41 @@ Two independent fixes, not one — check both:
   time this runs, and pulling in the composition root would be circular in
   spirit.
 
+### 1.6.2 The same blind spot exists *sideways*, between two pseudo-plugins
+
+§1.6's table assumes the thing on the other end of a surprising import is
+core. `authoring-ai` found the sideways case: a pseudo-plugin's own files
+importing *another* pseudo-plugin, or a feature with no classification at
+all — a `plugin → plugin` edge RFC §3 forbids once both sides are packaged.
+
+This one splits into a visible half and an invisible half, and it is worth
+knowing which is which before assuming `pnpm arch`'s current-layout count
+already told you everything. `authoring-ai`'s `planners/spec-planner.ts`
+calls into `src/server/actions/spec-import.ts`, which already has its own
+`PSEUDO_PLUGINS["spec-import"]` entry — `crossPluginPatternsFor()` generates
+a pattern from every *other* entry's `pseudoPluginPaths()`, so this one is
+already a counted, visible `cross-plugin` violation (one of the running
+total) and always was. Its `planners/code-planner.ts` calls into
+`src/server/actions/ai-routes.ts`, which has **no** `PSEUDO_PLUGINS` entry —
+no pattern exists to generate, so this one is genuinely invisible to
+`pnpm arch`, the same blind spot §1.6 already knows about for the core-ward
+direction, just sideways. Same for `planner-agent.ts`'s own call into
+`src/server/actions/specs.ts`. The visible one you would have found anyway by
+running the checks; the invisible one only surfaces by reading the feature's
+own import list, the same discipline §1.6 already asks for.
+
+Before costing a port, grep the feature's own files for imports of
+`src/server/actions/*` and `src/lib/*` paths **outside its own
+`PSEUDO_PLUGINS` entry**, the same way §1.6 greps core for the feature's
+name — just pointed at every other pseudo-plugin instead of at
+`CORE_SRC_PATHS`. Three outcomes, not the two you might expect:
+
+| What you found | Resolution |
+| --- | --- |
+| The other side already has a `PSEUDO_PLUGINS` entry | Blocked on that migration landing first (or being merged into this one, if the coupling is genuinely mutual) |
+| The other side has no entry, no core classification, nothing | Record it — do not silently start migrating it too, and do not guess whether it is core or a plugin. Same discipline as `change-map` in `rca-migration-result.md` §5: leave it for whoever classifies it next, named explicitly rather than left for a future grep to rediscover |
+| The other side is `libs/*` or already-core | Fine, not a blocker — this is just the ordinary host-port case |
+
 ## 1.7 Before declaring a `currentActor`, try an empty `contextFor()`
 
 Four migrations in a row declared a host method for "who is calling"
@@ -528,6 +568,20 @@ deleted) once a second plugin needs it; one data point does not justify the
 kernel change RFC §7.2 asks core PRs to earn.
 
 ## 3. The host port — the honest escape hatch
+
+**Before assuming a capability's gap is a host-port-sized problem, read its
+actual current interface — not what an earlier section of the RFC sketched
+for it.** `core-plugin-refactor.md` §4.2 drafted a `BrowserHandle.withRawPage`
+escape hatch as day-one scaffolding for exactly the "needs more than the
+capability offers" case. It was never built; the real `BrowserSession`
+(`core/contracts/src/browser.ts`) documents its own absence: *"notably absent
+is any way to obtain the CDP URL or the pod address."* `authoring-ai`
+(stopped — see
+[`authoring-ai-migration-result.md`](./authoring-ai-migration-result.md))
+needed exactly that shape and found no fallback waiting. When a feature's gap
+looks like it should be coverable by an escape hatch the RFC describes, check
+the shipped contract first; a draft in a design doc is not evidence the
+capability exists.
 
 When the feature needs something core does not expose yet, declare it as an
 interface in `plugins/<id>/src/host.ts` and let the composition root fill it from

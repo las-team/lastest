@@ -250,6 +250,18 @@ export const PSEUDO_PLUGINS = {
   // `libs/recording-codegen`, not the plugin — both are pure and core's own
   // `execution/executor.ts` / `playwright/assertion-parser.ts` import them
   // too.
+  // `authoring-ai` was costed and **stopped**, not migrated — see
+  // `docs/architecture/authoring-ai-migration-result.md`. Two blockers, either
+  // sufficient alone: (1) `generator-agent.ts`/`healer-agent.ts`/
+  // `enhancer-agent.ts` and two of `planner-agent.ts`'s three functions need
+  // AI generation wired to a live, claimed EB's CDP endpoint via MCP tools,
+  // and neither `ctx.ai` nor `ctx.browser` can express that — `BrowserSession`
+  // documents its own absence of a CDP escape hatch; (2) `planners/` imports
+  // `src/server/actions/spec-import.ts` (its own oversized, uncosted
+  // `PSEUDO_PLUGINS` entry) and `src/server/actions/ai-routes.ts` (no entry
+  // anywhere — an orphan with its own UI, found only by reading
+  // `code-planner.ts`'s import list). This entry stays as-is; nothing here
+  // graduated.
   "authoring-ai": {
     lib: [],
     files: [

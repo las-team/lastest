@@ -10,6 +10,9 @@ is not a plugin either — see `ranger-migration-result.md` §2; `spec-import`
 split out of `data-sources`, unmigrated — see
 `data-sources-migration-result.md` §1; `route-scan` split out of
 `scheduling`, unmigrated — see `scheduling-migration-result.md` §3).
+`authoring-ai` was costed and **stopped** — no core capability exists yet for
+"AI + live browser tools", and its `planners/` files reach sideways into two
+other unmigrated features — see `authoring-ai-migration-result.md`.
 **Author:** planning doc
 **Supersedes:** nothing
 
@@ -474,6 +477,39 @@ split out of `data-sources`, unmigrated — see
 >   `src/server/actions/` and `crossPluginPatternsFor()` only matches `@/…`
 >   specifiers. Two such invisible edges existed; this removed one. Fixing the
 >   walker is a `tools/architecture/` PR that will *raise* the baseline by one.
+>
+>   **`authoring-ai` — the next candidate after `recorder`/`ranger` out of the
+>   §6.2 `src/lib/playwright` split — was costed and stopped, the second `Stop`
+>   verdict after `url-diff` and for a related reason.** Every one of
+>   `generator-agent.ts`/`healer-agent.ts`/`enhancer-agent.ts` and two of
+>   `planner-agent.ts`'s three functions work by handing the AI provider live
+>   MCP browser tools wired to a claimed EB's CDP endpoint, and neither `ctx.ai`
+>   nor `ctx.browser` can express that. This is not the RFC's original §4.2
+>   gap closing late — `core/browser`'s real `BrowserSession` contract says,
+>   in its own docstring, that no CDP-URL escape hatch exists at all:
+>   *"notably absent is any way to obtain the CDP URL or the pod address."*
+>   The RFC's `withRawPage` sketch was never built; the shipped contract is
+>   stricter than the draft. Unblocking this needs a scoped extension —
+>   `AiCallOptions.browserTools?: BrowserSession`, resolved only inside
+>   `src/lib/core/ai-capability.ts` so the URL still never reaches a plugin —
+>   as its own core PR, not a paragraph in a migration doc.
+>
+>   It also surfaced a coupling shape recipe §1.6 did not have a row for:
+>   `authoring-ai`'s `planners/` files import two other pseudo-plugins
+>   sideways, and only one half of that is visible today. The call into
+>   `src/server/actions/spec-import.ts` (already its own oversized, uncosted
+>   `PSEUDO_PLUGINS` entry) is already a counted, visible `cross-plugin`
+>   violation — `crossPluginPatternsFor()` generates a pattern from every
+>   entry's paths, and `spec-import` has one. The call into
+>   `src/server/actions/ai-routes.ts` is not: no `PSEUDO_PLUGINS` entry, its
+>   own three-component UI surface, no classification anywhere, discovered
+>   only by reading `code-planner.ts`'s import list — a genuinely invisible
+>   `plugin → plugin`-shaped edge, the sideways twin of §1.6's core-ward
+>   blind spot. See
+>   [`authoring-ai-migration-result.md`](./authoring-ai-migration-result.md)
+>   for the full costing, plus two false leads (a file that looked misfiled
+>   into core and wasn't, and a file that looked like it should reclassify to
+>   core and shouldn't) worth reading before anyone re-derives them.
 
 ## 1. The problem
 
