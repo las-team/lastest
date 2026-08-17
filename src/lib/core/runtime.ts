@@ -34,6 +34,7 @@ import { configureExplorer } from "@lastest/plugin-explorer";
 import { configureGamification } from "@lastest/plugin-gamification";
 import { configureLaunch } from "@lastest/plugin-launch";
 import { configurePlayground } from "@lastest/plugin-playground";
+import { configureQuickstart } from "@lastest/plugin-quickstart";
 import { configureRanger } from "@lastest/plugin-ranger";
 import { configureRca } from "@lastest/plugin-rca";
 import { configureRecorder } from "@lastest/plugin-recorder";
@@ -60,6 +61,7 @@ import { createAppJobsHost } from "@/lib/core/jobs-host";
 import { MANIFESTS } from "@/lib/core/manifests";
 import { appLaunchHost } from "@/lib/core/launch-host";
 import { appPlaygroundHost } from "@/lib/core/playground-host";
+import { appQuickstartHost } from "@/lib/core/quickstart-host";
 import { appRangerHost } from "@/lib/core/ranger-host";
 import { appRcaHost } from "@/lib/core/rca-host";
 import { appRecorderHost } from "@/lib/core/recorder-host";
@@ -297,6 +299,15 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
     host: appSchedulingHost,
     data: data.capability("scheduling"),
   });
+  // Tenanted *and* wired with a `runtime`, same shape as `explorer`/`ci`/
+  // `ranger`/`scheduling`: every action calls `contextFor(quickstartPlugin,
+  // { repositoryId })` (or with no scope, for the two team-only actions) purely
+  // for the authorization side effect — QuickStart declares no capabilities at
+  // all (see `plugins/quickstart/src/index.ts`), so nothing reads `ctx` back.
+  // No `data` — QuickStart owns no schema; it persists through core's
+  // `agent_sessions`/`tests`/`build_demo_notes` tables via `appQuickstartHost`.
+  // See `plugins/quickstart/src/host.ts` for the full port.
+  configureQuickstart({ runtime, host: appQuickstartHost });
 
   // Core raises `tests` domain notifications through a port it owns; this is
   // where the feature that listens gets attached. `createTest` used to

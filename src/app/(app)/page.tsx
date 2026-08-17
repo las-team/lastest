@@ -35,8 +35,10 @@ import {
   getBaselinesByRepo,
 } from "@/lib/db/queries";
 import { getCurrentSession } from "@/lib/auth";
-import { QuickstartPanel } from "@/components/quickstart/quickstart-panel";
-import { isQuickstartEnabled } from "@/lib/quickstart/gating";
+import { QuickstartPanel } from "@lastest/plugin-quickstart/ui/quickstart-panel";
+import { isQuickstartEnabled } from "@lastest/plugin-quickstart/gating";
+import { appQuickstartHost } from "@/lib/core/quickstart-host";
+import { BrowserViewer } from "@/components/embedded-browser/browser-viewer-client";
 import { SelectorStatsChartClient } from "@/components/dashboard/selector-stats-chart-client";
 import { SetupGuide } from "@/components/setup-guide/setup-guide";
 import { ActivityAutoFocus } from "@/components/activity-feed/activity-auto-focus-client";
@@ -120,7 +122,7 @@ export default async function DashboardPage({
     teamId ? getGithubAccountByTeam(teamId) : Promise.resolve(null),
     selectedRepo ? getBaselinesByRepo(selectedRepo.id) : Promise.resolve([]),
     selectedRepo
-      ? isQuickstartEnabled(selectedRepo.id)
+      ? isQuickstartEnabled(appQuickstartHost, selectedRepo.id)
       : Promise.resolve({ enabled: false, reason: undefined as undefined }),
   ]);
 
@@ -320,6 +322,7 @@ export default async function DashboardPage({
         {!session?.team?.banAiMode && selectedRepo && (
           <QuickstartPanel
             repositoryId={selectedRepo.id}
+            browserViewer={BrowserViewer}
             enabled={quickstartGate.enabled}
             baseUrl={
               "baseUrl" in quickstartGate ? quickstartGate.baseUrl : null

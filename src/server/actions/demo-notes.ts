@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import {
   generateDemoNotes,
   type QuickstartRunFacts,
-} from "@/lib/quickstart/quickstart-notes";
+} from "@/lib/core/quickstart-notes-shared";
 import type { DemoNotes } from "@/lib/db/schema";
 
 /**

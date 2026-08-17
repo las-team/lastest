@@ -56,6 +56,7 @@ const nextConfig: NextConfig = {
     "@lastest/plugin-gamification",
     "@lastest/plugin-launch",
     "@lastest/plugin-playground",
+    "@lastest/plugin-quickstart",
     "@lastest/plugin-ranger",
     "@lastest/plugin-rca",
     "@lastest/plugin-recorder",

@@ -52,7 +52,7 @@ import { listGoogleSheetsDataSources } from "@lastest/plugin-data-sources/reads"
 import { TestingTemplateSelector } from "@/components/settings/testing-template-selector";
 import { AutoApproveToggle } from "@/components/settings/auto-approve-toggle";
 import { EarlyAdopterToggle } from "@/components/settings/early-adopter-toggle";
-import { QuickstartEmailTemplateInput } from "@/components/settings/quickstart-email-template-input";
+import { QuickstartEmailTemplateInput } from "@lastest/plugin-quickstart/ui/email-template-input";
 import { BanAiModeToggle } from "@/components/settings/ban-ai-mode-toggle";
 import { AiModeToggle } from "@/components/settings/ai-mode-toggle";
 import { GamificationToggle } from "@/components/settings/gamification-toggle";

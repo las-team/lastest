@@ -1195,12 +1195,16 @@ export async function GET(
     }
 
     // QuickStart agent session: GET /api/v1/quickstart/:sessionId
+    //
+    // Tenancy is the plugin action's: `getQuickstartSession` resolves scope
+    // through the kernel and returns null for another team's session, so
+    // there is no team check to duplicate here — same pattern as `ranger`.
     if (resource === "quickstart" && id) {
-      const sessionRow = await queries.getAgentSession(id);
-      if (!sessionRow || sessionRow.kind !== "quickstart") {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
-      }
-      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
+      await getPluginRuntime();
+      const { getQuickstartSession } =
+        await import("@lastest/plugin-quickstart/actions");
+      const sessionRow = await getQuickstartSession(id);
+      if (!sessionRow) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       // Surface demo notes inline once written, so the panel can auto-show them
@@ -1220,7 +1224,7 @@ export async function GET(
         : null;
       return NextResponse.json({
         id: sessionRow.id,
-        kind: sessionRow.kind,
+        kind: "quickstart",
         repositoryId: sessionRow.repositoryId,
         status: sessionRow.status,
         currentStepId: sessionRow.currentStepId,
@@ -2506,8 +2510,9 @@ export async function POST(
           ? body.appPassword
           : undefined;
       try {
+        await getPluginRuntime();
         const { startQuickstart } =
-          await import("@/server/actions/quickstart-agent");
+          await import("@lastest/plugin-quickstart/actions");
         const result = await startQuickstart(
           id,
           emailTemplate || appEmail || appPassword
@@ -2518,7 +2523,8 @@ export async function POST(
       } catch (err) {
         const e = err as Error & { code?: string; reason?: string };
         if (e.code === "quickstart_disabled") {
-          const { gateReasonHint } = await import("@/lib/quickstart/gating");
+          const { gateReasonHint } =
+            await import("@lastest/plugin-quickstart/gating");
           const reason = e.reason ?? "no_repo";
           return NextResponse.json(
             {
@@ -3380,16 +3386,14 @@ export async function DELETE(
     }
 
     // Cancel QuickStart agent session: DELETE /api/v1/quickstart/:sessionId
+    //
+    // Tenancy is the plugin action's — `cancelQuickstart` resolves scope
+    // through the kernel and no-ops for another team's session — same
+    // pattern as the GET handler above and as `ranger` below.
     if (resource === "quickstart" && id) {
-      const sessionRow = await queries.getAgentSession(id);
-      if (!sessionRow || sessionRow.kind !== "quickstart") {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
-      }
-      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
-      }
+      await getPluginRuntime();
       const { cancelQuickstart } =
-        await import("@/server/actions/quickstart-agent");
+        await import("@lastest/plugin-quickstart/actions");
       const result = await cancelQuickstart(id);
       return NextResponse.json(result);
     }

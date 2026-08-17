@@ -1,18 +1,23 @@
 # RFC: Core + Plugins
 
-**Status:** phases 0–3 landed. Phase 4 in progress — `rca`, `app-map`,
-`launch`, `api-test`, `playground`, `gamification`, `ci`, `share`, `awards`,
-`ranger`, `recorder`, `data-sources` and `scheduling` done, `url-diff`
-resolved as core, the credential half of `scm` reclassified as core, 6
-pseudo-plugins to go (`share`'s captions half moved to
-`src/lib/demo-captions/`, unmigrated, not counted as a plugin; `demo` itself
-is not a plugin either — see `ranger-migration-result.md` §2; `spec-import`
-split out of `data-sources`, unmigrated — see
-`data-sources-migration-result.md` §1; `route-scan` split out of
-`scheduling`, unmigrated — see `scheduling-migration-result.md` §3).
-`authoring-ai` was costed and **stopped** — no core capability exists yet for
-"AI + live browser tools", and its `planners/` files reach sideways into two
-other unmigrated features — see `authoring-ai-migration-result.md`.
+**Status:** phases 0–4 landed — all 14 planned plugins migrated. `rca`,
+`app-map`, `launch`, `api-test`, `playground`, `gamification`, `ci`, `share`,
+`awards`, `ranger`, `recorder`, `data-sources`, `scheduling` and `quickstart`
+done, `url-diff` resolved as core, the credential half of `scm` reclassified
+as core. 8 pseudo-plugins remain uncounted, none of them one of the 14
+(`share`'s captions half moved to `src/lib/demo-captions/`, unmigrated, not
+counted as a plugin; `demo` itself is not a plugin either — see
+`ranger-migration-result.md` §2; `spec-import` split out of `data-sources`,
+unmigrated — see `data-sources-migration-result.md` §1; `route-scan` split
+out of `scheduling`, unmigrated — see `scheduling-migration-result.md` §3;
+`static-scout` split out of `quickstart`, unmigrated — see
+`quickstart-migration-result.md` §5). `authoring-ai` was costed and
+**stopped** — no core capability exists yet for "AI + live browser tools",
+and its `planners/` files reach sideways into two other unmigrated features
+— see `authoring-ai-migration-result.md`. `quickstart-scout` hits the
+identical blocker and also stayed behind, split out of `quickstart` rather
+than stopping that whole migration — see `quickstart-migration-result.md`
+§1.
 **Author:** planning doc
 **Supersedes:** nothing
 
@@ -37,7 +42,7 @@ other unmigrated features — see `authoring-ai-migration-result.md`.
 > - **Phase 3 — done.** `CheckLayer` is a registry; `design-system` and `a11y`
 >   are check-layer plugins. Both are table-light, and `design-system` proved
 >   the no-schema shape (manifest + host port, no `ctx` at all).
-> - **Phase 4 — in progress. 13 of 14 plugins done.** `rca`
+> - **Phase 4 — done. 14 of 14 plugins done.** `rca`
 >   ([result](./rca-migration-result.md)), `app-map`
 >   ([result](./app-map-migration-result.md)), `launch`
 >   ([result](./launch-migration-result.md)), `api-test`
@@ -49,16 +54,20 @@ other unmigrated features — see `authoring-ai-migration-result.md`.
 >   ([result](./awards-migration-result.md)), `ranger`
 >   ([result](./ranger-migration-result.md)), `recorder`
 >   ([result](./recorder-migration-result.md)), `data-sources`
->   ([result](./data-sources-migration-result.md)) and `scheduling`
->   ([result](./scheduling-migration-result.md)) have landed. `url-diff` did
+>   ([result](./data-sources-migration-result.md)), `scheduling`
+>   ([result](./scheduling-migration-result.md)) and `quickstart`
+>   ([result](./quickstart-migration-result.md)) have landed. `url-diff` did
 >   not go to a plugin at all — it was **reclassified as core**: its in-app page
 >   and sidebar entry were removed, and what is left has no user surface and
 >   exists only to serve the documented `POST /api/v1/snapshot` and
 >   `POST /api/v1/diff` endpoints. A documented public API is core by any
 >   reading of `core-scope.md` §2. The repeatable procedure is written down in
 >   [`plugin-migration-recipe.md`](./plugin-migration-recipe.md) — read that,
->   not §9 below, before migrating the next feature.
->   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21 → 20 → 20 → 19 → 19 → 18 → 14 → 14 → 13**.
+>   not §9 below, before migrating the next feature (the recipe is written for
+>   *migrating a plugin*; what is left after phase 4 is the uncosted residue
+>   listed in this doc's status line plus whatever a phase-5 capability
+>   backlog decides to build first — see the end of this section).
+>   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21 → 20 → 20 → 19 → 19 → 18 → 14 → 14 → 13 → 8**.
 >   `data-sources` is the third migration in a row to graduate without moving
 >   the number — its coupling to core was through the query layer (allowed)
 >   and, once found, through a core→feature *type* import invisible to the
@@ -510,6 +519,41 @@ other unmigrated features — see `authoring-ai-migration-result.md`.
 >   for the full costing, plus two false leads (a file that looked misfiled
 >   into core and wasn't, and a file that looked like it should reclassify to
 >   core and shouldn't) worth reading before anyone re-derives them.
+>
+>   **`quickstart` is the fourteenth and last plugin, and the first to hit
+>   `authoring-ai`'s exact blocker without stopping.** Its own
+>   `quickstart-scout.ts` hands a raw CDP endpoint to an out-of-process
+>   `@playwright/mcp` binary — structurally identical to what stopped
+>   `authoring-ai` — but it is 2 of QuickStart's 9 pipeline steps, not the
+>   whole feature, so it split out into its own uncosted
+>   `PSEUDO_PLUGINS["quickstart-scout"]` entry (the fourth `spec-import`-shaped
+>   split, after `spec-import`, `route-scan` and this migration's own
+>   `static-scout`) and stayed behind, reached from the plugin through a host
+>   method instead of an import. Doubles the case for the
+>   `AiCallOptions.browserTools` core PR `authoring-ai-migration-result.md`
+>   asked for: it would now unblock two stalled migrations at once, not one.
+>
+>   It is also the largest host port of any phase-4 plugin — 32 methods in 9
+>   groups, more than double `share`'s 14 — and, per recipe §1.5's own
+>   framing, that is a property of the feature rather than a sign the
+>   boundary is wrong: QuickStart is an end-to-end pipeline that touches
+>   nearly every other subsystem (tests, builds, diffs, storage states,
+>   shares, activity events) by design, and the port that stays this
+>   large after grouping is the honest number, not an inflated one.
+>
+>   Two findings worth generalising. First, `ctx.events` was tried and
+>   reverted: the generic provider hard-codes `sourceType: pluginId` /
+>   `agentType: null`, but QuickStart's activity events need
+>   `sourceType: "play_agent"` / `agentType: "quickstart"` to render correctly
+>   in a feed shared with three other still-unmigrated agents — a capability
+>   that fits everywhere else and silently changes behaviour here. Second, the
+>   §1.6.2 sideways hazard hit *twice*, and neither caller (`qa-agent`,
+>   `demo`) had migrated first, so recipe's "blocked on that migration landing
+>   first" did not apply cleanly — both shared functions moved to
+>   `src/lib/core/` as shared, app-level code instead, the `share-reads.ts`
+>   shape extended to a case where neither side of the edge started out as a
+>   real package. See
+>   [`quickstart-migration-result.md`](./quickstart-migration-result.md).
 
 ## 1. The problem
 

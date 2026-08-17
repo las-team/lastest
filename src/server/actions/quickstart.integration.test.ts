@@ -3,17 +3,22 @@
  * core/ai, core/browser") — run quickstart on a fresh repo, confirm the
  * scaffolded walkthrough test is sane (not empty/garbage).
  *
- * `startQuickstart` (the `"use server"` action) gates on `requireRepoAccess`,
- * a session-based guard unavailable outside a real Next.js request. This
- * calls `executeQuickstart` directly — the same function `startQuickstart`
- * hands off to after its own gate checks — which is why `executeQuickstart`
- * was changed from module-private to exported in
- * `src/server/actions/quickstart-agent.ts` (visibility only, no behavior
- * change). `buildInitialQsSteps` lives in `@/lib/quickstart/step-definitions`
+ * `startQuickstart` (the `"use server"` action) gates on `contextFor`, a
+ * session-based guard unavailable outside a real Next.js request. This calls
+ * `executeQuickstart` directly — the same function `startQuickstart` hands
+ * off to after its own gate checks — which is why `executeQuickstart` was
+ * changed from module-private to exported in
+ * `plugins/quickstart/src/actions.ts` (visibility only, no behavior change).
+ * `buildInitialQsSteps` lives in `plugins/quickstart/src/step-definitions.ts`
  * (a plain module, not `"use server"` — Next.js requires every top-level
  * export of one to be async, and this isn't). Note `qs_preflight` (the pipeline's
  * own first step) re-checks `isQuickstartEnabled` independently, so the gate
  * is still exercised — just not through the session-auth wrapper.
+ *
+ * `getPluginRuntime()` must run first (it calls `configureQuickstart`) —
+ * `executeQuickstart` reads the plugin's wiring slot, which is otherwise
+ * empty outside a served request (`src/instrumentation.ts` normally awaits
+ * this before the server handles one).
  *
  * Target: https://the-internet.herokuapp.com/login, with
  * `credsProvided: true` and its well-known fixed demo credentials
@@ -40,9 +45,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import * as queries from "@/lib/db/queries";
 import { agentSessions } from "@/lib/db/schema";
+import { getPluginRuntime } from "@/lib/core/runtime";
 
-import { executeQuickstart } from "./quickstart-agent";
-import { buildInitialQsSteps } from "@/lib/quickstart/step-definitions";
+import { executeQuickstart } from "@lastest/plugin-quickstart/actions";
+import { buildInitialQsSteps } from "@lastest/plugin-quickstart/step-definitions";
 
 const TARGET = "https://the-internet.herokuapp.com";
 
@@ -64,7 +70,7 @@ beforeAll(async () => {
     name: "target",
     fullName: "quickstart-it/target",
     defaultBranch: "main",
-    // Non-local, per `isLocalUrl` in `src/lib/quickstart/gating.ts` — a
+    // Non-local, per `isLocalUrl` in `plugins/quickstart/src/gating.ts` — a
     // localhost baseUrl fails the gate `qs_preflight` re-checks itself.
     branchBaseUrls: { main: TARGET },
   });
@@ -82,6 +88,8 @@ describe("Quickstart — fresh repo scaffold", () => {
     await expect
       .poll(poolHeadroom, { timeout: 90_000, interval: 1_000 })
       .toBeGreaterThanOrEqual(1);
+
+    await getPluginRuntime();
 
     const session = await queries.createAgentSession({
       repositoryId: repoId,

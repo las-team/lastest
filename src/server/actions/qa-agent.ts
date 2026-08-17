@@ -34,7 +34,7 @@ import {
   type ExistingAuthSetup,
 } from "@/lib/qa-agent/auth";
 import { injectStorageStateIntoEb } from "@/lib/eb/inject-storage-state";
-import { captureStorageState } from "@/lib/quickstart/storage-capture";
+import { captureStorageState } from "@/lib/core/quickstart-storage-shared";
 import {
   renderAuthLoginCode,
   renderAuthSetupCode,

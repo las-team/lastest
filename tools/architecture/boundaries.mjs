@@ -68,6 +68,25 @@
  * `CORE_SRC_PATHS` entry, since it is composition-root code, not a
  * standalone boundary module. See
  * `docs/architecture/scheduling-migration-result.md`.
+ * `quickstart` is the fourteenth and last of RFC §9 phase 4, and the third
+ * (after `recorder`, `ranger`) out of the §6.2 `src/lib/playwright` split —
+ * `authoring-ai` stayed stopped. Its map entry named two files under
+ * `src/lib/playwright`; only one of them was ever this feature.
+ * `quickstart-scout.ts` hands a raw CDP endpoint to an out-of-process
+ * `@playwright/mcp` binary, the identical shape that stopped `authoring-ai`
+ * — so it stays behind too, but reached through a `QuickstartHost` method
+ * rather than an import, since it is 2 of QuickStart's 9 steps rather than
+ * the whole feature. Split into its own uncosted `PSEUDO_PLUGINS
+ * ["quickstart-scout"]` entry below. `static-scout.ts` was never this
+ * feature at all (zero shared import/table/type with quickstart-scout.ts —
+ * only the word "scout" in both names) and gets the third `spec-import`-
+ * shaped split, `PSEUDO_PLUGINS["static-scout"]`. The migrated part's
+ * largest finding was sideways, not core-ward (recipe §1.6.2):
+ * `storage-capture.ts` and `quickstart-notes.ts` are also called directly by
+ * `qa-agent`/`demo`, two other still-unmigrated pseudo-plugins, so both moved
+ * to `src/lib/core/` as shared composition-root code both sides call, rather
+ * than becoming plugin exports a pseudo-plugin may not import. See
+ * `docs/architecture/quickstart-migration-result.md`.
  */
 
 /** Zone globs for the target layout. */
@@ -276,14 +295,29 @@ export const PSEUDO_PLUGINS = {
     ],
     actions: [],
   },
-  quickstart: {
-    lib: ["src/lib/quickstart"],
-    files: [
-      "src/lib/playwright/quickstart-scout.ts",
-      "src/lib/playwright/static-scout.ts",
-    ],
-    actions: ["quickstart-agent.ts"],
-    components: ["src/components/quickstart"],
+  // `quickstart` graduated to `plugins/quickstart/` (RFC §9 phase 4,
+  // fourteenth and last plugin) — see
+  // `docs/architecture/quickstart-migration-result.md`. `src/lib/quickstart`,
+  // `src/server/actions/quickstart-agent.ts` and `src/components/quickstart`
+  // are deleted, not left as re-exports. `quickstart-scout.ts` did NOT
+  // migrate — it hits the same raw-CDP-to-MCP blocker that stopped
+  // `authoring-ai` — and gets its own uncosted entry below, reached from the
+  // plugin through a `QuickstartHost` method instead of an import.
+  "quickstart-scout": {
+    lib: [],
+    files: ["src/lib/playwright/quickstart-scout.ts"],
+  },
+  // `static-scout.ts` was never `quickstart` — zero shared import, table or
+  // type with `quickstart-scout.ts` in either direction, just the word
+  // "scout" in both names. Its only consumer is the core-classified catch-all
+  // API route (`POST /api/v1/scout`, also exposed over MCP as
+  // `lastest_scout_url`). Split into its own uncosted entry rather than
+  // migrated, dropped, or silently left attached to a plugin that no longer
+  // exists — the same call `data-sources` made for `spec-import.ts` and
+  // `scheduling` made for `scanner.ts`.
+  "static-scout": {
+    lib: [],
+    files: ["src/lib/playwright/static-scout.ts"],
   },
   // `ranger` graduated to `plugins/ranger/` (RFC §9 phase 4, tenth plugin) —
   // see `docs/architecture/ranger-migration-result.md`. The first plugin out

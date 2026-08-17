@@ -38,7 +38,21 @@ after `ci`'s three; and after the **stopped** `authoring-ai` attempt
 which added §1.6.2 (a pseudo-plugin's files importing *another* pseudo-plugin
 or an orphaned, unmapped one — not core) and a note on §3 (check the current
 core contract before assuming an RFC-sketched escape hatch was actually
-built).
+built); and after [`quickstart`](./quickstart-migration-result.md), the
+fourteenth and last phase-4 plugin, which found `authoring-ai`'s exact
+blocker again inside a plugin that otherwise migrated fine — the fix was
+splitting the one blocked module out (§1.6.2's split shape, not a stop —
+see its own §1), not reopening §3's "check the current core contract"
+question — and extended §1.6.2's table to the case where *both* sides of a
+sideways edge are still unmigrated, so neither is "blocked on that migration
+landing first": the shared function moves to `src/lib/core/` regardless of
+which side is packaged, the same file both pseudo-plugins call. It also
+found a capability that is the right shape for every other plugin and the
+wrong one for this one — `ctx.events`'s generic `sourceType`/`agentType`
+tagging cannot express a plugin that must keep posing as an unmigrated
+neighbour's activity-feed entry to render correctly — worth checking a
+capability's *actual* host implementation, not just its interface, before
+assuming it fits.
 **Audience:** whoever migrates the next feature out of `src/` into `plugins/<id>/`.
 
 This is the *how*. The *why* is [`core-plugin-refactor.md`](./core-plugin-refactor.md)

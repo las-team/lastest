@@ -89,6 +89,7 @@
     "@lastest/plugin-gamification": "workspace:*",
     "@lastest/plugin-launch": "workspace:*",
     "@lastest/plugin-playground": "workspace:*",
+    "@lastest/plugin-quickstart": "workspace:*",
     "@lastest/plugin-ranger": "workspace:*",
     "@lastest/plugin-rca": "workspace:*",
     "@lastest/plugin-recorder": "workspace:*",
