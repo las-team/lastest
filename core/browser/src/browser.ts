@@ -34,6 +34,46 @@ import {
 } from "./host";
 
 /**
+ * `session → cdpUrl`, module-private and weakly held.
+ *
+ * This is the whole mechanism behind `AiCallOptions.browserTools`. A plugin
+ * that wants an agentic browsing loop passes core the *session object* it
+ * already holds; only `resolveSessionCdpUrl` — exported from
+ * `@lastest/core-browser/internal`, which `pnpm arch` forbids a plugin from
+ * importing — turns that object back into an address.
+ *
+ * Three properties make it a boundary rather than a hiding place:
+ *
+ *   - **The key is the object, not an id.** There is no string a plugin could
+ *     construct, guess or replay to look one up. A forged `{ id, page, … }`
+ *     resolves to `undefined`, and the caller rejects rather than falling back
+ *     to a host-process browser.
+ *   - **It is a `WeakMap`.** The entry dies with the session; nothing accretes
+ *     for the process lifetime and nothing outlives the claim it describes.
+ *   - **It is deleted at teardown.** A session handed on after its
+ *     `withBrowser` scope ended resolves to `undefined` too, so "still live" is
+ *     enforced here rather than trusted from the caller.
+ */
+const CDP_BY_SESSION = new WeakMap<BrowserSession, string>();
+
+/**
+ * Resolve a live session back to its CDP endpoint. **Composition-root only.**
+ *
+ * Re-exported from `@lastest/core-browser/internal` rather than from the
+ * package root, and that subpath is on `FORBIDDEN_PLUGIN_IMPORTS` in
+ * `tools/architecture/boundaries.mjs` — so a plugin reaching for it fails
+ * `pnpm arch` and `pnpm lint`, not just review.
+ *
+ * Returns `undefined` for a session that was never issued here, or one whose
+ * `withBrowser` scope has already ended.
+ */
+export function resolveSessionCdpUrl(
+  session: BrowserSession,
+): string | undefined {
+  return CDP_BY_SESSION.get(session);
+}
+
+/**
  * The session a plugin receives.
  *
  * Identical to the contract's `BrowserSession` — the `page` and `isolatedPage`
@@ -105,10 +145,14 @@ export function createBrowserCapability(
     let browser: Browser | undefined;
     const isolatedContexts: BrowserContext[] = [];
     let closed = false;
+    let liveSession: CoreBrowserSession | undefined;
 
     const teardown = async () => {
       if (closed) return;
       closed = true;
+      // Revoke the address before anything else: a session that outlives its
+      // scope must stop resolving even if the CDP disconnect below hangs.
+      if (liveSession) CDP_BY_SESSION.delete(liveSession);
       await Promise.all(
         isolatedContexts.map((ctx) => ctx.close().catch(() => {})),
       );
@@ -126,10 +170,11 @@ export function createBrowserCapability(
     try {
       browser = await chromium.connectOverCDP(claim.cdpUrl);
 
+      let authApplied = false;
       if (claimOpts.storageStateId) {
         // Resolution and injection both happen host-side; the credential does
         // not pass through core, let alone through the plugin.
-        await host
+        authApplied = await host
           .applyAuth(claim.cdpUrl, claimOpts.storageStateId, team.id)
           .catch((err) => {
             // Degrading to an unauthenticated browser is the established
@@ -152,6 +197,7 @@ export function createBrowserCapability(
         id: sessionId,
         page,
         streamUrl: host.streamGrant(claim.streamUrl, claim.instanceId),
+        authApplied,
 
         async extendDeadline(byMs) {
           if (closed) throw new BrowserSessionClosedError();
@@ -183,6 +229,11 @@ export function createBrowserCapability(
           return isolated.newPage();
         },
       };
+
+      // Registered *after* the session is fully built, so nothing can observe a
+      // half-constructed entry, and torn down in `teardown()` below.
+      CDP_BY_SESSION.set(session, claim.cdpUrl);
+      liveSession = session;
 
       const onExpiry = deadline.whenExpired().then(async () => {
         log.warn({ sessionId, deadlineMs }, "browser deadline exceeded");

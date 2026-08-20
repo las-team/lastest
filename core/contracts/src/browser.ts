@@ -106,6 +106,21 @@ export interface BrowserSession {
   readonly streamUrl: string | null;
 
   /**
+   * Whether `storageStateId` actually got applied to this browser.
+   *
+   * A claim that asked for stored auth and did not get it still succeeds —
+   * degrading to an unauthenticated browser is the established behaviour and
+   * is usually still useful. But the *feature* often needs to know, because
+   * "you are already signed in" and "sign in first" are different instructions
+   * to give an agent, and getting it wrong wastes a whole run.
+   *
+   * `false` whenever no `storageStateId` was requested, so a plugin reading it
+   * cannot mistake "did not ask" for "asked and failed" in the direction that
+   * matters: nothing here ever claims authentication that was not applied.
+   */
+  readonly authApplied: boolean;
+
+  /**
    * Extend the deadline, if the plan allows it. Returns the new deadline, or
    * rejects when the extension would exceed the tenant's budget — so "this run
    * needs longer" is a metered decision core makes, not one a plugin takes.

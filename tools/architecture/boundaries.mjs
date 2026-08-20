@@ -352,6 +352,21 @@ export const FORBIDDEN_PLUGIN_IMPORTS = [
       "Plugins must not claim EBs directly. Use `ctx.browser.withBrowser()`.",
   },
   {
+    // `@lastest/core-browser` itself is fine — it is core, and a plugin
+    // importing its types or error classes is ordinary. The `/internal`
+    // subpath is not: it exists solely so the composition root can turn a
+    // `BrowserSession` back into a CDP endpoint when filling
+    // `AiCallOptions.browserTools`. Reachable from a plugin, it would undo the
+    // one sentence `core/contracts/src/browser.ts` makes about the session
+    // type ("notably absent is any way to obtain the CDP URL or the pod
+    // address"), which is the whole reason `browserTools` could be added
+    // without relaxing anything.
+    id: "browser-internal",
+    patterns: ["@lastest/core-browser/internal"],
+    message:
+      "`@lastest/core-browser/internal` resolves a session to a pod address and is composition-root-only. A plugin passes the opaque session to `ctx.ai.generate({ browserTools })` instead.",
+  },
+  {
     id: "db",
     patterns: ["@lastest/db", "@lastest/db/*", "pg", "postgres"],
     message: "Plugins must not open the database directly. Use `ctx.data`.",

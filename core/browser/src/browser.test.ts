@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { chromium } from "playwright";
-import type { Plan, TeamRef } from "@lastest/contracts";
+import type { BrowserSession, Plan, TeamRef } from "@lastest/contracts";
 
-import { createBrowserCapability } from "./browser";
+import { createBrowserCapability, resolveSessionCdpUrl } from "./browser";
 import {
   BrowserDeadlineExceededError,
   DeadlineExtensionRefusedError,
@@ -347,5 +347,129 @@ describe("withBrowserSwarm", () => {
     expect((results[1] as PromiseRejectedResult).reason).toBeInstanceOf(
       NoBrowserAvailableError,
     );
+  });
+});
+
+describe("resolveSessionCdpUrl — the browserTools boundary", () => {
+  it("resolves a live session for the composition root, while the session itself still carries no address", async () => {
+    const { browser } = fakeBrowser();
+    connectOverCDP.mockResolvedValue(browser as never);
+    const cap = createBrowserCapability(makeHost(), scope);
+
+    const seen = await cap.withBrowser({}, async (session) => ({
+      resolved: resolveSessionCdpUrl(session),
+      serialized: JSON.stringify(session),
+    }));
+
+    expect(seen.resolved).toBe("http://10.0.0.5:9232");
+    // The plugin holds the same object and still cannot read the address off
+    // it — only this module's WeakMap can turn one into the other.
+    expect(seen.serialized).not.toContain("10.0.0.5");
+  });
+
+  it("stops resolving once the withBrowser scope has ended", async () => {
+    const { browser } = fakeBrowser();
+    connectOverCDP.mockResolvedValue(browser as never);
+    const cap = createBrowserCapability(makeHost(), scope);
+
+    const escaped = await cap.withBrowser({}, async (session) => session);
+
+    // A session smuggled out of its scope is exactly the case that must not
+    // hand a live pod address to a later AI call.
+    expect(resolveSessionCdpUrl(escaped)).toBeUndefined();
+  });
+
+  it("stops resolving after the deadline tears the session down", async () => {
+    const { browser } = fakeBrowser();
+    connectOverCDP.mockResolvedValue(browser as never);
+    const cap = createBrowserCapability(makeHost(), scope);
+
+    let captured: BrowserSession | undefined;
+    await expect(
+      cap.withBrowser({ deadlineMs: 20 }, async (session) => {
+        captured = session;
+        await new Promise((r) => setTimeout(r, 200));
+        return "never";
+      }),
+    ).rejects.toBeInstanceOf(BrowserDeadlineExceededError);
+
+    expect(captured).toBeDefined();
+    expect(resolveSessionCdpUrl(captured!)).toBeUndefined();
+  });
+
+  it("resolves nothing for a forged session object", () => {
+    // No string a plugin can construct is a key here: the WeakMap is keyed by
+    // the object identity core minted, not by the session id.
+    const forged = {
+      id: "whatever",
+      page: {},
+      streamUrl: null,
+      authApplied: false,
+      extendDeadline: async () => 0,
+      isolatedPage: async () => ({}),
+    } as unknown as BrowserSession;
+    expect(resolveSessionCdpUrl(forged)).toBeUndefined();
+  });
+});
+
+describe("authApplied", () => {
+  it("is false when no storage state was requested", async () => {
+    const { browser } = fakeBrowser();
+    connectOverCDP.mockResolvedValue(browser as never);
+    const host = makeHost();
+    const cap = createBrowserCapability(host, scope);
+
+    const applied = await cap.withBrowser({}, async (s) => s.authApplied);
+
+    expect(applied).toBe(false);
+    expect(host.applyAuth).not.toHaveBeenCalled();
+  });
+
+  it("reports what the host actually applied, not what was asked for", async () => {
+    const { browser } = fakeBrowser();
+    connectOverCDP.mockResolvedValue(browser as never);
+    const host = makeHost({ applyAuth: vi.fn(async () => false) });
+    const cap = createBrowserCapability(host, scope);
+
+    const applied = await cap.withBrowser(
+      { storageStateId: "ss-1" },
+      async (s) => s.authApplied,
+    );
+
+    // The claim still succeeds — degrading to an unauthenticated browser is
+    // the established behaviour — but the feature can tell.
+    expect(applied).toBe(false);
+  });
+
+  it("is false when injection throws, rather than propagating", async () => {
+    const { browser } = fakeBrowser();
+    connectOverCDP.mockResolvedValue(browser as never);
+    const host = makeHost({
+      applyAuth: vi.fn(async () => {
+        throw new Error("EB refused the cookie jar");
+      }),
+    });
+    const cap = createBrowserCapability(host, scope);
+
+    const applied = await cap.withBrowser(
+      { storageStateId: "ss-1" },
+      async (s) => s.authApplied,
+    );
+
+    expect(applied).toBe(false);
+    expect(log.warn).toHaveBeenCalled();
+  });
+
+  it("is true when the host applied it", async () => {
+    const { browser } = fakeBrowser();
+    connectOverCDP.mockResolvedValue(browser as never);
+    const cap = createBrowserCapability(makeHost(), scope);
+
+    const applied = await cap.withBrowser(
+      { storageStateId: "ss-1" },
+      async (s) => s.authApplied,
+    );
+
+    expect(applied).toBe(true);
   });
 });
