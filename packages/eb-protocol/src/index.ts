@@ -1668,3 +1668,388 @@ export type StreamMessage =
 export function isStreamMessage(msg: { type: string }): boolean {
   return msg.type.startsWith("stream:");
 }
+
+// ============================================================================
+// QA Agent payload shapes
+// ============================================================================
+//
+// Owned by `@lastest/plugin-qa-agent`, stored in core columns on
+// `agent_sessions.metadata` (a jsonb the plugin is the only writer and reader
+// of). They live here for the same reason `api-test`'s six do: the plugin may
+// not import `@lastest/db`, and core's `AgentSessionMetadata` — shared with the
+// still-unmigrated `play` agent and with `quickstart` — has to keep naming
+// them. `packages/db/src/schema/agents.ts` re-exports every name below, so no
+// app import path changed.
+//
+// `agent_sessions` itself stays core (see `plugins/qa-agent/src/host.ts` item
+// 2): three `kind`s still share the row shape and its field-level encryption
+// path, so the table is not qa-agent's to take.
+
+/** Coverage groups the QA agent plans and generates tests for. Mirrors the
+ *  industry-standard suite tiers (smoke/regression) and coverage angles
+ *  (a11y/perf/resilience/negative); `journey` is the business-outcome E2E
+ *  tier (e.g. "an order is actually placed") and is always planned. */
+export type QaTestGroup =
+  | "smoke"
+  | "api"
+  | "ui"
+  | "hybrid"
+  | "a11y"
+  | "perf"
+  | "resilience"
+  | "negative"
+  | "journey";
+
+export type QaPriority = "P1" | "P2" | "P3";
+
+/** How the qa_login step resolved authentication for the run. */
+export type QaAuthStrategy =
+  /** Repo setup infrastructure reused (default setup steps / storage state). */
+  | "existing_setup"
+  /** User-provided credentials verified on the EB; storage state captured. */
+  | "user_creds"
+  /** The agent registered its own throwaway account and captured a session. */
+  | "self_registered"
+  /** Credentials exist but could not be verified — discovery tests them inline. */
+  | "creds_untested"
+  /** No auth resolvable — public surface only (discovery maps the auth pages). */
+  | "public_only";
+
+/** Outcome of the qa_login resolution cascade. Holds no secrets — registered
+ *  credentials go into quickstartEmail/quickstartPassword (encrypted at rest). */
+export interface QaAuthState {
+  strategy: QaAuthStrategy;
+  /** The authed heuristic was confirmed live on an EB (no password field,
+   *  final URL not an auth page). False = deferred to discovery/execution. */
+  validated: boolean;
+  storageStateId?: string;
+  /** Login/signup setup test created or found for reuse via setupOverrides. */
+  setupTestId?: string;
+  /** Repo default setup steps already cover auth — generated tests must NOT
+   *  add extraSteps (the executor applies defaults to every test already). */
+  defaultSetupInUse?: boolean;
+  /** Observed in the target app's DOM — never URL-guessed. */
+  loginUrl?: string;
+  /** Observed in the target app's DOM — never URL-guessed. */
+  signupUrl?: string;
+  registeredEmail?: string;
+  notes?: string;
+}
+
+/** A critical user journey with a verifiable business outcome. */
+export interface QaPlanJourney {
+  id: string;
+  title: string;
+  priority: QaPriority;
+  /** Ordered user-visible steps of the journey. */
+  steps: string[];
+  /** Business/functional domain of the journey (matrix axis). */
+  businessArea?: string;
+  /** The business outcome this journey must produce (e.g. "order placed"). */
+  businessOutcome: string;
+  /** How the outcome is proven beyond UI toasts (end-state via API/data/UI). */
+  endStateVerification: string;
+}
+
+/** One planned test case. `scenario` is generator-ready prose (steps +
+ *  expected results); `api` is set for api-group items and drives a headless
+ *  ApiTestDefinition instead of a browser test. */
+export interface QaPlanItem {
+  id: string;
+  /** Primary group — drives functional-area assignment and legacy plans. */
+  group: QaTestGroup;
+  /** All coverage groups this single test satisfies (primary first). One
+   *  test execution runs every check layer, so a page visit can serve
+   *  smoke+ui+a11y+perf at once. Absent = [group] (legacy plans). */
+  groups?: QaTestGroup[];
+  title: string;
+  priority: QaPriority;
+  /** Traceability link to the journey this test covers, when applicable. */
+  journeyId?: string;
+  /** Business/functional domain this item exercises (e.g. "Authentication",
+   *  "Checkout") — one axis of the coverage matrix. Missing values roll up
+   *  under "General". */
+  businessArea?: string;
+  /** Route/page under test, relative to the target base URL. */
+  pagePath?: string;
+  rationale?: string;
+  scenario: string;
+  /** Verified selectors from discovery the generator should prefer. */
+  selectorHints?: string[];
+  /** Exact ref strings from the branch-diff digest this item covers (symbol
+   *  names, "METHOD /path" endpoints, file paths) — drives PR coverage. */
+  changeRefs?: string[];
+  /** Set at plan time when a pre-existing test already covers this item
+   *  (matchPlanToExistingTests) — the review UI shows what already exists. */
+  existingTestId?: string;
+  existingTestName?: string;
+  api?: {
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+    path: string;
+    expectedStatus?: number;
+    body?: unknown;
+    description?: string;
+  };
+  /** User can exclude items during plan review. Absent = enabled. */
+  enabled?: boolean;
+}
+
+export interface QaTestPlan {
+  appProfile: {
+    summary: string;
+    businessDomain?: string;
+    /** The single most valuable business outcome of the app. */
+    primaryOutcome?: string;
+  };
+  journeys: QaPlanJourney[];
+  items: QaPlanItem[];
+  entryCriteria?: string[];
+  exitCriteria?: string[];
+  risks?: string[];
+}
+
+/** One live-crawled page: rendered-DOM facts + same-origin API endpoints
+ *  observed while the page loaded. Fed (condensed) to the planner. */
+export interface QaPageSnapshot {
+  url: string;
+  finalUrl: string;
+  title: string | null;
+  headings: Array<{ level: number; text: string }>;
+  forms: Array<{
+    name: string | null;
+    action: string | null;
+    method: string;
+    inputs: Array<{
+      tag: string;
+      type: string | null;
+      name: string | null;
+      id: string | null;
+      label: string | null;
+    }>;
+  }>;
+  buttons: string[];
+  links: Array<{ text: string; href: string }>;
+  testIds: string[];
+  candidateSelectors: string[];
+  apiEndpoints: Array<{ method: string; path: string; status: number }>;
+  /** Console errors observed while this page loaded — surfaces third-party /
+   *  analytics noise so the planner can route-block it or downgrade the
+   *  console check layer (the executor reds on ANY console error otherwise). */
+  consoleErrors?: string[];
+}
+
+/** One file changed on the working branch vs the base branch. */
+export interface QaPrChangedFile {
+  path: string;
+  status: "added" | "modified" | "removed" | "renamed";
+  additions: number;
+  deletions: number;
+  previousPath?: string;
+}
+
+/** A function/class/component the branch diff added or modified — extracted
+ *  deterministically from diff hunks (src/lib/qa-agent/pr-check). */
+export interface QaPrSymbol {
+  name: string;
+  kind: "function" | "component" | "class" | "endpoint";
+  file: string;
+  change: "added" | "modified";
+}
+
+/** An API endpoint whose route file the branch diff touched. */
+export interface QaPrEndpoint {
+  method: string;
+  path: string;
+  file: string;
+  change: "added" | "modified" | "removed";
+}
+
+/** Branch/PR diff facts (head vs base) feeding the planner + coverage report. */
+export interface QaPrChanges {
+  baseBranch: string;
+  headBranch: string;
+  files: QaPrChangedFile[];
+  symbols: QaPrSymbol[];
+  endpoints: QaPrEndpoint[];
+  /** True when file/symbol caps dropped part of the diff. */
+  truncated?: boolean;
+}
+
+/** Coverage verdict for one branch change (symbol/endpoint) in the summary. */
+export interface QaPrCoverageEntry {
+  /** Ref string as listed in the digest ("createInvoice", "POST /api/x"). */
+  ref: string;
+  kind: "symbol" | "endpoint";
+  file: string;
+  change: "added" | "modified" | "removed";
+  planItemIds: string[];
+  testIds: string[];
+  status: "passed" | "covered" | "generated" | "planned" | "uncovered";
+}
+
+export interface QaPrCoverage {
+  baseBranch: string;
+  headBranch: string;
+  /** Entries with a live test (passed/covered/generated). */
+  coveredCount: number;
+  entries: QaPrCoverageEntry[];
+}
+
+export interface QaDiscovery {
+  targetUrl: string;
+  crawledPages: QaPageSnapshot[];
+  /** Routes from the static GitHub-tree scan (repo-aware mode only). */
+  staticRoutes?: Array<{ path: string; type: string }>;
+  framework?: string;
+  githubConnected: boolean;
+  /** Branch the static scan + code check analyzed (the repo's selected
+   *  branch, falling back to its default branch). */
+  branch?: string;
+  /** Base branch for the PR diff (the repo's default branch). branch ===
+   *  baseBranch means the run analyzed the base itself — no diff exists. */
+  baseBranch?: string;
+  /** Code-check output (repo-aware mode): stack facts, testing implications,
+   *  and API endpoints declared in code. Shape in src/lib/qa-agent/code-check. */
+  codeCheck?: {
+    framework?: string;
+    authMechanism?: string;
+    apiLayer?: string;
+    projectDescription?: string;
+    testingNotes: string[];
+    declaredEndpoints: Array<{ method: string; path: string; file: string }>;
+  };
+  /** Branch diff vs the base branch (repo-aware mode, head ≠ base): the
+   *  functions/endpoints this branch adds or changes. Feeds the planner
+   *  ("cover these") and the summary's PR coverage report. */
+  prChanges?: QaPrChanges;
+}
+
+/** How a QA session runs. `full` is the complete pipeline; `refresh_spec`
+ *  re-discovers the app and re-plans against existing coverage (no
+ *  generation); `fill_gaps` takes the latest plan and generates only the
+ *  items not already covered by a live test; `explore` maps the app for the
+ *  App Map (setup → login → discover only — no plan/generation). */
+export type QaRunMode = "full" | "refresh_spec" | "fill_gaps" | "explore";
+
+// ── App Map Explore (mode = "explore") ───────────────────────────────────────
+
+/** How the explore frontier orders undiscovered pages. */
+export type ExploreStrategy = "breadth" | "depth" | "balanced";
+
+/** User-chosen parameters from the App Map "Explore app" dialog. All jsonb —
+ *  no migration needed. */
+export interface QaExploreConfig {
+  /** Requested explorer (EB) count. Capped by the plan's `maxExplorers`. */
+  explorers: number;
+  /** Crawl depth 1–6 (link hops from the entry URL). */
+  depth: number;
+  strategy: ExploreStrategy;
+  /** Wall-clock budget in minutes. */
+  maxMinutes: number;
+  /** Page budget derived from depth (`6 + depth*5`, capped at 40). */
+  pageBudget: number;
+}
+
+/** Live status of one explorer in the swarm (progress-panel card). */
+export interface QaExplorerState {
+  index: number;
+  status: "claiming" | "exploring" | "blocked" | "done" | "failed";
+  pagesMapped: number;
+  currentUrl?: string;
+  /** Proxied EB screencast URL while this explorer holds an EB. */
+  streamUrl?: string;
+  detail?: string;
+}
+
+/** A frontier entry the exploration could not get past. */
+export interface QaExploreBlocked {
+  url: string;
+  reason: "auth_wall" | "dead_end";
+}
+
+/** Aggregate live explore state (metadata.qaExplore) — written throttled
+ *  during the run, polled by the App Map progress UI. */
+export interface QaExploreState {
+  config: QaExploreConfig;
+  explorers: QaExplorerState[];
+  pagesDiscovered: number;
+  blocked: QaExploreBlocked[];
+  startedAt: string;
+  deadlineAt: string;
+}
+
+/** What started a QA session. `schedule`/`pr`/`mcp` are reserved for the
+ *  trigger phases (cron, PR webhook, MCP control). */
+export type QaSessionTrigger =
+  | "manual"
+  | "task"
+  | "rerun"
+  | "schedule"
+  | "pr"
+  | "mcp";
+
+export type QaGeneratedTestStatus =
+  | "generating"
+  | "generated"
+  | "generation_failed"
+  /** Matched to a pre-existing test (from a prior run or manual authoring) —
+   *  generation skipped, `testId` points at that test. */
+  | "covered"
+  | "passed"
+  | "failed"
+  | "healed";
+
+export interface QaGeneratedTest {
+  planItemId: string;
+  group: QaTestGroup;
+  /** All coverage groups of the source plan item (primary first). */
+  groups?: QaTestGroup[];
+  /** Absent when generation failed before a test row was created. */
+  testId?: string;
+  name: string;
+  status: QaGeneratedTestStatus;
+  error?: string;
+}
+
+/** The task dispatcher's routing decision for a Direct-the-agent directive.
+ *  Stored on the session for provenance; `promptLogId` links to the
+ *  ai_prompt_logs row holding the exact triage prompt + response. */
+export interface QaTaskTriage {
+  scope: "targeted" | "explore";
+  reason: string;
+  promptLogId?: string;
+}
+
+/** One cell of the business-area × test-group coverage matrix. */
+export interface QaMatrixCell {
+  planned: number;
+  /** Plan items satisfied by pre-existing tests. */
+  covered: number;
+  generated: number;
+  /** Passing among covered+generated is not knowable for covered (they run
+   *  in normal builds) — `passed` counts this run's passing tests only. */
+  passed: number;
+}
+
+export interface QaSummaryData {
+  planned: number;
+  generated: number;
+  /** Plan items satisfied by pre-existing tests (no generation needed). */
+  covered: number;
+  passed: number;
+  failed: number;
+  healed: number;
+  byGroup: Partial<
+    Record<
+      QaTestGroup,
+      { planned: number; generated: number; covered: number; passed: number }
+    >
+  >;
+  /** Coverage matrix: business area → test group → cell. Areas come from
+   *  QaPlanItem.businessArea ("General" when unset). */
+  matrix?: Record<string, Partial<Record<QaTestGroup, QaMatrixCell>>>;
+  /** journeyId → testIds covering it (traceability matrix). */
+  journeyCoverage: Record<string, string[]>;
+  /** Per-change coverage of the branch diff (repo-aware runs on a branch). */
+  prCoverage?: QaPrCoverage;
+}

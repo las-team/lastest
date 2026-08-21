@@ -18,6 +18,23 @@ and its `planners/` files reach sideways into two other unmigrated features
 identical blocker and also stayed behind, split out of `quickstart` rather
 than stopping that whole migration — see `quickstart-migration-result.md`
 §1.
+
+> **That blocker is gone.** `54e05d08 core: AI browser tools capability
+> (AiCallOptions.browserTools)` landed the exact core PR both of those
+> migrations asked for, built to the three implementation points
+> `authoring-ai-migration-result.md` §2 specified. `authoring-ai`'s verdict is
+> re-costed to **Go** (~21 calls, ~7 debt items) and `quickstart-scout` is
+> unblocked with it. Read the UPDATE box at the top of
+> [`authoring-ai-migration-result.md`](./authoring-ai-migration-result.md)
+> before trusting any "stopped" wording in this document or in
+> `tools/architecture/boundaries.mjs` — both predate the PR.
+>
+> `authoring-ai`'s second blocker (§4 of that doc — `planners/` reaching
+> sideways into `spec-import.ts`, `ai-routes.ts` and `specs.ts`) survives as a
+> fact but not as a stop: those are three host-port methods filled by the
+> composition root, the shape `app-map` already used for its three calls into
+> an unmigrated neighbour. It does not make the *other* features migratable;
+> `ai-routes.ts` and `specs.ts` are still unclassified orphans.
 **Author:** planning doc
 **Supersedes:** nothing
 

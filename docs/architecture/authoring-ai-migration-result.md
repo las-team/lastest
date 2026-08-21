@@ -1,6 +1,64 @@
 # `authoring-ai` migration — result
 
-**Status:** attempted, **stopped before any code moved.** Costed per
+> ## UPDATE (re-costed after `54e05d08`): **blocker 1 is resolved. The verdict is now Go.**
+>
+> §2 below asked for a specific core PR and specified its three implementation
+> points. That PR has since landed as `54e05d08 core: AI browser tools
+> capability (AiCallOptions.browserTools)` (+ `8243858c`, a test-typing fix),
+> and it landed **exactly** as §2 specified — worth recording, because it means
+> a costing document's "what would unblock this" section can be precise enough
+> to implement from:
+>
+> | §2 asked for | Shipped |
+> | --- | --- |
+> | `core/browser` tracks `session → claim.cdpUrl` in a module-private structure, resolvable only by composition-root code | `CDP_BY_SESSION` (a `WeakMap`) + `resolveSessionCdpUrl`, exported from `@lastest/core-browser/internal`, deleted on teardown |
+> | `core/contracts/src/ai.ts` gains an optional `browserTools` field | `readonly browserTools?: BrowserSession` |
+> | `src/lib/core/ai-capability.ts` accepts it, resolves the URL, wires `useMCP`/`mcpConfig` | `applyBrowserTools()` — and it went further than asked: it throws on an unresolvable or expired session rather than silently degrading to a host-process browser, and it centralises the strict tool allowlist the four pre-migration files each hand-rolled |
+>
+> `BrowserSession`'s guarantee is intact — the plugin still holds an opaque
+> object at every point, and the endpoint is never returned to a caller.
+>
+> **Blocker 2 (§4) still stands as a fact but no longer as a *stop*.** The
+> three sideways calls — `spec-planner.ts → spec-import.ts`,
+> `code-planner.ts → ai-routes.ts`, `planner-agent.ts → specs.ts` — are three
+> host-port methods filled by the composition root, which is exactly what
+> `app-map` did with its three calls into an unmigrated neighbour (one debt
+> item, not three). §4 read them as fatal partly because blocker 1 made the
+> question moot. They are not: a host method can call an unmigrated action
+> module, because the *composition root* is allowed to import anything. What a
+> host method cannot do is make the other feature migratable — that debt
+> stays, and `ai-routes.ts`/`specs.ts` remain unclassified orphans (§7).
+>
+> **Re-costed port: ~21 raw calls grouping into ~7 debt items** — 13 core
+> queries (functional areas ×4, tests ×3, repo/github ×3, AI settings, routes,
+> agent session), `agent-context`'s `getAIConfig`/`buildSeedFixture` (×2),
+> `computeDomDiff`, `getCurrentBranchForRepo`, `revalidatePath`, one
+> `validateGeneratedTest`, and the three sideways calls. Above §1.5's ~15 line,
+> below `quickstart`'s 32, and the grouping is healthy.
+>
+> Two costing corrections found while re-reading, both cheaper than §3
+> assumed:
+>
+> - **Five of the six system prompts move *into* the plugin, not to a lib.**
+>   `GENERATOR_`/`HEALER_`/`ENHANCER_`/`SCOUT_`/`DEEP_DIVER_SYSTEM_PROMPT` have
+>   exactly one consumer each — their own agent file. `PLANNER_SYSTEM_PROMPT`
+>   looks shared with `plugins/explorer/src/ai/planner.ts` and is not: explorer
+>   declares its own const of the same name with different text. No
+>   `libs/ai-prompts` is needed.
+> - **`validation-retry.ts` should *not* be promoted.** §3 implied a lib. Its
+>   dependency `validate-test-against-api.ts` reads
+>   `process.cwd()/src/lib/ai/runner-api.d.ts` — recipe §5's row-three shape
+>   (`video-fallback`'s near-miss). It stays core and becomes **one** host
+>   method, `validateGeneratedTest(code)`, which is §3.1's stronger "do the
+>   thing" form anyway. Moving a cwd-dependent asset inside a feature PR is the
+>   drive-by this recipe keeps warning about.
+>
+> Everything below this box is the original, unamended stop verdict. Read it
+> for the costing detail and the two false leads (§5, §6), not for the status.
+
+**Status:** ~~attempted, **stopped before any code moved**~~ — **superseded by
+the box above: blocker 1 resolved by `54e05d08`, verdict is Go, not yet
+executed.** Costed per
 [`plugin-migration-recipe.md`](./plugin-migration-recipe.md) §1.5/§1.6; the
 `PSEUDO_PLUGINS["authoring-ai"]` entry is unchanged.
 **Recipe:** [`plugin-migration-recipe.md`](./plugin-migration-recipe.md).

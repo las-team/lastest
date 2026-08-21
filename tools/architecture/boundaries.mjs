@@ -269,7 +269,20 @@ export const PSEUDO_PLUGINS = {
   // `libs/recording-codegen`, not the plugin — both are pure and core's own
   // `execution/executor.ts` / `playwright/assertion-parser.ts` import them
   // too.
-  // `authoring-ai` was costed and **stopped**, not migrated — see
+  // `authoring-ai` was costed and stopped — and has since been **re-costed to
+  // Go**, because blocker (1) below no longer exists: `54e05d08 core: AI
+  // browser tools capability` shipped `AiCallOptions.browserTools`, the exact
+  // PR that costing asked for, built to its three specified implementation
+  // points. Blocker (2) survives as three host-port methods rather than a stop
+  // (`app-map`'s shape: calls into an unmigrated neighbour are one debt item,
+  // not a blocker — the composition root may import anything). This entry is
+  // still here because nothing has moved yet, not because the feature is
+  // blocked. Read the UPDATE box at the top of
+  // `docs/architecture/authoring-ai-migration-result.md` before acting on the
+  // paragraph below, which predates the PR — as does the `quickstart-scout`
+  // entry's "identical blocker" note further down.
+  //
+  // The original, now-superseded reasoning — see
   // `docs/architecture/authoring-ai-migration-result.md`. Two blockers, either
   // sufficient alone: (1) `generator-agent.ts`/`healer-agent.ts`/
   // `enhancer-agent.ts` and two of `planner-agent.ts`'s three functions need
