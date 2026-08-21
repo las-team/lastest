@@ -12,7 +12,26 @@ import type { QaRunMode } from "@lastest/eb-protocol";
 import type { QaTaskSource, QaTaskStatus, QaTaskTestRef } from "./types";
 
 /**
- * The two tables QA Agent owns.
+ * The two tables QA Agent will own. **Not yet live — and deliberately not
+ * named `schema.ts`.**
+ *
+ * `drizzle.config.ts` globs `./plugins/*​/src/schema.ts`, and the Docker
+ * entrypoint runs `drizzle-kit push --force` on startup. If this file carried
+ * the canonical name while the migration is paused, that push would:
+ *
+ *   1. see `qa_agent_triggers` declared **twice** — here without a foreign key
+ *      and with an extra index, and in `packages/db/src/schema/agents.ts` with
+ *      `repository_id REFERENCES repositories(id) ON DELETE CASCADE` — because
+ *      the core table has not been removed yet; and
+ *   2. create an empty `qa_agent_tasks` beside the live, populated `qa_tasks`.
+ *
+ * Renaming it to `schema.planned.ts` is what keeps the design reviewable
+ * without arming it. The rename back to `schema.ts` is a step in finishing the
+ * migration, and it must happen in the same change that deletes both tables
+ * from the core schema and adds `migrateQaAgentTables()` to
+ * `scripts/migrate.js`.
+ *
+ * The two tables QA Agent owns:
  *
  * Two rules from `docs/architecture/core-scope.md` §6, paid for here:
  *
