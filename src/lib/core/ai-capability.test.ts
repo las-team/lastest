@@ -10,7 +10,7 @@ import type { BrowserSession } from "@lastest/contracts";
  * core builds — which is where the endpoint would appear if it leaked.
  */
 
-const generateWithAI = vi.fn(async () => "{}");
+const generateWithAI = vi.fn(async (..._args: unknown[]) => "{}");
 const resolveSessionCdpUrl = vi.fn<(s: BrowserSession) => string | undefined>();
 
 vi.mock("@/lib/ai", () => ({
@@ -136,17 +136,11 @@ describe("browserTools", () => {
 
 describe("promptLogId", () => {
   it("is returned so a plugin can point an operator at the prompt log", async () => {
-    generateWithAI.mockImplementation(
-      async (
-        _c: unknown,
-        _p: unknown,
-        _s: unknown,
-        o: { onLogCreated?: (id: string) => void },
-      ) => {
-        o.onLogCreated?.("log-42");
-        return "{}";
-      },
-    );
+    generateWithAI.mockImplementation(async (...args: unknown[]) => {
+      const o = args[3] as { onLogCreated?: (id: string) => void };
+      o.onLogCreated?.("log-42");
+      return "{}";
+    });
 
     const res = await capability().generate("go", {
       actionType: "agent_discover",
