@@ -73,6 +73,13 @@ const ACTION_TYPES = new Set<string>([
   // attribution on migration — the exact failure mode this allowlist's header
   // warns about, hit for the second time.
   "agent_discover",
+  // Arrived with `@lastest/plugin-authoring-ai` — the pre-migration
+  // generator/healer/enhancer agents each logged under their own value
+  // (`agent_generate`, `agent_heal`, `enhance_test`); `agent_discover` above
+  // already covers the planner. Third hit of the same failure mode.
+  "agent_generate",
+  "agent_heal",
+  "enhance_test",
 ]);
 
 /**

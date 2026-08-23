@@ -269,45 +269,19 @@ export const PSEUDO_PLUGINS = {
   // `libs/recording-codegen`, not the plugin — both are pure and core's own
   // `execution/executor.ts` / `playwright/assertion-parser.ts` import them
   // too.
-  // `authoring-ai` was costed and stopped — and has since been **re-costed to
-  // Go**, because blocker (1) below no longer exists: `54e05d08 core: AI
-  // browser tools capability` shipped `AiCallOptions.browserTools`, the exact
-  // PR that costing asked for, built to its three specified implementation
-  // points. Blocker (2) survives as three host-port methods rather than a stop
-  // (`app-map`'s shape: calls into an unmigrated neighbour are one debt item,
-  // not a blocker — the composition root may import anything). This entry is
-  // still here because nothing has moved yet, not because the feature is
-  // blocked. Read the UPDATE box at the top of
-  // `docs/architecture/authoring-ai-migration-result.md` before acting on the
-  // paragraph below, which predates the PR — as does the `quickstart-scout`
-  // entry's "identical blocker" note further down.
-  //
-  // The original, now-superseded reasoning — see
-  // `docs/architecture/authoring-ai-migration-result.md`. Two blockers, either
-  // sufficient alone: (1) `generator-agent.ts`/`healer-agent.ts`/
-  // `enhancer-agent.ts` and two of `planner-agent.ts`'s three functions need
-  // AI generation wired to a live, claimed EB's CDP endpoint via MCP tools,
-  // and neither `ctx.ai` nor `ctx.browser` can express that — `BrowserSession`
-  // documents its own absence of a CDP escape hatch; (2) `planners/` imports
-  // `src/server/actions/spec-import.ts` (its own oversized, uncosted
-  // `PSEUDO_PLUGINS` entry) and `src/server/actions/ai-routes.ts` (no entry
-  // anywhere — an orphan with its own UI, found only by reading
-  // `code-planner.ts`'s import list). This entry stays as-is; nothing here
-  // graduated.
-  "authoring-ai": {
-    lib: [],
-    files: [
-      "src/lib/playwright/generator-agent.ts",
-      "src/lib/playwright/healer-agent.ts",
-      "src/lib/playwright/enhancer-agent.ts",
-      "src/lib/playwright/planner-agent.ts",
-      "src/lib/playwright/planner-merger.ts",
-      "src/lib/playwright/planner-types.ts",
-      "src/lib/playwright/planners",
-      "src/lib/playwright/scenario-grouping.ts",
-    ],
-    actions: [],
-  },
+  // `authoring-ai` graduated to `plugins/authoring-ai/` (RFC §9 phase 4,
+  // fifteenth plugin), unblocked by `54e05d08 core: AI browser tools
+  // capability` (`AiCallOptions.browserTools`) — see
+  // `docs/architecture/authoring-ai-migration-result.md` for the original
+  // stop/re-cost history. `generator-agent.ts`/`healer-agent.ts`/
+  // `enhancer-agent.ts`/`planner-agent.ts` and the `planners/` directory are
+  // deleted, not left as re-exports; every MCP-driven call now passes
+  // `ctx.ai.generate({ browserTools: session })` a `BrowserSession` from
+  // `ctx.browser.withBrowser(...)`, never a raw CDP endpoint. Blocker (2)'s
+  // two sideways calls (`spec-import.ts`, `ai-routes.ts`) did not resolve —
+  // they are host-port methods filled by the composition root
+  // (`src/lib/core/authoring-ai-host.ts`), the `app-map` shape for a call
+  // into an unmigrated neighbour. Both remain unclassified orphans.
   // `quickstart` graduated to `plugins/quickstart/` (RFC §9 phase 4,
   // fourteenth and last plugin) — see
   // `docs/architecture/quickstart-migration-result.md`. `src/lib/quickstart`,

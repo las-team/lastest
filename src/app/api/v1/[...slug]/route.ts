@@ -2210,9 +2210,9 @@ export async function POST(
         }
       }
       // Dynamic import to avoid pulling in heavy AI deps at route level
-      const { agentHealTestCore } =
-        await import("@/lib/playwright/healer-agent");
-      const result = await agentHealTestCore(test.repositoryId!, testId);
+      const { agentHealTest } =
+        await import("@lastest/plugin-authoring-ai/actions");
+      const result = await agentHealTest(test.repositoryId!, testId);
       return NextResponse.json(result);
     }
 

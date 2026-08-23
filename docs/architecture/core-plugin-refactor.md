@@ -12,29 +12,16 @@ unmigrated — see `data-sources-migration-result.md` §1; `route-scan` split
 out of `scheduling`, unmigrated — see `scheduling-migration-result.md` §3;
 `static-scout` split out of `quickstart`, unmigrated — see
 `quickstart-migration-result.md` §5). `authoring-ai` was costed and
-**stopped** — no core capability exists yet for "AI + live browser tools",
-and its `planners/` files reach sideways into two other unmigrated features
-— see `authoring-ai-migration-result.md`. `quickstart-scout` hits the
-identical blocker and also stayed behind, split out of `quickstart` rather
-than stopping that whole migration — see `quickstart-migration-result.md`
-§1.
-
-> **That blocker is gone.** `54e05d08 core: AI browser tools capability
-> (AiCallOptions.browserTools)` landed the exact core PR both of those
-> migrations asked for, built to the three implementation points
-> `authoring-ai-migration-result.md` §2 specified. `authoring-ai`'s verdict is
-> re-costed to **Go** (~21 calls, ~7 debt items) and `quickstart-scout` is
-> unblocked with it. Read the UPDATE box at the top of
-> [`authoring-ai-migration-result.md`](./authoring-ai-migration-result.md)
-> before trusting any "stopped" wording in this document or in
-> `tools/architecture/boundaries.mjs` — both predate the PR.
->
-> `authoring-ai`'s second blocker (§4 of that doc — `planners/` reaching
-> sideways into `spec-import.ts`, `ai-routes.ts` and `specs.ts`) survives as a
-> fact but not as a stop: those are three host-port methods filled by the
-> composition root, the shape `app-map` already used for its three calls into
-> an unmigrated neighbour. It does not make the *other* features migratable;
-> `ai-routes.ts` and `specs.ts` are still unclassified orphans.
+**stopped**, then **unblocked and migrated**: `54e05d08 core: AI browser
+tools capability (AiCallOptions.browserTools)` landed the exact core PR its
+costing asked for, and `authoring-ai` is now the **fifteenth** plugin, past
+the "14 of 14" line phase 4 closed on — see
+[`authoring-ai-migration-result.md`](./authoring-ai-migration-result.md) for
+the stop-then-Go history and the final port. `quickstart-scout` hits the
+identical raw-CDP-to-MCP blocker and is unblocked by the same core PR, but
+has not been migrated yet — it stays its own uncosted
+`PSEUDO_PLUGINS["quickstart-scout"]` entry, split out of `quickstart` rather
+than reopening that migration.
 **Author:** planning doc
 **Supersedes:** nothing
 

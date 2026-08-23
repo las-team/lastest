@@ -2286,175 +2286,176 @@ async function runQaGenerate(
   }
 
   // Browser items share one EB, generated sequentially so the live view is
-  // coherent and the pool isn't drained.
-  let runnerId: string | undefined;
+  // coherent and the pool isn't drained. `withAuthoringAiSession` claims one
+  // Embedded Browser (core injects `qaAuth.storageStateId` as part of the
+  // claim itself, so the generator sees the same post-login state the tests
+  // will run in) and hands back bound `createTest` calls that all reuse it.
+  let stoppedEarly = false;
   try {
     if (browserItems.length > 0) {
-      const eb = await claimEmbeddedBrowserForAgent(
-        EB_CLAIM_TIMEOUT_MS,
-        () => {
-          mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
-        },
-        teamId,
-      );
-      if (!eb) {
+      const { withAuthoringAiSession } =
+        await import("@lastest/plugin-authoring-ai/actions");
+      try {
+        await withAuthoringAiSession(
+          repositoryId,
+          {
+            storageStateId: qaAuth?.storageStateId,
+            onQueued: () => {
+              mergeMetadata(sessionId, { queuedForBrowser: true }).catch(
+                () => {},
+              );
+            },
+            onSessionReady: (streamUrl) => {
+              mergeMetadata(sessionId, {
+                queuedForBrowser: false,
+                streamUrl: streamUrl ?? undefined,
+              }).catch(() => {});
+            },
+          },
+          async (browserSession) => {
+            for (const item of browserItems) {
+              if (await isStopped(sessionId, signal)) {
+                stoppedEarly = true;
+                return;
+              }
+              const subIdx = pending.indexOf(item);
+              const started = Date.now();
+              substeps[subIdx] = { ...substeps[subIdx], status: "running" };
+              await updateSubsteps(sessionId, "qa_generate", substeps);
+              emitActivity(
+                teamId,
+                repositoryId,
+                sessionId,
+                "substep:update",
+                `Generator working on "${item.title}" (${itemGroups(item).join(" + ")})`,
+                { stepId: "qa_generate", agentType: "generator" },
+              );
+              try {
+                const timeoutSignal = AbortSignal.timeout(GENERATOR_TIMEOUT_MS);
+                const result = await browserSession.createTest(
+                  {
+                    testName: item.title,
+                    baseUrl: targetUrl,
+                    routePath: item.pagePath,
+                    preAuthenticated,
+                    userPrompt: buildGeneratorPrompt({
+                      item,
+                      plan,
+                      targetUrl,
+                      credentials: preAuthenticated ? undefined : credentials,
+                      auth: { preAuthenticated },
+                      loginContext: {
+                        loginUrl: qaAuth?.loginUrl,
+                        signupUrl: qaAuth?.signupUrl,
+                      },
+                    }),
+                  },
+                  { signal: AbortSignal.any([signal, timeoutSignal]) },
+                );
+                if (result.success && result.code) {
+                  const test = await queries.createTest(
+                    {
+                      repositoryId,
+                      functionalAreaId: areaIdByGroup.get(item.group),
+                      name: item.title,
+                      code: result.code,
+                      targetUrl,
+                      playwrightOverrides: itemPlaywrightOverrides(
+                        itemGroups(item),
+                      ),
+                      // Chain the captured login session; when repo defaults already
+                      // cover auth this stays undefined (defaults apply to every test).
+                      ...(authSetupOverrides
+                        ? { setupOverrides: authSetupOverrides }
+                        : {}),
+                      // Authored by the play_agent bot — see the note above.
+                    },
+                    undefined,
+                    undefined,
+                    "play_agent",
+                  );
+                  substeps[subIdx] = {
+                    ...substeps[subIdx],
+                    status: "done",
+                    durationMs: Date.now() - started,
+                  };
+                  await upsertLedger({
+                    planItemId: item.id,
+                    group: item.group,
+                    groups: itemGroups(item),
+                    testId: test.id,
+                    name: item.title,
+                    status: "generated",
+                  });
+                  emitActivity(
+                    teamId,
+                    repositoryId,
+                    sessionId,
+                    "artifact:created",
+                    `Generated test "${item.title}" (${itemGroups(item).join(" + ")})`,
+                    {
+                      stepId: "qa_generate",
+                      agentType: "generator",
+                      artifactType: "test",
+                      artifactId: test.id,
+                      artifactLabel: item.title,
+                      durationMs: Date.now() - started,
+                    },
+                  );
+                } else {
+                  substeps[subIdx] = {
+                    ...substeps[subIdx],
+                    status: "error",
+                    detail: result.error?.slice(0, 200),
+                    rawError: result.error,
+                    durationMs: Date.now() - started,
+                  };
+                  await upsertLedger({
+                    planItemId: item.id,
+                    group: item.group,
+                    groups: itemGroups(item),
+                    name: item.title,
+                    status: "generation_failed",
+                    error: result.error,
+                  });
+                }
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                substeps[subIdx] = {
+                  ...substeps[subIdx],
+                  status: "error",
+                  detail: msg.slice(0, 200),
+                  rawError: msg,
+                  durationMs: Date.now() - started,
+                };
+                await upsertLedger({
+                  planItemId: item.id,
+                  group: item.group,
+                  groups: itemGroups(item),
+                  name: item.title,
+                  status: "generation_failed",
+                  error: msg,
+                });
+              }
+              await updateSubsteps(sessionId, "qa_generate", substeps);
+            }
+          },
+        );
+      } catch (error) {
         await setStepFailed(
           sessionId,
           "qa_generate",
-          "No embedded browser available for test generation",
+          error instanceof Error
+            ? error.message
+            : "No embedded browser available for test generation",
         );
         return false;
-      }
-      runnerId = eb.runnerId;
-      await mergeMetadata(sessionId, {
-        queuedForBrowser: false,
-        streamUrl: proxiedStream(eb.streamUrl, eb.instanceId),
-      });
-
-      // Pre-authenticate the generation EB too, so the generator verifies
-      // selectors against the same post-login state the tests will run in.
-      if (qaAuth?.storageStateId) {
-        const state = await queries
-          .getStorageState(qaAuth.storageStateId)
-          .catch(() => null);
-        if (state?.storageStateJson) {
-          await injectStorageStateIntoEb(eb.cdpUrl, state.storageStateJson);
-        }
-      }
-
-      const { agentCreateTest } =
-        await import("@/lib/playwright/generator-agent");
-
-      for (const item of browserItems) {
-        if (await isStopped(sessionId, signal)) return false;
-        const subIdx = pending.indexOf(item);
-        const started = Date.now();
-        substeps[subIdx] = { ...substeps[subIdx], status: "running" };
-        await updateSubsteps(sessionId, "qa_generate", substeps);
-        emitActivity(
-          teamId,
-          repositoryId,
-          sessionId,
-          "substep:update",
-          `Generator working on "${item.title}" (${itemGroups(item).join(" + ")})`,
-          { stepId: "qa_generate", agentType: "generator" },
-        );
-        try {
-          const timeoutSignal = AbortSignal.timeout(GENERATOR_TIMEOUT_MS);
-          const result = await agentCreateTest(
-            repositoryId,
-            {
-              testName: item.title,
-              baseUrl: targetUrl,
-              routePath: item.pagePath,
-              preAuthenticated,
-              userPrompt: buildGeneratorPrompt({
-                item,
-                plan,
-                targetUrl,
-                credentials: preAuthenticated ? undefined : credentials,
-                auth: { preAuthenticated },
-                loginContext: {
-                  loginUrl: qaAuth?.loginUrl,
-                  signupUrl: qaAuth?.signupUrl,
-                },
-              }),
-            },
-            {
-              signal: AbortSignal.any([signal, timeoutSignal]),
-              cdpEndpoint: eb.cdpUrl,
-            },
-          );
-          if (result.success && result.code) {
-            const test = await queries.createTest(
-              {
-                repositoryId,
-                functionalAreaId: areaIdByGroup.get(item.group),
-                name: item.title,
-                code: result.code,
-                targetUrl,
-                playwrightOverrides: itemPlaywrightOverrides(itemGroups(item)),
-                // Chain the captured login session; when repo defaults already
-                // cover auth this stays undefined (defaults apply to every test).
-                ...(authSetupOverrides
-                  ? { setupOverrides: authSetupOverrides }
-                  : {}),
-                // Authored by the play_agent bot — see the note above.
-              },
-              undefined,
-              undefined,
-              "play_agent",
-            );
-            substeps[subIdx] = {
-              ...substeps[subIdx],
-              status: "done",
-              durationMs: Date.now() - started,
-            };
-            await upsertLedger({
-              planItemId: item.id,
-              group: item.group,
-              groups: itemGroups(item),
-              testId: test.id,
-              name: item.title,
-              status: "generated",
-            });
-            emitActivity(
-              teamId,
-              repositoryId,
-              sessionId,
-              "artifact:created",
-              `Generated test "${item.title}" (${itemGroups(item).join(" + ")})`,
-              {
-                stepId: "qa_generate",
-                agentType: "generator",
-                artifactType: "test",
-                artifactId: test.id,
-                artifactLabel: item.title,
-                durationMs: Date.now() - started,
-              },
-            );
-          } else {
-            substeps[subIdx] = {
-              ...substeps[subIdx],
-              status: "error",
-              detail: result.error?.slice(0, 200),
-              rawError: result.error,
-              durationMs: Date.now() - started,
-            };
-            await upsertLedger({
-              planItemId: item.id,
-              group: item.group,
-              groups: itemGroups(item),
-              name: item.title,
-              status: "generation_failed",
-              error: result.error,
-            });
-          }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          substeps[subIdx] = {
-            ...substeps[subIdx],
-            status: "error",
-            detail: msg.slice(0, 200),
-            rawError: msg,
-            durationMs: Date.now() - started,
-          };
-          await upsertLedger({
-            planItemId: item.id,
-            group: item.group,
-            groups: itemGroups(item),
-            name: item.title,
-            status: "generation_failed",
-            error: msg,
-          });
-        }
-        await updateSubsteps(sessionId, "qa_generate", substeps);
       }
     }
   } finally {
     await mergeMetadata(sessionId, { streamUrl: undefined }).catch(() => {});
-    if (runnerId) await releasePoolEB(runnerId).catch(() => {});
   }
+  if (stoppedEarly) return false;
 
   const generatedCount = ledger.filter(
     (g) => g.testId && g.status !== "covered",
@@ -2685,57 +2686,62 @@ async function runQaHeal(
     { stepId: "qa_heal", agentType: "healer" },
   );
 
-  let runnerId: string | undefined;
   const healedTestIds: string[] = [];
+  let stoppedEarly = false;
   try {
-    const eb = await claimEmbeddedBrowserForAgent(
-      EB_CLAIM_TIMEOUT_MS,
-      () => {
-        mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+    const { withAuthoringAiSession } =
+      await import("@lastest/plugin-authoring-ai/actions");
+    await withAuthoringAiSession(
+      repositoryId,
+      {
+        onQueued: () => {
+          mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+        },
+        onSessionReady: (streamUrl) => {
+          mergeMetadata(sessionId, {
+            queuedForBrowser: false,
+            streamUrl: streamUrl ?? undefined,
+          }).catch(() => {});
+        },
       },
-      teamId,
-    );
-    if (eb) {
-      runnerId = eb.runnerId;
-      await mergeMetadata(sessionId, {
-        queuedForBrowser: false,
-        streamUrl: proxiedStream(eb.streamUrl, eb.instanceId),
-      });
-      const { agentHealTestCore } =
-        await import("@/lib/playwright/healer-agent");
-      for (let i = 0; i < failing.length; i++) {
-        if (await isStopped(sessionId, signal)) return false;
-        const entry = failing[i];
-        substeps[i] = { ...substeps[i], status: "running" };
-        await updateSubsteps(sessionId, "qa_heal", substeps);
-        try {
-          const timeoutSignal = AbortSignal.timeout(HEAL_TIMEOUT_MS);
-          const result = await agentHealTestCore(repositoryId, entry.testId!, {
-            cdpEndpoint: eb.cdpUrl,
-            signal: AbortSignal.any([signal, timeoutSignal]),
-            intent: healIntentFor(entry),
-          });
-          if (result.success && result.code) {
-            await queries.updateTest(entry.testId!, { code: result.code });
-            healedTestIds.push(entry.testId!);
-            substeps[i] = { ...substeps[i], status: "done" };
-          } else {
+      async (browserSession) => {
+        for (let i = 0; i < failing.length; i++) {
+          if (await isStopped(sessionId, signal)) {
+            stoppedEarly = true;
+            return;
+          }
+          const entry = failing[i];
+          substeps[i] = { ...substeps[i], status: "running" };
+          await updateSubsteps(sessionId, "qa_heal", substeps);
+          try {
+            const timeoutSignal = AbortSignal.timeout(HEAL_TIMEOUT_MS);
+            const result = await browserSession.healTest(entry.testId!, {
+              signal: AbortSignal.any([signal, timeoutSignal]),
+              intent: healIntentFor(entry),
+            });
+            if (result.success && result.code) {
+              await queries.updateTest(entry.testId!, { code: result.code });
+              healedTestIds.push(entry.testId!);
+              substeps[i] = { ...substeps[i], status: "done" };
+            } else {
+              substeps[i] = {
+                ...substeps[i],
+                status: "error",
+                detail: result.error?.slice(0, 200),
+              };
+            }
+          } catch (err) {
             substeps[i] = {
               ...substeps[i],
               status: "error",
-              detail: result.error?.slice(0, 200),
+              detail:
+                err instanceof Error ? err.message.slice(0, 200) : "failed",
             };
           }
-        } catch (err) {
-          substeps[i] = {
-            ...substeps[i],
-            status: "error",
-            detail: err instanceof Error ? err.message.slice(0, 200) : "failed",
-          };
+          await updateSubsteps(sessionId, "qa_heal", substeps);
         }
-        await updateSubsteps(sessionId, "qa_heal", substeps);
-      }
-    } else {
+      },
+    ).catch(async () => {
       for (let i = 0; i < substeps.length; i++) {
         substeps[i] = {
           ...substeps[i],
@@ -2744,11 +2750,11 @@ async function runQaHeal(
         };
       }
       await updateSubsteps(sessionId, "qa_heal", substeps);
-    }
+    });
   } finally {
     await mergeMetadata(sessionId, { streamUrl: undefined }).catch(() => {});
-    if (runnerId) await releasePoolEB(runnerId).catch(() => {});
   }
+  if (stoppedEarly) return false;
 
   // Re-run only the healed tests to confirm the fixes.
   let confirmed = 0;

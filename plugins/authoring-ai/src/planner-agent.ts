@@ -1,17 +1,18 @@
 /**
- * Planner Agent — discovers functional areas and generates test plans
- * by using the AI provider with Playwright MCP tools to explore the live app.
- *
- * Uses the official Playwright Test Planner agent prompt with the
- * `playwright-test` MCP server (npx playwright run-test-mcp-server).
+ * Planner Agent — discovers functional areas and generates test plans by
+ * giving the AI provider live MCP browser tools bound to a core-issued
+ * `BrowserSession` to explore the live app. Also home to Scout (fast,
+ * no-MCP classification) and the Deep-Diver (focused, MCP exploration of
+ * one area) — see `planners/browser-planner.ts` for how the three compose.
  */
 
-import * as queries from "@/lib/db/queries";
-import { requireRepoAccess } from "@/lib/auth";
+import type { AiCapability, BrowserSession } from "@lastest/contracts";
 import { revalidatePath } from "next/cache";
-import { generateWithAI } from "@/lib/ai";
-import { getAIConfig, buildSeedFixture } from "./agent-context";
+
+import type { AuthoringAiHost, AuthoringAiIntelligence } from "./host";
 import type { PlannerArea, ScoutArea, ScoutOutput } from "./planner-types";
+
+export type { PlannerArea } from "./planner-types";
 
 // ---------------------------------------------------------------------------
 // Planner system prompt (derived from Playwright's planner agent definition)
@@ -72,13 +73,7 @@ Quality Standards:
 - Group related functionality into functional areas`;
 
 // ---------------------------------------------------------------------------
-// Types (re-exported from shared module)
-// ---------------------------------------------------------------------------
-
-export type { PlannerArea } from "./planner-types";
-
-// ---------------------------------------------------------------------------
-// Core
+// Shared response parser
 // ---------------------------------------------------------------------------
 
 export function parseAreasFromResponse(response: string): PlannerArea[] {
@@ -125,17 +120,16 @@ export function parseAreasFromResponse(response: string): PlannerArea[] {
 }
 
 // ---------------------------------------------------------------------------
-// Server-action-compatible wrapper
+// Discover — monolithic exploration + persistence (MCP)
 // ---------------------------------------------------------------------------
 
-/**
- * Discover functional areas for a repository using the Planner agent.
- * Uses the AI provider + Playwright MCP tools to explore the live app.
- */
 export async function agentDiscoverAreas(
+  host: AuthoringAiHost,
+  ai: AiCapability,
+  session: BrowserSession,
   repositoryId: string,
   baseUrl: string,
-  options?: { onLogCreated?: (logId: string) => void; cdpEndpoint?: string },
+  options?: { onLogCreated?: (logId: string) => void },
 ): Promise<{
   success: boolean;
   functionalAreas?: Array<{
@@ -150,54 +144,33 @@ export async function agentDiscoverAreas(
   rawResponse?: string;
   error?: string;
 }> {
-  await requireRepoAccess(repositoryId);
-
-  // A CDP endpoint (Embedded Browser) is mandatory — MCP exploration must run
-  // against the sandboxed EB, never a host-process Chromium.
-  if (!options?.cdpEndpoint) {
-    return {
-      success: false,
-      error:
-        "No embedded browser available — cdpEndpoint is required for live exploration.",
-    };
-  }
-
   try {
-    const settings = await queries.getAISettings(repositoryId);
-    const config = getAIConfig(settings);
-    const seed = await buildSeedFixture(repositoryId);
+    const seed = await host.buildSeedFixture(repositoryId);
 
-    // Build the exploration prompt with seed fixture
     let prompt = `Explore the web application at ${baseUrl} and create a comprehensive test plan.\n\n`;
     prompt += `Start by navigating to ${baseUrl} and thoroughly exploring all pages, forms, and interactive elements.\n`;
     prompt += `Discover all functional areas and routes, then produce a structured test plan.\n`;
     prompt += `\n---\n\n${seed.seedPrompt}`;
 
-    const response = await generateWithAI(
-      config,
-      prompt,
-      PLANNER_SYSTEM_PROMPT,
-      {
-        useMCP: true,
-        repositoryId,
-        actionType: "agent_discover",
-        onLogCreated: options?.onLogCreated,
-        responseFormat: "json_object",
-        mcpConfig: { cdpEndpoint: options.cdpEndpoint },
-      },
-    );
+    const result = await ai.generate(prompt, {
+      actionType: "agent_discover",
+      repositoryId,
+      systemPrompt: PLANNER_SYSTEM_PROMPT,
+      json: true,
+      browserTools: session,
+    });
+    if (result.promptLogId) options?.onLogCreated?.(result.promptLogId);
 
-    const areas = parseAreasFromResponse(response);
+    const areas = parseAreasFromResponse(result.text);
 
     if (areas.length === 0) {
       return {
         success: false,
-        rawResponse: response,
+        rawResponse: result.text,
         error: "Planner agent found no functional areas",
       };
     }
 
-    // Map to DiscoveredArea format
     const functionalAreas = areas.map((area) => ({
       name: area.name,
       description: area.description,
@@ -210,22 +183,18 @@ export async function agentDiscoverAreas(
       })),
     }));
 
-    // Save agent plans to functional areas + auto-populate specs side so both
-    // halves are generated together by the planner path.
-    const { syncAreaPlanAndSpecs } = await import("@/server/actions/specs");
+    // Save agent plans to functional areas + auto-populate specs side so
+    // both halves are generated together by the planner path.
     for (const area of areas) {
       if (area.testPlan) {
-        const dbArea = await queries.getOrCreateFunctionalAreaByRepo(
+        const dbArea = await host.getOrCreateFunctionalArea(
           repositoryId,
           area.name,
           area.description,
         );
-        await queries.updateFunctionalArea(dbArea.id, {
-          agentPlan: area.testPlan,
-          planGeneratedAt: new Date(),
-        });
+        await host.saveAreaPlan(dbArea.id, area.testPlan);
         try {
-          await syncAreaPlanAndSpecs(dbArea.id, repositoryId);
+          await host.syncAreaPlanAndSpecs(dbArea.id, repositoryId);
         } catch {
           // Non-critical: spec sync failure shouldn't fail discovery.
         }
@@ -281,6 +250,8 @@ OUTPUT FORMAT (JSON only, no markdown):
 }`;
 
 export async function runScoutClassification(
+  host: AuthoringAiHost,
+  ai: AiCapability,
   repositoryId: string,
   otherPlannerAreas: PlannerArea[],
   options?: { onLogCreated?: (logId: string) => void },
@@ -288,10 +259,6 @@ export async function runScoutClassification(
   const start = Date.now();
   let promptLogId: string | undefined;
 
-  const settings = await queries.getAISettings(repositoryId);
-  const config = getAIConfig(settings);
-
-  // Build input from other planners' results
   const areasSummary = otherPlannerAreas.map((a) => ({
     name: a.name,
     routes: a.routes,
@@ -299,11 +266,8 @@ export async function runScoutClassification(
     testPlanPreview: a.testPlan?.slice(0, 200),
   }));
 
-  // Get codebase intelligence from active session
-  const activeSession = await queries.getActiveAgentSession(repositoryId);
-  const intelligence = activeSession?.metadata?.codebaseIntelligence as
-    | Record<string, unknown>
-    | undefined;
+  const intelligence: AuthoringAiIntelligence | undefined =
+    await host.getCodebaseIntelligence(repositoryId);
 
   const prompt = `Classify these ${areasSummary.length} functional areas discovered from the codebase.
 
@@ -315,22 +279,19 @@ ${intelligence ? `## Codebase Intelligence\n${JSON.stringify(intelligence, null,
 Classify each area as "skip" or "explore" and output JSON.`;
 
   try {
-    const response = await generateWithAI(config, prompt, SCOUT_SYSTEM_PROMPT, {
-      repositoryId,
+    const result = await ai.generate(prompt, {
       actionType: "agent_discover",
-      onLogCreated: (id) => {
-        promptLogId = id;
-        options?.onLogCreated?.(id);
-      },
-      responseFormat: "json_object",
+      repositoryId,
+      systemPrompt: SCOUT_SYSTEM_PROMPT,
+      json: true,
     });
+    promptLogId = result.promptLogId;
+    if (promptLogId) options?.onLogCreated?.(promptLogId);
 
-    // Parse scout output
-    const jsonMatch = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/) || [
-      null,
-      response,
-    ];
-    const jsonStr = jsonMatch[1]?.trim() || response.trim();
+    const jsonMatch = result.text.match(
+      /```(?:json)?\s*\n?([\s\S]*?)\n?```/,
+    ) || [null, result.text];
+    const jsonStr = jsonMatch[1]?.trim() || result.text.trim();
     const parsed = JSON.parse(jsonStr);
     const rawAreas = parsed.areas || parsed;
 
@@ -387,23 +348,17 @@ OUTPUT FORMAT (JSON only):
 }`;
 
 export async function runDeepDiveExploration(
+  host: AuthoringAiHost,
+  ai: AiCapability,
+  session: BrowserSession,
   areaName: string,
   routes: string[],
   focusPoints: string[] | undefined,
   repositoryId: string,
   baseUrl: string,
-  options?: { onLogCreated?: (logId: string) => void; cdpEndpoint?: string },
+  options?: { onLogCreated?: (logId: string) => void },
 ): Promise<PlannerArea[]> {
-  // A CDP endpoint (Embedded Browser) is mandatory — never explore via a
-  // host-process Chromium.
-  if (!options?.cdpEndpoint) {
-    throw new Error(
-      "runDeepDiveExploration requires a cdpEndpoint (Embedded Browser) — refusing to launch a host-process browser.",
-    );
-  }
-  const settings = await queries.getAISettings(repositoryId);
-  const config = getAIConfig(settings);
-  const seed = await buildSeedFixture(repositoryId);
+  const seed = await host.buildSeedFixture(repositoryId);
 
   let prompt = `Explore the "${areaName}" area of the web application at ${baseUrl}.\n\n`;
   prompt += `Target routes:\n${routes.map((r) => `- ${r}`).join("\n")}\n\n`;
@@ -420,19 +375,14 @@ export async function runDeepDiveExploration(
 
   prompt += `\n---\n\n${seed.seedPrompt}`;
 
-  const response = await generateWithAI(
-    config,
-    prompt,
-    DEEP_DIVER_SYSTEM_PROMPT,
-    {
-      useMCP: true,
-      repositoryId,
-      actionType: "agent_discover",
-      onLogCreated: options?.onLogCreated,
-      responseFormat: "json_object",
-      mcpConfig: { cdpEndpoint: options.cdpEndpoint },
-    },
-  );
+  const result = await ai.generate(prompt, {
+    actionType: "agent_discover",
+    repositoryId,
+    systemPrompt: DEEP_DIVER_SYSTEM_PROMPT,
+    json: true,
+    browserTools: session,
+  });
+  if (result.promptLogId) options?.onLogCreated?.(result.promptLogId);
 
-  return parseAreasFromResponse(response);
+  return parseAreasFromResponse(result.text);
 }

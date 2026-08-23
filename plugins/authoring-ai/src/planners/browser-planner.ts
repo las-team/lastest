@@ -4,13 +4,21 @@
  * 2. Deep-Dive (MCP, parallel): focused browser exploration of only complex areas
  *
  * Falls back to monolithic exploration if scout fails.
+ *
+ * Every browser claim goes through `ctx.browser.withBrowser` — core owns
+ * claim/release/teardown-on-throw, so a failed dive can never leak an EB
+ * the way the pre-plugin code's manual `claimEB`/`releaseEB` pair could.
  */
 
-import type {
-  PlannerArea,
-  PlannerResult,
-  ScoutOutput,
-} from "@/lib/playwright/planner-types";
+import type { AiCapability, BrowserCapability } from "@lastest/contracts";
+
+import type { AuthoringAiHost } from "../host";
+import {
+  agentDiscoverAreas,
+  runDeepDiveExploration,
+  runScoutClassification,
+} from "../planner-agent";
+import type { PlannerArea, PlannerResult, ScoutOutput } from "../planner-types";
 
 const DEEP_DIVE_CONCURRENCY = 3;
 
@@ -28,29 +36,10 @@ export interface BrowserPlannerOptions {
   onLogCreated?: (logId: string) => void;
 }
 
-async function claimEB(): Promise<
-  { cdpUrl: string; runnerId: string } | undefined
-> {
-  try {
-    const { claimEmbeddedBrowserForAgent } =
-      await import("@/server/actions/ai");
-    return (await claimEmbeddedBrowserForAgent(5 * 60 * 1000)) ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function releaseEB(runnerId: string): Promise<void> {
-  try {
-    const { releasePoolEB } =
-      await import("@/server/actions/embedded-sessions");
-    await releasePoolEB(runnerId);
-  } catch {
-    // non-fatal
-  }
-}
-
 export async function runBrowserPlanner(
+  host: AuthoringAiHost,
+  ai: AiCapability,
+  browser: BrowserCapability,
   repositoryId: string,
   baseUrl: string,
   options?: BrowserPlannerOptions,
@@ -60,24 +49,49 @@ export async function runBrowserPlanner(
 
   // If no other planner data, fall back to monolithic exploration
   if (otherAreas.length === 0) {
-    return runFallbackExploration(repositoryId, baseUrl, options);
+    return runFallbackExploration(
+      host,
+      ai,
+      browser,
+      repositoryId,
+      baseUrl,
+      options,
+    );
   }
 
   // Phase 1: Scout classification (no MCP, fast)
   let scoutOutput: ScoutOutput;
   try {
-    const { runScoutClassification } =
-      await import("@/lib/playwright/planner-agent");
-    scoutOutput = await runScoutClassification(repositoryId, otherAreas, {
-      onLogCreated: options?.onLogCreated,
-    });
+    scoutOutput = await runScoutClassification(
+      host,
+      ai,
+      repositoryId,
+      otherAreas,
+      {
+        onLogCreated: options?.onLogCreated,
+      },
+    );
   } catch {
     // Scout failed — fall back to monolithic
-    return runFallbackExploration(repositoryId, baseUrl, options);
+    return runFallbackExploration(
+      host,
+      ai,
+      browser,
+      repositoryId,
+      baseUrl,
+      options,
+    );
   }
 
   if (scoutOutput.areas.length === 0) {
-    return runFallbackExploration(repositoryId, baseUrl, options);
+    return runFallbackExploration(
+      host,
+      ai,
+      browser,
+      repositoryId,
+      baseUrl,
+      options,
+    );
   }
 
   options?.onScoutComplete?.(scoutOutput);
@@ -119,15 +133,19 @@ export async function runBrowserPlanner(
 
   // Hard fallback: Scout had no areas at all — fall back to monolithic MCP exploration.
   if (exploreAreas.length === 0) {
-    return runFallbackExploration(repositoryId, baseUrl, options);
+    return runFallbackExploration(
+      host,
+      ai,
+      browser,
+      repositoryId,
+      baseUrl,
+      options,
+    );
   }
 
   const deepDiveResults: PlannerArea[] = [];
 
   if (exploreAreas.length > 0) {
-    const { runDeepDiveExploration } =
-      await import("@/lib/playwright/planner-agent");
-
     for (
       let batch = 0;
       batch < exploreAreas.length;
@@ -143,10 +161,6 @@ export async function runBrowserPlanner(
           const diveStart = Date.now();
           let diveLogId: string | undefined;
 
-          // Each diver gets its own EB — they navigate concurrently and
-          // cannot safely share one browser/CDP endpoint.
-          const eb = await claimEB();
-
           const fallbackPlan = () =>
             [
               {
@@ -160,25 +174,27 @@ export async function runBrowserPlanner(
               },
             ] as PlannerArea[];
 
-          if (!eb) {
-            const diveDuration = Date.now() - diveStart;
-            options?.onDeepDiveComplete?.(area.name, 0, diveDuration);
-            return fallbackPlan();
-          }
-
           try {
-            const areas = await runDeepDiveExploration(
-              area.name,
-              area.routes,
-              area.focusPoints,
-              repositoryId,
-              baseUrl,
-              {
-                onLogCreated: (id) => {
-                  diveLogId = id;
-                },
-                cdpEndpoint: eb.cdpUrl,
-              },
+            // Each diver gets its own EB — they navigate concurrently and
+            // cannot safely share one browser session.
+            const areas = await browser.withBrowser(
+              { purpose: "interactive" },
+              (session) =>
+                runDeepDiveExploration(
+                  host,
+                  ai,
+                  session,
+                  area.name,
+                  area.routes,
+                  area.focusPoints,
+                  repositoryId,
+                  baseUrl,
+                  {
+                    onLogCreated: (id) => {
+                      diveLogId = id;
+                    },
+                  },
+                ),
             );
             const diveDuration = Date.now() - diveStart;
             options?.onDeepDiveComplete?.(
@@ -196,10 +212,9 @@ export async function runBrowserPlanner(
               diveDuration,
               diveLogId,
             );
-            // On failure, create a basic plan from scout's focus points
+            // On failure (including "no browser available"), create a basic
+            // plan from scout's focus points.
             return fallbackPlan();
-          } finally {
-            await releaseEB(eb.runnerId);
           }
         }),
       );
@@ -225,6 +240,9 @@ export async function runBrowserPlanner(
 
 /** Fallback: use the original monolithic browser exploration */
 async function runFallbackExploration(
+  host: AuthoringAiHost,
+  ai: AiCapability,
+  browser: BrowserCapability,
   repositoryId: string,
   baseUrl: string,
   options?: BrowserPlannerOptions,
@@ -232,26 +250,17 @@ async function runFallbackExploration(
   const start = Date.now();
   let promptLogId: string | undefined;
 
-  const eb = await claimEB();
-  if (!eb) {
-    return {
-      source: "browser",
-      areas: [],
-      error: "No embedded browsers available — all browsers are busy.",
-      durationMs: Date.now() - start,
-      inputSummary: `Fallback: baseUrl=${baseUrl}`,
-    };
-  }
   try {
-    const { agentDiscoverAreas } =
-      await import("@/lib/playwright/planner-agent");
-    const result = await agentDiscoverAreas(repositoryId, baseUrl, {
-      onLogCreated: (id) => {
-        promptLogId = id;
-        options?.onLogCreated?.(id);
-      },
-      cdpEndpoint: eb.cdpUrl,
-    });
+    const result = await browser.withBrowser(
+      { purpose: "interactive" },
+      (session) =>
+        agentDiscoverAreas(host, ai, session, repositoryId, baseUrl, {
+          onLogCreated: (id) => {
+            promptLogId = id;
+            options?.onLogCreated?.(id);
+          },
+        }),
+    );
     const durationMs = Date.now() - start;
 
     if (!result.success || !result.functionalAreas?.length) {
@@ -266,8 +275,7 @@ async function runFallbackExploration(
       };
     }
 
-    const dbQueries = await import("@/lib/db/queries");
-    const dbAreas = await dbQueries.getFunctionalAreasByRepo(repositoryId);
+    const dbAreas = await host.getFunctionalAreasByRepo(repositoryId);
     const areas = result.functionalAreas.map((fa) => {
       const dbArea = dbAreas.find((a) => a.name === fa.name);
       return {
@@ -289,13 +297,14 @@ async function runFallbackExploration(
     return {
       source: "browser",
       areas: [],
-      error: error instanceof Error ? error.message : "Browser planner failed",
+      error:
+        error instanceof Error
+          ? error.message
+          : "No embedded browsers available — all browsers are busy.",
       promptLogId,
       durationMs: Date.now() - start,
       inputSummary: `Fallback: baseUrl=${baseUrl}`,
     };
-  } finally {
-    await releaseEB(eb.runnerId);
   }
 }
 

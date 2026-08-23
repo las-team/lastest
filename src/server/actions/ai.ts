@@ -18,7 +18,7 @@ import type {
 } from "@/lib/ai/types";
 import { revalidatePath } from "next/cache";
 import { getCurrentBranchForRepo } from "@/lib/git-utils";
-import { agentCreateTest } from "@/lib/playwright/generator-agent";
+import { agentCreateTest } from "@lastest/plugin-authoring-ai/actions";
 import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
 import { awardScore } from "@lastest/plugin-gamification/actions";
 import * as gamificationReads from "@lastest/plugin-gamification/reads";
@@ -240,24 +240,9 @@ export async function aiEnhanceTest(
   testId: string,
   userPrompt?: string,
 ): Promise<{ success: boolean; code?: string; error?: string }> {
-  const { agentEnhanceTest } = await import("@/lib/playwright/enhancer-agent");
-  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-    () => undefined,
-  );
-  if (!eb) {
-    return {
-      success: false,
-      error:
-        "No embedded browsers available — all browsers are busy. Please try again later.",
-    };
-  }
-  try {
-    return await agentEnhanceTest(repositoryId, testId, userPrompt, {
-      cdpEndpoint: eb.cdpUrl,
-    });
-  } finally {
-    await releasePoolEB(eb.runnerId).catch(() => {});
-  }
+  const { agentEnhanceTest } =
+    await import("@lastest/plugin-authoring-ai/actions");
+  return agentEnhanceTest(repositoryId, testId, userPrompt);
 }
 
 export async function saveGeneratedTest(data: {
@@ -357,34 +342,6 @@ export async function startGenerateTestAgent(data: {
     // Fire-and-forget background execution
     (async () => {
       const startTime = Date.now();
-      // Wait for an EB from the pool (queues if all busy)
-      const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
-        queries
-          .updateAgentSession(session.id, {
-            metadata: { ...session.metadata, queuedForBrowser: true } as Record<
-              string,
-              unknown
-            >,
-          })
-          .catch(() => {});
-      });
-      if (!eb) {
-        throw new Error(
-          "No browsers available — all browsers are busy. Please try again later.",
-        );
-      }
-      console.log(
-        `[GenerateTestAgent] Claimed pool EB ${eb.runnerId.slice(0, 8)}, CDP: ${eb.cdpUrl}`,
-      );
-      await queries
-        .updateAgentSession(session.id, {
-          metadata: {
-            ...session.metadata,
-            streamUrl: eb.streamUrl,
-            queuedForBrowser: false,
-          } as Record<string, unknown>,
-        })
-        .catch(() => {});
       try {
         const result = await agentCreateTest(
           data.repositoryId,
@@ -393,7 +350,29 @@ export async function startGenerateTestAgent(data: {
             targetUrl: data.targetUrl,
             routePath: data.targetUrl,
           },
-          { headless: data.headless, cdpEndpoint: eb.cdpUrl },
+          {
+            onQueued: () => {
+              queries
+                .updateAgentSession(session.id, {
+                  metadata: {
+                    ...session.metadata,
+                    queuedForBrowser: true,
+                  } as Record<string, unknown>,
+                })
+                .catch(() => {});
+            },
+            onSessionReady: (streamUrl) => {
+              queries
+                .updateAgentSession(session.id, {
+                  metadata: {
+                    ...session.metadata,
+                    streamUrl: streamUrl ?? undefined,
+                    queuedForBrowser: false,
+                  } as Record<string, unknown>,
+                })
+                .catch(() => {});
+            },
+          },
         );
 
         if (!result.success || !result.code) {
@@ -496,14 +475,6 @@ export async function startGenerateTestAgent(data: {
           durationMs: Date.now() - startTime,
           promptLogId: null,
         }).catch(() => {});
-      } finally {
-        // Always release the EB back to the pool
-        if (eb) {
-          await releasePoolEB(eb.runnerId);
-          console.log(
-            `[GenerateTestAgent] Released pool EB ${eb.runnerId.slice(0, 8)}`,
-          );
-        }
       }
     })();
 
@@ -589,34 +560,6 @@ export async function startGeneratePlaceholderTestAgent(data: {
     // Fire-and-forget background execution
     (async () => {
       const startTime = Date.now();
-      // Wait for an EB from the pool (queues if all busy)
-      const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
-        queries
-          .updateAgentSession(session.id, {
-            metadata: { ...session.metadata, queuedForBrowser: true } as Record<
-              string,
-              unknown
-            >,
-          })
-          .catch(() => {});
-      });
-      if (!eb) {
-        throw new Error(
-          "No browsers available — all browsers are busy. Please try again later.",
-        );
-      }
-      console.log(
-        `[GeneratePlaceholderAgent] Claimed pool EB ${eb.runnerId.slice(0, 8)}, CDP: ${eb.cdpUrl}`,
-      );
-      await queries
-        .updateAgentSession(session.id, {
-          metadata: {
-            ...session.metadata,
-            streamUrl: eb.streamUrl,
-            queuedForBrowser: false,
-          } as Record<string, unknown>,
-        })
-        .catch(() => {});
       try {
         const result = await agentCreateTest(
           data.repositoryId,
@@ -627,7 +570,29 @@ export async function startGeneratePlaceholderTestAgent(data: {
             routePath: test.targetUrl ?? undefined,
             functionalAreaId: test.functionalAreaId ?? undefined,
           },
-          { cdpEndpoint: eb.cdpUrl },
+          {
+            onQueued: () => {
+              queries
+                .updateAgentSession(session.id, {
+                  metadata: {
+                    ...session.metadata,
+                    queuedForBrowser: true,
+                  } as Record<string, unknown>,
+                })
+                .catch(() => {});
+            },
+            onSessionReady: (streamUrl) => {
+              queries
+                .updateAgentSession(session.id, {
+                  metadata: {
+                    ...session.metadata,
+                    streamUrl: streamUrl ?? undefined,
+                    queuedForBrowser: false,
+                  } as Record<string, unknown>,
+                })
+                .catch(() => {});
+            },
+          },
         );
 
         if (!result.success || !result.code) {
@@ -752,14 +717,6 @@ export async function startGeneratePlaceholderTestAgent(data: {
           durationMs: Date.now() - startTime,
           promptLogId: null,
         }).catch(() => {});
-      } finally {
-        // Always release the EB back to the pool
-        if (eb) {
-          await releasePoolEB(eb.runnerId);
-          console.log(
-            `[GeneratePlaceholderAgent] Released pool EB ${eb.runnerId.slice(0, 8)}`,
-          );
-        }
       }
     })();
 
@@ -926,24 +883,9 @@ export async function healTest(
       error: "Forbidden: test does not belong to that repository",
     };
   }
-  const { agentHealTest } = await import("@/lib/playwright/healer-agent");
-  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-    () => undefined,
-  );
-  if (!eb) {
-    return {
-      success: false,
-      error:
-        "No embedded browsers available — all browsers are busy. Please try again later.",
-    };
-  }
-  try {
-    return await agentHealTest(repositoryId, testId, {
-      cdpEndpoint: eb.cdpUrl,
-    });
-  } finally {
-    await releasePoolEB(eb.runnerId).catch(() => {});
-  }
+  const { agentHealTest } =
+    await import("@lastest/plugin-authoring-ai/actions");
+  return agentHealTest(repositoryId, testId);
 }
 
 /**
@@ -1002,38 +944,31 @@ export async function startHealTestAgent(data: {
     // Fire-and-forget background execution
     (async () => {
       const startTime = Date.now();
-      const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
-        queries
-          .updateAgentSession(session.id, {
-            metadata: { ...session.metadata, queuedForBrowser: true } as Record<
-              string,
-              unknown
-            >,
-          })
-          .catch(() => {});
-      });
-      if (!eb) {
-        throw new Error(
-          "No browsers available — all browsers are busy. Please try again later.",
-        );
-      }
-      console.log(
-        `[HealTestAgent] Claimed pool EB ${eb.runnerId.slice(0, 8)}, CDP: ${eb.cdpUrl}`,
-      );
-      await queries
-        .updateAgentSession(session.id, {
-          metadata: {
-            ...session.metadata,
-            streamUrl: eb.streamUrl,
-            queuedForBrowser: false,
-          } as Record<string, unknown>,
-        })
-        .catch(() => {});
       try {
-        const { agentHealTestCore } =
-          await import("@/lib/playwright/healer-agent");
+        const { agentHealTest: agentHealTestCore } =
+          await import("@lastest/plugin-authoring-ai/actions");
         const result = await agentHealTestCore(data.repositoryId, data.testId, {
-          cdpEndpoint: eb.cdpUrl,
+          onQueued: () => {
+            queries
+              .updateAgentSession(session.id, {
+                metadata: {
+                  ...session.metadata,
+                  queuedForBrowser: true,
+                } as Record<string, unknown>,
+              })
+              .catch(() => {});
+          },
+          onSessionReady: (streamUrl) => {
+            queries
+              .updateAgentSession(session.id, {
+                metadata: {
+                  ...session.metadata,
+                  streamUrl: streamUrl ?? undefined,
+                  queuedForBrowser: false,
+                } as Record<string, unknown>,
+              })
+              .catch(() => {});
+          },
         });
 
         if (!result.success || !result.code) {
@@ -1131,13 +1066,6 @@ export async function startHealTestAgent(data: {
           durationMs: Date.now() - startTime,
           promptLogId: null,
         }).catch(() => {});
-      } finally {
-        if (eb) {
-          await releasePoolEB(eb.runnerId);
-          console.log(
-            `[HealTestAgent] Released pool EB ${eb.runnerId.slice(0, 8)}`,
-          );
-        }
       }
     })();
 
@@ -1161,7 +1089,8 @@ export async function healTests(
   failed: number;
   errors: string[];
 }> {
-  const { agentHealTests } = await import("@/lib/playwright/healer-agent");
+  const { agentHealTests } =
+    await import("@lastest/plugin-authoring-ai/actions");
   return agentHealTests(testIds, repositoryId);
 }
 
@@ -1170,24 +1099,9 @@ export async function healTests(
  */
 export async function createTest(
   repositoryId: string,
-  context: TestGenerationContext,
+  testContext: TestGenerationContext,
 ): Promise<{ success: boolean; code?: string; error?: string }> {
-  const { agentCreateTest } = await import("@/lib/playwright/generator-agent");
-  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-    () => undefined,
-  );
-  if (!eb) {
-    return {
-      success: false,
-      error:
-        "No embedded browsers available — all browsers are busy. Please try again later.",
-    };
-  }
-  try {
-    return await agentCreateTest(repositoryId, context, {
-      cdpEndpoint: eb.cdpUrl,
-    });
-  } finally {
-    await releasePoolEB(eb.runnerId).catch(() => {});
-  }
+  const { agentCreateTest: createTestViaAgent } =
+    await import("@lastest/plugin-authoring-ai/actions");
+  return createTestViaAgent(repositoryId, testContext);
 }

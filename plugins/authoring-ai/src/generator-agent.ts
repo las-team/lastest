@@ -1,21 +1,28 @@
 /**
- * Generator Agent — generates Playwright test code from specs/plans
- * by using the AI provider with Playwright MCP tools to verify selectors live.
+ * Generator Agent — generates Playwright test code from specs/plans by
+ * giving the AI provider live MCP browser tools bound to a core-issued
+ * `BrowserSession`, so it can verify selectors against the real page
+ * instead of hallucinating them.
  *
- * Uses the official Playwright Test Generator agent prompt with the
- * `playwright-test` MCP server (npx playwright run-test-mcp-server).
+ * Uses the official Playwright Test Generator agent prompt.
  */
 
-import * as queries from "@/lib/db/queries";
-import { requireRepoAccess } from "@/lib/auth";
-import { generateWithAI } from "@/lib/ai";
+import type { AiCapability, BrowserSession } from "@lastest/contracts";
 import {
   extractCodeFromResponse,
   SELECTOR_ROBUSTNESS_RULES,
-} from "@/lib/ai/prompts";
-import type { TestGenerationContext } from "@/lib/ai/types";
-import { runValidationWithRetry } from "@/lib/ai/validation-retry";
-import { getAIConfig, buildSeedFixture } from "./agent-context";
+} from "@lastest/ai-kit";
+
+import type { AuthoringAiHost } from "./host";
+import {
+  groupScenariosForGeneration,
+  parseScenariosFromPlan,
+  type ScenarioGroup,
+} from "./scenario-grouping";
+import { runValidationWithRetry } from "./validation";
+
+export { parseScenariosFromPlan, groupScenariosForGeneration };
+export type { ScenarioGroup };
 
 // ---------------------------------------------------------------------------
 // Generator system prompt (derived from Playwright's generator agent definition)
@@ -77,40 +84,46 @@ CRITICAL RULES:
 ${SELECTOR_ROBUSTNESS_RULES}`;
 
 // ---------------------------------------------------------------------------
-// Scenario parser — extracts individual test scenarios from an area's plan
+// Context passed in by the caller (matches the pre-plugin TestGenerationContext)
 // ---------------------------------------------------------------------------
 
-// Re-export pure parsing/grouping functions from shared module (usable in client components)
-import {
-  parseScenariosFromPlan,
-  groupScenariosForGeneration,
-} from "./scenario-grouping";
-import type { ParsedScenario, ScenarioGroup } from "./scenario-grouping";
-export { parseScenariosFromPlan, groupScenariosForGeneration };
-export type { ParsedScenario, ScenarioGroup };
-
-// ---------------------------------------------------------------------------
-// Server-action-compatible wrapper
-// ---------------------------------------------------------------------------
+export interface GeneratorContext {
+  functionalAreaId?: string;
+  testName?: string;
+  /** Not read by the generator itself — carried for parity with callers'
+   *  broader `TestGenerationContext` shape. */
+  targetUrl?: string;
+  /** Not read either — the generator derives its base URL from the seed
+   *  fixture's env config, not from caller input. */
+  baseUrl?: string;
+  routePath?: string;
+  userPrompt?: string;
+  scanContext?: {
+    specDescription?: string;
+    testSuggestions?: string[];
+  };
+  preAuthenticated?: boolean;
+  scenarioGroup?: ScenarioGroup;
+}
 
 /**
- * Generate a test using the PW Generator agent.
- * Uses the AI provider + Playwright MCP tools to verify selectors live.
+ * Generate a test using the PW Generator agent, on an already-claimed
+ * browser session (`ctx.browser.withBrowser`'s callback argument).
  *
- * When `scenarioGroup` is provided, generates a multi-step test covering all scenarios in the group.
- * Otherwise generates a test from the full area plan (legacy behavior).
+ * When `scenarioGroup` is provided, generates a multi-step test covering
+ * all scenarios in the group. Otherwise generates a test from the full
+ * area plan (legacy behavior).
  */
 export async function agentCreateTest(
+  host: AuthoringAiHost,
+  ai: AiCapability,
+  session: BrowserSession,
   repositoryId: string,
-  context: TestGenerationContext & { scenarioGroup?: ScenarioGroup },
-  options?: { signal?: AbortSignal; headless?: boolean; cdpEndpoint?: string },
+  context: GeneratorContext,
+  options?: { signal?: AbortSignal },
 ): Promise<{ success: boolean; code?: string; error?: string }> {
-  await requireRepoAccess(repositoryId);
-
   try {
-    const settings = await queries.getAISettings(repositoryId);
-    const config = getAIConfig(settings);
-    const seed = await buildSeedFixture(repositoryId);
+    const seed = await host.buildSeedFixture(repositoryId);
 
     let prompt = "";
 
@@ -122,9 +135,11 @@ export async function agentCreateTest(
       prompt += `Create ONE test function that walks through all ${g.scenarioCount} scenarios in sequence.\n`;
       prompt += `Group interactions on the same page together for efficiency.\n`;
     } else if (context.functionalAreaId) {
-      const area = await queries.getFunctionalArea(context.functionalAreaId);
-      if (area?.agentPlan) {
-        prompt = `Generate a Playwright test based on this test plan:\n\n${area.agentPlan}\n\n`;
+      const agentPlan = await host.getFunctionalAreaPlan(
+        context.functionalAreaId,
+      );
+      if (agentPlan) {
+        prompt = `Generate a Playwright test based on this test plan:\n\n${agentPlan}\n\n`;
       }
     }
 
@@ -148,73 +163,25 @@ export async function agentCreateTest(
 
     prompt += `\n\nTarget base URL: ${seed.baseUrl}`;
     prompt += `\nNavigate to the page, explore it using MCP tools, then generate the test code.`;
-    // The QA agent may have injected an authenticated session directly into the
-    // exploration browser (context.preAuthenticated) even when the repo has no
-    // login-bearing default setup step (seed.hasLoginSetup is false for a
-    // per-test storage_state override). Honor either signal so the generator's
-    // auth story matches the browser it is actually driving.
+    // The QA agent may have injected an authenticated session directly into
+    // the exploration browser (context.preAuthenticated) even when the repo
+    // has no login-bearing default setup step (seed.hasLoginSetup is false
+    // for a per-test storage_state override). Honor either signal so the
+    // generator's auth story matches the browser it is actually driving.
     if (seed.hasLoginSetup || context.preAuthenticated) {
       prompt += `\n\n**IMPORTANT: Do NOT include login/auth/setup steps in your generated test code. Authentication is applied automatically before the test runs (an injected session or a setup script), and your MCP exploration browser is already signed in. Your test should assume the user is already logged in — start directly on the page being tested. If exploration lands on a login page, the session lapsed: report it rather than scripting a manual login.**`;
     }
     prompt += `\n\n---\n\n${seed.seedPrompt}`;
 
-    // Configure Playwright MCP for the AI provider.
-    // For claude-agent-sdk: configure MCP servers directly on config (native MCP support).
-    // For other providers: pass useMCP + mcpConfig to let generateWithAI use the MCP bridge.
-    // A CDP endpoint (Embedded Browser) is mandatory — without it
-    // @playwright/mcp launches Chromium in THIS host process, running
-    // AI-driven browser actions outside the sandbox.
-    if (!options?.cdpEndpoint) {
-      throw new Error(
-        "[GeneratorAgent] cdpEndpoint is required — refusing to launch a host-process browser. Claim an Embedded Browser first.",
-      );
-    }
-    const mcpArgs = [
-      "@playwright/mcp@latest",
-      "--cdp-endpoint",
-      options.cdpEndpoint,
-      "--headless",
-    ];
-
-    console.log(
-      `[GeneratorAgent] MCP using CDP endpoint: ${options.cdpEndpoint}`,
-    );
-
-    if (config.provider === "claude-agent-sdk") {
-      config.agentSdkStrictMcpConfig = true;
-      config.agentSdkMcpServers = {
-        playwright: { command: "npx", args: mcpArgs },
-      };
-      config.agentSdkAllowedTools = ["mcp__playwright__*"];
-      config.agentSdkDisallowedTools = [
-        "Bash",
-        "Write",
-        "Edit",
-        "NotebookEdit",
-      ];
-    }
-
-    const useMCP = config.provider !== "claude-agent-sdk";
-
     const callLLM = async (userPrompt: string): Promise<string> => {
-      const response = await generateWithAI(
-        config,
-        userPrompt,
-        GENERATOR_SYSTEM_PROMPT,
-        {
-          repositoryId,
-          actionType: "agent_generate",
-          signal: options?.signal,
-          useMCP,
-          ...(useMCP && {
-            mcpConfig: {
-              servers: { playwright: { command: "npx", args: mcpArgs } },
-              cdpEndpoint: options?.cdpEndpoint,
-            },
-          }),
-        },
-      );
-      return extractCodeFromResponse(response) ?? "";
+      const result = await ai.generate(userPrompt, {
+        actionType: "agent_generate",
+        repositoryId,
+        systemPrompt: GENERATOR_SYSTEM_PROMPT,
+        signal: options?.signal,
+        browserTools: session,
+      });
+      return extractCodeFromResponse(result.text) ?? "";
     };
 
     const initial = await callLLM(prompt);
@@ -223,6 +190,7 @@ export async function agentCreateTest(
     }
 
     const validated = await runValidationWithRetry(
+      host,
       initial,
       async (feedback, attempt) => {
         console.log(

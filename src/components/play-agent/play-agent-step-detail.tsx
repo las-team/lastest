@@ -20,7 +20,7 @@ import type {
   AgentSubstep,
   AgentRichResultPlanArea,
 } from "@/lib/db/schema";
-import { groupScenariosForGeneration } from "@/lib/playwright/scenario-grouping";
+import { groupScenariosForGeneration } from "@lastest/plugin-authoring-ai/scenario-grouping";
 
 interface PlayAgentStepDetailProps {
   step: AgentStepState;

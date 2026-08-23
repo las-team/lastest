@@ -3,10 +3,8 @@
 import * as queries from "@/lib/db/queries";
 import { requireRepoAccess } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
-import { agentDiscoverAreas as runAgentDiscovery } from "@/lib/playwright/planner-agent";
+import { agentDiscoverAreas as runAgentDiscovery } from "@lastest/plugin-authoring-ai/actions";
 import { aiScanRoutes, type DiscoveredArea } from "./ai-routes";
-import { claimEmbeddedBrowserForAgent } from "./ai";
-import { releasePoolEB } from "./embedded-sessions";
 
 /**
  * Unified area discovery server action.
@@ -28,23 +26,18 @@ export async function discoverAreas(
   const envConfig = await queries.getEnvironmentConfig(repositoryId);
   const baseUrl = envConfig?.baseUrl || "http://localhost:3000";
 
-  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-    () => undefined,
+  // `ctx.browser.withBrowser` (inside runAgentDiscovery) claims and releases
+  // the Embedded Browser itself; a claim failure surfaces as a rejected
+  // promise rather than an `undefined` claim result.
+  const result = await runAgentDiscovery(repositoryId, baseUrl).catch(
+    (error) => ({
+      success: false as const,
+      error:
+        error instanceof Error
+          ? error.message
+          : "No embedded browsers available",
+    }),
   );
-
-  // No EB available — skip live browser exploration entirely (never fall
-  // back to a host-process Chromium) and go straight to the AI code scan.
-  const result = eb
-    ? await (async () => {
-        try {
-          return await runAgentDiscovery(repositoryId, baseUrl, {
-            cdpEndpoint: eb.cdpUrl,
-          });
-        } finally {
-          await releasePoolEB(eb.runnerId).catch(() => {});
-        }
-      })()
-    : { success: false as const, error: "No embedded browsers available" };
 
   if (result.success && result.functionalAreas) {
     revalidatePath("/areas");

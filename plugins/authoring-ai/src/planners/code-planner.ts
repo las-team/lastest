@@ -1,21 +1,23 @@
 /**
- * Code Planner — scans the repository's codebase to discover routes and areas.
- * Uses the existing aiScanRoutes() function.
+ * Code Planner — scans the repository's codebase to discover routes and
+ * areas via the sideways, unmigrated `ai-routes.ts` (recipe §1.6.2 — a
+ * host method filled by the composition root, not a promotion; see
+ * `../host.ts`'s header for why `ai-routes.ts` stays unclassified).
  */
 
-import type { PlannerResult } from "@/lib/playwright/planner-types";
-import type { CodebaseIntelligenceContext } from "@/lib/ai/types";
+import type { AuthoringAiHost, AuthoringAiIntelligence } from "../host";
+import type { PlannerResult } from "../planner-types";
 
 export async function runCodePlanner(
+  host: AuthoringAiHost,
   repositoryId: string,
   branch: string,
-  intelligence?: CodebaseIntelligenceContext,
+  intelligence?: AuthoringAiIntelligence,
 ): Promise<PlannerResult> {
   const start = Date.now();
 
   try {
-    const { aiScanRoutes } = await import("@/server/actions/ai-routes");
-    const result = await aiScanRoutes(repositoryId, branch, intelligence);
+    const result = await host.aiScanRoutes(repositoryId, branch, intelligence);
     const durationMs = Date.now() - start;
 
     if (!result.success || !result.functionalAreas?.length) {
@@ -54,10 +56,10 @@ export async function runCodePlanner(
 
 function buildCodeTestPlan(
   areaName: string,
-  routes: Array<{
+  routes: ReadonlyArray<{
     path: string;
     description?: string;
-    testSuggestions?: string[];
+    testSuggestions?: readonly string[];
   }>,
 ): string {
   const lines: string[] = [`## ${areaName} (from codebase scan)\n`];

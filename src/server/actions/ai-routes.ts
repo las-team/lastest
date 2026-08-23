@@ -387,7 +387,7 @@ export async function discoverAreas(
 }> {
   if (baseURL) {
     const { agentDiscoverAreas } =
-      await import("@/lib/playwright/planner-agent");
+      await import("@lastest/plugin-authoring-ai/actions");
     return agentDiscoverAreas(repositoryId, baseURL);
   }
   return aiScanRoutes(repositoryId, branch, intelligence);

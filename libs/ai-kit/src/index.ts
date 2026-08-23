@@ -8,3 +8,7 @@
  * here, where changing it does not require a core review.
  */
 export { parseAiJson, type ParseAiJsonOptions } from "./json-parse";
+export {
+  extractCodeFromResponse,
+  SELECTOR_ROBUSTNESS_RULES,
+} from "./response-code";

@@ -25,6 +25,7 @@ import { sql } from "@lastest/db";
 import { configureA11y } from "@lastest/plugin-a11y";
 import { configureApiTest } from "@lastest/plugin-api-test";
 import { configureAppMap } from "@lastest/plugin-app-map";
+import { configureAuthoringAi } from "@lastest/plugin-authoring-ai";
 import { configureAwards } from "@lastest/plugin-awards";
 import { configureCi } from "@lastest/plugin-ci";
 import { configureDataSources } from "@lastest/plugin-data-sources";
@@ -48,6 +49,7 @@ import { getLogger } from "@/lib/logger";
 import { createAiFactory } from "@/lib/core/ai-capability";
 import { appApiTestHost } from "@/lib/core/api-test-host";
 import { appAppMapHost } from "@/lib/core/app-map-host";
+import { appAuthoringAiHost } from "@/lib/core/authoring-ai-host";
 import { appAwardsHost } from "@/lib/core/awards-host";
 import { appBrowserHost } from "@/lib/core/browser-host";
 import { appCiHost } from "@/lib/core/ci-host";
@@ -227,6 +229,7 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
   configureA11y({ runtime, data: data.capability("a11y") });
   configureRca({ runtime, host: appRcaHost });
   configureAppMap({ runtime, host: appAppMapHost });
+  configureAuthoringAi({ runtime, host: appAuthoringAiHost });
   configureApiTest({ runtime, host: appApiTestHost });
   // No `runtime` — the launch board has no tenant, so there is no scope to
   // build a `ctx` from and nothing to build one for. See

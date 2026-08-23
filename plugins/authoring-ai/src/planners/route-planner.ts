@@ -3,17 +3,18 @@
  * produce test plan areas. Pure DB logic, no AI calls.
  */
 
-import * as queries from "@/lib/db/queries";
-import type { PlannerResult } from "@/lib/playwright/planner-types";
+import type { PlannerResult } from "../planner-types";
+import type { AuthoringAiHost } from "../host";
 
 export async function runRoutePlanner(
+  host: AuthoringAiHost,
   repositoryId: string,
 ): Promise<PlannerResult> {
   const start = Date.now();
   try {
     const [routes, areas] = await Promise.all([
-      queries.getRoutesByRepo(repositoryId),
-      queries.getFunctionalAreasByRepo(repositoryId),
+      host.getRoutesByRepo(repositoryId),
+      host.getFunctionalAreasByRepo(repositoryId),
     ]);
 
     if (routes.length === 0) {

@@ -3,15 +3,20 @@
  * generate a test via AI, heal a broken selector, and confirm what actually
  * gets written to `ai_prompt_logs`.
  *
- * Both flows are exercised through their real underlying functions
- * (`generateWithAI`, `agentHealTestCore`) rather than the `"use server"`
- * actions that wrap them (`startGenerateTestAgent`, `healTest` in
- * `src/server/actions/ai.ts`) — those wrappers open with `requireRepoAccess`,
- * a session-based guard that needs `headers()`/cookies, unavailable outside
- * a real Next.js request. `agentHealTestCore` is literally the same function
- * `healTest` calls after its own `requireRepoAccess` check, so this exercises
- * 100% of the AI/heal logic, just not the auth wrapper (already covered
- * generically elsewhere, and untouched by this refactor).
+ * The generate half calls `generateWithAI` directly (unaffected by the
+ * `authoring-ai` plugin migration — `ctx.ai.generate()` is a thin wrapper
+ * over the same function, see `src/lib/core/ai-capability.ts`). The heal
+ * half now goes through `@lastest/plugin-authoring-ai/healer-agent`'s
+ * `agentHealTest` on a real `PluginContext`, built the same way
+ * `dispatchDueExplorerTriggers` does it
+ * (`plugins/explorer/src/explorer.integration.test.ts`'s header explains
+ * why): `resolveScope`'s `{ repositoryId, teamId }` branch is the only one
+ * reachable outside a real HTTP request/session, which is what a Vitest
+ * process is. The plugin's own `"use server"` actions
+ * (`@lastest/plugin-authoring-ai/actions`) only accept `repositoryId` and
+ * fall through to the session-based branch, so this test builds its
+ * `PluginContext` directly via `getPluginRuntime()` instead of importing
+ * those actions.
  *
  * FINDING (corrects the test plan's framing, not a refactor regression):
  * `ai_prompt_logs` (`packages/db/src/schema/settings.ts`) has never had
@@ -46,9 +51,10 @@ import {
   SYSTEM_PROMPT,
 } from "@/lib/ai";
 import { getAIConfig } from "@/lib/playwright/agent-context";
-import { agentHealTestCore } from "@/lib/playwright/healer-agent";
-import { claimEmbeddedBrowserForAgent } from "@/server/actions/ai";
-import { releasePoolEB } from "@/server/actions/embedded-sessions";
+import { agentHealTest } from "@lastest/plugin-authoring-ai/healer-agent";
+import { authoringAiPlugin } from "@lastest/plugin-authoring-ai";
+import { getPluginRuntime } from "@/lib/core/runtime";
+import { appAuthoringAiHost } from "@/lib/core/authoring-ai-host";
 
 const TARGET = "https://the-internet.herokuapp.com/login";
 
@@ -136,7 +142,7 @@ describe("Authoring AI — generate a test via AI", () => {
 });
 
 describe("Authoring AI — heal a broken selector", () => {
-  it("agentHealTestCore fixes a deliberately broken selector against a live EB and logs a real ai_prompt_logs row", async () => {
+  it("agentHealTest fixes a deliberately broken selector against a live EB and logs a real ai_prompt_logs row", async () => {
     await expect
       .poll(poolHeadroom, { timeout: 90_000, interval: 1_000 })
       .toBeGreaterThanOrEqual(1);
@@ -164,28 +170,30 @@ describe("Authoring AI — heal a broken selector", () => {
         'locator.fill: Timeout 30000ms exceeded.\nwaiting for locator("#this-field-does-not-exist-12345")',
     });
 
-    const eb = await claimEmbeddedBrowserForAgent(120_000);
-    expect(eb).toBeTruthy();
-    try {
-      const result = await agentHealTestCore(repoId, test.id, {
-        cdpEndpoint: eb!.cdpUrl,
-      });
+    const runtime = await getPluginRuntime();
+    const ctx = await runtime.contextFor(authoringAiPlugin, {
+      repositoryId: repoId,
+      teamId,
+    });
 
-      expect(result.success).toBe(true);
-      expect(result.code).toBeTruthy();
-      // The healer must actually change something — the broken locator
-      // must not survive into the "fixed" code.
-      expect(result.code).not.toContain("this-field-does-not-exist-12345");
+    const result = await ctx.browser.withBrowser(
+      { purpose: "interactive", deadlineMs: 120_000 },
+      (session) =>
+        agentHealTest(appAuthoringAiHost, ctx.ai, session, repoId, test.id),
+    );
 
-      const logs = await queries.getAIPromptLogs(repoId);
-      const healLog = logs.find((l) => l.actionType === "agent_heal");
-      expect(healLog).toBeTruthy();
-      expect(healLog!.status).toBe("success");
-      expect(healLog!.response).toBeTruthy();
-      expect("inputTokens" in healLog!).toBe(false);
-    } finally {
-      await releasePoolEB(eb!.runnerId).catch(() => {});
-    }
+    expect(result.success).toBe(true);
+    expect(result.code).toBeTruthy();
+    // The healer must actually change something — the broken locator
+    // must not survive into the "fixed" code.
+    expect(result.code).not.toContain("this-field-does-not-exist-12345");
+
+    const logs = await queries.getAIPromptLogs(repoId);
+    const healLog = logs.find((l) => l.actionType === "agent_heal");
+    expect(healLog).toBeTruthy();
+    expect(healLog!.status).toBe("success");
+    expect(healLog!.response).toBeTruthy();
+    expect("inputTokens" in healLog!).toBe(false);
 
     const statusAfter = await getPoolStatus();
     if (statusAfter) {

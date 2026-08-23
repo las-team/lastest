@@ -1,21 +1,18 @@
 /**
- * Enhancer Agent — improves existing tests by using the AI provider
- * with Playwright MCP tools to inspect the live UI and enhance test
- * coverage, selectors, and assertions.
- *
- * Uses MCP browser tools to verify selectors live, avoiding blind
- * hallucination of selectors that may not exist.
+ * Enhancer Agent — improves existing tests by giving the AI provider live
+ * MCP browser tools bound to a core-issued `BrowserSession`, so it can
+ * inspect the live UI and enhance test coverage, selectors, and
+ * assertions instead of hallucinating them.
  */
 
-import * as queries from "@/lib/db/queries";
-import { requireRepoAccess } from "@/lib/auth";
-import { generateWithAI } from "@/lib/ai";
+import type { AiCapability, BrowserSession } from "@lastest/contracts";
 import {
   extractCodeFromResponse,
   SELECTOR_ROBUSTNESS_RULES,
-} from "@/lib/ai/prompts";
-import { runValidationWithRetry } from "@/lib/ai/validation-retry";
-import { getAIConfig, buildSeedFixture } from "./agent-context";
+} from "@lastest/ai-kit";
+
+import type { AuthoringAiHost } from "./host";
+import { runValidationWithRetry } from "./validation";
 
 // ---------------------------------------------------------------------------
 // Enhancer system prompt
@@ -62,30 +59,25 @@ CRITICAL RULES:
 
 ${SELECTOR_ROBUSTNESS_RULES}`;
 
-// ---------------------------------------------------------------------------
-// Server-action-compatible wrappers
-// ---------------------------------------------------------------------------
-
 /**
- * Enhance an existing test using the PW Enhancer agent.
- * Uses the AI provider + Playwright MCP tools to inspect and improve.
+ * Enhance an existing test using the PW Enhancer agent, on an
+ * already-claimed browser session.
  */
 export async function agentEnhanceTest(
+  host: AuthoringAiHost,
+  ai: AiCapability,
+  session: BrowserSession,
   repositoryId: string,
   testId: string,
   userPrompt?: string,
-  options?: { cdpEndpoint?: string },
 ): Promise<{ success: boolean; code?: string; error?: string }> {
-  await requireRepoAccess(repositoryId);
   try {
-    const test = await queries.getTest(testId);
+    const test = await host.getTestForHealing(testId);
     if (!test) {
       return { success: false, error: "Test not found" };
     }
 
-    const settings = await queries.getAISettings(repositoryId);
-    const config = getAIConfig(settings);
-    const seed = await buildSeedFixture(repositoryId);
+    const seed = await host.buildSeedFixture(repositoryId);
 
     const enhanceInstructions = userPrompt
       ? `\n\n**Enhancement request:**\n${userPrompt}`
@@ -107,57 +99,14 @@ Navigate to the relevant page using MCP tools, inspect the current UI state via 
 
 ${seed.seedPrompt}`;
 
-    // Configure Playwright MCP for the AI provider (matches healer-agent pattern).
-    // The system prompt above expects browser_snapshot/browser_navigate from
-    // @playwright/mcp — NOT the test-runner MCP that generateWithAI's fallback
-    // would otherwise inject for claude-agent-sdk.
-    // A CDP endpoint (Embedded Browser) is mandatory — without it
-    // @playwright/mcp launches Chromium in THIS host process.
-    if (!options?.cdpEndpoint) {
-      throw new Error(
-        "[EnhancerAgent] cdpEndpoint is required — refusing to launch a host-process browser. Claim an Embedded Browser first.",
-      );
-    }
-    const mcpArgs = [
-      "@playwright/mcp@latest",
-      "--cdp-endpoint",
-      options.cdpEndpoint,
-      "--headless",
-    ];
-
-    if (config.provider === "claude-agent-sdk") {
-      config.agentSdkStrictMcpConfig = true;
-      config.agentSdkMcpServers = {
-        playwright: { command: "npx", args: mcpArgs },
-      };
-      config.agentSdkAllowedTools = ["mcp__playwright__*"];
-      config.agentSdkDisallowedTools = [
-        "Bash",
-        "Write",
-        "Edit",
-        "NotebookEdit",
-      ];
-    }
-
-    const useMCP = config.provider !== "claude-agent-sdk";
-
     const callLLM = async (userPrompt: string): Promise<string> => {
-      const response = await generateWithAI(
-        config,
-        userPrompt,
-        ENHANCER_SYSTEM_PROMPT,
-        {
-          repositoryId,
-          actionType: "enhance_test",
-          useMCP,
-          ...(useMCP && {
-            mcpConfig: {
-              servers: { playwright: { command: "npx", args: mcpArgs } },
-            },
-          }),
-        },
-      );
-      return extractCodeFromResponse(response) ?? "";
+      const result = await ai.generate(userPrompt, {
+        actionType: "enhance_test",
+        repositoryId,
+        systemPrompt: ENHANCER_SYSTEM_PROMPT,
+        browserTools: session,
+      });
+      return extractCodeFromResponse(result.text) ?? "";
     };
 
     const initial = await callLLM(prompt);
@@ -169,6 +118,7 @@ ${seed.seedPrompt}`;
     }
 
     const validated = await runValidationWithRetry(
+      host,
       initial,
       async (feedback, attempt) => {
         console.log(

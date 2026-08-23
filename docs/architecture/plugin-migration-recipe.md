@@ -105,8 +105,10 @@ orchestrates, as its own PR, first.
 Measured so far: `ranger` **1** (done), `scheduling` **1** (done),
 `playground` **3** (done), `data-sources` **3** (done), `launch` **4** (done),
 `api-test` **5** (done), `rca` **6** (done), `app-map` **9** (done),
-`gamification` **9** (done), `ci` **9** (done), `url-diff` **~22** (never
-migrated — reclassified as core, RFC §9 phase 4).
+`gamification` **9** (done), `ci` **9** (done), `authoring-ai` **17**,
+grouping to 9 items (done — stopped once, re-costed to Go once a blocking
+core PR landed; see below), `url-diff` **~22** (never migrated —
+reclassified as core, RFC §9 phase 4).
 
 > **A port of 1 is not proof of a cheap migration.** `ranger` costed lowest
 > of anything migrated so far and came out 369 lines heavier, not lighter,
