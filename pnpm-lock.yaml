@@ -151,6 +151,9 @@ importers:
       '@lastest/plugin-playground':
         specifier: workspace:*
         version: link:plugins/playground
+      '@lastest/plugin-qa-agent':
+        specifier: workspace:*
+        version: link:plugins/qa-agent
       '@lastest/plugin-quickstart':
         specifier: workspace:*
         version: link:plugins/quickstart
@@ -611,6 +614,9 @@ importers:
       typescript:
         specifier: ^5
         version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
 
   libs/test-templates:
     devDependencies:

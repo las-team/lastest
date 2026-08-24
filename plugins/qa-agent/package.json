@@ -2,7 +2,7 @@
   "name": "@lastest/plugin-qa-agent",
   "version": "0.1.0",
   "private": true,
-  "description": "WIP — QA Agent migration, paused mid-flight. Only the domain layer has moved: the discovery crawl, the explorer swarm and login resolution, converted off raw CDP onto a core-issued page. No manifest, no host port, no actions and no UI yet, and nothing imports this package. RFC §7.4 makes this file the reviewable unit, so it lists only what exists. See docs/architecture/core-plugin-refactor.md.",
+  "description": "WIP — QA Agent migration, in flight. The domain layer has moved and is live: the discovery crawl, the explorer swarm and login resolution, converted off raw CDP onto core-issued pages and imported by src/server/actions/qa-agent.ts through @lastest/plugin-qa-agent/domain/*. Still to come: the manifest, the host port, the actions, the UI, and the two tables in src/schema.planned.ts. No typecheck script on purpose — DrivablePage resolves to unknown without @lastest/core-browser in the program, which no plugin may import; the app's own tsc covers these files. RFC §7.4 makes this file the reviewable unit, so it lists only what exists. See docs/architecture/core-plugin-refactor.md.",
   "type": "module",
   "exports": {
     "./domain/auth": "./src/domain/auth.ts",
@@ -11,9 +11,6 @@
     "./domain/page": "./src/domain/page.ts",
     "./domain/plan": "./src/domain/plan.ts",
     "./types": "./src/types.ts"
-  },
-  "scripts": {
-    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@lastest/contracts": "workspace:*",

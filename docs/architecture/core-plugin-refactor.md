@@ -43,16 +43,28 @@ recipe §1.5 before assuming "unmigrated" meant "migrate it":
   now has an explicit `CORE_SRC_PATHS` one, matching its two app-level
   callers.
 
-Four uncounted entries remain, all genuinely unresolved: `qa-agent` (the
-flagship, and the only remaining source of counted violations),
-`spec-import` (split out of `data-sources`, oversized — see
-`data-sources-migration-result.md` §1) and `authoring-ai`'s two sideways
-orphans, `ai-routes` and `specs`. The orphans were unclassified anywhere
-until they got their own uncosted `PSEUDO_PLUGINS` entries; that is a ledger
-correction, not a migration — the counter is unchanged (both are reached
-through `AuthoringAiHost` methods filled by the composition root, which is
-legal), and no cost has been run for either. See the entries in
-`tools/architecture/boundaries.mjs` for the open outcomes.
+**The burndown is 0.** The last three violations were `qa-agent`'s direct
+`playwright` imports, and they went away the only way they could: the ported
+domain layer in `plugins/qa-agent/` is now the live code, imported by
+`src/server/actions/qa-agent.ts`, and every EB claim on that path goes
+through core. See [Phase 4.5](#phase-45--the-unfinished-residue) for what
+that pass actually did and what it deliberately did not.
+
+Four uncounted entries remain, and they are unresolved in three different
+ways — **`qa-agent` is half-migrated**, not untouched and no longer paused:
+its domain layer is ported, live and counted-clean, while
+`src/server/actions/qa-agent.ts`, `src/components/qa-agent` and the
+non-browser half of `src/lib/qa-agent` are still app code and the package
+still has no manifest or host. `spec-import` (split out of `data-sources`, oversized —
+see `data-sources-migration-result.md` §1) is genuinely unstarted and
+uncosted. `authoring-ai`'s two sideways orphans, `ai-routes` and `specs`,
+were unclassified anywhere until they got their own uncosted
+`PSEUDO_PLUGINS` entries; that is a ledger correction, not a migration — the
+counter is unchanged (both are reached through `AuthoringAiHost` methods
+filled by the composition root, which is legal), and no cost has been run
+for either. **§9's [Phase 4.5](#phase-45--the-unfinished-residue) is the
+inventory for all three**: what exists, what does not, and what each one is
+blocked on. See also the entries in `tools/architecture/boundaries.mjs`.
 **Author:** planning doc
 **Supersedes:** nothing
 
@@ -102,12 +114,19 @@ legal), and no cost has been run for either. See the entries in
 >   *migrating a plugin*; what is left after phase 4 is the uncosted residue
 >   listed in this doc's status line plus whatever a phase-5 capability
 >   backlog decides to build first — see the end of this section).
->   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21 → 20 → 20 → 19 → 19 → 18 → 14 → 14 → 13 → 8 → 5 → 3**.
->   The last two steps are the pseudo-plugin residue pass described in the
->   status line above: 8 → 5 when `authoring-ai` landed, then 5 → 3 when
->   `demo`'s two `db` violations went away with its reclassification. All
->   three remaining violations are `qa-agent`'s direct `playwright` imports —
->   the flagship, deliberately left for last, is now the *entire* burndown.
+>   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21 → 20 → 20 → 19 → 19 → 18 → 14 → 14 → 13 → 8 → 5 → 3 → 0**.
+>   The last three steps are the pseudo-plugin residue pass described in the
+>   status line above: 8 → 5 when `authoring-ai` landed, 5 → 3 when
+>   `demo`'s two `db` violations went away with its reclassification, and
+>   **3 → 0 when `qa-agent`'s browser half landed** — the three violations
+>   were `chromium.connectOverCDP` in
+>   `src/lib/qa-agent/{auth,crawl,explore}.ts`, which are deleted; their
+>   ported halves in `plugins/qa-agent/src/domain/` are what runs now.
+>   **Zero is not "the migration is done", and this is the case that proves
+>   it**: `qa-agent` still has no manifest, no host port, a 4.4k-line action
+>   module and ten components in `src/`. The counter measures imports across
+>   a line, not features moved — read Phase 4.5 before reading `0` as
+>   finished.
 >   `data-sources` is the third migration in a row to graduate without moving
 >   the number — its coupling to core was through the query layer (allowed)
 >   and, once found, through a core→feature *type* import invisible to the
@@ -1355,6 +1374,164 @@ earlier PR** — which is exactly the workflow being asked for.
 >   commit. §4.3's amendment says do promotions in bulk and first; this is the
 >   same lesson at feature scale, where the destination is core rather than
 >   `libs/`.
+
+### Phase 4.5 — the unfinished residue
+
+Phase 4 closed on "14 of 14 plugins", then `authoring-ai` made fifteen and the
+pseudo-plugin residue pass resolved five of eight uncounted entries. What is
+left is **not** a to-do list of equivalent items: one entry is half-built, one
+is unstarted, and two are classified-but-uncosted. This section is the
+inventory, so nobody re-derives it from `git log` again.
+
+It is also where the burndown stops being a summary of the project. The
+counter hit **0** when `qa-agent`'s browser half landed, with the feature's
+manifest, host, actions and UI all still unmigrated — so from here on, "how
+much is left" has to be read off this section rather than off `pnpm arch`.
+
+#### `qa-agent` — half-migrated: the browser half is live, the rest is not
+
+The flagship, and easy to mistake for either "done" or "not started"; it is
+neither. `plugins/qa-agent/` landed its domain layer first (`ccc4fdd2`,
+`f30ae63d`) and sat unwired; the browser pass has now made that layer the
+live code and taken the burndown to **0**. What follows is the state after
+that pass.
+
+**What has moved and is running** (~3,700 LOC under `plugins/qa-agent/src/`):
+
+- `src/domain/` — twelve files: `auth`, `auth-links`, `code-check`, `crawl`,
+  `docs`, `explore`, `page`, `plan`, `pr-check`, `task-triage` plus their
+  tests. The load-bearing change is that `crawl.ts`, `explore.ts` and
+  `auth.ts` no longer take a `cdpUrl` and call
+  `chromium.connectOverCDP()` — they take a `QaPage` core claimed, injected
+  credentials into, metered and will close. Those were **the last three of
+  the six direct-CDP call sites §1.1 named as the concrete instance of what
+  R4 forbids**, and `src/lib/qa-agent/{auth,crawl,explore,auth-links}.ts` are
+  deleted rather than duplicated.
+- `src/domain/page.ts` (47 LOC) — `QaPage = DrivablePage`, plus
+  `gotoAndSettle`. This is the second caller
+  `plugins/explorer/src/browser/page.ts` predicted, deliberately duplicated
+  rather than promoted (recipe §5): **`libs/browser-kit` is now a real
+  two-caller case with a concrete ~6-operation surface**, and it wants its
+  own pass rather than being invented inside this migration.
+- `src/types.ts` (194 LOC) and `src/schema.planned.ts` (142 LOC).
+
+**Two core files the pass had to add**, both composition-root, both small:
+
+- `src/lib/core/agent-browser.ts` — the browser capability for app code that
+  is not a plugin yet. `getPluginRuntime()` hands every plugin a
+  `ctx.browser`; the unmigrated agents have no `ctx`, and before this their
+  only alternative was the raw claim-and-connect path R4 exists to forbid.
+  `createBrowserFactory` already ignores its `pluginId`
+  (`(_pluginId, scope) => createBrowserCapability(host, scope, opts)`), so
+  there is nothing to fake — the same capability, the same host, minus a
+  plugin id it never used. **It is a bridge with a delete condition**: when
+  `qa-agent` finishes it loses a caller, when `play-agent` follows it loses
+  its last one and goes.
+- `src/lib/core/auth-setup-resolution.ts` — `findExistingAuthSetup()`, moved
+  out of `src/lib/qa-agent/auth.ts` because `src/lib/core/explorer-host.ts`
+  imported it. That was a **core → feature import**, the direction `pnpm arch`
+  does not walk (recipe §1.6), and it was the blocking kind: the file could
+  not be deleted while core read from it. Same shape as
+  `quickstart-{notes,storage}-shared.ts` — two features want it, neither owns
+  it, it reads only core tables.
+
+**What the conversion changed in behaviour**, all deliberate and worth
+knowing before the next agent migrates:
+
+- **Storage-state JSON no longer reaches feature code.** Every claim passes
+  `storageStateId` and core resolves, ownership-checks and injects it;
+  `session.authApplied` is the single answer to "did it take". The old
+  "could not be loaded" branch disappears with the blob, and a `false` reads
+  as a deferral exactly as a failed injection did before.
+- **One EB per probe instead of one EB held across all of them.** The
+  qa_login step used to claim once and hand the same `cdpUrl` to validation,
+  link discovery and the credential login, then release it manually before
+  registration could claim its own. Each probe now lives in its own
+  `withBrowser` scope, which is why the "release ours first" dance is gone.
+- **The swarm needed a barrier, and that is a finding, not a hack.**
+  `withBrowserSwarm`'s callback is per session; a shared-frontier crawl needs
+  every page alive in one call. The callbacks park until the crawl finishes,
+  and arrival is observed off the sessions they push (bounded by the same
+  claim windows core was given) rather than off promises that cannot resolve
+  yet. **If a second shared-frontier crawler ever appears, that is the core
+  PR to write** — a swarm primitive that hands back N live sessions instead
+  of running N callbacks.
+- `session.streamUrl` is already proxied and grant-signed, so the feature's
+  own `proxiedStream()` helper is deleted.
+
+**What has not moved:**
+
+- No `src/index.ts`, no `definePlugin()` manifest, **no entry in
+  `src/lib/core/manifests.ts`**, no `src/lib/core/qa-agent-host.ts`. The app
+  imports the package's `domain/*` modules directly, which is legal because
+  both sides are the same pseudo-plugin — it is not the plugin boundary yet.
+- `src/server/actions/qa-agent.ts` (4.4k lines — the largest action module in
+  the repo), `src/components/qa-agent/` (10 files), and the non-browser half
+  of `src/lib/qa-agent/` (planning, task triage, PR/code checks, docs
+  ingestion) are still app code. Those four modules still exist in both
+  places, tests included, and `pnpm test` runs both copies — the duplication
+  the browser pass removed for its three files remains for the rest.
+- Schema: `schema.planned.ts` is deliberately *not* named `schema.ts` —
+  `drizzle.config.ts` globs `./plugins/*/src/schema.ts` and the Docker
+  entrypoint runs `drizzle-kit push --force`, so the canonical name would
+  double-declare `qa_agent_triggers` and create an empty `qa_agent_tasks`
+  beside the live `qa_tasks`. The rename back is a step in *finishing*, and
+  it must land in the same change that deletes both tables from
+  `packages/db/src/schema/agents.ts` and adds `migrateQaAgentTables()` to
+  `scripts/migrate.js`. **That function has not been written** —
+  `scripts/migrate.js` contains no QA reference today.
+- The package declares no `typecheck` script, on purpose: standalone it fails
+  with `'page' is of type 'unknown'`, because `DrivablePage` falls back to
+  `unknown` without `@lastest/core-browser` in the program and no plugin may
+  import that. The app's own `tsc` (root `tsconfig.json` includes
+  `plugins/**`) and `pnpm build` are what cover these files, same as every
+  other plugin.
+
+**To finish, in order:** (1) host port + `MANIFESTS` entry + `index.ts`;
+(2) `src/server/actions/qa-agent.ts` → plugin actions, at which point the
+`domain/*` imports become internal and `agent-browser.ts` loses this caller;
+(3) components; (4) the schema step above, `qa_tasks` → `qa_agent_tasks`
+rename and FK drops first, `schema.planned.ts` → `schema.ts` last;
+(5) delete the rest of `src/lib/qa-agent`.
+
+#### `spec-import` — unstarted, oversized, uncosted
+
+`src/server/actions/spec-import.ts`, 1,565 LOC, ~36 `queries.*` call sites,
+its own `spec_imports` table in `packages/db/src/schema/settings.ts`. It got
+its `PSEUDO_PLUGINS` entry when `data-sources` proved it shares no table, type
+or import with csv/google-sheets in either direction — AI-driven user-story
+extraction and test generation is not a data source.
+
+Nothing has happened since, and the reason it is hard is that it reads two
+ways at once. The call-site count for the LOC is past recipe §1.5's stop
+line, which is the `route-scan`/`url-diff` reading (**reclassify as core**);
+but unlike either of those it *owns a table*, which is the argument for a
+plugin. There is also one core→feature edge to resolve first:
+`requireSpecImportOwnership()` in `src/lib/auth/ownership.ts` reads
+`spec_imports` directly — the exact helper shape `ci` and `scheduling` each
+**deleted** rather than ported (recipe §3.1). Callers are
+`import-from-spec-dialog.tsx`, the record spec panel, the activity feed and
+one legal `AuthoringAiHost` method.
+
+Somebody has to run the costing. Until then this entry is a classification,
+not a plan.
+
+#### `ai-routes` and `specs` — on the ledger, still unpicked
+
+`authoring-ai`'s two sideways orphans. Both now have `PSEUDO_PLUGINS` entries
+(`ai-routes`: 799 LOC, ~8 `queries.*`, three UI components, reached through
+`AuthoringAiHost.aiScanRoutes`; `specs`: 643 LOC of test-spec CRUD and area
+plan/spec sync, three component callers, one `syncAreaPlanAndSpecs` method).
+Adding them moved the counter by 0 and was never meant to: it buys `pnpm arch`
+a generated pattern where it previously had a blind spot, and gives the
+features a classification in the one place that is supposed to hold it.
+
+**What the entries do not do is decide anything.** Three outcomes are open for
+each — graduate to a plugin, fold into `authoring-ai`, or reclassify to core
+the way `route-scan` did — and no cost has been run for either. Both are
+heavy on core's `routes`/`functionalAreas`/`tests` tables and own no table of
+their own, which is `route-scan`'s shape rather than `ranger`'s, so
+reclassify-to-core is the leading hypothesis and nothing more than that.
 
 ### Phase 5 — Tighten (ongoing)
 

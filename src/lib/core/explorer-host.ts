@@ -12,7 +12,7 @@ import {
   assertSafeOutboundUrl,
   SsrfBlockedError,
 } from "@/lib/security/outbound-url";
-import { findExistingAuthSetup } from "@/lib/qa-agent/auth";
+import { findExistingAuthSetup } from "@/lib/core/auth-setup-resolution";
 
 /**
  * The app's fill for `ExplorerHost` — the four core APIs that do not exist

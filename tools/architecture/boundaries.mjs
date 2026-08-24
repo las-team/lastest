@@ -98,10 +98,20 @@
  * line and `quickstart-migration-result.md` §12.
  *
  * What is left in `PSEUDO_PLUGINS` is `qa-agent` — the flagship, deliberately
- * last, and now the source of every remaining counted violation — plus three
- * uncosted, genuinely unresolved entries: `spec-import` (oversized) and
+ * last, and **half migrated as of the browser pass: the burndown is 0** — plus
+ * three uncosted, genuinely unresolved entries: `spec-import` (oversized) and
  * `ai-routes`/`specs` (`authoring-ai`'s two sideways orphans, classified here
  * rather than left as prose in a migration doc — see their entries below).
+ *
+ * **A zero here is not a finished migration**, and `qa-agent` is the reason to
+ * say so out loud. Its last three violations were direct `playwright` imports
+ * in `src/lib/qa-agent/{auth,crawl,explore}.ts`; those files are gone, their
+ * ported halves in `plugins/qa-agent/src/domain/` are what runs, and every EB
+ * claim on the path now goes through `src/lib/core/agent-browser.ts`. What did
+ * *not* happen is the rest of the migration: no manifest, no host port, and
+ * `src/server/actions/qa-agent.ts` (4.4k lines) plus `src/components/qa-agent`
+ * are still app code, which is exactly what the entry below still covers. The
+ * counter measures imports across a line, not features moved.
  */
 
 /** Zone globs for the target layout. */
@@ -234,6 +244,10 @@ export const UNCLASSIFIED_SRC_PATHS = [
  * Order matters only for readability; the walker builds a path→plugin index.
  */
 export const PSEUDO_PLUGINS = {
+  // Still the whole feature, minus the browser-driving domain layer that has
+  // already moved to `plugins/qa-agent/src/domain/` (crawl, explore swarm,
+  // login probes). `src/lib/qa-agent` is now the non-browser half — planning,
+  // task triage, PR/code checks, docs ingestion.
   "qa-agent": {
     lib: ["src/lib/qa-agent"],
     actions: ["qa-agent.ts"],
