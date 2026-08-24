@@ -61,6 +61,14 @@
 # boundaries, and `src/lib/auth/auth.ts` imports them.
 /src/lib/github/                @ewyct
 /src/lib/gitlab/                @ewyct
+# Demo/sandbox seeding, called only from core auth + onboarding. Was the `demo`
+# pseudo-plugin until its two server actions were confirmed dead and deleted;
+# what is left has no user surface of its own. See boundaries.mjs.
+/src/lib/demo/                  @ewyct
+# Caption authoring for demo videos. Split out of `share` during that migration
+# (it was never in share's map entry) and reached only from an app-level server
+# action and the v1 API route. See boundaries.mjs.
+/src/lib/demo-captions/         @ewyct
 /src/lib/utils.ts               @ewyct
 /src/lib/logger.ts              @ewyct
 /src/lib/crypto.ts              @ewyct

@@ -9,7 +9,6 @@ import type {
   QuickstartHost,
   QuickstartRepoGateInfo,
   QuickstartRunFacts,
-  QuickstartScoutClaim,
 } from "@lastest/plugin-quickstart/host";
 import { publishBuildShare } from "@lastest/plugin-share";
 
@@ -21,18 +20,9 @@ import { getLogger } from "@/lib/logger";
 import { computeDiffClusters } from "@/lib/diff/diff-clusters";
 import { resolveStoragePath } from "@/lib/storage/paths";
 import { toProxyStreamUrl } from "@/lib/eb/stream-url";
-import { injectStorageStateIntoEb } from "@/lib/eb/inject-storage-state";
-import {
-  runQuickstartScoutPublic,
-  runQuickstartScoutAuthed,
-} from "@/lib/playwright/quickstart-scout";
+import { getEbPoolHealth } from "@/server/actions/embedded-sessions";
 import { captureStorageState as captureStorageStateShared } from "@/lib/core/quickstart-storage-shared";
 import { generateDemoNotes as generateDemoNotesShared } from "@/lib/core/quickstart-notes-shared";
-import { claimEmbeddedBrowserForAgent } from "@/server/actions/ai";
-import {
-  releasePoolEB,
-  getEbPoolHealth,
-} from "@/server/actions/embedded-sessions";
 import {
   createAndRunBuildCore,
   getBuildSummary as getBuildSummaryCore,
@@ -128,32 +118,34 @@ function toSessionRow(
   };
 }
 
-// ---- 5. Scout ----------------------------------------------------------
+// ---- 5. Browser-claim diagnostics ------------------------------------------
 
 /**
  * Build an actionable failure message for a scout step that couldn't get an
- * Embedded Browser. `claimErr` is the error the claim path threw (usually
- * swallowed); when the claim merely timed out it's undefined, so we probe
- * pool health to explain WHY. The most common dev cause is the EB image not
- * being imported into the k3d cluster.
+ * Embedded Browser. `core/browser`'s `NoBrowserAvailableError` says "the pool
+ * is at capacity", which is true but does not distinguish it from the far
+ * more common dev cause: pods provisioned but never ready, because the EB
+ * image was never imported into the k3d cluster. Probing pool health is what
+ * tells those apart, and `getEbPoolHealth` is core's, not the plugin's.
  */
-async function describeEbClaimFailure(claimErr: unknown): Promise<string> {
-  if (claimErr instanceof Error && claimErr.message) {
-    return `Couldn't get a browser for the scout: ${claimErr.message}`;
-  }
+async function describeBrowserClaimFailure(err: unknown): Promise<string> {
   const health = await getEbPoolHealth().catch(() => null);
   if (!health) {
-    return "Couldn't get a browser for the scout: no Embedded Browser became available, and pool health could not be read.";
+    return err instanceof Error && err.message
+      ? err.message
+      : "No Embedded Browser became available, and pool health could not be read.";
   }
   if (health.size > health.online) {
     const unready = health.size - health.online;
-    return `Couldn't get a browser for the scout: ${health.online} ready, ${unready} provisioned but not ready (cap ${health.max}). EB pods are likely unhealthy — stuck pulling the image (ImagePullBackOff) or pending on resources. An operator may need to restart the EB pool (pnpm stack:refresh:eb).`;
+    return `Couldn't get a browser: ${health.online} ready, ${unready} provisioned but not ready (cap ${health.max}). EB pods are likely unhealthy — stuck pulling the image (ImagePullBackOff) or pending on resources. An operator may need to restart the EB pool (pnpm stack:refresh:eb).`;
   }
   if (health.size >= health.max) {
-    return `Couldn't get a browser for the scout: all ${health.max} browsers are busy and the pool is at capacity. Try again once a run finishes.`;
+    return `Couldn't get a browser: all ${health.max} browsers are busy and the pool is at capacity. Try again once a run finishes.`;
   }
-  return `Couldn't get a browser for the scout: no Embedded Browser became ready (${health.online} ready, pool ${health.size}/${health.max}). The EB pool may be unhealthy — an operator may need to restart it (pnpm stack:refresh:eb).`;
+  return `Couldn't get a browser: no Embedded Browser became ready (${health.online} ready, pool ${health.size}/${health.max}). The EB pool may be unhealthy — an operator may need to restart it (pnpm stack:refresh:eb).`;
 }
+
+// ---- 6. Build orchestration + notes evidence -------------------------------
 
 function proxiedStream(
   raw: string | null | undefined,
@@ -162,32 +154,6 @@ function proxiedStream(
   if (!raw) return undefined;
   return toProxyStreamUrl(raw, "", instanceId) || undefined;
 }
-
-async function claimScoutBrowser(
-  onQueued: () => void,
-): Promise<QuickstartScoutClaim> {
-  let claimErr: unknown;
-  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, onQueued).catch(
-    (e) => {
-      claimErr = e;
-      return undefined;
-    },
-  );
-  if (!eb) {
-    return {
-      claimed: false,
-      failureReason: await describeEbClaimFailure(claimErr),
-    };
-  }
-  return {
-    claimed: true,
-    runnerId: eb.runnerId,
-    cdpUrl: eb.cdpUrl,
-    streamUrl: proxiedStream(eb.streamUrl, eb.instanceId),
-  };
-}
-
-// ---- 6. Build orchestration + notes evidence -------------------------------
 
 async function resolveBuildStreamUrl(
   buildId: string,
@@ -370,34 +336,13 @@ export const appQuickstartHost: QuickstartHost = {
       expiresAt: r.expiresAt ?? null,
     }));
   },
-  async getStorageStateJson(storageStateId) {
-    const row = await queries.getStorageState(storageStateId);
-    return row?.storageStateJson ?? null;
-  },
   async captureStorageState(
     input: QuickstartCaptureStorageStateInput,
   ): Promise<QuickstartCaptureStorageStateResult> {
     return captureStorageStateShared(input);
   },
 
-  claimScoutBrowser,
-  async releaseScoutBrowser(runnerId) {
-    await releasePoolEB(runnerId);
-  },
-  async injectStorageState(cdpUrl, storageStateJson) {
-    return injectStorageStateIntoEb(cdpUrl, storageStateJson);
-  },
-  async runPublicScout(repositoryId, baseUrl, cdpUrl) {
-    return runQuickstartScoutPublic(repositoryId, baseUrl, {
-      cdpEndpoint: cdpUrl,
-    });
-  },
-  async runAuthedScout(repositoryId, baseUrl, authTestCode, opts) {
-    return runQuickstartScoutAuthed(repositoryId, baseUrl, authTestCode, {
-      cdpEndpoint: opts.cdpUrl,
-      preAuthenticated: opts.preAuthenticated,
-    });
-  },
+  describeBrowserClaimFailure,
 
   async startBuild(repositoryId, testIds) {
     try {

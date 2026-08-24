@@ -29,7 +29,8 @@
  * methods) is the largest of any phase-4 plugin so far. `captions.ts` /
  * `generate-captions.ts`, formerly under `src/lib/share/`, moved to
  * `src/lib/demo-captions/` instead of the plugin — see the migration result
- * doc for why. `awards` is the ninth, an 8-method port `share`'s migration
+ * doc for why; that directory is now an explicit `CORE_SRC_PATHS` entry.
+ * `awards` is the ninth, an 8-method port `share`'s migration
  * was done partly to unblock — see `docs/architecture/awards-migration-result.md`.
  * `ranger` is the tenth, and the first out of the §6.2 `src/lib/playwright`
  * split: one method (`assertSafeOutboundUrl`) and one table (`ranger_sessions`,
@@ -69,24 +70,36 @@
  * standalone boundary module. See
  * `docs/architecture/scheduling-migration-result.md`.
  * `quickstart` is the fourteenth and last of RFC §9 phase 4, and the third
- * (after `recorder`, `ranger`) out of the §6.2 `src/lib/playwright` split —
- * `authoring-ai` stayed stopped. Its map entry named two files under
- * `src/lib/playwright`; only one of them was ever this feature.
- * `quickstart-scout.ts` hands a raw CDP endpoint to an out-of-process
- * `@playwright/mcp` binary, the identical shape that stopped `authoring-ai`
- * — so it stays behind too, but reached through a `QuickstartHost` method
- * rather than an import, since it is 2 of QuickStart's 9 steps rather than
- * the whole feature. Split into its own uncosted `PSEUDO_PLUGINS
- * ["quickstart-scout"]` entry below. `static-scout.ts` was never this
- * feature at all (zero shared import/table/type with quickstart-scout.ts —
- * only the word "scout" in both names) and gets the third `spec-import`-
- * shaped split, `PSEUDO_PLUGINS["static-scout"]`. The migrated part's
- * largest finding was sideways, not core-ward (recipe §1.6.2):
- * `storage-capture.ts` and `quickstart-notes.ts` are also called directly by
- * `qa-agent`/`demo`, two other still-unmigrated pseudo-plugins, so both moved
- * to `src/lib/core/` as shared composition-root code both sides call, rather
+ * (after `recorder`, `ranger`) out of the §6.2 `src/lib/playwright` split.
+ * Its map entry named two files under `src/lib/playwright`; only one of them
+ * was ever this feature. The migrated part's largest finding was sideways,
+ * not core-ward (recipe §1.6.2): `storage-capture.ts` and
+ * `quickstart-notes.ts` were also called directly by `qa-agent`/`demo`, two
+ * other still-unmigrated pseudo-plugins at the time, so both moved to
+ * `src/lib/core/` as shared composition-root code both sides call, rather
  * than becoming plugin exports a pseudo-plugin may not import. See
  * `docs/architecture/quickstart-migration-result.md`.
+ *
+ * `authoring-ai` is the fifteenth, unblocked by `54e05d08 core: AI browser
+ * tools capability` (`AiCallOptions.browserTools`) after being costed and
+ * stopped — see `docs/architecture/authoring-ai-migration-result.md`.
+ *
+ * **The pseudo-plugin residue pass** then resolved five entries that had
+ * been split out of earlier migrations and left uncosted. They did not
+ * resolve the same way, which is the point: `quickstart-scout` **migrated**
+ * (the same core PR that unblocked `authoring-ai` unblocked it, at zero
+ * further core cost); `static-scout` was **promoted to `libs/static-scout`**
+ * (zero imports, zero core calls, one caller — never a plugin candidate);
+ * `route-scan` was **reclassified core** (~26 `queries.*` calls for 327 LOC,
+ * past recipe §1.5's stop line — `url-diff`'s verdict, and its reusable half
+ * was already `libs/route-scan`); `demo` was **deleted and reclassified**
+ * (two dead actions removed, two lib files core); and `demo-captions` got
+ * the explicit `CORE_SRC_PATHS` entry it never had. See the RFC's status
+ * line and `quickstart-migration-result.md` §12.
+ *
+ * What is left in `PSEUDO_PLUGINS` is `qa-agent` — the flagship, deliberately
+ * last, and now the source of every remaining counted violation — plus
+ * `spec-import`, oversized and genuinely unresolved.
  */
 
 /** Zone globs for the target layout. */
@@ -170,6 +183,22 @@ export const CORE_SRC_PATHS = [
   // The core half of the §6.2 split. The plugin half is enumerated per plugin
   // below; anything not named there stays core by default.
   "src/lib/playwright",
+  // `demo` was never a migration candidate (RFC's `ranger-migration-result.md`
+  // §2): `excalidraw-seed.ts` and `sandbox-seeds.ts` are called exclusively
+  // from core-classified auth/onboarding code (`src/lib/auth/demo.ts`,
+  // `src/server/actions/repos.ts`, `src/server/actions/onboarding.ts`). Its
+  // two server actions, `signInAsDemo` and `generateNotesForBuild`, had zero
+  // callers anywhere in the app (confirmed dead, re-verified before
+  // deletion) and are gone, not carried forward.
+  "src/lib/demo",
+  // `demo-captions` — `captions.ts` (AI vision-pass caption generation) and
+  // `generate-captions.ts` (build ↔ captions glue) — was never `share`'s:
+  // its action module was never listed under that feature's `PSEUDO_PLUGINS`
+  // entry, only its lib files were (see `share-migration-result.md` §4). Its
+  // only two callers are `src/server/actions/captions.ts` and the
+  // core-classified catch-all API route, both app-level, so it stays core
+  // rather than gaining a `PSEUDO_PLUGINS` entry it never actually had.
+  "src/lib/demo-captions",
 ];
 
 /**
@@ -208,7 +237,8 @@ export const PSEUDO_PLUGINS = {
     actions: ["qa-agent.ts"],
     components: ["src/components/qa-agent"],
   },
-  demo: { lib: ["src/lib/demo"], actions: ["demo.ts", "demo-notes.ts"] },
+  // `demo`'s entry is gone — see the `CORE_SRC_PATHS` comment above for
+  // `src/lib/demo`. It was never a migration candidate.
   // `awards` graduated to `plugins/awards/` (RFC §9 phase 4, ninth plugin) —
   // see `docs/architecture/awards-migration-result.md`. It was split out of
   // the original `gamification` map entry once reading the import lists
@@ -252,13 +282,18 @@ export const PSEUDO_PLUGINS = {
   // direction — it is repository route discovery, functional-area creation
   // and smoke-test generation against core's `routes`/`functionalAreas`/
   // `tests` tables, with a port that would run past recipe §1.5's stop line.
-  // It gets its own entry below, uncosted, rather than migrating with them
-  // or being silently dropped from the burndown — the same call
-  // `data-sources` made for `spec-import.ts`.
-  "route-scan": {
-    lib: [],
-    actions: ["scanner.ts"],
-  },
+  // It got its own uncosted `PSEUDO_PLUGINS["route-scan"]` entry rather than
+  // migrating with them or being silently dropped from the burndown — the
+  // same call `data-sources` made for `spec-import.ts`.
+  //
+  // `route-scan`'s entry is gone: costing it out found ~26 distinct
+  // `queries.*` calls for 327 LOC of feature code, past recipe §1.5's stop
+  // line and larger than the feature it would serve — `url-diff`'s shape,
+  // not `ranger`'s. Reclassified as core rather than migrated (`scanner.ts`
+  // stays at `src/server/actions/scanner.ts`, unmoved); the actual reusable
+  // boundary already lives one layer down, in the already-promoted
+  // `libs/route-scan` package that `qa-agent.ts` also imports directly,
+  // sidestepping `scanner.ts` entirely.
   // §6.2 — the `src/lib/playwright` split. `lib` stays empty; these plugins own
   // named files inside a directory that is otherwise core.
   //
@@ -287,25 +322,28 @@ export const PSEUDO_PLUGINS = {
   // `docs/architecture/quickstart-migration-result.md`. `src/lib/quickstart`,
   // `src/server/actions/quickstart-agent.ts` and `src/components/quickstart`
   // are deleted, not left as re-exports. `quickstart-scout.ts` did NOT
-  // migrate — it hits the same raw-CDP-to-MCP blocker that stopped
-  // `authoring-ai` — and gets its own uncosted entry below, reached from the
-  // plugin through a `QuickstartHost` method instead of an import.
-  "quickstart-scout": {
-    lib: [],
-    files: ["src/lib/playwright/quickstart-scout.ts"],
-  },
+  // migrate at the time — it hit the same raw-CDP-to-MCP blocker that
+  // stopped `authoring-ai` — and got its own uncosted
+  // `PSEUDO_PLUGINS["quickstart-scout"]` entry, reached from the plugin
+  // through five `QuickstartHost` methods instead of an import.
+  //
+  // That entry is now gone too: `54e05d08 core: AI browser tools capability`
+  // (`AiCallOptions.browserTools`) unblocked it, exactly as
+  // `authoring-ai-migration-result.md` predicted it would unblock both. The
+  // scout moved into the plugin as `plugins/quickstart/src/scout.ts` and
+  // drives the browser through `ctx.ai.generate({ browserTools: session })`
+  // on a session from `ctx.browser.withBrowser(...)`. All five host methods
+  // were retired, plus `getStorageStateJson` — `BrowserClaimOptions.
+  // storageStateId` injects by id, so the credential material no longer
+  // crosses the boundary at all. See `quickstart-migration-result.md` §12.
   // `static-scout.ts` was never `quickstart` — zero shared import, table or
   // type with `quickstart-scout.ts` in either direction, just the word
-  // "scout" in both names. Its only consumer is the core-classified catch-all
-  // API route (`POST /api/v1/scout`, also exposed over MCP as
-  // `lastest_scout_url`). Split into its own uncosted entry rather than
-  // migrated, dropped, or silently left attached to a plugin that no longer
-  // exists — the same call `data-sources` made for `spec-import.ts` and
-  // `scheduling` made for `scanner.ts`.
-  "static-scout": {
-    lib: [],
-    files: ["src/lib/playwright/static-scout.ts"],
-  },
+  // "scout" in both names, and it turned out to need no core primitive at
+  // all: zero imports, one caller (the core-classified catch-all API route,
+  // `POST /api/v1/scout`, also exposed over MCP as `lastest_scout_url`). Not
+  // a plugin candidate at any size — promoted to `libs/static-scout`
+  // (core-scope.md §3, same tier as `libs/route-scan`) instead of migrating,
+  // dropping, or leaving it attached to a plugin that no longer exists.
   // `ranger` graduated to `plugins/ranger/` (RFC §9 phase 4, tenth plugin) —
   // see `docs/architecture/ranger-migration-result.md`. The first plugin out
   // of the §6.2 split: `src/lib/playwright/ranger.ts` is deleted, not left as

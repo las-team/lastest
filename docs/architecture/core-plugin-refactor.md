@@ -4,24 +4,50 @@
 `app-map`, `launch`, `api-test`, `playground`, `gamification`, `ci`, `share`,
 `awards`, `ranger`, `recorder`, `data-sources`, `scheduling` and `quickstart`
 done, `url-diff` resolved as core, the credential half of `scm` reclassified
-as core. 8 pseudo-plugins remain uncounted, none of them one of the 14
-(`share`'s captions half moved to `src/lib/demo-captions/`, unmigrated, not
-counted as a plugin; `demo` itself is not a plugin either — see
-`ranger-migration-result.md` §2; `spec-import` split out of `data-sources`,
-unmigrated — see `data-sources-migration-result.md` §1; `route-scan` split
-out of `scheduling`, unmigrated — see `scheduling-migration-result.md` §3;
-`static-scout` split out of `quickstart`, unmigrated — see
-`quickstart-migration-result.md` §5). `authoring-ai` was costed and
-**stopped**, then **unblocked and migrated**: `54e05d08 core: AI browser
-tools capability (AiCallOptions.browserTools)` landed the exact core PR its
-costing asked for, and `authoring-ai` is now the **fifteenth** plugin, past
-the "14 of 14" line phase 4 closed on — see
+as core. `authoring-ai` was costed and **stopped**, then **unblocked and
+migrated**: `54e05d08 core: AI browser tools capability
+(AiCallOptions.browserTools)` landed the exact core PR its costing asked for,
+and `authoring-ai` is now the **fifteenth** plugin, past the "14 of 14" line
+phase 4 closed on — see
 [`authoring-ai-migration-result.md`](./authoring-ai-migration-result.md) for
-the stop-then-Go history and the final port. `quickstart-scout` hits the
-identical raw-CDP-to-MCP blocker and is unblocked by the same core PR, but
-has not been migrated yet — it stays its own uncosted
-`PSEUDO_PLUGINS["quickstart-scout"]` entry, split out of `quickstart` rather
-than reopening that migration.
+the stop-then-Go history and the final port.
+
+**Five of the eight uncounted pseudo-plugins have since been resolved**, and
+they resolved three different ways rather than one — sizing each against
+recipe §1.5 before assuming "unmigrated" meant "migrate it":
+
+- **`quickstart-scout` migrated.** It hit `authoring-ai`'s identical
+  raw-CDP-to-MCP blocker and was unblocked by the same core PR. Now
+  `plugins/quickstart/src/scout.ts`, driving the browser through
+  `ctx.ai.generate({ browserTools: session })`. It needed **zero** core
+  changes — `authoring-ai` had already paid for the capability *and*
+  pre-registered its `agent_discover` action type. It also **shrank**
+  `QuickstartHost` by six methods and a whole group, one of them
+  (`getStorageStateJson`) because `BrowserClaimOptions.storageStateId` is a
+  better shape: credential material no longer crosses the plugin boundary at
+  all. See [`quickstart-migration-result.md`](./quickstart-migration-result.md) §12.
+- **`static-scout` promoted to `libs/static-scout`.** Zero imports, zero core
+  calls, one caller — cheaper than `ranger`'s 1-method port, so not a plugin
+  candidate at any size. The `libs/*` answer §5 of the quickstart result left
+  open.
+- **`route-scan` reclassified as core.** ~26 distinct `queries.*` calls for
+  327 LOC — past §1.5's stop line and larger than the feature it serves.
+  `url-diff`'s verdict, for `url-diff`'s reason. The reusable part was
+  already promoted to `libs/route-scan` in an earlier pass, and `qa-agent`
+  imports it directly, so the real boundary was already one layer down.
+- **`demo` deleted and reclassified.** Its two lib files are called only from
+  core auth/onboarding; its two server actions had zero callers anywhere
+  (re-verified, then deleted). Entry gone, `src/lib/demo` in
+  `CORE_SRC_PATHS`.
+- **`demo-captions` formalized as core.** Never had a `PSEUDO_PLUGINS` entry;
+  now has an explicit `CORE_SRC_PATHS` one, matching its two app-level
+  callers.
+
+Three uncounted entries remain, all genuinely unresolved: `qa-agent` (the
+flagship, and the only remaining source of counted violations),
+`spec-import` (split out of `data-sources`, oversized — see
+`data-sources-migration-result.md` §1) and `authoring-ai`'s two sideways
+orphans (`ai-routes.ts`, unclassified anywhere).
 **Author:** planning doc
 **Supersedes:** nothing
 
@@ -71,7 +97,12 @@ than reopening that migration.
 >   *migrating a plugin*; what is left after phase 4 is the uncosted residue
 >   listed in this doc's status line plus whatever a phase-5 capability
 >   backlog decides to build first — see the end of this section).
->   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21 → 20 → 20 → 19 → 19 → 18 → 14 → 14 → 13 → 8**.
+>   Burndown: **42 → 34 → 32 → 31 → 22 → 21 → 21 → 21 → 20 → 20 → 19 → 19 → 18 → 14 → 14 → 13 → 8 → 5 → 3**.
+>   The last two steps are the pseudo-plugin residue pass described in the
+>   status line above: 8 → 5 when `authoring-ai` landed, then 5 → 3 when
+>   `demo`'s two `db` violations went away with its reclassification. All
+>   three remaining violations are `qa-agent`'s direct `playwright` imports —
+>   the flagship, deliberately left for last, is now the *entire* burndown.
 >   `data-sources` is the third migration in a row to graduate without moving
 >   the number — its coupling to core was through the query layer (allowed)
 >   and, once found, through a core→feature *type* import invisible to the

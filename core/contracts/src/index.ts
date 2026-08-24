@@ -14,6 +14,7 @@ export type { CheckLayerDescriptor, CheckMode } from "./check-layer";
 export type {
   BrowserCapability,
   BrowserClaimOptions,
+  BrowserErrorName,
   BrowserSession,
   DrivablePage,
   DrivablePageTypeMap,

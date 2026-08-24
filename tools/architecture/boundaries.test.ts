@@ -197,10 +197,14 @@ describe("split-PR check", () => {
       // then `src/components/quickstart/…` until quickstart graduated in RFC
       // §9 phase 4 (the fourteenth and last plugin).
       "src/components/qa-agent/qa-agent-client.tsx",
-      // An `actions` entry. It was `src/server/actions/rca.ts` until rca
-      // graduated in RFC §9 phase 4, then `url-diff.ts` until that feature was
-      // removed and its API half reclassified as core.
-      "src/server/actions/demo.ts",
+      // An `actions` entry, from a feature with no `lib`/`components` of its
+      // own, so it proves the key in isolation. It was
+      // `src/server/actions/rca.ts` until rca graduated in RFC §9 phase 4,
+      // then `url-diff.ts` until that feature was removed and its API half
+      // reclassified as core, then `demo.ts` until that entry was dropped
+      // (its lib half reclassified core, its two actions confirmed dead and
+      // deleted).
+      "src/server/actions/spec-import.ts",
     ]);
     expect(z.todayCore).toEqual([
       "src/lib/db/queries/tests.ts",
@@ -209,7 +213,7 @@ describe("split-PR check", () => {
     expect(z.todayPlugin).toEqual([
       "src/lib/qa-agent/crawl.ts",
       "src/components/qa-agent/qa-agent-client.tsx",
-      "src/server/actions/demo.ts",
+      "src/server/actions/spec-import.ts",
     ]);
   });
 

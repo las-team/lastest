@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import type { PluginContext } from "@lastest/contracts";
 import { resolveTestVideoUrl } from "@lastest/video-fallback";
 import {
   renderAuthSetupCode,
@@ -21,6 +22,8 @@ import type {
   QuickstartRunFacts as HostRunFacts,
 } from "./host";
 import { quickstartPlugin } from "./index";
+import { runQuickstartScoutAuthed, runQuickstartScoutPublic } from "./scout";
+import { describeScoutError } from "./scout-error";
 import { buildInitialQsSteps, QS_STEP_ORDER } from "./step-definitions";
 import type {
   QuickstartDemoNotes,
@@ -34,12 +37,41 @@ import { quickstartWiring, type QuickstartRuntime } from "./wiring";
 /**
  * The nine-step orchestrator. See `host.ts`'s header before reading this file
  * — most of what used to be inline here (raw EB claims, storage-state capture,
- * the scout itself, build execution, notes generation, sharing) now lives
- * behind `QuickstartHost`, and what is left is exactly the feature's own
- * control flow: the auth-mode decision tree, the credential-vs-throwaway
- * branch, the storage-state reuse window, the auth-chain-failure downgrade,
- * and the share-readiness quality gate.
+ * build execution, notes generation, sharing) now lives behind
+ * `QuickstartHost`, and what is left is exactly the feature's own control
+ * flow: the auth-mode decision tree, the credential-vs-throwaway branch, the
+ * storage-state reuse window, the auth-chain-failure downgrade, and the
+ * share-readiness quality gate.
+ *
+ * The two scout steps are the exception, and the only place `ctx` is read:
+ * they claim through `ctx.browser.withBrowser(...)` and hand the resulting
+ * session to `./scout.ts`, which drives the browser through
+ * `ctx.ai.generate({ browserTools: session })`. That used to be five host
+ * methods standing in for an unmigrated module — see `host.ts`'s header.
  */
+
+/**
+ * Wall-clock budget for one scout step, and how long to wait for a browser.
+ *
+ * Both are passed explicitly because the defaults are wrong here in opposite
+ * directions. `DEFAULT_DEADLINE_MS` is 5 minutes for the whole `withBrowser`
+ * callback, but a scout step is an agentic browsing loop that may make two
+ * full AI calls (the initial one plus the JSON-parse retry), and the authed
+ * walk replays a login through the model before it starts — the step this
+ * migration replaced had no wall-clock bound on that work at all, only on the
+ * claim. Taking the default would have converted a slow scout into a torn-down
+ * session. `claimTimeoutMs` is passed at the same value the pre-migration
+ * `claimEmbeddedBrowserForAgent(5 * 60 * 1000)` used, so the *waiting* half of
+ * the old behaviour is preserved exactly rather than by coincidence.
+ *
+ * Core clamps the deadline to `maxHoldFor(plan)` regardless (holding shared
+ * capacity is a money decision, not the plugin's), so on `free`/`demo` this
+ * still resolves to 5 minutes. Asking for more is not an attempt to escape
+ * that — it is what lets the larger plans, where the clamp is 15-60 minutes,
+ * actually finish the step.
+ */
+const SCOUT_DEADLINE_MS = 12 * 60_000;
+const SCOUT_CLAIM_TIMEOUT_MS = 5 * 60_000;
 
 const BUILD_POLL_INTERVAL_MS = 4000;
 const BUILD_POLL_TIMEOUT_MS = 8 * 60 * 1000;
@@ -59,19 +91,22 @@ function cleanupQsController(sessionId: string) {
   activeQuickstartControllers.delete(sessionId);
 }
 
+type QuickstartCtx = PluginContext<"ai" | "browser">;
+
 async function context(scope?: {
   repositoryId?: string;
   teamId?: string;
 }): Promise<{
   runtime: QuickstartRuntime;
   host: QuickstartHost;
+  ctx: QuickstartCtx;
 }> {
   const { runtime, host } = quickstartWiring();
-  // contextFor authorizes the scope even though nothing here reads ctx back —
-  // this plugin declares no capabilities (see index.ts), so the only thing it
-  // needs from `contextFor` is the authorization side effect itself.
-  await runtime.contextFor(quickstartPlugin, scope);
-  return { runtime, host };
+  // `contextFor` does the authorization work `requireRepoAccess`/
+  // `requireTeamAccess` used to do inline. The returned `ctx` carries the two
+  // declared capabilities (see index.ts) — only `./scout.ts` reads them.
+  const ctx = await runtime.contextFor(quickstartPlugin, scope);
+  return { runtime, host, ctx };
 }
 
 function emitActivity(
@@ -326,6 +361,7 @@ async function runQsPreflight(
 
 async function runQsScoutPublic(
   host: QuickstartHost,
+  ctx: QuickstartCtx,
   sessionId: string,
   repositoryId: string,
   teamId: string,
@@ -343,28 +379,41 @@ async function runQsScoutPublic(
     );
     return false;
   }
+  const baseUrl = gate.baseUrl;
 
-  // Hard-fail when no EB is available — never fall through to a host-process
-  // Chromium. While waiting, surface "queued" so the panel reflects back-pressure.
-  const claim = await host.claimScoutBrowser(() => {
-    mergeMetadata(host, sessionId, { queuedForBrowser: true }).catch(() => {});
-  });
-  if (!claim.claimed) {
-    await mergeMetadata(host, sessionId, { queuedForBrowser: false }).catch(
-      () => {},
-    );
-    await setFailed(host, sessionId, "qs_scout_public", claim.failureReason);
-    return false;
-  }
-  await mergeMetadata(host, sessionId, {
-    streamUrl: claim.streamUrl,
-    queuedForBrowser: false,
-  });
   try {
-    const { data, promptLogId, retryCount } = await host.runPublicScout(
-      repositoryId,
-      gate.baseUrl,
-      claim.cdpUrl,
+    // `withBrowser` owns claim/release/teardown. It throws rather than falling
+    // through to a host-process Chromium when no EB is available; while
+    // waiting, `onQueued` surfaces back-pressure in the panel.
+    const { data, promptLogId, retryCount } = await ctx.browser.withBrowser(
+      {
+        purpose: "interactive",
+        claimTimeoutMs: SCOUT_CLAIM_TIMEOUT_MS,
+        deadlineMs: SCOUT_DEADLINE_MS,
+        onQueued: () => {
+          mergeMetadata(host, sessionId, { queuedForBrowser: true }).catch(
+            () => {},
+          );
+        },
+      },
+      async (browserSession) => {
+        await mergeMetadata(host, sessionId, {
+          streamUrl: browserSession.streamUrl ?? undefined,
+          queuedForBrowser: false,
+        });
+        try {
+          return await runQuickstartScoutPublic(
+            ctx.ai,
+            browserSession,
+            repositoryId,
+            baseUrl,
+          );
+        } finally {
+          await mergeMetadata(host, sessionId, {
+            streamUrl: undefined,
+          }).catch(() => {});
+        }
+      },
     );
     await mergeMetadata(host, sessionId, { publicScout: data });
 
@@ -397,19 +446,17 @@ async function runQsScoutPublic(
     );
     return true;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    await mergeMetadata(host, sessionId, { queuedForBrowser: false }).catch(
+      () => {},
+    );
+    const { message } = await describeScoutError(host, err);
     await setFailed(
       host,
       sessionId,
       "qs_scout_public",
-      `Public scout failed: ${msg}`,
+      `Public scout failed: ${message}`,
     );
     return false;
-  } finally {
-    await host.releaseScoutBrowser(claim.runnerId).catch(() => {});
-    await mergeMetadata(host, sessionId, { streamUrl: undefined }).catch(
-      () => {},
-    );
   }
 }
 
@@ -585,6 +632,7 @@ async function runQsAuthSetup(
 
 async function runQsScoutAuthed(
   host: QuickstartHost,
+  ctx: QuickstartCtx,
   sessionId: string,
   repositoryId: string,
   teamId: string,
@@ -626,34 +674,46 @@ async function runQsScoutAuthed(
     return true;
   }
 
-  const claim = await host.claimScoutBrowser(() => {
-    mergeMetadata(host, sessionId, { queuedForBrowser: true }).catch(() => {});
-  });
-  if (!claim.claimed) {
-    await mergeMetadata(host, sessionId, { queuedForBrowser: false }).catch(
-      () => {},
-    );
-    await setFailed(host, sessionId, "qs_scout_authed", claim.failureReason);
-    return false;
-  }
-  await mergeMetadata(host, sessionId, {
-    streamUrl: claim.streamUrl,
-    queuedForBrowser: false,
-  });
-  try {
-    let preAuthenticated = false;
-    if (authSetup.storageStateId) {
-      const json = await host.getStorageStateJson(authSetup.storageStateId);
-      if (json) {
-        preAuthenticated = await host.injectStorageState(claim.cdpUrl, json);
-      }
-    }
+  const baseUrl = gate.baseUrl;
+  const authTestCode = authTest.code;
 
-    const { data, promptLogId, retryCount } = await host.runAuthedScout(
-      repositoryId,
-      gate.baseUrl,
-      authTest.code,
-      { cdpUrl: claim.cdpUrl, preAuthenticated },
+  try {
+    // Core resolves and injects the stored credential material from the id —
+    // the plugin never reads the storage-state JSON. `authApplied` reports
+    // back whether it actually landed, which is what decides between "you are
+    // already signed in" and "replay the seed" in the scout prompt.
+    const { data, promptLogId, retryCount } = await ctx.browser.withBrowser(
+      {
+        purpose: "interactive",
+        claimTimeoutMs: SCOUT_CLAIM_TIMEOUT_MS,
+        deadlineMs: SCOUT_DEADLINE_MS,
+        storageStateId: authSetup.storageStateId,
+        onQueued: () => {
+          mergeMetadata(host, sessionId, { queuedForBrowser: true }).catch(
+            () => {},
+          );
+        },
+      },
+      async (browserSession) => {
+        await mergeMetadata(host, sessionId, {
+          streamUrl: browserSession.streamUrl ?? undefined,
+          queuedForBrowser: false,
+        });
+        try {
+          return await runQuickstartScoutAuthed(
+            ctx.ai,
+            browserSession,
+            repositoryId,
+            baseUrl,
+            authTestCode,
+            { preAuthenticated: browserSession.authApplied },
+          );
+        } finally {
+          await mergeMetadata(host, sessionId, {
+            streamUrl: undefined,
+          }).catch(() => {});
+        }
+      },
     );
     await mergeMetadata(host, sessionId, { authedScout: data });
     await setCompleted(host, sessionId, "qs_scout_authed", {
@@ -673,20 +733,28 @@ async function runQsScoutAuthed(
     );
     return true;
   } catch (err) {
-    // Authed scout failure is not fatal — we still ship a public-only walk.
-    const msg = err instanceof Error ? err.message : String(err);
+    await mergeMetadata(host, sessionId, { queuedForBrowser: false }).catch(
+      () => {},
+    );
+    const { kind, message } = await describeScoutError(host, err);
+    // A scout that ran and failed is not fatal — we still ship a public-only
+    // walk, which is the established behaviour. Never getting a browser is a
+    // different thing and stays fatal, as it was before `withBrowser` folded
+    // the claim into the same throw: it is an infrastructure fault with an
+    // operator remediation, and swallowing it as a skip would silently degrade
+    // every QuickStart run to public-only for as long as the pool is broken,
+    // with the actionable message buried in a step detail nobody re-reads.
+    if (kind === "no_browser") {
+      await setFailed(host, sessionId, "qs_scout_authed", message);
+      return false;
+    }
     await setSkipped(
       host,
       sessionId,
       "qs_scout_authed",
-      `authed scout error: ${msg}`,
+      `authed scout error: ${message}`,
     );
     return true;
-  } finally {
-    await host.releaseScoutBrowser(claim.runnerId).catch(() => {});
-    await mergeMetadata(host, sessionId, { streamUrl: undefined }).catch(
-      () => {},
-    );
   }
 }
 
@@ -1264,6 +1332,7 @@ async function runQsPublishShare(
 
 type QsStepRunner = (
   host: QuickstartHost,
+  ctx: QuickstartCtx,
   sessionId: string,
   repositoryId: string,
   teamId: string,
@@ -1271,15 +1340,16 @@ type QsStepRunner = (
 ) => Promise<boolean>;
 
 const QS_RUNNERS: Record<QuickstartStepId, QsStepRunner> = {
-  qs_preflight: (h, s, r, t) => runQsPreflight(h, s, r, t),
-  qs_scout_public: (h, s, r, t) => runQsScoutPublic(h, s, r, t),
-  qs_auth_setup: (h, s, r, t) => runQsAuthSetup(h, s, r, t),
-  qs_scout_authed: (h, s, r, t) => runQsScoutAuthed(h, s, r, t),
-  qs_generate: (h, s, r, t) => runQsGenerate(h, s, r, t),
-  qs_run_and_notes: runQsRunAndNotes,
-  qs_approve_baselines: (h, s, r, t) => runQsApproveBaselines(h, s, r, t),
-  qs_rerun_after_approval: runQsRerunAfterApproval,
-  qs_publish_share: (h, s, r, t) => runQsPublishShare(h, s, r, t),
+  qs_preflight: (h, _c, s, r, t) => runQsPreflight(h, s, r, t),
+  qs_scout_public: (h, c, s, r, t) => runQsScoutPublic(h, c, s, r, t),
+  qs_auth_setup: (h, _c, s, r, t) => runQsAuthSetup(h, s, r, t),
+  qs_scout_authed: (h, c, s, r, t) => runQsScoutAuthed(h, c, s, r, t),
+  qs_generate: (h, _c, s, r, t) => runQsGenerate(h, s, r, t),
+  qs_run_and_notes: (h, _c, s, r, t, sig) => runQsRunAndNotes(h, s, r, t, sig),
+  qs_approve_baselines: (h, _c, s, r, t) => runQsApproveBaselines(h, s, r, t),
+  qs_rerun_after_approval: (h, _c, s, r, t, sig) =>
+    runQsRerunAfterApproval(h, s, r, t, sig),
+  qs_publish_share: (h, _c, s, r, t) => runQsPublishShare(h, s, r, t),
 };
 
 /**
@@ -1292,7 +1362,7 @@ export async function executeQuickstart(
   repositoryId: string,
   teamId: string,
 ) {
-  const { host } = await context({ repositoryId, teamId });
+  const { host, ctx } = await context({ repositoryId, teamId });
   const ctrl = getOrCreateQsController(sessionId);
   const { signal } = ctrl;
 
@@ -1313,7 +1383,14 @@ export async function executeQuickstart(
           stepId,
         },
       );
-      const ok = await runner(host, sessionId, repositoryId, teamId, signal);
+      const ok = await runner(
+        host,
+        ctx,
+        sessionId,
+        repositoryId,
+        teamId,
+        signal,
+      );
       if (!ok) {
         emitActivity(
           host,

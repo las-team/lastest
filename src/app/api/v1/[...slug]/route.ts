@@ -1792,7 +1792,7 @@ export async function POST(
         }
         throw err;
       }
-      const { scoutUrlStatic } = await import("@/lib/playwright/static-scout");
+      const { scoutUrlStatic } = await import("@lastest/static-scout");
       try {
         const scout = await scoutUrlStatic(body.url);
         return NextResponse.json(scout, { headers: rl.headers });

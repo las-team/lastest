@@ -40,6 +40,7 @@ const nextConfig: NextConfig = {
     "@lastest/google-sheets",
     "@lastest/recording-codegen",
     "@lastest/route-scan",
+    "@lastest/static-scout",
     "@lastest/test-templates",
     "@lastest/page-map",
     "@lastest/url-canonical",

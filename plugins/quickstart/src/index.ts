@@ -7,13 +7,15 @@ import { definePlugin } from "@lastest/kernel";
  *
  * RFC §9 phase 4's fourteenth and last plugin, and the last of the four
  * split out of `src/lib/playwright` (§6.2) — `recorder` and `ranger` already
- * landed, `authoring-ai` was costed and stopped. QuickStart's own scout
- * module (`src/lib/playwright/quickstart-scout.ts`) hits the identical
+ * landed, `authoring-ai` was costed and stopped, then unblocked and
+ * migrated. QuickStart's own scout module originally hit the identical
  * blocker that stopped `authoring-ai` (handing a raw CDP endpoint to an
- * out-of-process `@playwright/mcp` binary — see `host.ts` item 5) but is
- * only 2 of QuickStart's 9 steps, so rather than stopping the whole
- * migration, that one module stays behind, unmigrated, reached through a
- * host port method instead of an import.
+ * out-of-process `@playwright/mcp` binary) and stayed behind, unmigrated,
+ * reached through five host-port methods. `AiCallOptions.browserTools`
+ * closed that gap for both: the scout now lives in `./scout.ts` and drives
+ * the browser through `ctx.ai.generate({ browserTools: session })` on a
+ * session from `ctx.browser.withBrowser(...)` — see `host.ts`'s header and
+ * `docs/architecture/quickstart-migration-result.md` §12.
  *
  * ### No schema, no `data` capability
  *
@@ -24,7 +26,14 @@ import { definePlugin } from "@lastest/kernel";
  * the still-unmigrated `qa-agent` pseudo-plugin's rows in the same table
  * (same encryption path). See `host.ts` item 2 for the full reasoning.
  *
- * ### No real capabilities at all — and that is a finding, not a gap
+ * ### Two capabilities, both for the scout
+ *
+ * `ai` and `browser` are declared for `./scout.ts` and nothing else — the
+ * two steps that run an agentic browsing loop. Everything else still goes
+ * through `QuickstartHost`. The original migration declared *no* capabilities
+ * at all and routed even these through the host, because the scout could not
+ * be expressed without a raw CDP endpoint; that is the constraint
+ * `AiCallOptions.browserTools` removed.
  *
  * `ctx.events.emit()` was tried first and reverted: the pre-migration code
  * emitted every step event with `sourceType: "play_agent"` and
@@ -40,18 +49,19 @@ import { definePlugin } from "@lastest/kernel";
  * instead. `ctx.repo`/`ctx.team` still arrive through `contextFor()` for
  * authorization even with an empty capability set — see `actions.ts`.
  *
- * Everything QuickStart needs from core — repo/team reads, session and test
- * CRUD, storage-state capture, build orchestration, notes, sharing, activity
- * emission — has no capability shape yet and goes through `QuickstartHost`
- * instead. See `host.ts`'s header before concluding this plugin's core
- * surface is small; it is exactly as large as a nine-step, full-pipeline
- * orchestrator that touches nearly every other subsystem on purpose.
+ * Everything else QuickStart needs from core — repo/team reads, session and
+ * test CRUD, storage-state capture, build orchestration, notes, sharing,
+ * activity emission — has no capability shape yet and goes through
+ * `QuickstartHost` instead. See `host.ts`'s header before concluding this
+ * plugin's core surface is small; it is exactly as large as a nine-step,
+ * full-pipeline orchestrator that touches nearly every other subsystem on
+ * purpose.
  */
 export const quickstartPlugin = definePlugin({
   id: "quickstart",
   title: "QuickStart",
 
-  capabilities: [],
+  capabilities: ["ai", "browser"],
 });
 
 export default quickstartPlugin;

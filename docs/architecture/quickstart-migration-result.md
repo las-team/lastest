@@ -246,3 +246,112 @@ path with QuickStart's own `kind: "quickstart"` rows, by core's explicit
 design. Read `plugins/quickstart/src/host.ts`'s item 2 before deciding
 whether `qa-agent` gets its own table — the same constraint that kept
 QuickStart on the shared table applies in reverse.
+
+## 12. `quickstart-scout.ts` graduated later, and the five-method seam it left disappeared entirely
+
+§2's item 5 called the scout group "scaffolding, not a permanent seam" and
+predicted the `AiCallOptions.browserTools` core PR would retire it. It did,
+and the prediction was exact enough to be worth recording as a positive
+result rather than another finding.
+
+**What landed.** `54e05d08 core: AI browser tools capability` added
+`AiCallOptions.browserTools?: BrowserSession`, resolved to a CDP endpoint
+only inside `src/lib/core/ai-capability.ts`'s `applyBrowserTools()` via
+`@lastest/core-browser/internal`. `authoring-ai` consumed it first (see
+[`authoring-ai-migration-result.md`](./authoring-ai-migration-result.md)),
+which is what made this migration mechanical: the pattern was already proven
+end-to-end, and `ai-capability.ts`'s `ACTION_TYPES` allowlist already carried
+`agent_discover` — added speculatively during that migration with a comment
+naming `@lastest/plugin-quickstart-scout` in advance. **Zero core changes
+were needed here.** That is the framework compounding, the same effect
+`playground` recorded against `launch`'s `onUserDeleted`.
+
+**What moved.** `src/lib/playwright/quickstart-scout.ts` (561 lines) became
+`plugins/quickstart/src/scout.ts`. Its two entry points changed signature
+from `(repositoryId, baseUrl, { cdpEndpoint })` to
+`(ai, session, repositoryId, baseUrl)` — the `authoring-ai` shape exactly.
+Everything the module used to do by hand is gone: `getAIConfig` +
+`queries.getAISettings` (`ctx.ai` resolves per-repo provider settings
+internally), and `applyScoutMcpWiring` — a 40-line verbatim copy of the
+strict-MCP/disallowed-tools wiring that now exists once, in
+`applyBrowserTools`. The plugin's `package.json` gained no dependency; the
+capability arrives on `ctx`.
+
+**What the port lost.** All five scout methods (`claimScoutBrowser`,
+`releaseScoutBrowser`, `injectStorageState`, `runPublicScout`,
+`runAuthedScout`) **and** `getStorageStateJson` — six methods and one whole
+group, replaced by **one** new method (below), for a net
+**28 methods in 9 groups**. (§2's headline count of 32 was one short of a
+strict signature count; 28 is measured against the interface as it stands.)
+`getStorageStateJson` is the interesting removal: it
+existed only so the plugin could read a stored state out as raw JSON and pass
+it to `injectStorageState(cdpUrl, json)`. `BrowserClaimOptions.storageStateId`
+injects by *id*, with core resolving the credential material — so the
+migration did not just relocate that step, it **removed a path by which
+credential material crossed the plugin boundary at all**. A port method that
+disappears because the capability has a better shape than the host method is
+the outcome §1.5 is trying to produce.
+
+**The one method that had to survive the group.** Deleting the claim
+methods would have deleted their error message too, and that message was not
+generic. `describeEbClaimFailure` probed `getEbPoolHealth()` to separate "all
+browsers busy, try later" from "pods provisioned but never became ready" —
+the ImagePullBackOff case, whose fix is a specific command
+(`pnpm stack:refresh:eb`) nobody can guess from `NoBrowserAvailableError`'s
+"the pool is at capacity". A plugin cannot derive it; pool health is core's.
+So `describeBrowserClaimFailure(err)` is the port's new item 5, called only
+when `err.name === "NoBrowserAvailableError"`. That match is a string on both
+sides — a plugin cannot `instanceof` a class it may not import — so the union
+of names is declared once in `@lastest/contracts` as `BrowserErrorName` and
+both sides annotate against it, which is what keeps a rename in `core/browser`
+from silently turning every claim failure back into the generic message with
+nothing failing to say so. **The generalisable point: a
+retired host method's *diagnostics* are functionality, and they do not
+retire with the mechanism.** Checking what the deleted branch reported, not
+just what it did, is the step that catches this. Its honest future is a
+`BrowserCapability` widening — core knows its own pool health, and every
+plugin claiming a browser wants the same sentence.
+
+**A behaviour change worth naming.** The old code decided
+`preAuthenticated` from `injectStorageState`'s own boolean return; the new
+code reads `session.authApplied`, which `core/contracts/src/browser.ts`
+documents as `false` whenever no `storageStateId` was requested — so it
+cannot mistake "did not ask" for "asked and failed". Same decision, sourced
+from the contract instead of from a local variable.
+
+**Two behaviour changes the capability's defaults would have made silently,
+and the explicit values that stop them.** `withBrowser` bounds the *whole
+callback*, where the old code's 5 minutes bounded only the claim and left the
+scout itself unbounded. Taking `DEFAULT_DEADLINE_MS` would therefore have
+converted a slow authed walk — the step whose login replay the code comments
+already describe as taking minutes — into a torn-down session, so both call
+sites pass `SCOUT_DEADLINE_MS` and `SCOUT_CLAIM_TIMEOUT_MS` explicitly; the
+latter is the pre-migration number, kept by intent rather than by coincidence.
+Core still clamps the deadline to `maxHoldFor(plan)`, which is the point: the
+plugin asks for what the step needs and core decides what the tenant may hold.
+Separately, folding the claim into the same `throw` as the AI loop had made a
+failed *claim* in `qs_scout_authed` non-fatal, where it used to stop the
+pipeline — a pool outage would have quietly downgraded every run to a
+public-only walk. `describeScoutError` now returns a `kind` alongside its text
+and the claim case stays fatal. **The generalisable point: when a hand-rolled
+mechanism becomes a capability call, its *defaults* are a behaviour change even
+though no line of feature logic moved — diff the timeouts, not just the
+control flow.**
+
+**Capability declaration.** `quickstart`'s manifest went from
+`capabilities: []` — §3's "no real capabilities at all, and that is a
+finding" — to `["ai", "browser"]`. That finding was true *because* the scout
+could not be expressed; it is not true any more, and the honest reading is
+that the empty set was always a measure of the missing capability rather than
+of the feature. §3's other half still stands unchanged: `ctx.events` remains
+the wrong shape for QuickStart's `sourceType: "play_agent"` tagging, and
+`emitActivity` stays a host method.
+
+**Note on §5 and §11.** `static-scout.ts` (§5) was resolved in the same pass
+and went to `libs/static-scout` — zero imports, zero core calls, one caller,
+so a `libs/*` promotion rather than either classification §5 left open. And
+§11's advice about `demo` is now partly moot: that pseudo-plugin's entry is
+gone (its two lib files reclassified core, its two actions confirmed dead and
+deleted), so `src/lib/core/quickstart-notes-shared.ts`'s second consumer no
+longer exists. The file stays shared for `qa-agent`, which is still
+unmigrated; re-examine it when that lands.

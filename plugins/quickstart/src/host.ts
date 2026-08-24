@@ -10,19 +10,33 @@ import type {
 /**
  * The core surface QuickStart needs and core does not have yet.
  *
- * **Read this file first.** It is the largest host port migrated so far —
- * larger than `share`'s 14, the previous high-water mark — and recipe §1.5's
- * stop line is "> ~15, the port would be bigger than the feature." This one
- * is not: what stays in `plugins/quickstart/src/actions.ts` after this port
- * is declared is still the entire nine-step orchestrator's control flow (the
- * auth-mode decision tree, the credential-vs-throwaway-account branch, the
- * storage-state reuse window, the auth-chain-failure downgrade-and-rerun,
- * the share-readiness quality gate) plus gating and the full UI. The port is
- * this large because the *feature* is: QuickStart is an end-to-end demo
- * pipeline that touches nearly every other subsystem in the product on
- * purpose (tests, builds, diffs, storage states, shares, activity events).
- * Below is the grouping recipe §1.5 asks for — **9 items, not 30-odd
- * unrelated reads** — with each item's honest future.
+ * **Read this file first.** At **28 methods** it is still the largest host
+ * port migrated — larger than `share`'s 14, the previous high-water mark —
+ * and recipe §1.5's stop line is "> ~15, the port would be bigger than the
+ * feature." This one is not: what stays in `plugins/quickstart/src/
+ * actions.ts` after this port is declared is still the entire nine-step
+ * orchestrator's control flow (the auth-mode decision tree, the
+ * credential-vs-throwaway-account branch, the storage-state reuse window,
+ * the auth-chain-failure downgrade-and-rerun, the share-readiness quality
+ * gate) plus gating and the full UI. The port is this large because the
+ * *feature* is: QuickStart is an end-to-end demo pipeline that touches
+ * nearly every other subsystem in the product on purpose (tests, builds,
+ * diffs, storage states, shares, activity events). Below is the grouping
+ * recipe §1.5 asks for — **9 items, not 30-odd unrelated reads** — with each
+ * item's honest future.
+ *
+ * **The Scout group is gone** (see
+ * `docs/architecture/quickstart-migration-result.md` §12): once
+ * `AiCallOptions.browserTools` landed, `runPublicScout`/`runAuthedScout`/
+ * `claimScoutBrowser`/`releaseScoutBrowser`/`injectStorageState` — the five
+ * methods that used to stand in for `src/lib/playwright/quickstart-scout.ts`
+ * staying behind, unmigrated — were retired, along with
+ * `getStorageStateJson`. The scout logic itself moved into
+ * `plugins/quickstart/src/scout.ts` and is called directly from `actions.ts`
+ * via `ctx.ai.generate({ browserTools: session })` and
+ * `ctx.browser.withBrowser(...)`, the same shape `authoring-ai` proved
+ * first. Six methods out, one in: item 5 below is the diagnostic that could
+ * not be derived plugin-side.
  *
  * 1. **Gating/settings** (`getRepoGateInfo`…`saveBranchBaseUrl`, 6 methods).
  *    Read-mostly repo/team configuration no capability covers today.
@@ -59,7 +73,7 @@ import type {
  *    update. The guard lives inside the host method, not beside it — see
  *    `src/lib/core/quickstart-host.ts`.
  *
- * 4. **Storage states** (`listStorageStates`…`captureStorageState`, 3
+ * 4. **Storage states** (`listStorageStates`, `captureStorageState`, 2
  *    methods). `captureStorageState` alone folds the ~150 lines that used to
  *    be `src/lib/quickstart/storage-capture.ts` — a disposable-runner claim
  *    with a direct-Chromium fallback for self-hosted installs with no EB
@@ -70,32 +84,24 @@ import type {
  *    baseline. Both are gone: the code moved wholesale to
  *    `src/lib/core/quickstart-storage-shared.ts`, unchanged, which is also
  *    where `qa-agent.ts` now calls it from (recipe §1.6.2 — see that file's
- *    header).
+ *    header). `getStorageStateJson` is gone with the scout group: reading a
+ *    stored state out as raw JSON only ever existed so the plugin could hand
+ *    it to `injectStorageState(cdpUrl, json)`. `BrowserClaimOptions.
+ *    storageStateId` does that by id now, so the credential material never
+ *    crosses the boundary at all — a strictly better shape than the one this
+ *    port started with.
  *
- * 5. **Scout — scaffolding, not a permanent seam** (`runPublicScout`,
- *    `runAuthedScout`, `claimScoutBrowser`, `releaseScoutBrowser`,
- *    `injectStorageState`, 5 methods). This is the item to read if you read
- *    only one. `src/lib/playwright/quickstart-scout.ts` hands a raw CDP
- *    endpoint to an out-of-process `@playwright/mcp` binary so the AI can
- *    drive the browser directly — structurally the identical shape that
- *    stopped `authoring-ai`'s migration outright
- *    (`authoring-ai-migration-result.md`): `core/contracts/src/browser.ts`'s
- *    `BrowserSession` documents, verbatim, that "notably absent is any way
- *    to obtain the CDP URL or the pod address," and no
- *    `AiCallOptions.browserTools`-shaped extension has been built. Unlike
- *    `authoring-ai`, this is not the *whole* feature — `quickstart-scout.ts`
- *    is 2 of QuickStart's 9 steps and ~16% of its lines — so rather than
- *    stopping the migration, the scout module **stays behind**,
- *    unmigrated, in `src/lib/playwright/`, and this group is the seam: five
- *    thin methods whose sole app-side implementation
- *    (`src/lib/core/quickstart-host.ts`) calls straight into the
- *    still-`@/`-rooted scout code and the raw-EB-claim dance
- *    (`claimEmbeddedBrowserForAgent`/`releasePoolEB`/`injectStorageStateIntoEb`)
- *    that used to live in `quickstart-agent.ts` itself. The plugin package
- *    never sees a CDP URL, a `Page`, or `playwright` — it awaits a typed
- *    result. This *doubles* the case for the `browserTools` core PR
- *    `authoring-ai-migration-result.md` asked for: it would now unblock two
- *    stalled migrations, not one.
+ * 5. **Browser-claim diagnostics** (`describeBrowserClaimFailure`, 1 method).
+ *    The one piece of the retired scout group that had to survive it.
+ *    `NoBrowserAvailableError` says "the pool is at capacity", which is true
+ *    but not actionable; the message this replaces probed pool health and
+ *    distinguished "all busy" from "pods provisioned but never became ready"
+ *    — the ImagePullBackOff case, whose fix is a specific command
+ *    (`pnpm stack:refresh:eb`) an operator cannot guess from the generic
+ *    text. `getEbPoolHealth` is core's, so the plugin cannot derive this. The
+ *    honest future is a `BrowserCapability` widening (core knows its own pool
+ *    health and every plugin claiming a browser wants the same sentence), at
+ *    which point this method retires like the other five.
  *
  * 6. **Build orchestration + notes evidence** (`startBuild`…
  *    `getRunFactsForBuild`, 6 methods). "The feature needs a build/execution
@@ -179,29 +185,14 @@ export interface QuickstartHost {
   listStorageStates(
     repositoryId: string,
   ): Promise<QuickstartStorageStateSummary[]>;
-  getStorageStateJson(storageStateId: string): Promise<string | null>;
   captureStorageState(
     input: QuickstartCaptureStorageStateInput,
   ): Promise<QuickstartCaptureStorageStateResult>;
 
-  // ---- 5. Scout (scaffolding — see header item 5) -------------------------
-  claimScoutBrowser(onQueued: () => void): Promise<QuickstartScoutClaim>;
-  releaseScoutBrowser(runnerId: string): Promise<void>;
-  injectStorageState(
-    cdpUrl: string,
-    storageStateJson: string,
-  ): Promise<boolean>;
-  runPublicScout(
-    repositoryId: string,
-    baseUrl: string,
-    cdpUrl: string,
-  ): Promise<QuickstartScoutPublicRun>;
-  runAuthedScout(
-    repositoryId: string,
-    baseUrl: string,
-    authTestCode: string,
-    opts: { cdpUrl: string; preAuthenticated: boolean },
-  ): Promise<QuickstartScoutAuthedRun>;
+  // ---- 5. Browser-claim diagnostics ---------------------------------------
+  /** Operator-actionable explanation for a failed `withBrowser` claim.
+   *  Never throws — falls back to the error's own message. */
+  describeBrowserClaimFailure(err: unknown): Promise<string>;
 
   // ---- 6. Build orchestration + notes evidence ----------------------------
   startBuild(
@@ -336,27 +327,6 @@ export interface QuickstartCaptureStorageStateResult {
   storageStateId?: string;
   failureReason?: string;
   durationMs: number;
-}
-
-export type QuickstartScoutClaim =
-  | {
-      claimed: true;
-      runnerId: string;
-      cdpUrl: string;
-      streamUrl: string | undefined;
-    }
-  | { claimed: false; failureReason: string };
-
-export interface QuickstartScoutPublicRun {
-  data: QuickstartPublicScout;
-  promptLogId?: string;
-  retryCount: number;
-}
-
-export interface QuickstartScoutAuthedRun {
-  data: QuickstartAuthedScout;
-  promptLogId?: string;
-  retryCount: number;
 }
 
 export type QuickstartBuildStart =

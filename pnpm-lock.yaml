@@ -181,6 +181,9 @@ importers:
       '@lastest/shared':
         specifier: workspace:*
         version: link:packages/shared
+      '@lastest/static-scout':
+        specifier: workspace:*
+        version: link:libs/static-scout
       '@lastest/test-templates':
         specifier: workspace:*
         version: link:libs/test-templates
@@ -598,6 +601,12 @@ importers:
       '@lastest/github':
         specifier: workspace:*
         version: link:../github
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  libs/static-scout:
     devDependencies:
       typescript:
         specifier: ^5

@@ -182,3 +182,24 @@ export interface BrowserCapability {
     fn: (session: BrowserSession, index: number) => Promise<T>,
   ): Promise<PromiseSettledResult<T>[]>;
 }
+
+/**
+ * The `name` a plugin sees on a browser-capability failure.
+ *
+ * A plugin cannot `instanceof` these: the classes live in `@lastest/core-browser`,
+ * which is composition-root code no plugin may import. Matching on `err.name`
+ * is the available option, and a bare string literal on both sides is a rename
+ * away from silently degrading every claim failure to a generic message — the
+ * plugin's branch would simply stop matching, with nothing failing to say so.
+ *
+ * Naming the set here restores the compile-time tie without costing anything at
+ * runtime (this package stays types-only): `core/browser`'s error classes
+ * declare `name: BrowserErrorName`, so a string that drifts out of this union
+ * fails core's own typecheck, and a plugin annotating its comparison with the
+ * same type fails when a member is removed.
+ */
+export type BrowserErrorName =
+  | "NoBrowserAvailableError"
+  | "BrowserDeadlineExceededError"
+  | "DeadlineExtensionRefusedError"
+  | "BrowserSessionClosedError";

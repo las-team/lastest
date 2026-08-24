@@ -1,13 +1,17 @@
 /**
- * Static, no-browser URL scout used by POST /api/v1/scout (exposed over MCP as
- * `lastest_scout_url`). Fetches a page's HTML and extracts a best-effort map —
- * title, headings, forms, inputs, links, and candidate selectors — to give an
- * AI agent a starting point for authoring a test when it has no live browser.
+ * `@lastest/static-scout` — static, no-browser URL scout used by
+ * POST /api/v1/scout (exposed over MCP as `lastest_scout_url`). Fetches a
+ * page's HTML and extracts a best-effort map — title, headings, forms,
+ * inputs, links, and candidate selectors — to give an AI agent a starting
+ * point for authoring a test when it has no live browser.
  *
  * This intentionally does NOT render JavaScript, so SPA-built DOM won't appear;
  * the MCP-first guidance tells agents to prefer their own Playwright MCP for
  * live pages and treat this as a fallback / quick map. SSRF is guarded by the
- * caller (validateTargetUrl) before this runs.
+ * caller (validateTargetUrl) before this runs — this package makes no
+ * tenancy, capacity, money or credential decision of its own
+ * (docs/architecture/core-scope.md §3), which is why it lives in `libs/`
+ * rather than core or a plugin.
  */
 
 export interface StaticScoutResult {

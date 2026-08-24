@@ -100,6 +100,7 @@
     "@lastest/recording-codegen": "workspace:*",
     "@lastest/route-scan": "workspace:*",
     "@lastest/shared": "workspace:*",
+    "@lastest/static-scout": "workspace:*",
     "@lastest/test-templates": "workspace:*",
     "@lastest/ui": "workspace:*",
     "@lastest/url-canonical": "workspace:*",

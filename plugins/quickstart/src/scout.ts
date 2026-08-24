@@ -10,72 +10,29 @@
  * The classification table mirrors `gtm-lastest-saas-demo`'s Phase-3
  * `AUTH_AUTOMATABLE` table verbatim — it is the source of truth for whether
  * Test 1 (auth setup) gets built at all.
+ *
+ * ### Graduated from `src/lib/playwright/quickstart-scout.ts`
+ *
+ * This module used to hand a raw CDP endpoint to an out-of-process
+ * `@playwright/mcp` binary — the same shape that stopped `authoring-ai`'s
+ * migration outright (see `docs/architecture/authoring-ai-migration-result.md`
+ * §2) — which is why it stayed behind, unmigrated, when the rest of
+ * `quickstart` graduated. `AiCallOptions.browserTools`
+ * (`core/contracts/src/ai.ts`) closed that gap: every AI call below passes
+ * `ai.generate(prompt, { ..., browserTools: session })` a `BrowserSession`
+ * obtained from `ctx.browser.withBrowser(...)`, never a CDP endpoint or an
+ * `AIProviderConfig` this module builds by hand. See
+ * `docs/architecture/quickstart-migration-result.md` §12 for the graduation.
  */
 
-import * as queries from "@/lib/db/queries";
-import { generateWithAI, type GenerateWithAIOptions } from "@/lib/ai";
-import type { AIProviderConfig } from "@/lib/ai/types";
-import type { MCPServerConfig } from "@/lib/ai/mcp-bridge";
-import { getAIConfig } from "./agent-context";
+import type { AiCapability, BrowserSession } from "@lastest/contracts";
+
 import type {
-  QuickstartPublicScout,
   QuickstartAuthedScout,
   QuickstartBusinessInteraction,
   QuickstartProductArchetype,
-} from "@/lib/db/schema";
-
-/**
- * Apply the EB-aware MCP wiring used by healer/generator. When a CDP endpoint
- * is provided, both the SDK-native MCP path and the bridge path get pointed at
- * a dedicated containerized browser instead of spawning a local Chromium that
- * fights for the user-data-dir held by any ambient Playwright MCP process
- * (e.g. the user's terminal Claude session). Strict mode + an explicit
- * disallowedTools list also stops the SDK from trying to fall back to WebFetch
- * (which it can't get permission for in this headless context).
- */
-function applyScoutMcpWiring(
-  config: AIProviderConfig,
-  cdpEndpoint: string | undefined,
-): Pick<GenerateWithAIOptions, "useMCP" | "mcpConfig"> {
-  // A CDP endpoint (Embedded Browser) is mandatory — without it @playwright/mcp
-  // launches Chromium in THIS host process, running the scout's browser actions
-  // outside the sandbox. Callers must claim an EB first.
-  if (!cdpEndpoint) {
-    throw new Error(
-      "applyScoutMcpWiring requires a cdpEndpoint — refusing to launch a host-process browser. Claim an Embedded Browser first.",
-    );
-  }
-  const mcpArgs = [
-    "@playwright/mcp@latest",
-    "--cdp-endpoint",
-    cdpEndpoint,
-    "--headless",
-  ];
-  const playwrightServer: MCPServerConfig = { command: "npx", args: mcpArgs };
-
-  if (config.provider === "claude-agent-sdk") {
-    config.agentSdkStrictMcpConfig = true;
-    config.agentSdkMcpServers = { playwright: playwrightServer };
-    config.agentSdkAllowedTools = ["mcp__playwright__*"];
-    config.agentSdkDisallowedTools = [
-      "Bash",
-      "Write",
-      "Edit",
-      "NotebookEdit",
-      "WebFetch",
-    ];
-    // SDK path consumes the mcpServers above; bridge path is unused.
-    return { useMCP: false };
-  }
-
-  return {
-    useMCP: true,
-    mcpConfig: {
-      servers: { playwright: playwrightServer },
-      cdpEndpoint,
-    },
-  };
-}
+  QuickstartPublicScout,
+} from "./types";
 
 const PUBLIC_SCOUT_SYSTEM_PROMPT = `You are a web app reconnaissance agent. Your job is to (1) describe what a SaaS does, (2) extract its primary business interaction, and (3) classify whether its sign-up flow is automatable.
 
@@ -340,44 +297,35 @@ export interface QuickstartScoutAuthedResult {
 }
 
 export async function runQuickstartScoutPublic(
+  ai: AiCapability,
+  session: BrowserSession,
   repositoryId: string,
   baseUrl: string,
-  options?: { onLogCreated?: (logId: string) => void; cdpEndpoint?: string },
+  options?: { signal?: AbortSignal },
 ): Promise<QuickstartScoutPublicResult> {
-  const settings = await queries.getAISettings(repositoryId);
-  const config = getAIConfig(settings);
-  const mcpOpts = applyScoutMcpWiring(config, options?.cdpEndpoint);
-
   const prompt = `Reconnoiter ${baseUrl}. Follow the workflow in the system prompt and return strict JSON.`;
 
-  let promptLogId: string | undefined;
-  const response = await generateWithAI(
-    config,
-    prompt,
-    PUBLIC_SCOUT_SYSTEM_PROMPT,
-    {
-      ...mcpOpts,
-      repositoryId,
-      actionType: "agent_discover",
-      onLogCreated: (id) => {
-        promptLogId = id;
-        options?.onLogCreated?.(id);
-      },
-      responseFormat: "json_object",
-    },
-  );
+  const result = await ai.generate(prompt, {
+    actionType: "agent_discover",
+    repositoryId,
+    systemPrompt: PUBLIC_SCOUT_SYSTEM_PROMPT,
+    json: true,
+    signal: options?.signal,
+    browserTools: session,
+  });
 
+  let promptLogId = result.promptLogId;
   let parsed: Record<string, unknown> | null = null;
   let parseError: string | undefined;
   try {
-    const json = extractJson(response);
+    const json = extractJson(result.text);
     if (json && typeof json === "object")
       parsed = json as Record<string, unknown>;
   } catch (err) {
     parseError = err instanceof Error ? err.message : String(err);
     console.warn(
       "[QuickStartScout] non-JSON response on first try:",
-      response.slice(0, 400),
+      result.text.slice(0, 400),
     );
   }
 
@@ -389,23 +337,17 @@ export async function runQuickstartScoutPublic(
   if (!parsed) {
     retryCount = 1;
     const retryPrompt = `${prompt}\n\nIMPORTANT: Your previous response was not valid JSON (parse error: ${parseError ?? "unknown"}). Browse the site with MCP tools and return ONLY the strict JSON object specified in the system prompt, no prose, no markdown fences.`;
-    const retryResponse = await generateWithAI(
-      config,
-      retryPrompt,
-      PUBLIC_SCOUT_SYSTEM_PROMPT,
-      {
-        ...mcpOpts,
-        repositoryId,
-        actionType: "agent_discover",
-        onLogCreated: (id) => {
-          promptLogId = id;
-          options?.onLogCreated?.(id);
-        },
-        responseFormat: "json_object",
-      },
-    );
+    const retryResult = await ai.generate(retryPrompt, {
+      actionType: "agent_discover",
+      repositoryId,
+      systemPrompt: PUBLIC_SCOUT_SYSTEM_PROMPT,
+      json: true,
+      signal: options?.signal,
+      browserTools: session,
+    });
+    promptLogId = retryResult.promptLogId ?? promptLogId;
     try {
-      const json = extractJson(retryResponse);
+      const json = extractJson(retryResult.text);
       if (json && typeof json === "object")
         parsed = json as Record<string, unknown>;
     } catch (err) {
@@ -468,21 +410,18 @@ export async function runQuickstartScoutPublic(
 }
 
 export async function runQuickstartScoutAuthed(
+  ai: AiCapability,
+  session: BrowserSession,
   repositoryId: string,
   baseUrl: string,
   authSetupCode: string,
   options?: {
-    onLogCreated?: (logId: string) => void;
-    cdpEndpoint?: string;
+    signal?: AbortSignal;
     /** When true, the EB already has the captured session cookies/localStorage
      *  injected — skip the seed replay entirely and start scouting authed. */
     preAuthenticated?: boolean;
   },
 ): Promise<QuickstartScoutAuthedResult> {
-  const settings = await queries.getAISettings(repositoryId);
-  const config = getAIConfig(settings);
-  const mcpOpts = applyScoutMcpWiring(config, options?.cdpEndpoint);
-
   // Pre-authenticated: the session was injected into this browser out-of-band,
   // so skip step 1 (the seed sign-in) — re-driving the login form through the
   // model is what made this step take minutes. Otherwise fall back to handing
@@ -498,28 +437,23 @@ ${authSetupCode}
 
 After the seed completes successfully, navigate to ${baseUrl} and proceed with the workflow in the system prompt. Return strict JSON.`;
 
-  let promptLogId: string | undefined;
-  const generateOpts = {
-    ...mcpOpts,
-    repositoryId,
-    actionType: "agent_discover" as const,
-    onLogCreated: (id: string) => {
-      promptLogId = id;
-      options?.onLogCreated?.(id);
-    },
-    responseFormat: "json_object" as const,
-  };
-  const response = await generateWithAI(
-    config,
-    prompt,
-    AUTHED_SCOUT_SYSTEM_PROMPT,
-    generateOpts,
-  );
+  const generate = (p: string) =>
+    ai.generate(p, {
+      actionType: "agent_discover",
+      repositoryId,
+      systemPrompt: AUTHED_SCOUT_SYSTEM_PROMPT,
+      json: true,
+      signal: options?.signal,
+      browserTools: session,
+    });
+
+  const result = await generate(prompt);
+  let promptLogId = result.promptLogId;
 
   let parsed: Record<string, unknown> = {};
   let parseError: string | undefined;
   try {
-    const json = extractJson(response);
+    const json = extractJson(result.text);
     if (json && typeof json === "object")
       parsed = json as Record<string, unknown>;
   } catch (err) {
@@ -533,14 +467,10 @@ After the seed completes successfully, navigate to ${baseUrl} and proceed with t
   if (parseError) {
     retryCount = 1;
     const retryPrompt = `${prompt}\n\nIMPORTANT: Your previous response was not valid JSON (parse error: ${parseError}). Return ONLY the strict JSON object specified in the system prompt, no prose, no markdown fences.`;
-    const retryResponse = await generateWithAI(
-      config,
-      retryPrompt,
-      AUTHED_SCOUT_SYSTEM_PROMPT,
-      generateOpts,
-    );
+    const retryResult = await generate(retryPrompt);
+    promptLogId = retryResult.promptLogId ?? promptLogId;
     try {
-      const json = extractJson(retryResponse);
+      const json = extractJson(retryResult.text);
       if (json && typeof json === "object")
         parsed = json as Record<string, unknown>;
     } catch {
