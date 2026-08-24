@@ -643,13 +643,15 @@ describe("§4 step 11 — QA Agent session: crawl → tasks → execution → re
 
     // ── report ────────────────────────────────────────────────────────────
     // `QaSummaryPanel` is the persistent coverage dashboard: Planned /
-    // Covered / Generated / Passed stat tiles. On a `failed` run it may be
+    // Covered / Generated / Passing / Gaps stat tiles. On a `failed` run it may be
     // absent — in that case the UI must still name the failed phase rather
     // than stalling silently.
     const finalText = await bodyText(page);
     if (terminal === "completed") {
       // `QaSummaryPanel`'s stat tiles — the standing coverage artifact.
-      for (const tile of ["Planned", "Covered", "Generated", "Passed"]) {
+      // Labels are verbatim from `qa-results-panel.tsx`; the fourth tile reads
+      // "Passing", not "Passed".
+      for (const tile of ["Planned", "Covered", "Generated", "Passing"]) {
         expect(finalText.includes(tile), `summary tile "${tile}"`).toBe(true);
       }
       const headline = /(\d+) planned/.exec(finalText);

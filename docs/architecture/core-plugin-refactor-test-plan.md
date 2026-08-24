@@ -13,6 +13,10 @@
 >   structurally could not see** — all three pre-existing on `main`, none
 >   caused by this refactor (§4.1). The most serious: **the Recorder is
 >   completely broken** in the default dev provisioner mode.
+> - **Update (2026-08-24, §4.3): the §4 suite is green — 25/25**, including
+>   steps 10–11, which §4.2 listed as never having produced a verdict. The
+>   Recorder and the video-recording toggle are fixed; three further
+>   pre-existing bugs were found and fixed in that run.
 >
 > Caveat on §4's numbers: they were gathered while a *second, unrelated*
 > plugin-rollout effort was live in the same working tree, which repeatedly
@@ -749,6 +753,66 @@ Two harness/infra issues also surfaced, both fixed or recorded:
 - EBs can be left `busy` and are **not reaped**, wedging the pool at
   `online: 0` until cleaned by hand. Observed after abnormally-terminated
   runs; it is §2.1's pool-exhaustion mode, reachable in practice.
+
+### 4.3 Results — 2026-08-24 re-run (suite now green)
+
+Re-run of all four `e2e/` suites against a quiet tree: **25 passed / 0 failed**
+(`golden-path` 11, `agents-ui` 2, `settings-ui` 10, `share-and-deletion` 2),
+teardown clean. This closes both items §4.2 left open at the top of its list:
+**steps 10 and 11 now pass** — the Explorer live stream painted (1280×720
+canvas, 145 distinct sampled colours, EB released back to the pool) and the QA
+Agent walked crawl → plan → execution → report. §2.18's live-stream gap is
+therefore closed.
+
+Two of §4.1's three findings are fixed and one is unchanged:
+
+1. **Recorder — FIXED.** It records against a live EB end to end; step 3 no
+   longer needs the Import-code substitution.
+2. **"Video Recording" toggle — FIXED.** `resolveVideoRecording`
+   (`src/lib/execution/executor.ts`) ORs the repo-level
+   `playwright_settings.enableVideoRecording` with the per-run
+   `forceVideoRecording`, so the Settings switch really does produce a video.
+   Step 7 now asserts that instead of documenting the bug.
+3. **`repositories` → `teams` foreign key — STILL MISSING.** Unchanged.
+
+Bugs this re-run found and fixed (all pre-existing, none caused by the
+refactor):
+
+- **The umami ingest proxy forwarded upstream 5xx to the browser.**
+  `/api/umami/[event]` returned the upstream status verbatim, so a dead
+  analytics box (its own DB unreachable) put a failed request in the console of
+  *every* page — enough to fail the app-shell smoke case, and enough to fail
+  our own console check layer on a customer's site. It now degrades a non-2xx
+  to 204, the same as the timeout path it already had.
+- **The recorder created functional areas with no `repositoryId`.** "New area
+  name" on `/record` went through a global get-or-create, so the area was
+  invisible in the Tests tree (which reads `getFunctionalAreasByRepo`) and
+  matched by name across *every* team. Now repo-scoped, behind
+  `requireRepoCapability(repositoryId, "tests:write")`.
+- **`runBuildAsync` called `revalidatePath` outside a request scope.** As a
+  fire-and-forget it routinely outlives its request, and the queued-build
+  consumer has none at all — Next throws "static generation store missing"
+  there, surfacing as an unhandled rejection. Now best-effort.
+
+Harness/expectation fixes in `e2e/` itself:
+
+- `destroyTeam` deleted repositories directly and died on
+  `background_jobs_repository_id_repositories_id_fk`; it now goes through
+  `queries.deleteRepository`, the product's own cascade.
+- `golden-path` dispatches a build in-process (step 7b), so it now awaits
+  `getPluginRuntime()` first — without the composition root, the run failed
+  with "The data-sources plugin is not wired".
+- Step 13 read `STRIPE_SECRET_KEY` instead of assuming billing is
+  unconfigured, and `agents-ui` lifts the QA-Agent plan gate on its own
+  disposable team — a dev box with Stripe configured gates `/qa-agent` and
+  `/explorer` for a free team, which is correct product behaviour and used to
+  read as "the Explorer heading never appeared".
+- The scrubber case hovers with `force` (the centred Play overlay sits on the
+  video's centre point) and accepts any tick that moves the case rail: step
+  timings are finer-grained than step comparisons, so not every segment has a
+  case to select.
+
+---
 
 ### 4.2 What is not yet green, and why
 

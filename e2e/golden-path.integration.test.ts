@@ -851,12 +851,12 @@ describe("§4 golden path — one continuous browser journey", () => {
     // Segment ticks come from persisted stepTimings; clicking one seeks the
     // video *and* selects that step in the case rail.
     // The control bar (and with it the segment strip) only paints on hover.
-    // Hover the centred Play overlay rather than the `<video>` itself: it sits
-    // at the video's exact centre point, so a plain `video.hover()` spends its
-    // whole timeout reporting "subtree intercepts pointer events". Same mouse
-    // position either way, so the player sees the same hover.
-    const playOverlay = page.getByRole("button", { name: "Play" }).first();
-    await ((await playOverlay.count()) > 0 ? playOverlay : video).hover();
+    // `force` because the centred Play overlay button sits exactly on the
+    // video's centre point, which is where Playwright aims a hover — without
+    // it the call spends its whole timeout reporting "subtree intercepts
+    // pointer events". The mouse still moves to the same coordinates, which is
+    // all the player's hover state reacts to.
+    await video.hover({ force: true });
     await page.waitForTimeout(300);
     const ticks = page.locator('button[aria-label^="Seek to step "]');
     await expect
@@ -885,8 +885,24 @@ describe("§4 golden path — one continuous browser journey", () => {
     // In sync: the playhead landed on the segment the tick describes.
     expect(after).not.toBe(before);
     if (startS !== null) expect(Math.abs(after - startS)).toBeLessThan(1.5);
-    // …and the rail followed the seek to a step.
-    expect(new URL(page.url()).searchParams.get("step")).toBeTruthy();
+
+    // …and the rail follows the seek. `selectByStepIndex` (focus-view.tsx)
+    // matches a segment to a case *by stepIndex*, and step timings are finer
+    // grained than step comparisons — a recorded action can have a timing and
+    // no case — so not every tick has a rail cell to select. Walk the ticks
+    // and require that at least one drives the selection into the URL, rather
+    // than assuming the last one does.
+    // `dispatchEvent` rather than `click`: segments whose timings collapse to
+    // the same instant render as overlapping zero-width ticks, so a real mouse
+    // click on one of them always lands on whichever sibling is on top. The
+    // event still bubbles to React's handler on the tick we mean.
+    let selectedStep = new URL(page.url()).searchParams.get("step");
+    for (let i = 0; i < (await ticks.count()) && !selectedStep; i++) {
+      await ticks.nth(i).dispatchEvent("click");
+      await page.waitForTimeout(400);
+      selectedStep = new URL(page.url()).searchParams.get("step");
+    }
+    expect(selectedStep).toBeTruthy();
     mark(`7: scrubber seek ${before} -> ${after} (tick "${title}")`);
   }, 600_000);
 });
