@@ -136,6 +136,44 @@ describe("Quickstart — fresh repo scaffold", () => {
     expect(after).toBeTruthy();
     expect(["completed", "failed"]).toContain(after.status);
 
+    // The scout half, asserted unconditionally. Everything below this point is
+    // allowed to degrade (see the `headers()` boundary noted above), so
+    // without these the test can report green having exercised none of the
+    // refactor's central claim: `qs_scout_public` is the first step that needs
+    // the whole `ctx.browser.withBrowser` → `ctx.ai.generate({ browserTools })`
+    // → `@playwright/mcp` chain to work.
+    //
+    // These assert *evidence that a browser actually read the DOM*, not a
+    // particular verdict. Pinning the verdict was tried and is flaky: across
+    // three runs against this same target the scout returned
+    // `login_email_password` once and `no_public_register` twice. Both are
+    // defensible readings — the-internet.herokuapp.com has no signup page at
+    // all, and whether the model applies the `login_email_password` OVERRIDE
+    // (register unavailable BUT a plain email+password login exists) varies
+    // run to run. A test that pins one of them fails for a reason that has
+    // nothing to do with the code under test.
+    const publicScoutStep = after.steps.find((s) => s.id === "qs_scout_public");
+    // Surface the step's own error in the failure message — otherwise this
+    // reads as a bare 'failed' !== 'completed' and the actual reason (AI
+    // provider error, no browser available, MCP failure) dies with the
+    // session, which `afterAll` deletes.
+    expect(
+      publicScoutStep?.status,
+      `qs_scout_public error: ${publicScoutStep?.error ?? "(none recorded)"}`,
+    ).toBe("completed");
+
+    const publicScout = after.metadata.publicScout;
+    expect(publicScout).toBeTruthy();
+    // `unknown` is what `scout.ts`'s validation gate downgrades to when the
+    // model produced no tagline, no concept and no navLinks — i.e. when it
+    // never actually browsed. That is the failure this test exists to catch.
+    expect(publicScout!.classification).not.toBe("unknown");
+    // Concept and navLinks can only come from reading the live page: the
+    // concept is written from the hero, and navLinks are DOM-discovered
+    // `<a href>` paths the prompt explicitly forbids the model from guessing.
+    expect((publicScout!.concept ?? "").length).toBeGreaterThan(0);
+    expect(publicScout!.navLinks.length).toBeGreaterThan(0);
+
     const walkthroughTestId = after.metadata.walkthroughTestId;
     if (walkthroughTestId) {
       // The core "not empty/garbage" check §3 asks for — reachable once

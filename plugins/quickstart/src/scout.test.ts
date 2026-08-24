@@ -5,7 +5,7 @@ import type {
   BrowserSession,
 } from "@lastest/contracts";
 
-import { runQuickstartScoutPublic } from "./scout";
+import { runQuickstartScoutAuthed, runQuickstartScoutPublic } from "./scout";
 
 const mockGenerate = vi.fn<AiCapability["generate"]>();
 
@@ -234,5 +234,166 @@ describe("runQuickstartScoutPublic — authAutomatable guard", () => {
 
     expect(data.classification).toBe("oauth_only");
     expect(data.authAutomatable).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runQuickstartScoutAuthed
+//
+// The authed scout has two prompt shapes, chosen by `preAuthenticated` — which
+// `actions.ts` derives from `browserSession.authApplied`. That substitution is
+// the whole point of the branch: when core already injected the stored session
+// into the EB, re-driving the login form through the model costs minutes for
+// nothing. These assert the branch on the *prompt text actually sent*, since
+// that is the only externally visible difference.
+// ---------------------------------------------------------------------------
+
+const AUTHED_JSON = JSON.stringify({
+  inAppNavLinks: [
+    { path: "/dashboard", label: "Dashboard" },
+    { path: "/projects", label: "Projects" },
+  ],
+  safeCtaCandidates: [
+    {
+      label: "Create project",
+      selectorHint: "button with name 'Create project'",
+    },
+  ],
+  observedRoutes: ["/dashboard", "/projects"],
+  friction: [],
+});
+
+const SEED_CODE = "await page.goto(baseUrl + '/login');";
+
+const authedScout = (preAuthenticated?: boolean) =>
+  runQuickstartScoutAuthed(
+    ai,
+    session,
+    REPO_ID,
+    "https://app.example.com",
+    SEED_CODE,
+    preAuthenticated === undefined ? undefined : { preAuthenticated },
+  );
+
+/** The prompt string passed to the Nth `ai.generate` call. */
+const promptOf = (call = 0) => mockGenerate.mock.calls[call][0] as string;
+
+describe("runQuickstartScoutAuthed — preAuthenticated substitution", () => {
+  it("omits the seed and tells the model it is already signed in", async () => {
+    mockGenerate.mockResolvedValueOnce(aiResult(AUTHED_JSON));
+
+    const { data } = await authedScout(true);
+
+    const prompt = promptOf();
+    expect(prompt).not.toContain(SEED_CODE);
+    expect(prompt).toContain("ALREADY signed in");
+    expect(prompt).toContain("SKIP step 1");
+    expect(data.inAppNavLinks).toHaveLength(2);
+  });
+
+  it("embeds the seed for replay when the session was not pre-authenticated", async () => {
+    mockGenerate.mockResolvedValueOnce(aiResult(AUTHED_JSON));
+
+    await authedScout(false);
+
+    const prompt = promptOf();
+    expect(prompt).toContain(SEED_CODE);
+    expect(prompt).toContain("run this FIRST");
+    expect(prompt).not.toContain("ALREADY signed in");
+  });
+
+  it("defaults to seed replay when no options are passed", async () => {
+    mockGenerate.mockResolvedValueOnce(aiResult(AUTHED_JSON));
+
+    await authedScout();
+
+    expect(promptOf()).toContain(SEED_CODE);
+  });
+
+  it("passes the claimed browser session as browserTools on every call", async () => {
+    mockGenerate.mockResolvedValueOnce(aiResult(AUTHED_JSON));
+
+    await authedScout(true);
+
+    expect(mockGenerate.mock.calls[0][1]).toMatchObject({
+      actionType: "agent_discover",
+      repositoryId: REPO_ID,
+      json: true,
+      browserTools: session,
+    });
+  });
+});
+
+describe("runQuickstartScoutAuthed — parsing", () => {
+  it("retries once on non-JSON and keeps the chosen prompt shape", async () => {
+    mockGenerate
+      .mockResolvedValueOnce(aiResult("I browsed the app but here is prose."))
+      .mockResolvedValueOnce(aiResult(AUTHED_JSON));
+
+    const { data, retryCount } = await authedScout(true);
+
+    expect(retryCount).toBe(1);
+    expect(mockGenerate).toHaveBeenCalledTimes(2);
+    // The retry re-sends the same pre-authenticated prompt plus the parse
+    // error — it must not silently fall back to the seed-replay shape.
+    expect(promptOf(1)).toContain("ALREADY signed in");
+    expect(promptOf(1)).toContain("not valid JSON");
+    expect(data.observedRoutes).toEqual(["/dashboard", "/projects"]);
+  });
+
+  it("degrades to an empty scout when both attempts are unusable", async () => {
+    mockGenerate
+      .mockResolvedValueOnce(aiResult("nope"))
+      .mockResolvedValueOnce(aiResult("still nope"));
+
+    const { data, retryCount } = await authedScout(true);
+
+    expect(retryCount).toBe(1);
+    expect(data).toEqual({
+      inAppNavLinks: [],
+      safeCtaCandidates: [],
+      observedRoutes: [],
+      friction: [],
+    });
+  });
+
+  it("drops malformed nav links, CTAs and routes rather than throwing", async () => {
+    mockGenerate.mockResolvedValueOnce(
+      aiResult(
+        JSON.stringify({
+          inAppNavLinks: [
+            { path: "/ok", label: "Ok" },
+            { path: "not-a-path", label: "Relative" },
+            { label: "no path at all" },
+          ],
+          safeCtaCandidates: [
+            { label: "Create project" },
+            { selectorHint: "no label" },
+          ],
+          observedRoutes: ["/dashboard", 42, null],
+          friction: [{ kind: "slow_route", note: "3s" }, { kind: "bad" }],
+        }),
+      ),
+    );
+
+    const { data } = await authedScout(true);
+
+    expect(data.inAppNavLinks).toEqual([{ path: "/ok", label: "Ok" }]);
+    expect(data.safeCtaCandidates).toEqual([
+      { label: "Create project", selectorHint: undefined },
+    ]);
+    expect(data.observedRoutes).toEqual(["/dashboard"]);
+    expect(data.friction).toEqual([{ kind: "slow_route", note: "3s" }]);
+  });
+
+  it("unwraps JSON wrapped in a fence with trailing prose", async () => {
+    mockGenerate.mockResolvedValueOnce(
+      aiResult("Here you go:\n```json\n" + AUTHED_JSON + "\n```\nDone!"),
+    );
+
+    const { data, retryCount } = await authedScout(true);
+
+    expect(retryCount).toBe(0);
+    expect(data.inAppNavLinks).toHaveLength(2);
   });
 });

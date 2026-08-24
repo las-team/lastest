@@ -112,9 +112,17 @@ just relocated. `host.ts`'s `aiScanRoutes`/`extractUserStoriesFromFiles`/
 with dynamic `import()`s into `ai-routes.ts`/`spec-import.ts`/`specs.ts` —
 the composition root importing an unmigrated action module, the same shape
 `app-map`'s host used for its own unmigrated-neighbour calls. This plugin
-does not make any of those three migratable; `ai-routes.ts` and `specs.ts`
-remain unclassified orphans, and `spec-import.ts` remains its own oversized,
-uncosted `PSEUDO_PLUGINS` entry.
+does not make any of those three migratable, and `spec-import.ts` remains its
+own oversized, uncosted `PSEUDO_PLUGINS` entry.
+
+`ai-routes.ts` and `specs.ts` are no longer *unclassified*, though they are
+still unresolved: both now have their own uncosted `PSEUDO_PLUGINS` entries
+so the ledger holds the classification instead of this paragraph. The counter
+did not move — the edges into them run through `AuthoringAiHost` methods
+filled by the composition root, which is the legal `app-map` shape — and no
+costing has been run for either. What the entries buy is that `qa-agent`, the
+one pseudo-plugin left, now gets a generated cross-plugin pattern for those
+paths rather than the blind spot described above.
 
 ## 5. What I did NOT verify
 

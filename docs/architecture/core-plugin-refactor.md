@@ -43,11 +43,16 @@ recipe §1.5 before assuming "unmigrated" meant "migrate it":
   now has an explicit `CORE_SRC_PATHS` one, matching its two app-level
   callers.
 
-Three uncounted entries remain, all genuinely unresolved: `qa-agent` (the
+Four uncounted entries remain, all genuinely unresolved: `qa-agent` (the
 flagship, and the only remaining source of counted violations),
 `spec-import` (split out of `data-sources`, oversized — see
 `data-sources-migration-result.md` §1) and `authoring-ai`'s two sideways
-orphans (`ai-routes.ts`, unclassified anywhere).
+orphans, `ai-routes` and `specs`. The orphans were unclassified anywhere
+until they got their own uncosted `PSEUDO_PLUGINS` entries; that is a ledger
+correction, not a migration — the counter is unchanged (both are reached
+through `AuthoringAiHost` methods filled by the composition root, which is
+legal), and no cost has been run for either. See the entries in
+`tools/architecture/boundaries.mjs` for the open outcomes.
 **Author:** planning doc
 **Supersedes:** nothing
 

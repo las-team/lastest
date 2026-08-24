@@ -98,8 +98,10 @@
  * line and `quickstart-migration-result.md` §12.
  *
  * What is left in `PSEUDO_PLUGINS` is `qa-agent` — the flagship, deliberately
- * last, and now the source of every remaining counted violation — plus
- * `spec-import`, oversized and genuinely unresolved.
+ * last, and now the source of every remaining counted violation — plus three
+ * uncosted, genuinely unresolved entries: `spec-import` (oversized) and
+ * `ai-routes`/`specs` (`authoring-ai`'s two sideways orphans, classified here
+ * rather than left as prose in a migration doc — see their entries below).
  */
 
 /** Zone globs for the target layout. */
@@ -260,6 +262,47 @@ export const PSEUDO_PLUGINS = {
   "spec-import": {
     lib: [],
     actions: ["spec-import.ts"],
+  },
+  // `ai-routes` is `authoring-ai`'s second sideways orphan, and it is here for
+  // the same reason `spec-import` is: to exist on the ledger at all. Until now
+  // its only classification anywhere was prose in
+  // `authoring-ai-migration-result.md` §2 — no `PSEUDO_PLUGINS` entry, so
+  // `crossPluginPatternsFor()` had no pattern to generate for it and the
+  // `authoring-ai` → `ai-routes.ts` edge was invisible to `pnpm arch` while
+  // `authoring-ai` was still a pseudo-plugin (`plugin-migration-recipe.md`
+  // §1.6.2, RFC progress note). That particular edge is legal today —
+  // `authoring-ai` graduated, and it reaches this file through one
+  // `AuthoringAiHost.aiScanRoutes` method filled by the composition root, the
+  // `app-map` shape for calling an unmigrated neighbour — so adding the entry
+  // moves the counter by 0. What it buys is forward cover: `qa-agent`, the one
+  // pseudo-plugin left, now gets a generated pattern for these paths instead of
+  // a blind spot, and the feature stops being unclassified in the one place
+  // that is supposed to hold the classification.
+  //
+  // Uncosted, like `spec-import` — this entry is classification, not a
+  // commitment to migrate. AI route scanning from repo source
+  // (`aiScanRoutes`), live MCP exploration (`mcpExploreRoutes`) and branch-diff
+  // scanning (`scanBranchDiff`) over core's `routes`/`functionalAreas` tables:
+  // 799 LOC with its own three-component UI surface. Whether it graduates to a
+  // plugin, folds into `authoring-ai`, or reclassifies to core the way
+  // `route-scan` did is a costing exercise nobody has run — note the shape is
+  // closer to `route-scan`'s (heavy `queries.*` against core tables) than to
+  // `ranger`'s.
+  "ai-routes": {
+    lib: [],
+    actions: ["ai-routes.ts"],
+  },
+  // `specs` is the second of the pair, added with `ai-routes` for the same
+  // reason and on the same terms: it was the *other* file
+  // `authoring-ai-migration-result.md` §4 left as an unclassified orphan, and
+  // splitting them would just leave the ledger half-corrected. 643 LOC of
+  // test-spec CRUD and area plan/spec sync over core's `functionalAreas`/
+  // `tests` tables, three component callers plus one
+  // `AuthoringAiHost.syncAreaPlanAndSpecs` method. Uncosted; same three open
+  // outcomes as `ai-routes`.
+  specs: {
+    lib: [],
+    actions: ["specs.ts"],
   },
   // `scm` is gone, and it is the first entry to graduate as **two things**.
   // RFC §6.3 mapped it to all of `src/lib/github` + `src/lib/gitlab` + two
