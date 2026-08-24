@@ -4,6 +4,15 @@
 **Package:** `plugins/quickstart/` → `@lastest/plugin-quickstart`
 **Recipe followed:** [`plugin-migration-recipe.md`](./plugin-migration-recipe.md)
 
+> **§§1–3 and 5 describe the migration as it landed, and four of their claims
+> have since been overtaken by [§12](#12-quickstart-scoutts-graduated-later-and-the-five-method-seam-it-left-disappeared-entirely).**
+> The scout module no longer stays behind (it migrated), the port is 28
+> methods rather than 32, the plugin no longer declares zero capabilities
+> (it declares `ai` and `browser`), and `static-scout.ts` found its home in
+> `libs/`. Each is flagged inline below. The original text is kept rather
+> than rewritten — the reasoning that led to a deferral is worth reading
+> next to what eventually resolved it.
+
 ## 1. The headline
 
 QuickStart is a one-click, nine-step agent: scout a founder's own site,
@@ -27,10 +36,28 @@ unmigrated, in `src/lib/playwright/`, reached from the plugin through a
 orchestration, notes generation, baseline noise-masking, sharing, and the
 full UI — migrated in full.
 
+> **Superseded by §12.** The scout module did not stay behind permanently.
+> `AiCallOptions.browserTools` — the core PR this deferral and
+> `authoring-ai`'s stop both asked for — landed and unblocked it, and the
+> module is now `plugins/quickstart/src/scout.ts`. The deferral was still
+> the right call at the time: it is what kept a 9-step pipeline from being
+> held hostage to 2 of its steps, and it is what made the case for the core
+> PR concrete enough to build.
+
 Burndown: **13 → 8** (`browser` 4→3, `cross-plugin` 5→3, `db` 3→2,
 `pool-service` 1→0). Target layout stayed **0**.
 
+> **Later.** The repo-wide burndown has since gone **8 → 5 → 3** (the
+> `authoring-ai` migration, then the pseudo-plugin residue pass §12
+> describes). All three remaining violations are `qa-agent`'s.
+
 ## 2. Port size: 32 methods in 9 groups — larger than `share`'s 14, and why that is honest rather than a red flag
+
+> **Superseded by §12: the port is now 28 methods in 9 groups.** The scout
+> group's five methods and `getStorageStateJson` were retired; one method
+> (`describeBrowserClaimFailure`) was added. The argument below — that a
+> port this size is a property of the feature rather than a misdrawn
+> boundary — is unaffected, and 28 is still the largest in the repo.
 
 Recipe §1.5's stop line is "> ~15, the port would be bigger than the
 feature." QuickStart's raw method count is roughly double that. It is not a
@@ -59,7 +86,10 @@ repeating here:
   split with QuickStart's copy unencrypted. Left as inherited debt — see
   §4.
 - **The scout group (5 methods) is scaffolding, not a permanent seam** — see
-  §1 above and the host file's own item 5.
+  §1 above and the host file's own item 5. **This one was right**: §12 is
+  that group being torn down. Worth noting as a case where labelling a port
+  group "scaffolding" at migration time turned out to be a checkable
+  prediction rather than a hedge.
 
 Everything else groups the way `app-map`'s "5 reads of one missing
 capability" and `api-test`'s "one security boundary, two authorized writes"
@@ -67,9 +97,18 @@ did: gating/settings (6, one missing capability), test CRUD (3, `api-test`'s
 exact shape), storage states (3, folds `storage-capture.ts` wholesale),
 build orchestration + notes evidence (6, one missing capability), notes
 persistence (4), activity (1, deliberately not `ctx.events` — see §3), share
-(1).
+(1). (Post-§12: storage states is 2, and a 1-method browser-claim-diagnostics
+group replaces the scout group.)
 
 ## 3. `ctx.events` was tried and reverted — a capability that fits everywhere except here
+
+> **Partly superseded by §12.** QuickStart no longer declares zero
+> capabilities — it declares `["ai", "browser"]`, for `scout.ts` and nothing
+> else. That does **not** change this section's finding, which is about
+> `events` specifically: `emitActivity` is still a host method for exactly
+> the reason below. What it does change is the *interpretation* offered in
+> the next paragraph. An empty capability set read like a statement about
+> the feature; it was really a statement about which capabilities existed.
 
 QuickStart declares **zero capabilities**. `events` was the obvious first
 choice (`ctx.events.emit()`, the shape `ranger` uses) and was reverted after
@@ -140,6 +179,11 @@ for `spec-import.ts` and `scheduling` made for `scanner.ts` — rather than
 migrated, dropped, or silently left attached to a plugin that no longer
 exists. Whether it belongs in `libs/*` or `CORE_SRC_PATHS` is left for
 whoever picks it up next; nothing about its classification was decided here.
+
+> **Answered: `libs/static-scout`.** Costed in the same pass as §12 — zero
+> imports, zero core calls, one caller — so it guards nothing and
+> `core-scope.md` §3 applies without argument. Cheaper than `ranger`'s
+> 1-method port, i.e. never a plugin candidate at any size.
 
 A third file the RFC's map never named, `quickstart-templates.ts`, had
 already been promoted to `libs/test-templates` in an earlier pass

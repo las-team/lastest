@@ -304,9 +304,11 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
   });
   // Tenanted *and* wired with a `runtime`, same shape as `explorer`/`ci`/
   // `ranger`/`scheduling`: every action calls `contextFor(quickstartPlugin,
-  // { repositoryId })` (or with no scope, for the two team-only actions) purely
-  // for the authorization side effect — QuickStart declares no capabilities at
-  // all (see `plugins/quickstart/src/index.ts`), so nothing reads `ctx` back.
+  // { repositoryId })` (or with no scope, for the two team-only actions). Most
+  // call it purely for the authorization side effect; the two scout steps also
+  // read `ctx.ai`/`ctx.browser` back, the only capabilities QuickStart declares
+  // (see `plugins/quickstart/src/index.ts` — it declared none until
+  // `AiCallOptions.browserTools` let its scout module migrate).
   // No `data` — QuickStart owns no schema; it persists through core's
   // `agent_sessions`/`tests`/`build_demo_notes` tables via `appQuickstartHost`.
   // See `plugins/quickstart/src/host.ts` for the full port.

@@ -978,6 +978,29 @@ run → diff → review).
 This split is the one most likely to be wrong on the first attempt. It should be
 attempted late (phase 4), after the contract has been proven on easier features.
 
+> **Resolved — and the prediction above was correct: three of the four plugin
+> rows were wrong, all in the same direction.** Every file listed here has
+> landed somewhere, but only `ranger`'s row survived intact:
+>
+> - **`recorder`** kept only `debug-recorder.ts` — which turned out to be dead
+>   (651 lines, zero callers) and was *deleted*. `event-to-code.ts` and
+>   `debug-parser.ts` were core's own, imported by `execution/executor.ts`;
+>   both were pure, so they went to `libs/recording-codegen`.
+> - **`quickstart`** was three things, not one. `quickstart-templates.ts` had
+>   already been promoted to `libs/test-templates`; `static-scout.ts` shared
+>   nothing with the feature but the word "scout" and went to
+>   `libs/static-scout`; only `quickstart-scout.ts` was really QuickStart's,
+>   and it migrated later than the rest, after `AiCallOptions.browserTools`
+>   landed.
+> - **`authoring-ai`** kept its whole row, but was **stopped** on first costing
+>   and only migrated once that same core PR existed.
+>
+> The generalisable error: **this map was written from directory names.** Every
+> correction came from reading a file's import list or its consumer list
+> instead — the discipline recipe §1.6/§5 now makes mandatory. Three of the
+> five `spec-import`-shaped splits in the whole refactor came out of these two
+> rows alone.
+
 ### 6.3 Plugins
 
 | Plugin | Sources | Vertical LOC (approx) |
@@ -999,6 +1022,29 @@ attempted late (phase 4), after the contract has been proven on easier features.
 | `scm` | `lib/github`, `lib/gitlab`, actions for actions/pipelines | ~3,500 |
 | `scheduling` | `lib/scheduling`, `lib/scanner` | ~1,300 |
 | `recorder`, `authoring-ai`, `quickstart`, `ranger` | from §6.2 | ~12,000 |
+
+> **Resolved. Four rows in this table were never plugins**, which is a ~30%
+> error rate on a table written from directory names and LOC:
+>
+> - **`scm`** was two features — the credential half (OAuth, tokens, webhook
+>   verification) is a core boundary `src/lib/auth/auth.ts` itself imports; the
+>   rest became `@lastest/plugin-ci`.
+> - **`url-diff`** is a thin orchestration *of* core with a documented public
+>   API and no user surface — reclassified core, port would have been ~22
+>   methods for ~1,000 LOC.
+> - **`demo`** was not a feature at all: two seed files called only from core
+>   auth/onboarding, plus two server actions with zero callers anywhere
+>   (deleted). The "~6,000 LOC" here is the clearest example of why **LOC is
+>   the wrong metric** — nearly all of it is one 317KB generated
+>   `excalidraw-seed.ts` constant.
+> - **`scheduling`**'s `lib/scanner` was route discovery, not scheduling; it
+>   split to `libs/route-scan` plus a core-classified action module.
+>
+> The surviving rows also split more than they merged: `gamification` → itself
+> + `awards`, `data-sources` → itself + `spec-import`. **No row in this table
+> ever turned out to be two features that should have been one.** The error is
+> systematically in one direction: a directory looks like a feature, and is
+> usually two.
 
 **`design-system` and `a11y` are the good news case.** `src/lib/verify/check-modes.ts`
 already defines a 9-value `CheckLayer` union with per-layer enforce/log/disable modes.
