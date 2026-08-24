@@ -265,7 +265,16 @@ export interface RecorderHost {
     rerecordTestId?: string | null;
     repositoryId?: string | null;
   }): Promise<ResolvedSetupStep[] | undefined>;
-  getOrCreateFunctionalArea(name: string): Promise<FunctionalAreaRef>;
+  /**
+   * Areas belong to a repository — the Tests tree only ever renders areas
+   * fetched by repo, so an area created without one is invisible in the
+   * product and (being matched by name alone) shared across every team.
+   * Callers pass the repo the recording is being made against.
+   */
+  getOrCreateFunctionalArea(
+    name: string,
+    repositoryId?: string | null,
+  ): Promise<FunctionalAreaRef>;
 
   // Guarded writes
   saveRecordedTest(input: SaveRecordedTestInput): Promise<{ id: string }>;

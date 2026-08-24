@@ -328,12 +328,24 @@ export const appRecorderHost: RecorderHost = {
     return resolved.length > 0 ? resolved : undefined;
   },
 
-  async getOrCreateFunctionalArea(name: string): Promise<FunctionalAreaRef> {
-    const areas = await queries.getFunctionalAreas();
-    const existing = areas.find(
-      (a) => a.name.toLowerCase() === name.toLowerCase(),
-    );
-    const area = existing ?? (await queries.createFunctionalArea({ name }));
+  async getOrCreateFunctionalArea(
+    name: string,
+    repositoryId?: string | null,
+  ): Promise<FunctionalAreaRef> {
+    // Scope to the repo when we have one: `getFunctionalAreasByRepo` is what
+    // the Tests tree reads, so a repo-less area is created but never rendered,
+    // and a global name match would hand one team another team's area row.
+    let area;
+    if (repositoryId) {
+      await requireRepoCapability(repositoryId, "tests:write");
+      area = await queries.getOrCreateFunctionalAreaByRepo(repositoryId, name);
+    } else {
+      const areas = await queries.getFunctionalAreas();
+      const existing = areas.find(
+        (a) => a.name.toLowerCase() === name.toLowerCase(),
+      );
+      area = existing ?? (await queries.createFunctionalArea({ name }));
+    }
     return {
       id: area.id,
       name: area.name,

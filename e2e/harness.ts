@@ -439,8 +439,21 @@ export async function destroyTeam(teamId: string | undefined): Promise<void> {
   // all (see `packages/db/src/schema/repos.ts`, whose comment claims one was
   // "added after teams table definition"; it never was). Without this the
   // team's repositories survive it with a dangling team_id.
+  //
+  // Go through `queries.deleteRepository`, which is the product's own cascade,
+  // rather than a bare `delete from repositories`: a repo that has ever been
+  // built has `background_jobs` (and reviewTodos, baselines, visualDiffs …)
+  // pointing at it under NO ACTION foreign keys, so the bare delete dies on
+  // `background_jobs_repository_id_repositories_id_fk` and takes the whole
+  // suite's teardown with it.
   const { repositories } = await import("@/lib/db/schema");
-  await db.delete(repositories).where(eq(repositories.teamId, teamId));
+  const repoRows = await db
+    .select({ id: repositories.id })
+    .from(repositories)
+    .where(eq(repositories.teamId, teamId));
+  for (const repo of repoRows) {
+    await queries.deleteRepository(repo.id);
+  }
 
   // Deliberately unguarded: a fixture that cannot clean up should say so
   // loudly rather than quietly accumulate rows across re-runs.

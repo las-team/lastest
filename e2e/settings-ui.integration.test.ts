@@ -38,6 +38,7 @@ import { db } from "@/lib/db";
 import { repositories, teams, users } from "@/lib/db/schema";
 import * as queries from "@/lib/db/queries";
 import { schedulingBuildSchedules } from "@lastest/plugin-scheduling/schema";
+import { hasQaAgentAccess } from "@/lib/billing/feature-access";
 
 import {
   BASE_URL,
@@ -52,6 +53,14 @@ import {
 } from "./harness";
 
 const PROJECT = "Settings UI Project";
+
+/**
+ * Same input `isBillingEnabled()` reads on the server (`src/lib/billing/
+ * enabled.ts`). `.env.local` is loaded into this process by
+ * `vitest.integration.config.ts`, so this matches whatever the dev server the
+ * browser is driving was started with.
+ */
+const BILLING_ENABLED = Boolean(process.env.STRIPE_SECRET_KEY);
 
 /** The card's debounce is 500ms; a save round-trip is a server action. */
 const DEBOUNCE_MS = 500;
@@ -313,7 +322,7 @@ describe("§4 step 12 — scheduled runs, preset + custom cron", () => {
 // ── Step 13 — QA Agent gating vs. plan + billing state (§2.9) ────────────
 
 describe("§4 step 13 — billing page and QA Agent gating agree", () => {
-  it("billing page reports billing unconfigured and the team on Free", async () => {
+  it("billing page agrees with the server's billing configuration, team on Free", async () => {
     const page = s.page;
     await page.goto(`${BASE_URL}/settings/billing`, {
       waitUntil: "domcontentloaded",
@@ -324,26 +333,37 @@ describe("§4 step 13 — billing page and QA Agent gating agree", () => {
       .poll(() => card.textContent(), { timeout: 30_000 })
       .toMatch(/Current plan:\s*Free/);
     // The rendered client component agrees with the server's
-    // `isStripeConfigured()` — this env has no STRIPE_SECRET_KEY.
-    expect(await card.textContent()).toMatch(/Billing is not configured/i);
+    // `isStripeConfigured()`. Which branch that is depends on the env this
+    // suite runs against, so read the same input the server reads rather than
+    // hard-coding the self-hosted case — a dev box with STRIPE_SECRET_KEY in
+    // `.env.local` is a perfectly normal place to run this.
+    expect(await card.textContent()).toMatch(
+      BILLING_ENABLED ? /Upgrade to Lastest/i : /Billing is not configured/i,
+    );
   }, 120_000);
 
-  it("free plan + billing disabled: sidebar shows no lock and /qa-agent is not gated", async () => {
+  it("free plan: the sidebar lock and the /qa-agent gate agree with hasQaAgentAccess", async () => {
     const page = s.page;
     await page.goto(`${BASE_URL}/qa-agent`, { waitUntil: "domcontentloaded" });
 
     const qaLink = page.locator("nav a[href='/qa-agent']").first();
     await qaLink.waitFor({ state: "visible", timeout: 60_000 });
-    // Client-side gate: `sidebar.tsx` renders a "Pro" lock badge
-    // (aria-label="Pro feature") when `hasQaAgentAccess` is false. Billing is
-    // disabled here, so per §2.9 every plan is unlocked.
-    expect(await qaLink.locator("[aria-label='Pro feature']").count()).toBe(0);
 
-    // Server-side gate on the same page load: the upgrade screen must be
-    // absent. Drift between these two is exactly what §2.9 exists to catch.
-    expect(await page.locator("body").textContent()).not.toMatch(
-      /Unlock the QA Agent with/i,
+    // §2.9 is about *drift*: `sidebar.tsx`'s client-side "Pro" lock badge
+    // (aria-label="Pro feature") and `/qa-agent/page.tsx`'s server-side
+    // upgrade screen must reach the same verdict as `hasQaAgentAccess`. With
+    // billing configured a free team is gated on both; with billing off
+    // (self-hosted) plan gates are lifted on both.
+    const gated = !hasQaAgentAccess("free", BILLING_ENABLED);
+    expect(await qaLink.locator("[aria-label='Pro feature']").count()).toBe(
+      gated ? 1 : 0,
     );
+    const body = await page.locator("body").textContent();
+    if (gated) {
+      expect(body).toMatch(/Unlock the QA Agent with/i);
+    } else {
+      expect(body).not.toMatch(/Unlock the QA Agent with/i);
+    }
 
     // …and the server function backing it agrees for this team's real plan.
     const team = await queries.getTeam(teamId!);

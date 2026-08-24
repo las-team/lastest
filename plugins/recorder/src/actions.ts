@@ -801,8 +801,11 @@ export async function updateRerecordedTest(data: {
   return result;
 }
 
-export async function getOrCreateFunctionalArea(name: string) {
+export async function getOrCreateFunctionalArea(
+  name: string,
+  repositoryId?: string | null,
+) {
   const host = recorderHost();
   await host.requireRecordingAccess();
-  return host.getOrCreateFunctionalArea(name);
+  return host.getOrCreateFunctionalArea(name, repositoryId);
 }

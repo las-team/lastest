@@ -159,6 +159,17 @@ let baselineBuildId: string | undefined;
 let diffBuildId: string | undefined;
 
 beforeAll(async () => {
+  // Step 7b dispatches a build by calling `createAndRunBuildCore` *in this
+  // process*, which runs the whole executor here rather than in the dev
+  // server — and plugin wiring is a module-global installed by the
+  // composition root, which only `src/instrumentation.ts` normally runs. With
+  // it missing, the run dies on "The data-sources plugin is not wired" (and
+  // the awards recompute after it), which looks exactly like a product
+  // failure. Same prologue as `quickstart.integration.test.ts`; memoized, so
+  // this is the only place that has to pay for it.
+  const { getPluginRuntime } = await import("@/lib/core/runtime");
+  await getPluginRuntime();
+
   target = await startTargetApp();
   s = await launchSession();
 }, 120_000);
@@ -745,9 +756,8 @@ describe("§4 golden path — one continuous browser journey", () => {
       `7: walked ${seen.size} layers, ${new Set(seen.values()).size} distinct panes`,
     );
 
-    // The Settings toggle flipped in step 6b did NOT produce a video — see
-    // the dedicated case below for why. Step timings *are* persisted, so the
-    // data half of spec 28 is present even when the video half is not.
+    // The Settings toggle flipped in step 6b produced a video for this build,
+    // and step timings are persisted alongside it — both halves of spec 28.
     const { db } = await import("@/lib/db");
     const { testResults, builds } = await import("@/lib/db/schema");
     const { eq } = await import("drizzle-orm");
@@ -764,22 +774,24 @@ describe("§4 golden path — one continuous browser journey", () => {
       .where(eq(testResults.testRunId, b!.testRunId!));
     expect(results.some((r) => r.stepTimings)).toBe(true);
     const withVideo = results.filter((r) => r.videoPath);
-    // Documents the finding rather than asserting the (broken) behaviour:
-    // toggling Settings → Testing → "Video Recording" changes nothing here.
-    expect(withVideo.length).toBe(0);
-    mark("7: tabs verified; no video from the Settings toggle (see 7b)");
+    // §4.1's finding 2 ("Video Recording is a dead toggle") is fixed:
+    // `resolveVideoRecording` (executor.ts) now ORs the repo-level
+    // `playwright_settings.enableVideoRecording` with the per-run
+    // `forceVideoRecording`, so the switch flipped in step 6b is what put a
+    // video on this build.
+    expect(withVideo.length).toBeGreaterThan(0);
+    mark("7: tabs verified; Settings toggle produced a video");
   }, 600_000);
 
   /**
    * Step 7b — the spec-28 playback scrubber, on a build that actually has a
    * video.
    *
-   * Step 7 establishes that the Settings toggle does not produce one. Video
-   * is gated exclusively on `command.forceVideoRecording`
-   * (`packages/embedded-browser/src/test-executor.ts`), the flag demo/share
-   * builds pass — so this drives that same real path via
-   * `createAndRunBuildCore(..., forceVideoRecording = true)` rather than
-   * leaving §2.17 unverified because of an unrelated wiring bug.
+   * Step 7 covers the repo-level Settings toggle; this covers the other input
+   * to `resolveVideoRecording` — the per-run `forceVideoRecording` flag that
+   * demo/share builds pass — by driving `createAndRunBuildCore(...,
+   * forceVideoRecording = true)` directly, and then exercises the scrubber on
+   * the build it produces.
    */
   it("step 7b: the playback scrubber seeks the video and moves the case rail", async () => {
     const page = s.page;
@@ -839,7 +851,12 @@ describe("§4 golden path — one continuous browser journey", () => {
     // Segment ticks come from persisted stepTimings; clicking one seeks the
     // video *and* selects that step in the case rail.
     // The control bar (and with it the segment strip) only paints on hover.
-    await video.hover();
+    // Hover the centred Play overlay rather than the `<video>` itself: it sits
+    // at the video's exact centre point, so a plain `video.hover()` spends its
+    // whole timeout reporting "subtree intercepts pointer events". Same mouse
+    // position either way, so the player sees the same hover.
+    const playOverlay = page.getByRole("button", { name: "Play" }).first();
+    await ((await playOverlay.count()) > 0 ? playOverlay : video).hover();
     await page.waitForTimeout(300);
     const ticks = page.locator('button[aria-label^="Seek to step "]');
     await expect

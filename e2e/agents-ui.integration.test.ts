@@ -354,6 +354,22 @@ async function setupFixture(attempts = 3): Promise<void> {
       await onboardWithSandbox(candidate, TARGET, `agents-ui-${Date.now()}`);
       session = candidate;
       teamId = await teamIdForEmail(candidate.email);
+      // Both surfaces this file drives are gated by `hasQaAgentAccess`
+      // (`/qa-agent` and `/explorer` both render `QaAgentUpgradeGate`), and a
+      // freshly registered team is on `free`. That gate is real product
+      // behaviour whenever Stripe is configured — §4 step 13 is what asserts
+      // it — so lift it here on this disposable team rather than have step 10
+      // and step 11 report "the Explorer heading never appeared" on a dev box
+      // that happens to have STRIPE_SECRET_KEY set.
+      if (process.env.STRIPE_SECRET_KEY) {
+        const { db } = await import("@/lib/db");
+        const { teams } = await import("@/lib/db/schema");
+        const { eq } = await import("drizzle-orm");
+        await db
+          .update(teams)
+          .set({ plan: "pro" })
+          .where(eq(teams.id, teamId!));
+      }
       return;
     } catch (err) {
       lastErr = err;

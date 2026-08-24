@@ -686,7 +686,7 @@ export function RecordingClient({
     try {
       // Create functional area if needed
       if (newAreaName && !areaId) {
-        const area = await getOrCreateFunctionalArea(newAreaName);
+        const area = await getOrCreateFunctionalArea(newAreaName, repositoryId);
         setAreas([
           ...areas,
           {

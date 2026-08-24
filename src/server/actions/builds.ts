@@ -1749,8 +1749,18 @@ async function runBuildAsync(
     }
   }
 
-  revalidatePath("/builds");
-  revalidatePath("/");
+  // `runBuildAsync` is fire-and-forget: it routinely outlives the request that
+  // started it, and the queued-build consumer calls it with no request at all.
+  // Outside a request scope `revalidatePath` throws "Invariant: static
+  // generation store missing", which — from a floating promise — surfaces as an
+  // unhandled rejection that can take the process down. Cache invalidation is
+  // best-effort here; the build rows are already committed.
+  try {
+    revalidatePath("/builds");
+    revalidatePath("/");
+  } catch {
+    // No request scope — nothing to revalidate against.
+  }
 
   // Process next queued job for this specific runner.
   // Pool-managed queue (targetRunner='auto') is handled by releasePoolEB + periodic consumer.
