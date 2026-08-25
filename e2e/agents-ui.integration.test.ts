@@ -277,11 +277,34 @@ async function assertStreamPainted(
     500,
   );
 
-  // A second sample a beat later. Not asserted to differ — an idle page
-  // legitimately streams identical frames — but captured as evidence that the
-  // canvas keeps its content rather than being cleared after one draw.
-  await page.waitForTimeout(3_000);
-  const second = await probeCanvas(page);
+  // Further samples over the next few seconds. Not asserted to differ — an
+  // idle page legitimately streams identical frames — but captured as
+  // evidence that the canvas keeps its content rather than being cleared
+  // after one draw.
+  //
+  // Polled, rather than one probe after a blind 3s sleep, because the phase
+  // this watches can legitimately END inside that window: the QA discovery
+  // crawl finishes its 6-page budget in ~6s against a fast target, and when
+  // it does core releases the EB and the viewer unmounts by design (1-job-1-
+  // EB). The old fixed sleep raced that teardown, so the second probe read a
+  // vanished canvas (width 0) or a blanked one (1 colour) and failed — not
+  // because the stream broke, but because it had ended. Observed 3 failures
+  // and 2 passes on identical code before this was pinned down.
+  //
+  // What still gets enforced is the thing the sample was for: every frame we
+  // observe while the canvas EXISTS must be painted. A canvas that is gone is
+  // the phase moving on, which is not a stream defect.
+  let second = first;
+  const sampleUntil = Date.now() + 3_000;
+  while (Date.now() < sampleUntil) {
+    await page.waitForTimeout(500);
+    const probe = await probeCanvas(page);
+    // Viewer unmounted — the EB was released and the phase advanced. Stop
+    // sampling rather than asserting the crawl outlived the probe.
+    if (!probe.present || probe.width === 0) break;
+    expect(probe.distinctColors).toBeGreaterThan(1);
+    second = probe;
+  }
   expect(second.width).toBeGreaterThan(0);
   expect(second.distinctColors).toBeGreaterThan(1);
 

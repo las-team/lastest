@@ -17,7 +17,11 @@ pnpm format                     # Prettier --write (whole repo)
 pnpm format:check               # Prettier --check (CI-style)
 pnpm test                       # Unit tests (vitest)
 pnpm test -- src/lib/diff       # Tests in specific directory
-pnpm db:push                    # Push schema changes to DB
+pnpm db:push                    # Push schema changes to DB (scripts/migrate.js:
+                                # plugin-table renames FIRST, then drizzle-kit
+                                # push --force). Never use db:push:raw on a DB
+                                # with data — bare drizzle-kit push cannot see a
+                                # rename and DROPS the old plugin tables.
 pnpm db:studio                  # Drizzle Studio
 
 # Host postgres (persists in `lastest-pgdata` named volume; defined in ./docker-compose.yml)
