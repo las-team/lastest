@@ -7,6 +7,7 @@ import {
   PAGE_SETTLE_TIMEOUT_MS,
   type QaPage,
 } from "./page";
+import { applyUserAgentOverride, CrawlPacer } from "./politeness";
 
 /**
  * QA Agent live discovery crawl. Drives a page core claimed for this run (see
@@ -41,6 +42,9 @@ export interface QaCrawlOptions {
   /** Rank login/signup/register links first when picking pages to follow, so
    *  public-only discovery reliably maps the auth surface within maxPages. */
   prioritizeAuthLinks?: boolean;
+  /** Repo's `playwright_settings.userAgentOverride`. Unset = stock browser UA,
+   *  same as an executor run with the setting unset. */
+  userAgentOverride?: string | null;
   signal?: AbortSignal;
 }
 
@@ -283,12 +287,18 @@ export async function crawlTargetApp(
   const pages: QaPageSnapshot[] = [];
   let loginAttempted = false;
   const base = new URL(targetUrl);
+  await applyUserAgentOverride(page, options.userAgentOverride);
+  // A single-explorer crawl paces itself for the same reason the swarm does:
+  // the floor is a property of the target origin, not of how many crawlers we
+  // happen to be running.
+  const pacer = new CrawlPacer();
   const observers = attachPageObservers(page, base.origin);
 
   // With a known login page, authenticate BEFORE the crawl starts so every
   // mapped page reflects the post-login state.
   if (options.credentials && options.loginUrl) {
     try {
+      await pacer.wait();
       await gotoAndSettle(page, options.loginUrl);
       loginAttempted = await attemptLogin(page, options.credentials);
     } catch {
@@ -309,6 +319,8 @@ export async function crawlTargetApp(
     visited.add(url);
     observers.reset();
     try {
+      await pacer.wait();
+      if (options.signal?.aborted) break;
       await page.goto(url, {
         waitUntil: "domcontentloaded",
         timeout: PAGE_NAV_TIMEOUT_MS,

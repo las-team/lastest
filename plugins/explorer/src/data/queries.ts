@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, lte } from "drizzle-orm";
+import { and, count, desc, eq, inArray, lte } from "drizzle-orm";
 
 import { matchUrlPattern } from "../domain/url-match";
 import type { ExplorerHost } from "../host";
@@ -129,6 +129,45 @@ export async function updateSession(
       updatedAt: new Date(),
     })
     .where(eq(explorerSessions.id, id));
+}
+
+/**
+ * Compare-and-set a session's status: the write applies only while the row
+ * still holds `from`, so two concurrent callers (a double resume, a pause
+ * racing a cancel) cannot both win. Returns true for the caller that actually
+ * performed the transition.
+ */
+export async function transitionSessionStatus(
+  ctx: Ctx,
+  id: string,
+  from: ExplorerSessionStatus,
+  to: ExplorerSessionStatus,
+  extra?: { steps?: ExplorerStepState[]; completedAt?: Date },
+): Promise<boolean> {
+  const rows = await ctx.db
+    .update(explorerSessions)
+    .set({ status: to, ...extra, updatedAt: new Date() })
+    .where(and(eq(explorerSessions.id, id), eq(explorerSessions.status, from)))
+    .returning({ id: explorerSessions.id });
+  return rows.length > 0;
+}
+
+/** Count a team's currently-active explorer sessions across all its repos.
+ *  Used by the trigger dispatcher to cap scheduled fan-out per team. */
+export async function countActiveSessionsForTeam(
+  ctx: Ctx,
+  teamId: string,
+): Promise<number> {
+  const [row] = await ctx.db
+    .select({ value: count() })
+    .from(explorerSessions)
+    .where(
+      and(
+        eq(explorerSessions.teamId, teamId),
+        eq(explorerSessions.status, "active"),
+      ),
+    );
+  return row?.value ?? 0;
 }
 
 export async function getActiveSession(

@@ -226,8 +226,16 @@ export async function pauseExplorerAgent(
 ): Promise<{ success: boolean }> {
   const { ctx, host, session } = await ownedSession(sessionId);
   if (session.status !== "active") return { success: false };
+  // CAS so a concurrent cancel (or a second pause) can't be overwritten —
+  // only the caller that actually flipped the row goes on to abort the run.
+  const paused = await q.transitionSessionStatus(
+    dataOf(ctx, host),
+    sessionId,
+    "active",
+    "paused",
+  );
+  if (!paused) return { success: false };
   abortSession(sessionId);
-  await q.updateSession(dataOf(ctx, host), sessionId, { status: "paused" });
   revalidatePath("/explorer");
   return { success: true };
 }
@@ -237,13 +245,27 @@ export async function resumeExplorerAgent(
 ): Promise<{ success: boolean }> {
   const { ctx, host, session } = await ownedSession(sessionId);
   if (session.status !== "paused") return { success: false };
-  // Re-open the interrupted step so the resume-safe driver re-runs it.
-  await q.updateSession(dataOf(ctx, host), sessionId, {
-    status: "active",
-    steps: session.steps.map((s) =>
-      s.status === "active" ? { ...s, status: "pending" as const } : s,
-    ),
-  });
+  // Resume re-enters the same gates as a start: a team that dropped below the
+  // required plan or burned its run-minute quota while the session sat paused
+  // must not be able to bring it back to life.
+  assertEntitled(ctx);
+  await ctx.browser.assertRunMinutes();
+  // CAS paused→active, re-opening the interrupted step so the resume-safe
+  // driver re-runs it. Of two concurrent resumes exactly one flips the row —
+  // the loser must not spawn a second pipeline that replaces the winner's
+  // abort controller and orphans its claimed browser.
+  const resumed = await q.transitionSessionStatus(
+    dataOf(ctx, host),
+    sessionId,
+    "paused",
+    "active",
+    {
+      steps: session.steps.map((s) =>
+        s.status === "active" ? { ...s, status: "pending" as const } : s,
+      ),
+    },
+  );
+  if (!resumed) return { success: false };
   // Re-scoped to the session's repo: the resume request only proved team
   // access, and the pipeline needs a repo-scoped context to run under.
   const { ctx: scoped } = await context(session.repositoryId);
@@ -465,6 +487,11 @@ export async function updateExplorerTriggerConfig(
  * is core itself — this is one of those callers, and it must never become
  * reachable from a request path.
  */
+/** A team gets one scheduled explorer session at a time across its repos —
+ *  cron triggers on many repos must not stack browser-holding sessions for one
+ *  tenant. Manual starts stay per-repo-gated only. */
+const MAX_ACTIVE_TRIGGER_SESSIONS_PER_TEAM = 1;
+
 export async function dispatchDueExplorerTriggers(): Promise<number> {
   const { runtime, host, data } = explorerWiring();
   const systemDb = { db: orm(data), host };
@@ -505,6 +532,15 @@ export async function dispatchDueExplorerTriggers(): Promise<number> {
       // expected, quiet re-arm, not a failure — `startCore` enforces this
       // too, but checking here keeps it out of the `catch` block's error log,
       // which exists for genuinely unexpected failures.
+      // Per-team concurrency: triggers armed on several repos of one team must
+      // not stack browser-holding sessions. Declining re-arms, so the next due
+      // cycle retries once the running ones finish.
+      const teamActive = await q.countActiveSessionsForTeam(db, trigger.teamId);
+      if (teamActive >= MAX_ACTIVE_TRIGGER_SESSIONS_PER_TEAM) {
+        await decline();
+        continue;
+      }
+
       const hasRunMinutes = await ctx.browser
         .assertRunMinutes()
         .then(() => true)

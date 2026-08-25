@@ -22,7 +22,7 @@ import {
 } from "@/lib/github/content";
 import { createJob, completeJob, failJob } from "./jobs";
 import { requireRepoAccess } from "@/lib/auth";
-import { claimEmbeddedBrowserForAgent } from "./ai";
+import { claimEmbeddedBrowserForAgent } from "@/lib/eb/claim-for-agent";
 import { releasePoolEB } from "./embedded-sessions";
 
 /** Extract first valid JSON array from text, handling nested brackets correctly */
@@ -402,7 +402,7 @@ export async function mcpExploreRoutes(
   functionalAreas?: DiscoveredArea[];
   error?: string;
 }> {
-  await requireRepoAccess(repositoryId);
+  const { team } = await requireRepoAccess(repositoryId);
   try {
     const config = await getAIConfig(repositoryId);
 
@@ -415,9 +415,13 @@ export async function mcpExploreRoutes(
       existingPaths,
       intelligence,
     );
-    const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000).catch(
-      () => undefined,
-    );
+    // `billTeamId` is the third argument here: this claim's browser time is
+    // metered to the repo's team, so an agent EB can't run unbilled.
+    const eb = await claimEmbeddedBrowserForAgent(
+      5 * 60 * 1000,
+      undefined,
+      team.id,
+    ).catch(() => undefined);
     if (!eb) {
       return {
         success: false,

@@ -10,7 +10,7 @@ import * as queries from "@/lib/db/queries";
 import { assertAgentRunMinutesAvailable } from "@/lib/billing/agent-eb-usage";
 import { injectStorageStateIntoEb } from "@/lib/eb/inject-storage-state";
 import { toProxyStreamUrl } from "@/lib/eb/stream-url";
-import { claimEmbeddedBrowserForAgent } from "@/server/actions/ai";
+import { claimEmbeddedBrowserForAgent } from "@/lib/eb/claim-for-agent";
 import { releasePoolEB } from "@/server/actions/embedded-sessions";
 
 /**

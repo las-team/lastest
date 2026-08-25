@@ -18,7 +18,7 @@
 import { WebSocket } from "ws";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { claimEmbeddedBrowserForAgent } from "@/server/actions/ai";
+import { claimEmbeddedBrowserForAgent } from "@/lib/eb/claim-for-agent";
 import { releasePoolEB } from "@/server/actions/embedded-sessions";
 import { toProxyStreamUrl } from "@/lib/eb/stream-url";
 import { signStreamGrant } from "@/lib/eb/stream-grant";

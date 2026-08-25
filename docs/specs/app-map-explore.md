@@ -94,6 +94,24 @@ session per repo preserved.
   concrete URLs per canonical path so `/orders/1..999` doesn't burn budget).
 - **Progressive claim**: explorer #1 gets the full 5-min claim timeout (must
   succeed); #2..K get 30s each — run with however many arrive.
+- **Pacing** (`plugins/qa-agent/src/domain/politeness.ts`), decided once and shared by the
+  whole swarm, since N explorers hit one origin:
+  - **Pace**: one shared `CrawlPacer` serializes navigations swarm-wide at a
+    500ms floor — 10 explorers still produce one page request per slot, not
+    ten. This is what actually protects the target.
+  - **Identity**: each explorer applies the repo's Playwright
+    `userAgentOverride` setting via CDP `Emulation.setUserAgentOverride` (so
+    `navigator.userAgent` and the request header agree), falling back to the
+    stock browser UA when unset. Same setting, same result as an executor run;
+    the crawls drive a core-claimed EB's existing context, so `newContext()`
+    never applies it for them.
+  - **No robots.txt**, deliberately. The target is an app the user owns and
+    explicitly asked us to test, driven with their own credentials — the same
+    origin the executor already navigates without consulting robots.txt.
+    robots.txt governs unattended third-party crawlers discovering public
+    content, which this is not, and obeying it would map nothing at all on the
+    staging and preview environments that ship a blanket `Disallow: /` to keep
+    search engines out — exactly the environments people point this at.
 
 ### 1.6 Live exploration progress
 

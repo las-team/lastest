@@ -1339,6 +1339,12 @@ async function runQaDiscoverSwarm(args: {
       storageStateInjected: sessions.some((s) => s.authApplied),
       credentials: args.credentials,
       loginUrl: args.loginUrl,
+      // Same UA the executor would use for this repo — these crawls run on a
+      // core-claimed EB's existing context, so newContext() never applies it.
+      userAgentOverride: await queries
+        .getPlaywrightSettings(repositoryId)
+        .then((s) => s.userAgentOverride)
+        .catch(() => null),
       signal,
       onPage: (snapshot, explorerIndex, totalMapped) => {
         livePages.push(snapshot);
@@ -1788,6 +1794,13 @@ async function runQaDiscover(
               // No injected session and no creds to try → make sure the crawl at
               // least maps the login/signup surface itself.
               prioritizeAuthLinks: !preAuthed && !credentials,
+              // Same UA the executor would use for this repo — this crawl runs
+              // on a core-claimed EB's existing context, so newContext() never
+              // applies it here.
+              userAgentOverride: await queries
+                .getPlaywrightSettings(repositoryId)
+                .then((s) => s.userAgentOverride)
+                .catch(() => null),
               signal,
               onPage: (snapshot, index) => {
                 substeps[2] = {

@@ -32,6 +32,7 @@ import { canonicalPath } from "@lastest/url-canonical";
 import { isAuthLink } from "./auth-links";
 import { attachPageObservers, attemptLogin, extractDom } from "./crawl";
 import { gotoAndSettle, type QaPage } from "./page";
+import { applyUserAgentOverride, CrawlPacer } from "./politeness";
 
 const IDLE_POLL_MS = 250;
 
@@ -236,6 +237,9 @@ export interface ExploreTargetAppOptions {
   /** Fallback login when no storage state: each explorer logs in itself. */
   credentials?: { email: string; password: string };
   loginUrl?: string;
+  /** Repo's `playwright_settings.userAgentOverride`. Unset = stock browser UA,
+   *  same as an executor run with the setting unset. */
+  userAgentOverride?: string | null;
   signal?: AbortSignal;
   onPage?: (
     snapshot: QaPageSnapshot,
@@ -294,14 +298,20 @@ export async function exploreTargetApp(opts: ExploreTargetAppOptions): Promise<{
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+  // One pacer for the whole swarm: N explorers still issue one navigation per
+  // slot against the single target origin, not N.
+  const pacer = new CrawlPacer();
+
   async function runExplorer(index: number, page: QaPage): Promise<void> {
     try {
+      await applyUserAgentOverride(page, opts.userAgentOverride);
       const observers = attachPageObservers(page, origin);
 
       // No storage state but creds → every explorer logs itself in (each
       // EB is its own browser).
       if (!opts.storageStateInjected && opts.credentials && opts.loginUrl) {
         try {
+          await pacer.wait();
           await gotoAndSettle(page, opts.loginUrl);
           loginAttempted =
             (await attemptLogin(page, opts.credentials)) || loginAttempted;
@@ -325,6 +335,14 @@ export async function exploreTargetApp(opts: ExploreTargetAppOptions): Promise<{
         }
         observers.reset();
         try {
+          await pacer.wait();
+          // Abort/deadline may have landed while queued behind the pacer.
+          // Release the in-flight slot before leaving, or the other explorers
+          // idle-wait on a page that will never be mapped.
+          if (opts.signal?.aborted || Date.now() >= opts.deadline) {
+            frontier.recordFailed();
+            break;
+          }
           await gotoAndSettle(page, entry.url);
           const dom = await extractDom(page);
           const snapshot: QaPageSnapshot = {
