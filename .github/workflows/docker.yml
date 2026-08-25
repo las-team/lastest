@@ -6,7 +6,12 @@ env:
 on:
   push:
     branches: [main]
+  pull_request:
+    types: [opened, reopened, synchronize, labeled]
   workflow_dispatch:
+concurrency:
+  group: docker-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 # Builds ONLY the images referenced by the Kubernetes deployment (see k8s/):
 #   lastest-app             -> Dockerfile.app                        (app.yaml)
 #   lastest-migrate         -> Dockerfile.migrate                    (migrate-job.yaml)
@@ -19,6 +24,9 @@ jobs:
   app:
     name: Build app image
     runs-on: ubuntu-latest
+    # PRs build only while the `preview` label is present; a `labeled` event for
+    # any other label is ignored so unrelated labels don't retrigger a rebuild.
+    if: ${{ github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'preview') && (github.event.action != 'labeled' || github.event.label.name == 'preview')) }}
     timeout-minutes: 60
     permissions:
       contents: read
@@ -37,7 +45,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository }}-app
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=ref,event=pr
             type=sha,format=long
       - uses: docker/build-push-action@v6
         with:
@@ -52,6 +62,9 @@ jobs:
   migrate:
     name: Build migrate image
     runs-on: ubuntu-latest
+    # PRs build only while the `preview` label is present; a `labeled` event for
+    # any other label is ignored so unrelated labels don't retrigger a rebuild.
+    if: ${{ github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'preview') && (github.event.action != 'labeled' || github.event.label.name == 'preview')) }}
     timeout-minutes: 60
     permissions:
       contents: read
@@ -70,7 +83,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository }}-migrate
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=ref,event=pr
             type=sha,format=long
       - uses: docker/build-push-action@v6
         with:
@@ -85,6 +100,9 @@ jobs:
   pool-service:
     name: Build pool-service image
     runs-on: ubuntu-latest
+    # PRs build only while the `preview` label is present; a `labeled` event for
+    # any other label is ignored so unrelated labels don't retrigger a rebuild.
+    if: ${{ github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'preview') && (github.event.action != 'labeled' || github.event.label.name == 'preview')) }}
     timeout-minutes: 60
     permissions:
       contents: read
@@ -103,7 +121,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository }}-pool-service
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=ref,event=pr
             type=sha,format=long
       - uses: docker/build-push-action@v6
         with:
@@ -118,6 +138,9 @@ jobs:
   ocr-service:
     name: Build ocr-service image
     runs-on: ubuntu-latest
+    # PRs build only while the `preview` label is present; a `labeled` event for
+    # any other label is ignored so unrelated labels don't retrigger a rebuild.
+    if: ${{ github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'preview') && (github.event.action != 'labeled' || github.event.label.name == 'preview')) }}
     timeout-minutes: 60
     permissions:
       contents: read
@@ -136,7 +159,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository }}-ocr-service
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=ref,event=pr
             type=sha,format=long
       - uses: docker/build-push-action@v6
         with:
@@ -151,6 +176,9 @@ jobs:
   embedded-browser:
     name: Build embedded-browser image
     runs-on: ubuntu-latest
+    # PRs build only while the `preview` label is present; a `labeled` event for
+    # any other label is ignored so unrelated labels don't retrigger a rebuild.
+    if: ${{ github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'preview') && (github.event.action != 'labeled' || github.event.label.name == 'preview')) }}
     timeout-minutes: 60
     permissions:
       contents: read
@@ -177,7 +205,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository }}-embedded-browser
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=ref,event=pr
             type=sha,format=long
       - uses: docker/build-push-action@v6
         with:
