@@ -75,6 +75,166 @@ export interface A11yViolation {
   sampleNodes?: A11yViolationSampleNode[];
 }
 
+/** Score roll-up for the a11y check layer. Lives here (not in
+ *  `packages/db`) so `@lastest/plugin-a11y`'s scorer can share the exact
+ *  shape the `test_runs`/`test_results` columns persist. */
+export interface WcagScoreSummary {
+  score: number;
+  totalRules: number;
+  passedRules: number;
+  violatedRules: number;
+  bySeverity: {
+    critical: number;
+    serious: number;
+    moderate: number;
+    minor: number;
+  };
+}
+
+/** Persisted payload of one approved a11y baseline row
+ *  (`a11y_baselines.payload`, owned by `@lastest/plugin-a11y`). */
+export interface A11yBaselinePayload {
+  ruleId: string;
+  selector: string;
+  impact: string;
+  acknowledgedAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Visual-diff payload shapes (`visual_diffs.metadata`)
+// ---------------------------------------------------------------------------
+//
+// These live here rather than in `packages/db` for the same reason the design
+// tokens above do: `@lastest/plugin-rca` computes the `rca` verdict and reads
+// the pixel/DOM signals it fuses, and a plugin may not import `@lastest/db`
+// (FORBIDDEN_PLUGIN_IMPORTS). `packages/db/src/schema/shared.ts` re-exports
+// every name below, so core call sites are unchanged.
+//
+// Nothing here is a table — they are the shapes of one jsonb column, which is
+// exactly what this package is for.
+
+export interface AlignmentSegment {
+  op: "match" | "insert" | "delete";
+  count: number;
+}
+
+export interface PageShiftInfo {
+  detected: boolean;
+  deltaY: number;
+  confidence: number;
+  insertedRows?: number;
+  deletedRows?: number;
+  alignedBaselineImagePath?: string;
+  alignedCurrentImagePath?: string;
+  alignedDiffImagePath?: string;
+  alignmentSegments?: AlignmentSegment[];
+}
+
+/** DOM diff result for comparing two snapshots. */
+export interface DomDiffResult {
+  added: DomSnapshotElement[];
+  removed: DomSnapshotElement[];
+  changed: Array<{
+    baseline: DomSnapshotElement;
+    current: DomSnapshotElement;
+    changes: ("text" | "position" | "size" | "selector")[];
+  }>;
+  unchangedCount: number;
+}
+
+// ── Root Cause Analysis (RCA) — "is this diff the TEST or the CODE?" ───────
+//
+// A per-visual-diff verdict that fuses signals already computed elsewhere
+// (pixel-diff metadata, optional DOM diff, the build's Change Map) into a
+// rich-taxonomy classification. Computed by `@lastest/plugin-rca` after the
+// build's Change Map is available and persisted into `DiffMetadata.rca`. The
+// `headline` drives the badge color; `signals` explain the verdict; the
+// element-level `regionCauses` come from the correlation phase.
+
+export type RcaCategory =
+  // Application changed because the code changed (real regression or an
+  // intended UI change to approve).
+  | "code:structural" // DOM nodes/attributes added, removed, or re-selected
+  | "code:style" // CSS/visual change (color, spacing, size) tied to a code change
+  | "code:content" // copy/content changed and it is NOT a dynamic-data pattern
+  // Diff is noise from the test/environment, not a code change.
+  | "test:flake" // non-deterministic render with no DOM/code change
+  | "test:dynamic-data" // dates, counters, ids, currency — data, not code
+  | "test:animation" // transient/mid-animation frame or anti-aliasing
+  | "test:environment" // page shift, cross-branch baseline, locale/viewport
+  | "test:never-passed" // test has no green history — its baseline isn't trustworthy
+  // Not enough signal to commit to test-vs-code.
+  | "uncertain";
+
+export interface RcaSignal {
+  category: RcaCategory;
+  /** 0..1 — strength of THIS signal, not a probability across categories. */
+  confidence: number;
+  /** One short plain-English sentence explaining the signal. */
+  reason: string;
+}
+
+/** Element-level cause for one changed pixel region (populated by the
+ *  correlation phase; empty in the Phase-1 classifier-only path). */
+export interface RcaRegionCause {
+  region: { x: number; y: number; width: number; height: number };
+  selector: string;
+  changeType: (
+    | "text"
+    | "position"
+    | "size"
+    | "selector"
+    | "added"
+    | "removed"
+  )[];
+  cssDeltas?: Array<{ property: string; baseline: string; current: string }>;
+}
+
+export interface RcaVerdict {
+  /** Headline bucket that drives the badge: code change, test noise, or unsure. */
+  headline: "code" | "test" | "uncertain";
+  /** Ranked contributing signals (strongest first). */
+  signals: RcaSignal[];
+  /** Build-level files that changed (from the Change Map), surfaced for `code`. */
+  changedFiles: string[];
+  /** Element-level region→cause mapping (correlation phase). */
+  regionCauses?: RcaRegionCause[];
+  /** One-sentence human-readable root cause (AI, best-effort; Phase 4). */
+  narrative?: string;
+  /** Schema/heuristic version, so stale verdicts can be recomputed. */
+  version: number;
+  computedAt: string;
+}
+
+export interface DiffMetadata {
+  changedRegions: { x: number; y: number; width: number; height: number }[];
+  affectedComponents?: string[];
+  changeCategories?: ("layout" | "color" | "text" | "image" | "style")[];
+  pageShift?: PageShiftInfo;
+  isNewTest?: boolean;
+  textRegions?: { x: number; y: number; width: number; height: number }[];
+  textRegionDiffPixels?: number;
+  nonTextRegionDiffPixels?: number;
+  ocrDurationMs?: number;
+  domDiff?: DomDiffResult;
+  textDiffSummary?: { added: number; removed: number; sameAsBaseline: boolean };
+  // Branch the baseline was sourced from when it differs from the build's
+  // branch. Set by `processVisualDiff` when the current-branch baseline lookup
+  // misses and we fall back to the repo's default branch. UI uses this to
+  // label the diff "baseline from <branch>" so users know they're not
+  // comparing apples-to-apples within-branch.
+  baselineSourceBranch?: string;
+  // When no baseline exists on either the current branch or the default
+  // branch, surface where the user DOES have an approved baseline so they
+  // know it's not lost. Empty when there's no approved baseline anywhere.
+  baselineExistsOn?: { branch: string; createdAt: string };
+  // Root Cause Analysis verdict — "is this diff the test or the code?".
+  // Computed post-build by `@lastest/plugin-rca` and read by the diff badge +
+  // Source filter. Absent on diffs predating the feature (UI treats it as
+  // unknown).
+  rca?: RcaVerdict;
+}
+
 export type DesignTokenCategory =
   | "color" // any color computed property (color, background-color, border-color, fill, stroke)
   | "border-radius" // border-*-radius
@@ -132,6 +292,99 @@ export interface AssertionResult {
 export type DesignSystemTokenUsage = Partial<
   Record<DesignTokenCategory, Record<string, number>>
 >;
+
+// ── Design system config + score (persisted jsonb payload shapes,
+// packages/db/src/schema/{shared,tests}.ts columns, and
+// plugins/design-system's own token parser/scorer) ─────────────────────────
+
+/** A token with a display role and the value it resolves to (after
+ *  `var()` chasing). Used in the Setup preview to show "BRAND · Red ·
+ *  #E03E36" tiles instead of just raw token names. */
+export interface DesignRoleToken {
+  /** Token name in CSS (`--c-red`). */
+  name: string;
+  /** Resolved literal value (hex / px / family). */
+  value: string;
+  /** Optional uppercase eyebrow label ("BRAND", "ACTION", "ACCENT") that
+   *  the preview puts on the tile. Inferred from the token name by the
+   *  parser. */
+  role?: string;
+  /** Optional human label ("Red", "Steel Blue") for the tile. Defaults
+   *  to a Title-Cased version of the name suffix. */
+  label?: string;
+}
+
+export interface DesignSystemGroups {
+  brandPalette?: DesignRoleToken[];
+  surfaces?: DesignRoleToken[];
+  inkScale?: DesignRoleToken[];
+  semantic?: DesignRoleToken[];
+  radii?: DesignRoleToken[];
+  spacing?: DesignRoleToken[];
+  typeScale?: DesignRoleToken[];
+  fonts?: DesignRoleToken[];
+}
+
+export interface DesignSystemMeta {
+  /** Title pulled from the bundle README (first H1). */
+  title?: string;
+  /** First paragraph after the H1 in the README. */
+  description?: string;
+  /** All file paths the upload action ingested (CSS + README + assets). */
+  files?: string[];
+  /** Asset filenames (svg / png / woff / woff2) found in the archive.
+   *  Used by the preview's "Missing brand fonts" detection. */
+  assets?: string[];
+  /** When set, the bundle carried `.woff` / `.woff2` files — no font
+   *  warning needed. */
+  hasFontFiles?: boolean;
+}
+
+// A test/repo can declare a "design system" — a closed set of allowed
+// values for color, border-radius, font-family, font-size, and spacing
+// (margin/padding). During each test the EB walks the live DOM at
+// screenshot time, samples computed styles per visible element, and the
+// host marks any computed value not present in the allowed set as a
+// violation. Same flow as a11y: per-test_result violations roll up into a
+// build-level design_system_score (0-100), drill-in shows occurrence count
+// and a sample selector for each off-token value.
+export interface DesignSystemConfig {
+  /** When false, the layer is opt-out for this test even if the repo
+   *  toggle is on. Repo-level config has no `enabled` (the toggle on
+   *  playwright_settings.enableDesignSystem governs that). */
+  enabled?: boolean;
+  /** Allowed CSS values per category. Values are stored normalized
+   *  (lowercase hex, px ints). Token NAMES (`--c-red`) can be supplied as
+   *  keys so the violation card surfaces a friendly label, but the raw
+   *  resolved value is what the comparator matches against. */
+  tokens: Partial<Record<DesignTokenCategory, DesignToken[]>>;
+  /** Hide a class of violations entirely. Useful when a repo controls
+   *  color tokens centrally but vendor 3rd-parties bring their own. */
+  ignoredCategories?: DesignTokenCategory[];
+  /** Per-screenshot cap on collected violations. Defaults to 200 to keep
+   *  test_results.design_system_violations sane in JSONB. */
+  maxViolationsPerScreenshot?: number;
+  /** Display-only grouping the parser builds when ingesting a CSS file.
+   *  The matcher in the EB never reads this — it exists solely to render
+   *  the Claude-Design-style preview card on the Setup tab. */
+  groups?: DesignSystemGroups;
+  /** Bundle metadata captured at upload time. Used by the preview to
+   *  show the bundle title, source files, and asset filenames. */
+  meta?: DesignSystemMeta;
+}
+
+export interface DesignSystemScoreSummary {
+  score: number;
+  totalRules: number;
+  passedRules: number;
+  violatedRules: number;
+  bySeverity: {
+    critical: number;
+    serious: number;
+    moderate: number;
+    minor: number;
+  };
+}
 
 export interface UrlTrajectoryStep {
   stepIndex: number;
@@ -225,6 +478,87 @@ export interface StorageStateSnapshot {
     valueHash?: string;
     redacted?: boolean;
   }>;
+}
+
+// ── API tests (E1) — a headless HTTP request, its assertions, its result ────
+//
+// The one family in this file that never crosses the runner wire: an API test
+// executes in-process (`@lastest/plugin-api-test`), not in a browser pod. It
+// lives here anyway because this package is also the home for *jsonb payload
+// shapes a plugin owns but the core schema stores* — `tests.api_definition`
+// and `test_results.api_result` are core columns, and the plugin that fills
+// them may not import `@lastest/db`.
+//
+// That is the `RcaVerdict` precedent above (`docs/architecture/
+// plugin-migration-recipe.md` §6.1: promote the plugin's *own* payload types,
+// narrow somebody else's). `packages/db/src/schema/tests.ts` re-exports every
+// name below, so nothing in the app changed import path when they moved.
+
+export type ApiAuth =
+  | { type: "none" }
+  | { type: "bearer"; token: string }
+  | { type: "basic"; username: string; password: string }
+  | { type: "custom"; headers: Record<string, string> };
+
+export type ApiAssertionKind =
+  | "status"
+  | "header"
+  | "jsonPath"
+  | "jsonSchema"
+  | "bodyContains"
+  | "latencyMs";
+
+export interface ApiAssertion {
+  kind: ApiAssertionKind;
+  /** status: exact status code, or `in` for a set of acceptable codes. */
+  equals?: number;
+  in?: number[];
+  /** header: header name to assert on (case-insensitive). */
+  header?: string;
+  /** jsonPath: dot-path into the JSON response body. */
+  path?: string;
+  /** Expected value (jsonPath / header) or substring (bodyContains). */
+  value?: string | number | boolean;
+  /** jsonSchema: a JSON Schema object validated with ajv. */
+  schema?: unknown;
+  /** latencyMs: max acceptable round-trip latency. */
+  maxMs?: number;
+  /** header/jsonPath: require an exact same-type match (no string coercion).
+   *  Default comparison is type-aware, keyed off the expected value's type. */
+  strict?: boolean;
+  description?: string;
+}
+
+/** Stored verbatim in `tests.api_definition`. Carries live credentials — the
+ *  *displayed* copies are redacted by the plugin's `redactApiDefinition`. */
+export interface ApiTestDefinition {
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  url: string;
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
+  body?: unknown;
+  auth?: ApiAuth;
+  assertions: ApiAssertion[];
+  /** Optional per-request timeout (ms). Falls back to DEFAULT_API_TEST_SETTINGS. */
+  timeoutMs?: number;
+}
+
+export interface ApiAssertionResultData {
+  kind: ApiAssertionKind;
+  passed: boolean;
+  description: string;
+  expected?: unknown;
+  actual?: unknown;
+}
+
+/** Persisted result of a headless API test (stored on test_results.apiResult). */
+export interface ApiTestResultData {
+  passed: boolean;
+  statusCode: number | null;
+  latencyMs: number;
+  assertionResults: ApiAssertionResultData[];
+  error?: string;
+  responseSnippet?: string;
 }
 
 // ============================================
@@ -1333,4 +1667,389 @@ export type StreamMessage =
 
 export function isStreamMessage(msg: { type: string }): boolean {
   return msg.type.startsWith("stream:");
+}
+
+// ============================================================================
+// QA Agent payload shapes
+// ============================================================================
+//
+// Owned by `@lastest/plugin-qa-agent`, stored in core columns on
+// `agent_sessions.metadata` (a jsonb the plugin is the only writer and reader
+// of). They live here for the same reason `api-test`'s six do: the plugin may
+// not import `@lastest/db`, and core's `AgentSessionMetadata` — shared with the
+// still-unmigrated `play` agent and with `quickstart` — has to keep naming
+// them. `packages/db/src/schema/agents.ts` re-exports every name below, so no
+// app import path changed.
+//
+// `agent_sessions` itself stays core (see `plugins/qa-agent/src/host.ts` item
+// 2): three `kind`s still share the row shape and its field-level encryption
+// path, so the table is not qa-agent's to take.
+
+/** Coverage groups the QA agent plans and generates tests for. Mirrors the
+ *  industry-standard suite tiers (smoke/regression) and coverage angles
+ *  (a11y/perf/resilience/negative); `journey` is the business-outcome E2E
+ *  tier (e.g. "an order is actually placed") and is always planned. */
+export type QaTestGroup =
+  | "smoke"
+  | "api"
+  | "ui"
+  | "hybrid"
+  | "a11y"
+  | "perf"
+  | "resilience"
+  | "negative"
+  | "journey";
+
+export type QaPriority = "P1" | "P2" | "P3";
+
+/** How the qa_login step resolved authentication for the run. */
+export type QaAuthStrategy =
+  /** Repo setup infrastructure reused (default setup steps / storage state). */
+  | "existing_setup"
+  /** User-provided credentials verified on the EB; storage state captured. */
+  | "user_creds"
+  /** The agent registered its own throwaway account and captured a session. */
+  | "self_registered"
+  /** Credentials exist but could not be verified — discovery tests them inline. */
+  | "creds_untested"
+  /** No auth resolvable — public surface only (discovery maps the auth pages). */
+  | "public_only";
+
+/** Outcome of the qa_login resolution cascade. Holds no secrets — registered
+ *  credentials go into quickstartEmail/quickstartPassword (encrypted at rest). */
+export interface QaAuthState {
+  strategy: QaAuthStrategy;
+  /** The authed heuristic was confirmed live on an EB (no password field,
+   *  final URL not an auth page). False = deferred to discovery/execution. */
+  validated: boolean;
+  storageStateId?: string;
+  /** Login/signup setup test created or found for reuse via setupOverrides. */
+  setupTestId?: string;
+  /** Repo default setup steps already cover auth — generated tests must NOT
+   *  add extraSteps (the executor applies defaults to every test already). */
+  defaultSetupInUse?: boolean;
+  /** Observed in the target app's DOM — never URL-guessed. */
+  loginUrl?: string;
+  /** Observed in the target app's DOM — never URL-guessed. */
+  signupUrl?: string;
+  registeredEmail?: string;
+  notes?: string;
+}
+
+/** A critical user journey with a verifiable business outcome. */
+export interface QaPlanJourney {
+  id: string;
+  title: string;
+  priority: QaPriority;
+  /** Ordered user-visible steps of the journey. */
+  steps: string[];
+  /** Business/functional domain of the journey (matrix axis). */
+  businessArea?: string;
+  /** The business outcome this journey must produce (e.g. "order placed"). */
+  businessOutcome: string;
+  /** How the outcome is proven beyond UI toasts (end-state via API/data/UI). */
+  endStateVerification: string;
+}
+
+/** One planned test case. `scenario` is generator-ready prose (steps +
+ *  expected results); `api` is set for api-group items and drives a headless
+ *  ApiTestDefinition instead of a browser test. */
+export interface QaPlanItem {
+  id: string;
+  /** Primary group — drives functional-area assignment and legacy plans. */
+  group: QaTestGroup;
+  /** All coverage groups this single test satisfies (primary first). One
+   *  test execution runs every check layer, so a page visit can serve
+   *  smoke+ui+a11y+perf at once. Absent = [group] (legacy plans). */
+  groups?: QaTestGroup[];
+  title: string;
+  priority: QaPriority;
+  /** Traceability link to the journey this test covers, when applicable. */
+  journeyId?: string;
+  /** Business/functional domain this item exercises (e.g. "Authentication",
+   *  "Checkout") — one axis of the coverage matrix. Missing values roll up
+   *  under "General". */
+  businessArea?: string;
+  /** Route/page under test, relative to the target base URL. */
+  pagePath?: string;
+  rationale?: string;
+  scenario: string;
+  /** Verified selectors from discovery the generator should prefer. */
+  selectorHints?: string[];
+  /** Exact ref strings from the branch-diff digest this item covers (symbol
+   *  names, "METHOD /path" endpoints, file paths) — drives PR coverage. */
+  changeRefs?: string[];
+  /** Set at plan time when a pre-existing test already covers this item
+   *  (matchPlanToExistingTests) — the review UI shows what already exists. */
+  existingTestId?: string;
+  existingTestName?: string;
+  api?: {
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+    path: string;
+    expectedStatus?: number;
+    body?: unknown;
+    description?: string;
+  };
+  /** User can exclude items during plan review. Absent = enabled. */
+  enabled?: boolean;
+}
+
+export interface QaTestPlan {
+  appProfile: {
+    summary: string;
+    businessDomain?: string;
+    /** The single most valuable business outcome of the app. */
+    primaryOutcome?: string;
+  };
+  journeys: QaPlanJourney[];
+  items: QaPlanItem[];
+  entryCriteria?: string[];
+  exitCriteria?: string[];
+  risks?: string[];
+}
+
+/** One live-crawled page: rendered-DOM facts + same-origin API endpoints
+ *  observed while the page loaded. Fed (condensed) to the planner. */
+export interface QaPageSnapshot {
+  url: string;
+  finalUrl: string;
+  title: string | null;
+  headings: Array<{ level: number; text: string }>;
+  forms: Array<{
+    name: string | null;
+    action: string | null;
+    method: string;
+    inputs: Array<{
+      tag: string;
+      type: string | null;
+      name: string | null;
+      id: string | null;
+      label: string | null;
+    }>;
+  }>;
+  buttons: string[];
+  links: Array<{ text: string; href: string }>;
+  testIds: string[];
+  candidateSelectors: string[];
+  apiEndpoints: Array<{ method: string; path: string; status: number }>;
+  /** Console errors observed while this page loaded — surfaces third-party /
+   *  analytics noise so the planner can route-block it or downgrade the
+   *  console check layer (the executor reds on ANY console error otherwise). */
+  consoleErrors?: string[];
+}
+
+/** One file changed on the working branch vs the base branch. */
+export interface QaPrChangedFile {
+  path: string;
+  status: "added" | "modified" | "removed" | "renamed";
+  additions: number;
+  deletions: number;
+  previousPath?: string;
+}
+
+/** A function/class/component the branch diff added or modified — extracted
+ *  deterministically from diff hunks (src/lib/qa-agent/pr-check). */
+export interface QaPrSymbol {
+  name: string;
+  kind: "function" | "component" | "class" | "endpoint";
+  file: string;
+  change: "added" | "modified";
+}
+
+/** An API endpoint whose route file the branch diff touched. */
+export interface QaPrEndpoint {
+  method: string;
+  path: string;
+  file: string;
+  change: "added" | "modified" | "removed";
+}
+
+/** Branch/PR diff facts (head vs base) feeding the planner + coverage report. */
+export interface QaPrChanges {
+  baseBranch: string;
+  headBranch: string;
+  files: QaPrChangedFile[];
+  symbols: QaPrSymbol[];
+  endpoints: QaPrEndpoint[];
+  /** True when file/symbol caps dropped part of the diff. */
+  truncated?: boolean;
+}
+
+/** Coverage verdict for one branch change (symbol/endpoint) in the summary. */
+export interface QaPrCoverageEntry {
+  /** Ref string as listed in the digest ("createInvoice", "POST /api/x"). */
+  ref: string;
+  kind: "symbol" | "endpoint";
+  file: string;
+  change: "added" | "modified" | "removed";
+  planItemIds: string[];
+  testIds: string[];
+  status: "passed" | "covered" | "generated" | "planned" | "uncovered";
+}
+
+export interface QaPrCoverage {
+  baseBranch: string;
+  headBranch: string;
+  /** Entries with a live test (passed/covered/generated). */
+  coveredCount: number;
+  entries: QaPrCoverageEntry[];
+}
+
+export interface QaDiscovery {
+  targetUrl: string;
+  crawledPages: QaPageSnapshot[];
+  /** Routes from the static GitHub-tree scan (repo-aware mode only). */
+  staticRoutes?: Array<{ path: string; type: string }>;
+  framework?: string;
+  githubConnected: boolean;
+  /** Branch the static scan + code check analyzed (the repo's selected
+   *  branch, falling back to its default branch). */
+  branch?: string;
+  /** Base branch for the PR diff (the repo's default branch). branch ===
+   *  baseBranch means the run analyzed the base itself — no diff exists. */
+  baseBranch?: string;
+  /** Code-check output (repo-aware mode): stack facts, testing implications,
+   *  and API endpoints declared in code. Shape in src/lib/qa-agent/code-check. */
+  codeCheck?: {
+    framework?: string;
+    authMechanism?: string;
+    apiLayer?: string;
+    projectDescription?: string;
+    testingNotes: string[];
+    declaredEndpoints: Array<{ method: string; path: string; file: string }>;
+  };
+  /** Branch diff vs the base branch (repo-aware mode, head ≠ base): the
+   *  functions/endpoints this branch adds or changes. Feeds the planner
+   *  ("cover these") and the summary's PR coverage report. */
+  prChanges?: QaPrChanges;
+}
+
+/** How a QA session runs. `full` is the complete pipeline; `refresh_spec`
+ *  re-discovers the app and re-plans against existing coverage (no
+ *  generation); `fill_gaps` takes the latest plan and generates only the
+ *  items not already covered by a live test; `explore` maps the app for the
+ *  App Map (setup → login → discover only — no plan/generation). */
+export type QaRunMode = "full" | "refresh_spec" | "fill_gaps" | "explore";
+
+// ── App Map Explore (mode = "explore") ───────────────────────────────────────
+
+/** How the explore frontier orders undiscovered pages. */
+export type ExploreStrategy = "breadth" | "depth" | "balanced";
+
+/** User-chosen parameters from the App Map "Explore app" dialog. All jsonb —
+ *  no migration needed. */
+export interface QaExploreConfig {
+  /** Requested explorer (EB) count. Capped by the plan's `maxExplorers`. */
+  explorers: number;
+  /** Crawl depth 1–6 (link hops from the entry URL). */
+  depth: number;
+  strategy: ExploreStrategy;
+  /** Wall-clock budget in minutes. */
+  maxMinutes: number;
+  /** Page budget derived from depth (`6 + depth*5`, capped at 40). */
+  pageBudget: number;
+}
+
+/** Live status of one explorer in the swarm (progress-panel card). */
+export interface QaExplorerState {
+  index: number;
+  status: "claiming" | "exploring" | "blocked" | "done" | "failed";
+  pagesMapped: number;
+  currentUrl?: string;
+  /** Proxied EB screencast URL while this explorer holds an EB. */
+  streamUrl?: string;
+  detail?: string;
+}
+
+/** A frontier entry the exploration could not get past. */
+export interface QaExploreBlocked {
+  url: string;
+  reason: "auth_wall" | "dead_end";
+}
+
+/** Aggregate live explore state (metadata.qaExplore) — written throttled
+ *  during the run, polled by the App Map progress UI. */
+export interface QaExploreState {
+  config: QaExploreConfig;
+  explorers: QaExplorerState[];
+  pagesDiscovered: number;
+  blocked: QaExploreBlocked[];
+  startedAt: string;
+  deadlineAt: string;
+}
+
+/** What started a QA session. `schedule`/`pr`/`mcp` are reserved for the
+ *  trigger phases (cron, PR webhook, MCP control). */
+export type QaSessionTrigger =
+  | "manual"
+  | "task"
+  | "rerun"
+  | "schedule"
+  | "pr"
+  | "mcp";
+
+export type QaGeneratedTestStatus =
+  | "generating"
+  | "generated"
+  | "generation_failed"
+  /** Matched to a pre-existing test (from a prior run or manual authoring) —
+   *  generation skipped, `testId` points at that test. */
+  | "covered"
+  | "passed"
+  | "failed"
+  | "healed";
+
+export interface QaGeneratedTest {
+  planItemId: string;
+  group: QaTestGroup;
+  /** All coverage groups of the source plan item (primary first). */
+  groups?: QaTestGroup[];
+  /** Absent when generation failed before a test row was created. */
+  testId?: string;
+  name: string;
+  status: QaGeneratedTestStatus;
+  error?: string;
+}
+
+/** The task dispatcher's routing decision for a Direct-the-agent directive.
+ *  Stored on the session for provenance; `promptLogId` links to the
+ *  ai_prompt_logs row holding the exact triage prompt + response. */
+export interface QaTaskTriage {
+  scope: "targeted" | "explore";
+  reason: string;
+  promptLogId?: string;
+}
+
+/** One cell of the business-area × test-group coverage matrix. */
+export interface QaMatrixCell {
+  planned: number;
+  /** Plan items satisfied by pre-existing tests. */
+  covered: number;
+  generated: number;
+  /** Passing among covered+generated is not knowable for covered (they run
+   *  in normal builds) — `passed` counts this run's passing tests only. */
+  passed: number;
+}
+
+export interface QaSummaryData {
+  planned: number;
+  generated: number;
+  /** Plan items satisfied by pre-existing tests (no generation needed). */
+  covered: number;
+  passed: number;
+  failed: number;
+  healed: number;
+  byGroup: Partial<
+    Record<
+      QaTestGroup,
+      { planned: number; generated: number; covered: number; passed: number }
+    >
+  >;
+  /** Coverage matrix: business area → test group → cell. Areas come from
+   *  QaPlanItem.businessArea ("General" when unset). */
+  matrix?: Record<string, Partial<Record<QaTestGroup, QaMatrixCell>>>;
+  /** journeyId → testIds covering it (traceability matrix). */
+  journeyCoverage: Record<string, string[]>;
+  /** Per-change coverage of the branch diff (repo-aware runs on a branch). */
+  prCoverage?: QaPrCoverage;
 }

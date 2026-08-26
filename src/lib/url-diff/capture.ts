@@ -24,7 +24,7 @@ import type {
   DomSnapshotData,
   WcagScoreSummary,
 } from "@/lib/db/schema";
-import { calculateWcagScore } from "@/lib/a11y/wcag-score";
+import { calculateWcagScore } from "@lastest/wcag-score";
 import type { NetworkRequestLike } from "@/lib/diff/network-diff";
 
 export type CaptureSide = "a" | "b";

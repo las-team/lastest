@@ -1,6 +1,9 @@
 packages:
   - .
   - packages/*
+  - core/*
+  - libs/*
+  - plugins/*
 ignoredBuiltDependencies:
   - sharp
   - unrs-resolver

@@ -1,0 +1,20 @@
+{
+  "name": "@lastest/google-sheets",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Google Sheets/Drive REST client + {{sheet:alias.accessor}} reference resolution. Caller-supplied token, no OAuth exchange/refresh, no DB — the third tier of docs/architecture/core-scope.md §3.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5"
+  },
+  "license": "FSL-1.1-ALv2"
+}

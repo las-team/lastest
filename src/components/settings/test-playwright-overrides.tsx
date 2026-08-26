@@ -46,6 +46,7 @@ import {
   type CheckMode,
   type CheckModeMap,
 } from "@/lib/verify/check-modes";
+import { CHECK_LAYERS } from "@/lib/verify/check-layers";
 
 interface TestPlaywrightOverridesProps {
   testId: string;
@@ -69,18 +70,14 @@ interface TestPlaywrightOverridesProps {
   repoCheckModes?: CheckModeMap;
 }
 
-const MODE_LAYERS: { id: CheckLayer; name: string }[] = [
-  { id: "visual", name: "Visual" },
-  { id: "text", name: "Text" },
-  { id: "dom", name: "DOM" },
-  { id: "network", name: "Network" },
-  { id: "console", name: "Console" },
-  { id: "a11y", name: "A11y" },
-  { id: "design", name: "Design" },
-  { id: "perf", name: "Perf" },
-  { id: "url", name: "URL" },
-  { id: "api", name: "API" },
-];
+// `storage` has never had a per-test override row here (pre-registry gap —
+// preserved as-is rather than folded in as a side effect of this list
+// becoming registry-derived).
+const OMITTED_FROM_TEST_OVERRIDES = new Set(["storage"]);
+
+const MODE_LAYERS: { id: CheckLayer; name: string }[] = CHECK_LAYERS.filter(
+  (layer) => !OMITTED_FROM_TEST_OVERRIDES.has(layer.id),
+).map((layer) => ({ id: layer.id, name: layer.name }));
 
 const MODE_OPTIONS: { id: CheckMode | null; label: string; hint: string }[] = [
   {

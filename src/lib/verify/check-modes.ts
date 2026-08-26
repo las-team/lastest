@@ -1,72 +1,73 @@
 /**
- * Per-check 3-way mode (enforce / log / disable) governing the 9 layers
- * shown in the Verify focus toolbar. Replaces the older mix of `enable*`
- * booleans and `*ErrorMode` selects with a single uniform shape per layer.
+ * Per-check 3-way mode (enforce / log / disable) governing the check layers
+ * shown in the Verify focus toolbar — the 9 core layers
+ * (`src/lib/verify/core-check-layers.ts`) plus whatever plugins contribute
+ * (`CHECK_LAYERS` in `check-layers.ts`, RFC §6.3). Replaces the older mix of
+ * `enable*` booleans and `*ErrorMode` selects with a single uniform shape
+ * per layer.
  *
  *   enforce → check runs AND a failure marks the test red
  *   log     → check runs, evidence is surfaced as amber, test stays green
  *   disable → check does not run; layer is "absent" in the focus view
  */
 
+import type { CheckMode } from "@lastest/contracts";
 import type {
   PlaywrightSettings,
   EvidenceItem,
   StepVerdict,
 } from "@/lib/db/schema";
+import { CHECK_LAYERS, CHECK_LAYER_BY_ID } from "@/lib/verify/check-layers";
 
-export type CheckMode = "enforce" | "log" | "disable";
+export type { CheckMode } from "@lastest/contracts";
 
-export type CheckLayer =
-  | "visual"
-  | "text"
-  | "dom"
-  | "network"
-  | "console"
-  | "a11y"
-  | "design"
-  | "perf"
-  | "url"
-  | "api"
-  | "storage";
+/**
+ * Open registry (RFC §6.3, phase 3) — `CheckLayer` used to be an 11-member
+ * closed union hand-duplicated here and in `core/contracts/src/refs.ts`.
+ * `visual`/`text`/`dom`/`network`/`console`/`perf`/`url`/`api`/`storage`
+ * stay core-owned (`src/lib/verify/core-check-layers.ts`); `a11y`/`design`
+ * are now contributed by `@lastest/plugin-a11y`/`@lastest/plugin-design-system`
+ * via `CHECK_LAYERS` (`src/lib/verify/check-layers.ts`). Widening this to
+ * `string` gives up compile-time exhaustiveness for the id itself — the
+ * same tradeoff already made for `jobTypes`/capability `provides` in
+ * `core/kernel/src/registry.ts` — in exchange for "add a new check layer"
+ * requiring zero edits here.
+ */
+export type CheckLayer = string;
 
 export type CheckModeMap = Record<CheckLayer, CheckMode>;
 
-/** Layers whose data is always captured by the runner. For these,
- *  `disable` means "don't surface or grade", not "skip the capture". */
-const ALWAYS_CAPTURED: ReadonlySet<CheckLayer> = new Set([
+/** The 9 core-owned layers, whose derive/patch logic stays hardcoded below
+ *  instead of running through the generic `modeField`/`legacyEnabledField`
+ *  loop — bespoke legacy fallbacks (network's two-axis capture+errorMode,
+ *  console's errorMode, text's textDiffEnabled) that don't reduce to the
+ *  shape a plugin layer declares. Everything else comes from the registry. */
+const HARDCODED_LAYER_IDS: ReadonlySet<string> = new Set([
   "visual",
-  "url",
+  "text",
+  "dom",
+  "network",
+  "console",
   "perf",
+  "url",
+  "api",
   "storage",
 ]);
 
-const DEFAULTS: CheckModeMap = {
-  visual: "enforce",
-  text: "log",
-  dom: "log",
-  network: "enforce",
-  console: "enforce",
-  a11y: "log",
-  design: "disable",
-  perf: "log",
-  url: "log",
-  // API request/response assertions (E1). Standalone api-type tests run a
-  // headless HTTP request; a failed status/schema/body assertion gates red.
-  api: "enforce",
-  // End-of-run storage state diff (cookies + localStorage, State tab).
-  // Sessions rotate and caches churn — log-only by default, and the diff
-  // engine emits 'low' signal so it never gates a verdict either way.
-  storage: "log",
-};
+/** Repo / global default to use when nothing is persisted. Derived from the
+ *  composed registry so a plugin layer's `defaultMode` needs no edit here. */
+const DEFAULTS: CheckModeMap = Object.fromEntries(
+  CHECK_LAYERS.map((layer) => [layer.id, layer.defaultMode]),
+);
 
-/** Repo / global default to use when nothing is persisted. */
 export function defaultCheckModes(): CheckModeMap {
   return { ...DEFAULTS };
 }
 
-/** Whether a layer is always captured regardless of its mode. */
+/** Whether a layer is always captured regardless of its mode — `disable`
+ *  means "don't surface or grade", not "skip the capture". */
 export function isAlwaysCaptured(layer: CheckLayer): boolean {
-  return ALWAYS_CAPTURED.has(layer);
+  return CHECK_LAYER_BY_ID.get(layer)?.alwaysCaptured ?? false;
 }
 
 type LegacySource = Partial<
@@ -161,21 +162,27 @@ export function deriveCheckModes(
       return "disable";
     })();
 
-  // --- a11y ---
-  out.a11y =
-    normalizeMode(source.a11yMode) ??
-    (source.enableA11y === true ? "enforce" : DEFAULTS.a11y);
-
-  // --- design ---
-  out.design =
-    normalizeMode(source.designMode) ??
-    (source.enableDesignSystem === true ? "enforce" : DEFAULTS.design);
-
   // --- perf / url / api / storage ---
   out.perf = normalizeMode(source.perfMode) ?? DEFAULTS.perf;
   out.url = normalizeMode(source.urlMode) ?? DEFAULTS.url;
   out.api = normalizeMode(source.apiMode) ?? DEFAULTS.api;
   out.storage = normalizeMode(source.storageMode) ?? DEFAULTS.storage;
+
+  // --- plugin-contributed layers (a11y, design) ---
+  // Each declares `modeField`/`legacyEnabledField` on its descriptor instead
+  // of a hardcoded branch here — see `CheckLayerDescriptor` in
+  // `core/contracts/src/check-layer.ts`. This is what makes a new check
+  // layer a plugin-only PR: this loop needs no edit when one is added.
+  const rawSource = source as unknown as Record<string, unknown>;
+  for (const layer of CHECK_LAYERS) {
+    if (HARDCODED_LAYER_IDS.has(layer.id)) continue;
+    const legacy = layer.legacyEnabledField
+      ? rawSource[layer.legacyEnabledField]
+      : undefined;
+    out[layer.id] =
+      normalizeMode(rawSource[layer.modeField]) ??
+      (legacy === true ? "enforce" : DEFAULTS[layer.id]);
+  }
 
   return out;
 }
@@ -240,14 +247,6 @@ export function checkModesToSettingsPatch(modes: Partial<CheckModeMap>): {
           ? "warn"
           : "ignore";
   }
-  if (modes.a11y) {
-    patch.a11yMode = modes.a11y;
-    patch.enableA11y = modes.a11y !== "disable";
-  }
-  if (modes.design) {
-    patch.designMode = modes.design;
-    patch.enableDesignSystem = modes.design !== "disable";
-  }
   if (modes.perf) {
     patch.perfMode = modes.perf;
   }
@@ -259,6 +258,18 @@ export function checkModesToSettingsPatch(modes: Partial<CheckModeMap>): {
   }
   if (modes.storage) {
     patch.storageMode = modes.storage;
+  }
+
+  // --- plugin-contributed layers (a11y, design) ---
+  const rawPatch = patch as Record<string, unknown>;
+  for (const layer of CHECK_LAYERS) {
+    if (HARDCODED_LAYER_IDS.has(layer.id)) continue;
+    const mode = modes[layer.id];
+    if (!mode) continue;
+    rawPatch[layer.modeField] = mode;
+    if (layer.legacyEnabledField) {
+      rawPatch[layer.legacyEnabledField] = mode !== "disable";
+    }
   }
 
   return patch;
@@ -384,20 +395,7 @@ export function pickTestModeOverrides(
     return null;
   };
   const out: Partial<CheckModeMap> = {};
-  const layers: CheckLayer[] = [
-    "visual",
-    "text",
-    "dom",
-    "network",
-    "console",
-    "a11y",
-    "design",
-    "perf",
-    "url",
-    "api",
-    "storage",
-  ];
-  for (const layer of layers) {
+  for (const { id: layer } of CHECK_LAYERS) {
     const newKey = `${layer}Mode` as const;
     const raw = (overrides as Record<string, unknown>)[newKey];
     const norm = normalizeMode(raw);
@@ -455,8 +453,6 @@ export function testModeOverridesToOverridesPatch(
   if (modes.perf) patch.perfMode = modes.perf;
   if (modes.url) patch.urlMode = modes.url;
   if (modes.storage) patch.storageMode = modes.storage;
-  if (modes.a11y) patch.a11yMode = modes.a11y;
-  if (modes.design) patch.designMode = modes.design;
   if (modes.network) {
     patch.networkMode = modes.network;
     patch.networkErrorMode = modeToErr(modes.network);
@@ -465,6 +461,17 @@ export function testModeOverridesToOverridesPatch(
     patch.consoleMode = modes.console;
     patch.consoleErrorMode = modeToErr(modes.console);
   }
+
+  // --- plugin-contributed layers (a11y, design) ---
+  // No legacy-boolean mirror here: per-test overrides postdate the
+  // enable*/mode-column migration, so only `*Mode` needs writing.
+  const rawPatch = patch as Record<string, unknown>;
+  for (const layer of CHECK_LAYERS) {
+    if (HARDCODED_LAYER_IDS.has(layer.id)) continue;
+    const mode = modes[layer.id];
+    if (mode) rawPatch[layer.modeField] = mode;
+  }
+
   return patch;
 }
 
@@ -475,5 +482,9 @@ export function mergeWithTestOverrides(
   perTest: Partial<CheckModeMap> | null | undefined,
 ): CheckModeMap {
   if (!perTest) return repo;
-  return { ...repo, ...perTest };
+  // `Partial<Record<string, CheckMode>>` types every value as possibly
+  // `undefined` (unlike `Partial` of a literal-keyed type); the object
+  // itself never actually holds one — `checkModesToSettingsPatch` and
+  // friends only ever set a key when they have a real `CheckMode`.
+  return { ...repo, ...perTest } as CheckModeMap;
 }

@@ -18,11 +18,7 @@ import type {
   ExtractedAcceptanceCriterion,
 } from "@/lib/db/schema";
 import { revalidatePath } from "next/cache";
-import {
-  getRepoTree,
-  getFileContent,
-  compareBranches,
-} from "@/lib/github/content";
+import { getRepoTree, getFileContent, compareBranches } from "@lastest/github";
 import { runParallel } from "@/lib/ai/parallel";
 import { createJob, updateJobProgress, completeJob, failJob } from "./jobs";
 import { getCurrentBranchForRepo } from "@/lib/git-utils";
@@ -1493,9 +1489,12 @@ If fixes are needed, return the FIXED code.
 
 Return ONLY the code (fixed or original), no explanations.`;
 
+    // `billTeamId` is the third argument here: this claim's browser time is
+    // metered to the repo's team, so an agent EB can't run unbilled.
     const eb = await claimEmbeddedBrowserForAgent(
-      { billTeamId: team.id },
       5 * 60 * 1000,
+      undefined,
+      team.id,
     ).catch(() => undefined);
     if (!eb) {
       return {

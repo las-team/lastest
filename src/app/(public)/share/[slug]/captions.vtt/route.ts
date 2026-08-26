@@ -1,8 +1,11 @@
 import { NextRequest } from "next/server";
-import { getPublicShareContext } from "@/lib/db/queries/public-shares";
 import { getBuildDemoNotes } from "@/lib/db/queries/demo-notes";
-import { isValidShareSlug } from "@/lib/share/slug";
-import { captionsToVtt } from "@/lib/share/vtt";
+import { resolveShareRenderBuild } from "@/lib/core/share-host";
+import {
+  getPublicShareBySlug,
+  isValidShareSlug,
+  captionsToVtt,
+} from "@lastest/plugin-share";
 
 // Serve the share recording's subtitle track as a real WebVTT file so the
 // <video> on /r/<slug> can attach it via <track src=".../captions.vtt">.
@@ -25,12 +28,19 @@ export async function GET(
     return new Response("Bad Request", { status: 400 });
   }
 
-  const ctx = await getPublicShareContext(slug);
-  if (!ctx) {
+  const share = await getPublicShareBySlug(slug);
+  if (!share || share.status !== "public") {
+    return new Response("Not Found", { status: 404 });
+  }
+  const build = await resolveShareRenderBuild({
+    buildId: share.buildId,
+    testId: share.testId,
+  });
+  if (!build) {
     return new Response("Not Found", { status: 404 });
   }
 
-  const notes = await getBuildDemoNotes(ctx.build.id);
+  const notes = await getBuildDemoNotes(build.id);
   const captions = notes?.captions ?? [];
   if (captions.length === 0) {
     return new Response("Not Found", { status: 404 });

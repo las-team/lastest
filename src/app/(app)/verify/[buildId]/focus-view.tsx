@@ -56,11 +56,11 @@ import {
   type IgnoreRegionRect,
 } from "@/components/diff/slider-comparison";
 import { CheckModesDialog } from "@/components/verify/check-modes-dialog";
-import { ApiTestDialog } from "@/components/api-tests/api-test-dialog";
+import { ApiTestDialog } from "@lastest/plugin-api-test/ui/api-test-dialog";
 import {
   networkRequestToApiTest,
   type ApiTestSeed,
-} from "@/lib/api-test/from-network";
+} from "@lastest/plugin-api-test/from-network";
 import {
   classifyEvidenceWithMode,
   effectiveVerdict,
@@ -69,6 +69,7 @@ import {
   type CheckModeMap,
   type CheckLayer,
 } from "@/lib/verify/check-modes";
+import { CHECK_LAYER_BY_ID } from "@/lib/verify/check-layers";
 import { A11yComplianceCard } from "@/components/builds/a11y-compliance-card";
 import { A11yViolationsCard } from "@/components/builds/a11y-violations-card";
 import { DesignSystemComplianceCard } from "@/components/builds/design-system-compliance-card";
@@ -91,7 +92,7 @@ import {
 } from "@/lib/verify/case-status";
 import { useIsMobile } from "@/lib/hooks/use-is-mobile";
 import type { VisualDiffLite, TestResultLite } from "./board-focus-client";
-import { RcaBadge } from "@/components/diff/rca-badge";
+import { RcaBadge } from "@lastest/plugin-rca/ui/rca-badge";
 import {
   VideoPlayer,
   type PlayerSegment,
@@ -266,18 +267,30 @@ function classifyLayer(
     case "console":
       if (!result?.status) return "absent";
       return "clean";
-    case "a11y":
+    case "a11y": {
       // A11y requires the enableA11y toggle, so null/null means *not* run.
-      return result?.a11yViolations != null || result?.a11yPassesCount != null
-        ? "clean"
-        : "absent";
-    case "design":
+      // Delegated to the plugin — see `plugins/a11y/src/check-layer.ts`.
+      const captured =
+        !!result &&
+        (CHECK_LAYER_BY_ID.get("a11y")?.wasCaptured?.(
+          result as unknown as Record<string, unknown>,
+        ) ??
+          false);
+      return captured ? "clean" : "absent";
+    }
+    case "design": {
       // Same opt-in shape as a11y: only marked captured when the EB
-      // harvester ran (violations array or rulesChecked is non-null).
-      return result?.designSystemViolations != null ||
-        result?.designSystemRulesChecked != null
-        ? "clean"
-        : "absent";
+      // harvester ran. Delegates to the plugin instead of duplicating its
+      // knowledge of which result fields mean "captured" — see
+      // `plugins/design-system/src/check-layer.ts`.
+      const captured =
+        !!result &&
+        (CHECK_LAYER_BY_ID.get("design")?.wasCaptured?.(
+          result as unknown as Record<string, unknown>,
+        ) ??
+          false);
+      return captured ? "clean" : "absent";
+    }
     case "perf":
       if (!result?.status) return "absent";
       return "clean";

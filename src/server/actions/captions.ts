@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import * as queries from "@/lib/db/queries";
 import { requireRepoAccess } from "@/lib/auth/session";
-import { generateAndStoreCaptionsForBuild } from "@/lib/share/generate-captions";
+import { generateAndStoreCaptionsForBuild } from "@/lib/demo-captions/generate-captions";
 
 /**
  * Generate AI subtitle captions for a build's primary recording and persist

@@ -1,0 +1,43 @@
+{
+  "name": "@lastest/plugin-api-test",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Headless API tests (E1): an HTTP request plus response assertions, executed without a browser, seeded from a captured network request or authored by AI.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./actions": "./src/actions.ts",
+    "./evidence": "./src/evidence.ts",
+    "./from-network": "./src/from-network.ts",
+    "./generator": "./src/generator.ts",
+    "./host": "./src/host.ts",
+    "./redact": "./src/redact.ts",
+    "./runner": "./src/runner.ts",
+    "./ui/api-test-dialog": "./src/ui/api-test-dialog.tsx",
+    "./ui/api-test-form": "./src/ui/api-test-form.tsx",
+    "./wiring": "./src/wiring.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lastest/ai-kit": "workspace:*",
+    "@lastest/contracts": "workspace:*",
+    "@lastest/eb-protocol": "workspace:*",
+    "@lastest/kernel": "workspace:*",
+    "@lastest/ui": "workspace:*",
+    "ajv": "^8.17.1",
+    "sonner": "^2.0.7"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "lucide-react": "^0.562.0",
+    "next": "16.2.11",
+    "react": "19.2.3",
+    "typescript": "^5",
+    "vitest": "^4.1.0"
+  },
+  "license": "FSL-1.1-ALv2"
+}

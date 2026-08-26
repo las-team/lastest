@@ -11,7 +11,8 @@ import type {
 } from "@/lib/db/schema";
 import { createAndRunBuild } from "./builds";
 import { approveAllDiffs } from "./diffs";
-import { awardScore } from "./gamification";
+import { awardScore } from "@lastest/plugin-gamification/actions";
+import * as gamificationReads from "@lastest/plugin-gamification/reads";
 import { getCurrentBranchForRepo } from "@/lib/git-utils";
 import { getBuildSummary } from "./builds";
 import { startRemoteRouteScan } from "./scanner";
@@ -658,7 +659,7 @@ async function testLoginScript(
 async function runEnvSetup(
   sessionId: string,
   repositoryId: string,
-  teamId: string,
+  _teamId: string,
   signal: AbortSignal,
 ) {
   await setStepActive(sessionId, "env_setup");
@@ -796,20 +797,16 @@ async function runEnvSetup(
 
   // Claim an EB from the pool — login detection + script test both run against
   // the embedded browser via CDP, never a host-local chromium.
-  const eb = await claimEmbeddedBrowserForAgent(
-    { billTeamId: teamId },
-    5 * 60 * 1000,
-    () => {
-      queries
-        .updateAgentSession(sessionId, {
-          metadata: {
-            ...(session?.metadata ?? {}),
-            queuedForBrowser: true,
-          } as Record<string, unknown>,
-        })
-        .catch(() => {});
-    },
-  );
+  const eb = await claimEmbeddedBrowserForAgent(5 * 60 * 1000, () => {
+    queries
+      .updateAgentSession(sessionId, {
+        metadata: {
+          ...(session?.metadata ?? {}),
+          queuedForBrowser: true,
+        } as Record<string, unknown>,
+      })
+      .catch(() => {});
+  });
 
   if (!eb) {
     await updateSubsteps(sessionId, "env_setup", [
@@ -1314,18 +1311,18 @@ async function runPlanWithAgents(
   await flushSubsteps();
 
   const { runBrowserPlanner } =
-    await import("@/lib/playwright/planners/browser-planner");
+    await import("@lastest/plugin-authoring-ai/actions");
   const { runCodePlanner } =
-    await import("@/lib/playwright/planners/code-planner");
+    await import("@lastest/plugin-authoring-ai/actions");
   const { runSpecPlanner } =
-    await import("@/lib/playwright/planners/spec-planner");
+    await import("@lastest/plugin-authoring-ai/actions");
   const { runRoutePlanner } =
-    await import("@/lib/playwright/planners/route-planner");
+    await import("@lastest/plugin-authoring-ai/actions");
 
   /** Helper to enrich a substep from a PlannerResult */
   const enrichSubstep = (
     idx: number,
-    result: import("@/lib/playwright/planner-types").PlannerResult,
+    result: import("@lastest/plugin-authoring-ai/actions").PlannerResult,
   ) => {
     plannerStates[idx].status = result.error ? "error" : "done";
     plannerStates[idx].detail = result.error
@@ -1407,7 +1404,7 @@ async function runPlanWithAgents(
         source: "spec" as const,
         areas: [],
         error: String(err),
-      } as import("@/lib/playwright/planner-types").PlannerResult;
+      } as import("@lastest/plugin-authoring-ai/actions").PlannerResult;
     });
 
   const [codeResult, routeResult] = await Promise.all([
@@ -1444,7 +1441,7 @@ async function runPlanWithAgents(
           source: "code" as const,
           areas: [],
           error: String(err),
-        } as import("@/lib/playwright/planner-types").PlannerResult;
+        } as import("@lastest/plugin-authoring-ai/actions").PlannerResult;
       }),
     runRoutePlanner(repositoryId)
       .then((r) => {
@@ -1477,7 +1474,7 @@ async function runPlanWithAgents(
           source: "routes" as const,
           areas: [],
           error: String(err),
-        } as import("@/lib/playwright/planner-types").PlannerResult;
+        } as import("@lastest/plugin-authoring-ai/actions").PlannerResult;
       }),
   ]);
 
@@ -1616,7 +1613,7 @@ async function runPlanWithAgents(
       source: "browser" as const,
       areas: [],
       error: String(err),
-    } as import("@/lib/playwright/planner-types").PlannerResult;
+    } as import("@lastest/plugin-authoring-ai/actions").PlannerResult;
   });
 
   if (isAborted(signal)) return false;
@@ -1628,12 +1625,12 @@ async function runPlanWithAgents(
     string,
     {
       source: string;
-      areas: import("@/lib/playwright/planner-types").PlannerArea[];
+      areas: import("@lastest/plugin-authoring-ai/actions").PlannerArea[];
       error?: string;
       rawOutput?: string;
     }
   > = {};
-  const fulfilledResults: import("@/lib/playwright/planner-types").PlannerResult[] =
+  const fulfilledResults: import("@lastest/plugin-authoring-ai/actions").PlannerResult[] =
     [];
   for (const r of allResults) {
     allPlannerResults[r.source] = {
@@ -1655,7 +1652,7 @@ async function runPlanWithAgents(
 
   // Merge results
   const { mergePlannerResults } =
-    await import("@/lib/playwright/planner-merger");
+    await import("@lastest/plugin-authoring-ai/actions");
 
   const mergedAreas = mergePlannerResults(fulfilledResults);
   const sourcesUsed = new Set(fulfilledResults.map((r) => r.source)).size;
@@ -1918,17 +1915,20 @@ async function runGenerate(
   }> = [];
 
   // Look up the play_agent bot so test-creation points go to the bot, not the user
-  const playAgentBot = await queries.getBotByKind(teamId, "play_agent");
+  const playAgentBot = await gamificationReads.getBotByKind(
+    teamId,
+    "play_agent",
+  );
 
   if (targetAreas.length > 0) {
     const { agentCreateTest, groupScenariosForGeneration } =
-      await import("@/lib/playwright/generator-agent");
+      await import("@lastest/plugin-authoring-ai/actions");
     const GENERATOR_CONCURRENCY = 3;
 
     // Build work items: group scenarios by route proximity per area
     const workItems: Array<{
       area: (typeof targetAreas)[0];
-      group: import("@/lib/playwright/generator-agent").ScenarioGroup;
+      group: import("@lastest/plugin-authoring-ai/actions").ScenarioGroup;
     }> = [];
 
     const allRoutes = await queries.getRoutesByRepo(repositoryId);
@@ -2414,7 +2414,8 @@ async function runFixTests(
 
   {
     const HEALER_CONCURRENCY = 3;
-    const { agentHealTest } = await import("@/lib/playwright/healer-agent");
+    const { agentHealTest } =
+      await import("@lastest/plugin-authoring-ai/actions");
 
     for (
       let batch = 0;
@@ -2465,26 +2466,8 @@ async function runFixTests(
             },
           );
 
-          // Claim an EB for this healer call
-          const eb = await claimEmbeddedBrowserForAgent(
-            { billTeamId: teamId },
-            5 * 60 * 1000,
-          ).catch(() => undefined);
-          let healResult: { success: boolean; code?: string; error?: string };
-          if (!eb) {
-            healResult = {
-              success: false,
-              error: "No embedded browsers available — all browsers are busy.",
-            };
-          } else {
-            try {
-              healResult = await agentHealTest(repositoryId, testId, {
-                cdpEndpoint: eb.cdpUrl,
-              });
-            } finally {
-              await releasePoolEB(eb.runnerId).catch(() => {});
-            }
-          }
+          // Claims its own Embedded Browser for this healer call.
+          const healResult = await agentHealTest(repositoryId, testId);
           fixAttempts[testId] = attempts + 1;
 
           const test = await queries.getTest(testId);
@@ -3265,40 +3248,26 @@ export async function rerunPlanner(
   }
 
   // Re-run the specific planner
-  let result: import("@/lib/playwright/planner-types").PlannerResult;
+  let result: import("@lastest/plugin-authoring-ai/actions").PlannerResult;
   try {
     if (plannerSource.startsWith("browser-dive-")) {
       // Re-run a single deep-diver for a specific area
       const areaName = plannerSource.replace("browser-dive-", "");
       const scoutData = session.metadata?.scoutOutput as
-        | import("@/lib/playwright/planner-types").ScoutOutput
+        | import("@lastest/plugin-authoring-ai/actions").ScoutOutput
         | undefined;
       const scoutArea = scoutData?.areas?.find((a) => a.name === areaName);
 
       const { runDeepDiveExploration } =
-        await import("@/lib/playwright/planner-agent");
-      const diveEB = await claimEmbeddedBrowserForAgent(
-        { billTeamId: team.id },
-        5 * 60 * 1000,
-      ).catch(() => undefined);
-      if (!diveEB) {
-        throw new Error(
-          "No embedded browsers available — all browsers are busy. Please try again later.",
-        );
-      }
-      let areas;
-      try {
-        areas = await runDeepDiveExploration(
-          areaName,
-          scoutArea?.routes || [],
-          scoutArea?.focusPoints,
-          session.repositoryId,
-          baseUrl,
-          { cdpEndpoint: diveEB.cdpUrl },
-        );
-      } finally {
-        await releasePoolEB(diveEB.runnerId).catch(() => {});
-      }
+        await import("@lastest/plugin-authoring-ai/actions");
+      // Claims its own Embedded Browser for the duration of the dive.
+      const areas = await runDeepDiveExploration(
+        areaName,
+        scoutArea?.routes || [],
+        scoutArea?.focusPoints,
+        session.repositoryId,
+        baseUrl,
+      );
       result = {
         source: "browser",
         areas,
@@ -3309,13 +3278,13 @@ export async function rerunPlanner(
       switch (plannerSource) {
         case "browser": {
           const { runBrowserPlanner } =
-            await import("@/lib/playwright/planners/browser-planner");
+            await import("@lastest/plugin-authoring-ai/actions");
           result = await runBrowserPlanner(session.repositoryId, baseUrl);
           break;
         }
         case "code": {
           const { runCodePlanner } =
-            await import("@/lib/playwright/planners/code-planner");
+            await import("@lastest/plugin-authoring-ai/actions");
           result = await runCodePlanner(
             session.repositoryId,
             branch,
@@ -3325,13 +3294,13 @@ export async function rerunPlanner(
         }
         case "spec": {
           const { runSpecPlanner } =
-            await import("@/lib/playwright/planners/spec-planner");
+            await import("@lastest/plugin-authoring-ai/actions");
           result = await runSpecPlanner(session.repositoryId, branch);
           break;
         }
         case "routes": {
           const { runRoutePlanner } =
-            await import("@/lib/playwright/planners/route-planner");
+            await import("@lastest/plugin-authoring-ai/actions");
           result = await runRoutePlanner(session.repositoryId);
           break;
         }
@@ -3388,15 +3357,15 @@ export async function rerunPlanner(
 
   // Re-merge all planner results
   const { mergePlannerResults } =
-    await import("@/lib/playwright/planner-merger");
+    await import("@lastest/plugin-authoring-ai/actions");
   const allResults = Object.values(plannerResults) as Array<{
     source: string;
-    areas: import("@/lib/playwright/planner-types").PlannerArea[];
+    areas: import("@lastest/plugin-authoring-ai/actions").PlannerArea[];
     error?: string;
   }>;
   const mergeInput = allResults.filter(
     (r) => r.areas.length > 0,
-  ) as import("@/lib/playwright/planner-types").PlannerResult[];
+  ) as import("@lastest/plugin-authoring-ai/actions").PlannerResult[];
   const mergedAreas = mergePlannerResults(mergeInput);
 
   // Filter out routes that already exist in DB (user may have rearranged them)

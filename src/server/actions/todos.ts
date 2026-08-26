@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import * as queries from "@/lib/db/queries";
 import { requireTeamAccess, requireRepoAccess } from "@/lib/auth";
 import { requireBuildOwnership } from "@/lib/auth/ownership";
-import { awardScore } from "@/server/actions/gamification";
+import { awardScore } from "@lastest/plugin-gamification/actions";
 
 async function assertTodoOwnership(todoId: string, teamId: string) {
   const todo = await queries.getReviewTodo(todoId);

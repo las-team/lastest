@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 import {
   extractSelectorArray,
   type DebugStep,
-} from "@/lib/playwright/debug-parser";
+} from "@lastest/recording-codegen/debug-parser";
 import {
   hashSelectors,
   sortSelectorsByStats,

@@ -6,6 +6,12 @@
  *   - setup_configs.authConfig  (bearer token / basic-auth password / headers)
  *   - agent_sessions.metadata.quickstartPassword  (QuickStart app login)
  *
+ * The explorer-knowledge helpers that used to live here left with the plugin.
+ * It encrypts its own credential column through `ExplorerHost.encryptField`,
+ * which is the same primitive reached a different way — see
+ * `plugins/explorer/src/host.ts` for why field crypto is a core concern the
+ * capability contract does not yet cover.
+ *
  * Kept DB-free (depends only on `./crypto` + schema *types*) so the encrypt/
  * decrypt round-trip is unit-testable without a database. The query layers in
  * queries/setup.ts and queries/integrations.ts apply these on write/read.
@@ -16,12 +22,7 @@
  */
 
 import { encrypt, decryptField, ENC_PREFIX } from "./crypto";
-import type {
-  SetupAuthConfig,
-  AgentSessionMetadata,
-  AgentKnowledge,
-  NewAgentKnowledge,
-} from "./db/schema";
+import type { SetupAuthConfig, AgentSessionMetadata } from "./db/schema";
 
 function encField(value: string): string {
   return value.startsWith(ENC_PREFIX) ? value : encrypt(value);
@@ -92,22 +93,4 @@ export function decryptSessionMetadata<
     out = { ...out, qaAuthContext: decryptField(out.qaAuthContext) };
   }
   return out;
-}
-
-// ── agent_knowledge.credPassword ────────────────────────────────────────────
-// Explorer-agent knowledge notes may carry page-scoped login credentials.
-// Only the password is encrypted; credEmail stays plaintext (identifier).
-
-export function encryptKnowledgeRow<
-  T extends Pick<NewAgentKnowledge, "credPassword"> | null | undefined,
->(row: T): T {
-  if (!row || row.credPassword == null) return row;
-  return { ...row, credPassword: encField(row.credPassword) };
-}
-
-export function decryptKnowledgeRow<
-  T extends Pick<AgentKnowledge, "credPassword"> | null | undefined,
->(row: T): T {
-  if (!row || row.credPassword == null) return row;
-  return { ...row, credPassword: decryptField(row.credPassword) };
 }

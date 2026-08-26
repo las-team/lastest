@@ -4,7 +4,7 @@
  * When a test failure is classified `real_regression`, produce a structured
  * application-code fix recommendation (file/snippet/rationale) and return it to
  * the calling coding agent. NEVER auto-applies — distinct from the test healer
- * (`src/lib/playwright/healer-agent.ts`), which patches test code.
+ * (`@lastest/plugin-authoring-ai/healer-agent`), which patches test code.
  */
 
 import { generateWithAI } from "@/lib/ai";

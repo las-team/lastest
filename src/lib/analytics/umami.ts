@@ -1,28 +1,7 @@
-type EventData = Record<string, string | number | boolean | null | undefined>;
-
-declare global {
-  interface Window {
-    umami?: {
-      track: (event: string, data?: EventData) => void;
-      identify: (id: string, data?: EventData) => void;
-    };
-  }
-}
-
-export function track(event: string, data?: EventData): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.umami?.track(event, data);
-  } catch {
-    // Tracker errors must never propagate to app code.
-  }
-}
-
-export function identify(id: string, data?: EventData): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.umami?.identify(id, data);
-  } catch {
-    // Tracker errors must never propagate to app code.
-  }
-}
+/**
+ * Re-export shim. The implementation moved to `libs/analytics` so plugins can
+ * use it without a cross-plugin import — the scheduling plugin's UI is the
+ * first plugin consumer, and event tracking is shared pure logic, which
+ * `docs/architecture/core-scope.md` §3 says is a library, not a feature.
+ */
+export { track, identify } from "@lastest/analytics";

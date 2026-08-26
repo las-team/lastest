@@ -1,3 +1,8 @@
 *.md
 pnpm-lock.yaml
 awesome-playwright-fork/
+# Claude agent worktrees are full repo copies, including their own .next builds.
+# Without this, `pnpm format:check` reports style issues in another branch's
+# unfinished work — and in generated build output — as if they were ours.
+# `eslint.config.mjs` and `vitest.config.ts` carry the same guard.
+.claude/

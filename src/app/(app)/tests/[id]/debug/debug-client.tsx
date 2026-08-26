@@ -50,9 +50,9 @@ import {
   debugInsertTimestamp,
   debugInsertWait,
 } from "@/server/actions/debug";
-import { RecordingTimeline } from "@/components/recording/recording-timeline";
-import { RecordingControls } from "@/components/recording/recording-controls";
-import { codeGenEventToStepCardEvent } from "@/lib/recording/timeline-events";
+import { RecordingTimeline } from "@lastest/plugin-recorder/ui/recording-timeline";
+import { RecordingControls } from "@lastest/plugin-recorder/ui/recording-controls";
+import { codeGenEventToStepCardEvent } from "@lastest/plugin-recorder/timeline-events";
 import {
   Dialog,
   DialogContent,
@@ -74,7 +74,7 @@ import {
   removeInlineLocateWithFallback,
   removeInlineReplayCursorPath,
   parseSteps,
-} from "@/lib/playwright/debug-parser";
+} from "@lastest/recording-codegen/debug-parser";
 import {
   BrowserViewer,
   type BrowserViewerHandle,

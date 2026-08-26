@@ -6,13 +6,12 @@
  * their values post-run by reading page fields, not at code-resolution time.
  */
 
-import { resolveSheetReferences } from "@/lib/google-sheets/resolver";
-import { resolveCsvReferences } from "@/lib/csv/resolver";
-import type {
-  TestVariable,
-  GoogleSheetsDataSource,
-  CsvDataSource,
-} from "@/lib/db/schema";
+import {
+  resolveSheetReferences,
+  type SheetSourceLike,
+} from "@lastest/google-sheets";
+import { resolveCsvReferences, type CsvSourceLike } from "@lastest/csv";
+import type { TestVariable } from "@/lib/db/schema";
 
 export interface ResolvedVarReference {
   fullMatch: string;
@@ -36,8 +35,8 @@ const INCREMENT_WRAP_TARGET = 2;
 
 function getRowCount(
   variable: TestVariable,
-  gsheetSources: GoogleSheetsDataSource[],
-  csvSources: CsvDataSource[],
+  gsheetSources: SheetSourceLike[],
+  csvSources: CsvSourceLike[],
 ): number {
   if (variable.sourceType === "csv") {
     return (
@@ -91,8 +90,8 @@ export function pickRowForVariable(
  *  it can persist the new cursor state to tests.variableRowCursors. */
 export function pickRowsForVariables(
   variables: TestVariable[] | null | undefined,
-  gsheetSources: GoogleSheetsDataSource[],
-  csvSources: CsvDataSource[],
+  gsheetSources: SheetSourceLike[],
+  csvSources: CsvSourceLike[],
   cursors: Record<string, number> | null | undefined,
   rng: () => number = Math.random,
 ): { rowPicks: Record<string, number>; nextCursors: Record<string, number> } {
@@ -131,8 +130,8 @@ function buildSyntheticRefForVar(
 
 function resolveSingleVar(
   variable: TestVariable,
-  gsheetSources: GoogleSheetsDataSource[],
-  csvSources: CsvDataSource[],
+  gsheetSources: SheetSourceLike[],
+  csvSources: CsvSourceLike[],
   rowOverride?: number,
   aiLastValues?: Record<string, string>,
 ): { value: string; error?: string } {
@@ -194,8 +193,8 @@ interface SingleVarAsyncResult {
 
 async function resolveSingleVarAsync(
   variable: TestVariable,
-  gsheetSources: GoogleSheetsDataSource[],
-  csvSources: CsvDataSource[],
+  gsheetSources: SheetSourceLike[],
+  csvSources: CsvSourceLike[],
   rowOverride: number | undefined,
   ai: AIVarRuntime | null,
   aiLastValues: Record<string, string> | undefined,
@@ -258,8 +257,8 @@ async function resolveSingleVarAsync(
 export function resolveVarReferences(
   code: string,
   variables: TestVariable[] | null | undefined,
-  gsheetSources: GoogleSheetsDataSource[],
-  csvSources: CsvDataSource[],
+  gsheetSources: SheetSourceLike[],
+  csvSources: CsvSourceLike[],
   /** Per-variable row overrides keyed by TestVariable.id. Used by the
    *  executor to pin a single row across all {{var:x}} occurrences in a run
    *  (so increment/random vars stay consistent within one run). */
@@ -338,8 +337,8 @@ export interface VarResolveAsyncResult extends VarResolveResult {
 export async function resolveVarReferencesAsync(
   code: string,
   variables: TestVariable[] | null | undefined,
-  gsheetSources: GoogleSheetsDataSource[],
-  csvSources: CsvDataSource[],
+  gsheetSources: SheetSourceLike[],
+  csvSources: CsvSourceLike[],
   rowOverrides: Record<string, number> | undefined,
   ai: AIVarRuntime | null,
   aiLastValues: Record<string, string> | undefined,
@@ -426,8 +425,8 @@ export async function resolveVarReferencesAsync(
  *  sourceRow / row 0). */
 export function resolveAssignedValues(
   variables: TestVariable[] | null | undefined,
-  gsheetSources: GoogleSheetsDataSource[],
-  csvSources: CsvDataSource[],
+  gsheetSources: SheetSourceLike[],
+  csvSources: CsvSourceLike[],
   rowOverrides?: Record<string, number>,
   aiLastValues?: Record<string, string>,
 ): Record<string, string> {
@@ -452,8 +451,8 @@ export function resolveAssignedValues(
  *  mode, cached value for `fixed`). */
 export async function resolveAssignedValuesAsync(
   variables: TestVariable[] | null | undefined,
-  gsheetSources: GoogleSheetsDataSource[],
-  csvSources: CsvDataSource[],
+  gsheetSources: SheetSourceLike[],
+  csvSources: CsvSourceLike[],
   rowOverrides: Record<string, number> | undefined,
   ai: AIVarRuntime | null,
   aiLastValues: Record<string, string> | undefined,
@@ -497,8 +496,8 @@ export async function resolveAssignedValuesAsync(
 export function previewVarReferences(
   code: string,
   variables: TestVariable[] | null | undefined,
-  gsheetSources: GoogleSheetsDataSource[],
-  csvSources: CsvDataSource[],
+  gsheetSources: SheetSourceLike[],
+  csvSources: CsvSourceLike[],
   aiLastValues?: Record<string, string>,
 ) {
   const vars = variables ?? [];

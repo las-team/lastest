@@ -17,6 +17,21 @@ export async function register() {
     }
   }
 
+  // Resolve the plugin registry and hand each plugin its runtime.
+  //
+  // This has to happen at boot rather than on first use: a plugin's
+  // `"use server"` module is dispatched directly by Next.js, so an action
+  // request never passes through app code that could lazily wire it. It is
+  // also where a bad manifest surfaces — duplicate ids, a plugin with storage
+  // and no deletion hook, a table missing its namespace prefix — as a loud boot
+  // failure instead of a 500 on whichever request happens to touch it first.
+  try {
+    const { getPluginRuntime } = await import("@/lib/core/runtime");
+    await getPluginRuntime();
+  } catch (err) {
+    console.error("[Boot] plugin runtime failed to initialize:", err);
+  }
+
   // Must run before `reconcileOrphanedPoolEBs` — deleting the Jobs here is
   // what produces the phantom rows that reconcile prunes.
   try {

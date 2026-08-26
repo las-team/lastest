@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
-import { listPublicSharesForSitemap } from "@/lib/db/queries";
+import { listIndexablePublicShares } from "@lastest/plugin-share";
+import { getSitemapEnrichment } from "@/lib/core/share-host";
 
 export const revalidate = 3600;
 
@@ -51,13 +52,64 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   let shareEntries: MetadataRoute.Sitemap = [];
   try {
-    const shares = await listPublicSharesForSitemap(5000);
+    // Sitemap input: one entry per indexable PER-TEST share (testId not
+    // null), deduped to the most recent live share per test. Build-wide
+    // shares (testId null) are EXCLUDED — they're noindex'd on the page to
+    // avoid duplicate-content competition with their per-test share.
+    const rawShares = await listIndexablePublicShares(5000);
+    const enrichment = await getSitemapEnrichment(
+      rawShares.map((s) => ({
+        slug: s.slug,
+        testId: s.testId,
+        buildId: s.buildId,
+      })),
+    );
+
+    // Two-level dedup, rows are createdAt-desc:
+    //  - per slug: retried runs leave multiple results per (run, test) — keep
+    //    the first row per slug so each sitemap entry carries at most one
+    //    video.
+    //  - per test: a test may carry multiple public share rows (legacy links
+    //    minted before the 1-share-per-test reuse rule). Keep only the most
+    //    recent share per test so each test contributes exactly one sitemap
+    //    URL.
+    const seenSlug = new Set<string>();
+    const seenTest = new Set<string>();
+    const shares: Array<{
+      slug: string;
+      updatedAt: Date | null;
+      targetDomain: string | null;
+      testName: string | null;
+      changesDetected: number;
+      videoPath: string | null;
+      videoDurationMs: number | null;
+    }> = [];
+    for (const s of rawShares) {
+      if (seenSlug.has(s.slug)) continue;
+      seenSlug.add(s.slug);
+      if (s.testId) {
+        if (seenTest.has(s.testId)) continue;
+        seenTest.add(s.testId);
+      }
+      const e = enrichment.get(s.slug);
+      shares.push({
+        slug: s.slug,
+        updatedAt:
+          e?.buildCompletedAt ?? e?.buildCreatedAt ?? s.createdAt ?? null,
+        targetDomain: s.targetDomain,
+        testName: e?.testName ?? null,
+        changesDetected: e?.changesDetected ?? 0,
+        videoPath: e?.videoPath ?? null,
+        videoDurationMs: e?.videoDurationMs ?? null,
+      });
+    }
+
     shareEntries = shares.map((s) => {
       // <video:video> extension on test-share entries. Title, description,
       // and thumbnail must stay CONSISTENT with the VideoObject JSON-LD the
       // share page emits (Google merges metadata across sources and flags
       // mismatches), so the strings mirror buildVideoSchemas() in
-      // src/app/(public)/r/[slug]/page.tsx.
+      // plugins/share/src/ui/page.tsx.
       const displayName = s.testName ?? s.targetDomain ?? "this site";
       const domain = s.targetDomain ?? s.testName ?? "this site";
       const videos = s.videoPath

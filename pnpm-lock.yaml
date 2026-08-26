@@ -55,21 +55,156 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.3)
+      '@lastest/ai-kit':
+        specifier: workspace:*
+        version: link:libs/ai-kit
+      '@lastest/analytics':
+        specifier: workspace:*
+        version: link:libs/analytics
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:core/contracts
+      '@lastest/core-browser':
+        specifier: workspace:*
+        version: link:core/browser
+      '@lastest/core-data':
+        specifier: workspace:*
+        version: link:core/data
+      '@lastest/core-jobs':
+        specifier: workspace:*
+        version: link:core/jobs
+      '@lastest/core-repos':
+        specifier: workspace:*
+        version: link:core/repos
+      '@lastest/core-storage':
+        specifier: workspace:*
+        version: link:core/storage
+      '@lastest/core-tests':
+        specifier: workspace:*
+        version: link:core/tests
+      '@lastest/cron':
+        specifier: workspace:*
+        version: link:libs/cron
+      '@lastest/csv':
+        specifier: workspace:*
+        version: link:libs/csv
       '@lastest/db':
         specifier: workspace:*
         version: link:packages/db
+      '@lastest/design-tokens':
+        specifier: workspace:*
+        version: link:libs/design-tokens
       '@lastest/eb-protocol':
         specifier: workspace:*
         version: link:packages/eb-protocol
+      '@lastest/github':
+        specifier: workspace:*
+        version: link:libs/github
+      '@lastest/google-sheets':
+        specifier: workspace:*
+        version: link:libs/google-sheets
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:core/kernel
       '@lastest/mcp-server':
         specifier: workspace:*
         version: link:packages/mcp-server
+      '@lastest/page-map':
+        specifier: workspace:*
+        version: link:libs/page-map
+      '@lastest/playback':
+        specifier: workspace:*
+        version: link:libs/playback
+      '@lastest/plugin-a11y':
+        specifier: workspace:*
+        version: link:plugins/a11y
+      '@lastest/plugin-api-test':
+        specifier: workspace:*
+        version: link:plugins/api-test
+      '@lastest/plugin-app-map':
+        specifier: workspace:*
+        version: link:plugins/app-map
+      '@lastest/plugin-authoring-ai':
+        specifier: workspace:*
+        version: link:plugins/authoring-ai
+      '@lastest/plugin-awards':
+        specifier: workspace:*
+        version: link:plugins/awards
+      '@lastest/plugin-ci':
+        specifier: workspace:*
+        version: link:plugins/ci
+      '@lastest/plugin-data-sources':
+        specifier: workspace:*
+        version: link:plugins/data-sources
+      '@lastest/plugin-design-system':
+        specifier: workspace:*
+        version: link:plugins/design-system
+      '@lastest/plugin-events':
+        specifier: workspace:*
+        version: link:plugins/events
+      '@lastest/plugin-explorer':
+        specifier: workspace:*
+        version: link:plugins/explorer
+      '@lastest/plugin-gamification':
+        specifier: workspace:*
+        version: link:plugins/gamification
+      '@lastest/plugin-launch':
+        specifier: workspace:*
+        version: link:plugins/launch
+      '@lastest/plugin-playground':
+        specifier: workspace:*
+        version: link:plugins/playground
+      '@lastest/plugin-qa-agent':
+        specifier: workspace:*
+        version: link:plugins/qa-agent
+      '@lastest/plugin-quickstart':
+        specifier: workspace:*
+        version: link:plugins/quickstart
+      '@lastest/plugin-ranger':
+        specifier: workspace:*
+        version: link:plugins/ranger
+      '@lastest/plugin-rca':
+        specifier: workspace:*
+        version: link:plugins/rca
+      '@lastest/plugin-recorder':
+        specifier: workspace:*
+        version: link:plugins/recorder
+      '@lastest/plugin-scheduling':
+        specifier: workspace:*
+        version: link:plugins/scheduling
+      '@lastest/plugin-share':
+        specifier: workspace:*
+        version: link:plugins/share
       '@lastest/pool-service':
         specifier: workspace:*
         version: link:packages/pool-service
+      '@lastest/recording-codegen':
+        specifier: workspace:*
+        version: link:libs/recording-codegen
+      '@lastest/route-scan':
+        specifier: workspace:*
+        version: link:libs/route-scan
       '@lastest/shared':
         specifier: workspace:*
         version: link:packages/shared
+      '@lastest/static-scout':
+        specifier: workspace:*
+        version: link:libs/static-scout
+      '@lastest/test-templates':
+        specifier: workspace:*
+        version: link:libs/test-templates
+      '@lastest/ui':
+        specifier: workspace:*
+        version: link:libs/ui
+      '@lastest/url-canonical':
+        specifier: workspace:*
+        version: link:libs/url-canonical
+      '@lastest/video-fallback':
+        specifier: workspace:*
+        version: link:libs/video-fallback
+      '@lastest/wcag-score':
+        specifier: workspace:*
+        version: link:libs/wcag-score
       '@modelcontextprotocol/sdk':
         specifier: ^1.28.0
         version: 1.29.0(zod@4.4.3)
@@ -291,6 +426,321 @@ importers:
         specifier: ^4.1.0
         version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
 
+  core/browser:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      playwright:
+        specifier: ^1.57.0
+        version: 1.57.0
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  core/contracts:
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  core/data:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8)
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  core/jobs:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  core/kernel:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  core/repos:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  core/storage:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  core/tests:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  libs/ai-kit:
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  libs/analytics:
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  libs/cron:
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  libs/csv:
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.30
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  libs/design-tokens:
+    dependencies:
+      '@lastest/eb-protocol':
+        specifier: workspace:*
+        version: link:../../packages/eb-protocol
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  libs/github:
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.30
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  libs/google-sheets:
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.30
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  libs/page-map:
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  libs/playback:
+    dependencies:
+      '@lastest/eb-protocol':
+        specifier: workspace:*
+        version: link:../../packages/eb-protocol
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  libs/recording-codegen:
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  libs/route-scan:
+    dependencies:
+      '@lastest/github':
+        specifier: workspace:*
+        version: link:../github
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  libs/static-scout:
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  libs/test-templates:
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  libs/ui:
+    dependencies:
+      '@radix-ui/react-checkbox':
+        specifier: ^1.3.3
+        version: 1.3.3(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@radix-ui/react-dialog':
+        specifier: ^1.1.15
+        version: 1.1.15(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@radix-ui/react-dropdown-menu':
+        specifier: ^2.1.16
+        version: 2.1.16(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@radix-ui/react-hover-card':
+        specifier: ^1.1.15
+        version: 1.1.15(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@radix-ui/react-popover':
+        specifier: ^1.1.15
+        version: 1.1.15(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@radix-ui/react-progress':
+        specifier: ^1.1.8
+        version: 1.1.8(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@radix-ui/react-select':
+        specifier: ^2.2.6
+        version: 2.2.6(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@radix-ui/react-separator':
+        specifier: ^1.1.8
+        version: 1.1.8(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@radix-ui/react-slider':
+        specifier: ^1.3.6
+        version: 1.3.6(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@radix-ui/react-slot':
+        specifier: ^1.2.4
+        version: 1.2.4(@types/react@19.2.8)(react@19.2.3)
+      '@radix-ui/react-switch':
+        specifier: ^1.2.6
+        version: 1.2.6(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@radix-ui/react-tabs':
+        specifier: ^1.1.13
+        version: 1.1.13(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@radix-ui/react-tooltip':
+        specifier: ^1.2.8
+        version: 1.2.8(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      class-variance-authority:
+        specifier: ^0.7.1
+        version: 0.7.1
+      clsx:
+        specifier: ^2.1.1
+        version: 2.1.1
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      tailwind-merge:
+        specifier: ^3.4.0
+        version: 3.4.0
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.8
+      '@types/react-dom':
+        specifier: ^19
+        version: 19.2.3(@types/react@19.2.8)
+      react:
+        specifier: 19.2.3
+        version: 19.2.3
+      react-dom:
+        specifier: 19.2.3
+        version: 19.2.3(react@19.2.3)
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  libs/url-canonical:
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  libs/video-fallback:
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.30
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  libs/wcag-score:
+    dependencies:
+      '@lastest/eb-protocol':
+        specifier: workspace:*
+        version: link:../../packages/eb-protocol
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
   packages/db:
     dependencies:
       '@lastest/eb-protocol':
@@ -475,6 +925,761 @@ importers:
       typescript:
         specifier: ^5
         version: 5.9.3
+
+  plugins/a11y:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/core-data':
+        specifier: workspace:*
+        version: link:../../core/data
+      '@lastest/eb-protocol':
+        specifier: workspace:*
+        version: link:../../packages/eb-protocol
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8)
+    devDependencies:
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/api-test:
+    dependencies:
+      '@lastest/ai-kit':
+        specifier: workspace:*
+        version: link:../../libs/ai-kit
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/eb-protocol':
+        specifier: workspace:*
+        version: link:../../packages/eb-protocol
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@lastest/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      ajv:
+        specifier: ^8.17.1
+        version: 8.20.0
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.8
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: 19.2.3
+        version: 19.2.3
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/app-map:
+    dependencies:
+      '@dagrejs/dagre':
+        specifier: ^3.0.0
+        version: 3.0.0
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/eb-protocol':
+        specifier: workspace:*
+        version: link:../../packages/eb-protocol
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@lastest/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      '@lastest/url-canonical':
+        specifier: workspace:*
+        version: link:../../libs/url-canonical
+      '@xyflow/react':
+        specifier: ^12.11.2
+        version: 12.11.2(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(immer@11.1.4)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.8
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: 19.2.3
+        version: 19.2.3
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/authoring-ai:
+    dependencies:
+      '@lastest/ai-kit':
+        specifier: workspace:*
+        version: link:../../libs/ai-kit
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+    devDependencies:
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/awards:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/core-data':
+        specifier: workspace:*
+        version: link:../../core/data
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@lastest/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8)
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      uuid:
+        specifier: '>=11.1.1'
+        version: 13.0.2
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.8
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: ^19
+        version: 19.2.3
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/ci:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/core-data':
+        specifier: workspace:*
+        version: link:../../core/data
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@lastest/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8)
+      libsodium-wrappers:
+        specifier: ^0.8.2
+        version: 0.8.2
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+    devDependencies:
+      '@types/libsodium-wrappers':
+        specifier: ^0.8.2
+        version: 0.8.2
+      '@types/react':
+        specifier: ^19
+        version: 19.2.8
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: ^19
+        version: 19.2.3
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/data-sources:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/core-data':
+        specifier: workspace:*
+        version: link:../../core/data
+      '@lastest/core-storage':
+        specifier: workspace:*
+        version: link:../../core/storage
+      '@lastest/csv':
+        specifier: workspace:*
+        version: link:../../libs/csv
+      '@lastest/google-sheets':
+        specifier: workspace:*
+        version: link:../../libs/google-sheets
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@lastest/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8)
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.8
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: ^19
+        version: 19.2.3
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/design-system:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/design-tokens':
+        specifier: workspace:*
+        version: link:../../libs/design-tokens
+      '@lastest/eb-protocol':
+        specifier: workspace:*
+        version: link:../../packages/eb-protocol
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+    devDependencies:
+      jszip:
+        specifier: ^3.10.1
+        version: 3.10.1
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/events:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/explorer:
+    dependencies:
+      '@lastest/ai-kit':
+        specifier: workspace:*
+        version: link:../../libs/ai-kit
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/core-data':
+        specifier: workspace:*
+        version: link:../../core/data
+      '@lastest/cron':
+        specifier: workspace:*
+        version: link:../../libs/cron
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@lastest/page-map':
+        specifier: workspace:*
+        version: link:../../libs/page-map
+      '@lastest/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8)
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.8
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: 19.2.3
+        version: 19.2.3
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/gamification:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/core-data':
+        specifier: workspace:*
+        version: link:../../core/data
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@lastest/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8)
+      uuid:
+        specifier: '>=11.1.1'
+        version: 13.0.2
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.8
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: ^19
+        version: 19.2.3
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/launch:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/core-data':
+        specifier: workspace:*
+        version: link:../../core/data
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8)
+      uuid:
+        specifier: '>=11.1.1'
+        version: 13.0.2
+    devDependencies:
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/playground:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/core-data':
+        specifier: workspace:*
+        version: link:../../core/data
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8)
+      uuid:
+        specifier: '>=11.1.1'
+        version: 13.0.2
+    devDependencies:
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/qa-agent:
+    dependencies:
+      '@lastest/ai-kit':
+        specifier: workspace:*
+        version: link:../../libs/ai-kit
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/core-data':
+        specifier: workspace:*
+        version: link:../../core/data
+      '@lastest/cron':
+        specifier: workspace:*
+        version: link:../../libs/cron
+      '@lastest/eb-protocol':
+        specifier: workspace:*
+        version: link:../../packages/eb-protocol
+      '@lastest/github':
+        specifier: workspace:*
+        version: link:../../libs/github
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@lastest/test-templates':
+        specifier: workspace:*
+        version: link:../../libs/test-templates
+      '@lastest/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      '@lastest/url-canonical':
+        specifier: workspace:*
+        version: link:../../libs/url-canonical
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8)
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.8
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: 19.2.3
+        version: 19.2.3
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/quickstart:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@lastest/test-templates':
+        specifier: workspace:*
+        version: link:../../libs/test-templates
+      '@lastest/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      '@lastest/video-fallback':
+        specifier: workspace:*
+        version: link:../../libs/video-fallback
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.8
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: 19.2.3
+        version: 19.2.3
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/ranger:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/core-data':
+        specifier: workspace:*
+        version: link:../../core/data
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@lastest/page-map':
+        specifier: workspace:*
+        version: link:../../libs/page-map
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8)
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/rca:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/eb-protocol':
+        specifier: workspace:*
+        version: link:../../packages/eb-protocol
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@lastest/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.8
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: 19.2.3
+        version: 19.2.3
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/recorder:
+    dependencies:
+      '@lastest/eb-protocol':
+        specifier: workspace:*
+        version: link:../../packages/eb-protocol
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@lastest/recording-codegen':
+        specifier: workspace:*
+        version: link:../../libs/recording-codegen
+      '@lastest/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      uuid:
+        specifier: '>=11.1.1'
+        version: 13.0.2
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.8
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: 19.2.3
+        version: 19.2.3
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/scheduling:
+    dependencies:
+      '@lastest/analytics':
+        specifier: workspace:*
+        version: link:../../libs/analytics
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/core-data':
+        specifier: workspace:*
+        version: link:../../core/data
+      '@lastest/cron':
+        specifier: workspace:*
+        version: link:../../libs/cron
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@lastest/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8)
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.8
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: 19.2.3
+        version: 19.2.3
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
+  plugins/share:
+    dependencies:
+      '@lastest/contracts':
+        specifier: workspace:*
+        version: link:../../core/contracts
+      '@lastest/core-data':
+        specifier: workspace:*
+        version: link:../../core/data
+      '@lastest/eb-protocol':
+        specifier: workspace:*
+        version: link:../../packages/eb-protocol
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@lastest/playback':
+        specifier: workspace:*
+        version: link:../../libs/playback
+      '@lastest/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      '@lastest/video-fallback':
+        specifier: workspace:*
+        version: link:../../libs/video-fallback
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8)
+      jszip:
+        specifier: ^3.10.1
+        version: 3.10.1
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      uuid:
+        specifier: '>=11.1.1'
+        version: 13.0.2
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.8
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: 19.2.3
+        version: 19.2.3
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
 
 packages:
 
@@ -2041,6 +3246,10 @@ packages:
 
   '@types/json5@0.0.29':
     resolution: {integrity: sha512-dRLjCWHYg4oaA77cxO64oO+7JwCwnIzkZPdrrC71jQmQtlhM556pwKo5bUzqvZndkVbeFLIIi+9TC40JNF5hNQ==}
+
+  '@types/libsodium-wrappers@0.8.2':
+    resolution: {integrity: sha512-+2IDfSULPUskSjIYfZl9suIUsIE5PXwoKZiE/j0MZWd+M9nEGvJDsk/ztMZKNhL1lBL+1CaypW0dQSjqPW2dMg==}
+    deprecated: This is a stub types definition. libsodium-wrappers provides its own type definitions, so you do not need this installed.
 
   '@types/mdast@4.0.4':
     resolution: {integrity: sha512-kGaNbPh1k7AFzgpud/gMdvIm5xuECykRR+JnWKQno9TAXVa6WIVCGTPvYGekIDL4uwCZQSYbUxNBSb1aUo79oA==}
@@ -6827,6 +8036,10 @@ snapshots:
   '@types/json-schema@7.0.15': {}
 
   '@types/json5@0.0.29': {}
+
+  '@types/libsodium-wrappers@0.8.2':
+    dependencies:
+      libsodium-wrappers: 0.8.2
 
   '@types/mdast@4.0.4':
     dependencies:

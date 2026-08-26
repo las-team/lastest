@@ -1,5 +1,6 @@
 import { db } from "../index";
 import { encryptField, decryptField } from "@/lib/crypto";
+import { cascadePluginDeletion } from "@/lib/db/plugin-deletion";
 import {
   repositories,
   pullRequests,
@@ -28,11 +29,8 @@ import {
   specImports,
   setupScripts,
   setupConfigs,
-  googleSheetsDataSources,
-  csvDataSources,
   functionalAreas,
   activityEvents,
-  publicShares,
   remoteDebugSessions,
 } from "../schema";
 import type {
@@ -233,6 +231,9 @@ export async function updateRepository(
  * transaction; the final `DELETE FROM repositories` only handles the
  * subset of tables that actually declare ON DELETE CASCADE.
  *
+ * Plugin-owned tables are cleaned up by their registered deletion hooks after
+ * the transaction commits — they have no FK here to cascade through.
+ *
  * Disk storage is NOT cleaned up here — call `deleteRepoStorage(id)`
  * from `@/lib/storage/cleanup` after this returns.
  */
@@ -342,15 +343,17 @@ export async function deleteRepository(id: string) {
     await tx.delete(specImports).where(eq(specImports.repositoryId, id));
     await tx.delete(setupScripts).where(eq(setupScripts.repositoryId, id));
     await tx.delete(setupConfigs).where(eq(setupConfigs.repositoryId, id));
-    await tx
-      .delete(googleSheetsDataSources)
-      .where(eq(googleSheetsDataSources.repositoryId, id));
-    await tx.delete(csvDataSources).where(eq(csvDataSources.repositoryId, id));
+    // googleSheetsDataSources/csvDataSources moved to
+    // plugins/data-sources/src/schema.ts (RFC §9 phase 4) — reaped by the
+    // plugin's onRepoDeleted hook, driven by `cascadePluginDeletion` below,
+    // not by this transaction.
     await tx
       .delete(plannedScreenshots)
       .where(eq(plannedScreenshots.repositoryId, id));
     await tx.delete(activityEvents).where(eq(activityEvents.repositoryId, id));
-    await tx.delete(publicShares).where(eq(publicShares.repositoryId, id));
+    // publicShares moved to plugins/share/src/schema.ts (RFC §9 phase 4) —
+    // its rows are reaped by the plugin's onRepoDeleted hook, driven by
+    // `cascadePluginDeletion` below, not by this transaction.
     await tx
       .delete(remoteDebugSessions)
       .where(eq(remoteDebugSessions.repositoryId, id));
@@ -358,8 +361,15 @@ export async function deleteRepository(id: string) {
       .delete(functionalAreas)
       .where(eq(functionalAreas.repositoryId, id));
 
-    // 12. Nullify selectedRepositoryId references that don't have a
-    //     SET NULL cascade (users.selectedRepositoryId already does).
+    // 12. Nullify selectedRepositoryId pointers. None of the three is an FK
+    //     any more: users.selectedRepositoryId gave up its SET NULL cascade so
+    //     that `repositories.team_id → teams.id` could exist instead (only one
+    //     of the two edges can, see the column comment in schema/identity.ts),
+    //     which makes doing this here load-bearing rather than tidy-up.
+    await tx
+      .update(users)
+      .set({ selectedRepositoryId: null })
+      .where(eq(users.selectedRepositoryId, id));
     await tx
       .update(teams)
       .set({ selectedRepositoryId: null })
@@ -373,12 +383,39 @@ export async function deleteRepository(id: string) {
       .set({ selectedRepositoryId: null })
       .where(eq(gitlabAccounts.selectedRepositoryId, id));
 
-    // 13. Finally the repo itself. Cascades: agentSessions, buildSchedules,
+    // 13. Finally the repo itself. Cascades: agentSessions,
     //     composeConfigs, defaultSetupSteps, defaultTeardownSteps,
-    //     githubIssues, gitlabPipelineConfigs, storageStates, testFixtures,
-    //     testSpecs.
+    //     githubIssues, storageStates, testFixtures, testSpecs.
+    //     (`gitlabPipelineConfigs` used to be in this list; it became
+    //     `ci_gitlab_pipeline_configs` and is reaped by the ci plugin's
+    //     `onRepoDeleted` hook below instead. `buildSchedules` likewise
+    //     became `scheduling_build_schedules`, reaped by the scheduling
+    //     plugin's `onRepoDeleted` hook.)
     await tx.delete(repositories).where(eq(repositories.id, id));
   });
+
+  // Plugin tables carry no FK to `repositories` by rule (`core-scope.md` §6),
+  // so nothing above touched them. Driven after the transaction commits, not
+  // inside it: a plugin's hook runs on the scoped handle `core/data` gave it,
+  // which is a different connection — enlisting it in `tx` is not possible, and
+  // letting it fail the transaction would give a broken plugin a veto over
+  // deleting a repository. See `@/lib/db/plugin-deletion`.
+  await cascadePluginDeletion({ kind: "repo", id });
+}
+
+/**
+ * The owning team's presentation flags for a repository, in one join rather
+ * than a repo read followed by a team read. Only the flags a viewer of the
+ * repo's public artefacts is allowed to see — never plan, quota or billing.
+ */
+export async function getRepositoryOwnerTeamFlags(repositoryId: string) {
+  const [row] = await db
+    .select({ earlyAdopterMode: teams.earlyAdopterMode })
+    .from(repositories)
+    .innerJoin(teams, eq(repositories.teamId, teams.id))
+    .where(eq(repositories.id, repositoryId))
+    .limit(1);
+  return row;
 }
 
 export async function getBaselinesByRepo(repositoryId: string) {

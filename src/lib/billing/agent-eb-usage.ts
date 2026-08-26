@@ -16,10 +16,9 @@ import * as queries from "@/lib/db/queries";
  * place that knows the real team, so it registers the attribution here and the
  * release path settles it.
  *
- * Every `claimEmbeddedBrowserForAgent` call must state its attribution: either
- * a `billTeamId` to track here, or an explicit `{ unmetered: reason }` opt-out
- * for paths that meter elsewhere (the test executor) — so agent EB time can't
- * silently go unbilled, and separately-metered paths are never double-counted.
+ * Only claims made through `claimEmbeddedBrowserForAgent` with an explicit
+ * `teamId` are tracked, so EBs claimed by the test executor (which meters
+ * separately) are never double-counted.
  *
  * State is in-process and deliberately best-effort: a server restart mid-session
  * drops the pending entry, which under-counts rather than double-charges. The

@@ -3,7 +3,7 @@
 import { useOptimistic, useTransition } from "react";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { toggleGamification } from "@/server/actions/gamification";
+import { toggleGamification } from "@lastest/plugin-gamification/actions";
 
 interface GamificationToggleProps {
   enabled: boolean;

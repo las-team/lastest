@@ -27,7 +27,6 @@ import type {
   FunctionalArea,
   VisualDiff,
   PlannedScreenshot,
-  BuildSchedule,
   SetupConfig,
   SetupScript,
   StorageState,
@@ -36,7 +35,6 @@ import type {
   EmbeddedSession,
   SpecImport,
   TestFixture,
-  CsvDataSource,
   Repository,
 } from "@/lib/db/schema";
 
@@ -185,20 +183,10 @@ export async function requirePlannedScreenshotOwnership(
   return { session, planned };
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-// Schedule
-
-export async function requireScheduleOwnership(scheduleId: string): Promise<{
-  session: SessionWithTeam;
-  schedule: BuildSchedule;
-}> {
-  const session = await requireTeamAccess();
-  const schedule = await queries.getBuildSchedule(scheduleId);
-  if (!schedule) forbid("Schedule not found");
-  if (!schedule.repositoryId) forbid("Schedule has no repository binding");
-  await assertRepoTeam(schedule.repositoryId, session.team.id);
-  return { session, schedule };
-}
+// Schedule ownership moved to plugins/scheduling/src/actions.ts's `mustOwn`
+// (RFC §9 phase 4, thirteenth plugin) — `build_schedules` is that plugin's
+// own table now, so a core helper reading it directly would mean core
+// importing a plugin. See docs/architecture/scheduling-migration-result.md.
 
 // ──────────────────────────────────────────────────────────────────────────
 // SetupConfig
@@ -332,19 +320,4 @@ export async function requireTestFixtureOwnership(fixtureId: string): Promise<{
   if (!fixture.repositoryId) forbid("Test fixture has no repository binding");
   await assertRepoTeam(fixture.repositoryId, session.team.id);
   return { session, fixture };
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// CSV Data Source (also used for Google Sheets sources)
-
-export async function requireDataSourceOwnership(dsId: string): Promise<{
-  session: SessionWithTeam;
-  dataSource: CsvDataSource;
-}> {
-  const session = await requireTeamAccess();
-  const dataSource = await queries.getCsvDataSource(dsId);
-  if (!dataSource) forbid("Data source not found");
-  if (!dataSource.repositoryId) forbid("Data source has no repository binding");
-  await assertRepoTeam(dataSource.repositoryId, session.team.id);
-  return { session, dataSource };
 }

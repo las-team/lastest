@@ -30,6 +30,35 @@ export async function getStepComparisonsByBuild(
     .where(eq(stepComparisons.buildId, buildId));
 }
 
+/**
+ * Verdict + layer map only, optionally narrowed to a single test. The evidence
+ * chain on the full row is several kilobytes per step, and a read-only viewer
+ * of the verdicts never opens it.
+ */
+export async function getStepComparisonVerdictsByBuild(
+  buildId: string,
+  testId?: string | null,
+) {
+  return db
+    .select({
+      id: stepComparisons.id,
+      testId: stepComparisons.testId,
+      stepLabel: stepComparisons.stepLabel,
+      stepIndex: stepComparisons.stepIndex,
+      verdict: stepComparisons.verdict,
+      layers: stepComparisons.layers,
+    })
+    .from(stepComparisons)
+    .where(
+      testId
+        ? and(
+            eq(stepComparisons.buildId, buildId),
+            eq(stepComparisons.testId, testId),
+          )
+        : eq(stepComparisons.buildId, buildId),
+    );
+}
+
 export async function getStepComparisonsByTestResult(
   testResultId: string,
 ): Promise<StepComparison[]> {

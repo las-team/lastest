@@ -19,6 +19,7 @@ import type {
   NewIgnoreRegion,
   NewFocusRegion,
   NewPlannedScreenshot,
+  DomDiffResult,
   DomSnapshotData,
 } from "../schema";
 import { eq, desc, and, or, inArray, isNull, sql } from "drizzle-orm";
@@ -89,6 +90,50 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
     .leftJoin(functionalAreas, eq(tests.functionalAreaId, functionalAreas.id))
     .where(eq(visualDiffs.buildId, buildId));
   return diffs;
+}
+
+/**
+ * Build's visual diffs with only the `domDiff` sub-object pulled out of
+ * `metadata`, optionally narrowed to a single test.
+ *
+ * The projection is deliberately narrower than `getVisualDiffsWithTestStatus`:
+ * the rest of `metadata` (aiAnalysis, GitHub links) would bloat a payload that
+ * the only consumer — the public share render context — never reads.
+ */
+export async function getVisualDiffsWithDomDiff(
+  buildId: string,
+  testId?: string | null,
+) {
+  return db
+    .select({
+      id: visualDiffs.id,
+      buildId: visualDiffs.buildId,
+      testResultId: visualDiffs.testResultId,
+      testId: visualDiffs.testId,
+      stepLabel: visualDiffs.stepLabel,
+      baselineImagePath: visualDiffs.baselineImagePath,
+      currentImagePath: visualDiffs.currentImagePath,
+      diffImagePath: visualDiffs.diffImagePath,
+      status: visualDiffs.status,
+      pixelDifference: visualDiffs.pixelDifference,
+      percentageDifference: visualDiffs.percentageDifference,
+      classification: visualDiffs.classification,
+      plannedImagePath: visualDiffs.plannedImagePath,
+      plannedDiffImagePath: visualDiffs.plannedDiffImagePath,
+      mainBaselineImagePath: visualDiffs.mainBaselineImagePath,
+      mainDiffImagePath: visualDiffs.mainDiffImagePath,
+      domDiff: sql<DomDiffResult | null>`${visualDiffs.metadata}->'domDiff'`,
+      testResultStatus: testResults.status,
+      testName: tests.name,
+    })
+    .from(visualDiffs)
+    .leftJoin(testResults, eq(visualDiffs.testResultId, testResults.id))
+    .leftJoin(tests, eq(visualDiffs.testId, tests.id))
+    .where(
+      testId
+        ? and(eq(visualDiffs.buildId, buildId), eq(visualDiffs.testId, testId))
+        : eq(visualDiffs.buildId, buildId),
+    );
 }
 
 export async function getVisualDiff(id: string) {
@@ -311,6 +356,20 @@ export async function getAnyActiveBaseline(
     .orderBy(desc(baselines.createdAt))
     .limit(1);
   return row;
+}
+
+/**
+ * Every active baseline for a test, across all steps, branches and browsers.
+ *
+ * Unlike `getActiveBaseline`/`getAnyActiveBaseline` this resolves nothing — it
+ * is the whole set, which is what a media allow-list and a baseline copy both
+ * need.
+ */
+export async function getActiveBaselinesForTest(testId: string) {
+  return db
+    .select()
+    .from(baselines)
+    .where(and(eq(baselines.testId, testId), eq(baselines.isActive, true)));
 }
 
 /**

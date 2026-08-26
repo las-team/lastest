@@ -1,14 +1,14 @@
 import { notFound } from "next/navigation";
 import { headers } from "next/headers";
 import { getCurrentSession } from "@/lib/auth";
-import * as queries from "@/lib/db/queries";
-import { getTeamTrophyRoom } from "@/lib/db/queries/awards";
+import { getTeamTrophyRoom } from "@lastest/plugin-awards/reads";
+import * as gamification from "@lastest/plugin-gamification/reads";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Trophy, Zap, Bot as BotIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { TrophyRoom } from "@/components/awards/trophy-room";
+import { TrophyRoom } from "@lastest/plugin-awards/ui/trophy-room";
 
 export const dynamic = "force-dynamic";
 
@@ -26,15 +26,17 @@ export default async function LeaderboardPage() {
   const session = await getCurrentSession();
   if (!session?.team) notFound();
 
+  // `getTeamTrophyRoom` authorizes its own scope through the plugin runtime
+  // (`contextFor` -> the app's `requireTeamAccess()`), so no team id crosses.
   const [trophyEntries, origin] = await Promise.all([
-    getTeamTrophyRoom(session.team.id),
+    getTeamTrophyRoom(),
     resolveOrigin(),
   ]);
 
   // High Scores still gates on gamificationEnabled; Trophy Room is always shown.
   const gamificationEnabled = !!session.team.gamificationEnabled;
   const season = gamificationEnabled
-    ? await queries.getActiveSeason(session.team.id)
+    ? await gamification.getActiveSeason(session.team.id)
     : null;
 
   if (!gamificationEnabled || !season) {
@@ -49,8 +51,8 @@ export default async function LeaderboardPage() {
   }
 
   const [leaderboard, blitz] = await Promise.all([
-    queries.getSeasonLeaderboard(season.id, session.team.id, 10),
-    queries.getActiveBugBlitz(session.team.id),
+    gamification.getSeasonLeaderboard(season.id, session.team.id, 10),
+    gamification.getActiveBugBlitz(session.team.id),
   ]);
 
   // Append viewer's own row if they're outside the top 10
@@ -59,10 +61,10 @@ export default async function LeaderboardPage() {
     (r) => r.actorKind === "user" && r.actorId === viewerId,
   );
   if (!viewerRow) {
-    const row = await queries.getUserScoreRow(season.id, "user", viewerId);
+    const row = await gamification.getUserScoreRow(season.id, "user", viewerId);
     if (row) {
       // Rank is approximate (count of actors with strictly higher score + 1).
-      const allRows = await queries.getSeasonLeaderboard(
+      const allRows = await gamification.getSeasonLeaderboard(
         season.id,
         session.team.id,
         1000,

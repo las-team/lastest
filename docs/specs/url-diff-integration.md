@@ -6,6 +6,16 @@ app's authenticated v1 API.
 
 Status: stable for v1. Endpoints live in `src/app/api/v1/[...slug]/route.ts`.
 
+> **The in-app URL Diff page was removed; this API is now the only surface.**
+> The `/url-diff` route and its sidebar entry are gone — nothing inside the
+> product calls these endpoints any more, so **this document's audience is
+> their only consumer.** The engine (`src/lib/url-diff/`,
+> `src/server/actions/url-diff.ts`) is retained and reclassified as **core**,
+> CODEOWNERS-protected, precisely so that stays true: a change to it is a
+> change to a published API and gets reviewed as one. If `lastest-www` ever
+> stops calling `/api/v1/snapshot` and `/api/v1/diff`, say so — at that point
+> the whole engine can be deleted.
+
 ---
 
 ## 1. What you get

@@ -1,0 +1,36 @@
+{
+  "name": "@lastest/plugin-explorer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Autonomous exploratory tester: research → plan → act → analyze on a core-issued browser, findings clustered by root cause, passing flows kept as tests.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./actions": "./src/actions.ts",
+    "./errors": "./src/errors.ts",
+    "./page": "./src/ui/page.tsx",
+    "./schema": "./src/schema.ts",
+    "./wiring": "./src/wiring.ts"
+  },
+  "dependencies": {
+    "@lastest/ai-kit": "workspace:*",
+    "@lastest/contracts": "workspace:*",
+    "@lastest/core-data": "workspace:*",
+    "@lastest/cron": "workspace:*",
+    "@lastest/kernel": "workspace:*",
+    "@lastest/page-map": "workspace:*",
+    "@lastest/ui": "workspace:*",
+    "drizzle-orm": "^0.45.2"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "lucide-react": "^0.562.0",
+    "next": "16.2.11",
+    "react": "19.2.3",
+    "typescript": "^5",
+    "vitest": "^4.1.0"
+  },
+  "license": "FSL-1.1-ALv2"
+}

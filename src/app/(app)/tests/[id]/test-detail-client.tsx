@@ -29,11 +29,11 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { ReplayPlayer } from "@/components/replay-player";
 import { resolveStepSegments } from "@/lib/playback/step-timings";
-import { ApiTestDialog } from "@/components/api-tests/api-test-dialog";
+import { ApiTestDialog } from "@lastest/plugin-api-test/ui/api-test-dialog";
 import {
   networkRequestToApiTest,
   type ApiTestSeed,
-} from "@/lib/api-test/from-network";
+} from "@lastest/plugin-api-test/from-network";
 import {
   Play,
   Trash2,
@@ -89,7 +89,10 @@ import {
   getJobStatus,
   getTestRunStepState,
 } from "@/server/actions/runs";
-import { extractTestBody, parseSteps } from "@/lib/playwright/debug-parser";
+import {
+  extractTestBody,
+  parseSteps,
+} from "@lastest/recording-codegen/debug-parser";
 import {
   PlaybackTimeline,
   type StepResultsMap,
@@ -111,13 +114,15 @@ import type {
   TestVersion,
   PlannedScreenshot,
   SetupScript,
-  GoogleSheetsDataSource,
-  CsvDataSource,
   A11yViolation,
   StabilizationSettings,
   DiffSensitivitySettings,
   TestSpec,
 } from "@/lib/db/schema";
+import type {
+  CsvDataSource,
+  GoogleSheetsDataSource,
+} from "@lastest/plugin-data-sources";
 import {
   DEFAULT_STABILIZATION_SETTINGS,
   DEFAULT_DIFF_THRESHOLDS,
@@ -136,8 +141,8 @@ import { TestStepsTab } from "@/components/tests/success-criteria-tab";
 import { StepCriteriaTab } from "@/components/tests/step-criteria-tab";
 import { TestVarsTab } from "@/components/tests/test-vars-tab";
 import type { ScreenshotGroup } from "@/server/actions/tests";
-import { SheetDataPreview } from "@/components/test-data/sheet-data-preview";
-import { SheetReferenceInserter } from "@/components/test-data/sheet-reference-inserter";
+import { SheetDataPreview } from "@lastest/plugin-data-sources/ui/sheet-data-preview";
+import { SheetReferenceInserter } from "@lastest/plugin-data-sources/ui/sheet-reference-inserter";
 import { VarReferenceInserter } from "@/components/test-data/var-reference-inserter";
 import {
   BrowserViewer,

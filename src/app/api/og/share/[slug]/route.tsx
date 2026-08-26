@@ -1,13 +1,15 @@
 import { ImageResponse } from "next/og";
 import { readFile, stat } from "fs/promises";
 import { existsSync } from "fs";
-import {
-  getPublicShareContext,
-  getShareDataBySlug,
-} from "@/lib/db/queries/public-shares";
+import { appShareHost } from "@/lib/core/share-host";
 import { resolveStoragePath } from "@/lib/storage/paths";
-import { isValidShareSlug } from "@/lib/share/slug";
-import { deriveShareFacts } from "@/lib/share/demo-facts";
+import {
+  deriveShareFacts,
+  getPublicShareBySlug,
+  isValidShareSlug,
+  type ShareTestResult,
+  type ShareVisualDiff,
+} from "@lastest/plugin-share";
 
 // Node runtime — we read screenshots off disk to embed them inline.
 export const runtime = "nodejs";
@@ -30,18 +32,8 @@ const COLOR_TEAL = "#36A88E";
 const COLOR_LINE = "rgba(31, 42, 51, 0.10)";
 const COLOR_MUTED = "rgba(31, 42, 51, 0.55)";
 
-type ShareDiffs =
-  Awaited<ReturnType<typeof getShareDataBySlug>> extends infer T
-    ? T extends { diffs: infer D }
-      ? D
-      : never
-    : never;
-type ShareResults =
-  Awaited<ReturnType<typeof getShareDataBySlug>> extends infer T
-    ? T extends { results: infer R }
-      ? R
-      : never
-    : never;
+type ShareDiffs = ShareVisualDiff[];
+type ShareResults = ShareTestResult[];
 
 type HeroPick = {
   kind: "diff" | "current" | "baseline" | "shot";
@@ -201,19 +193,22 @@ async function renderShareOg({
     return fallbackImage("Invalid share");
   }
 
-  const ctx = await getPublicShareContext(slug);
-  if (!ctx) return fallbackImage("Share unavailable");
+  const share = await getPublicShareBySlug(slug);
+  if (!share || share.status !== "public") {
+    return fallbackImage("Share unavailable");
+  }
+  const rendered = await appShareHost.getBuildRenderContext({
+    buildId: share.buildId,
+    testId: share.testId,
+  });
+  if (!rendered) return fallbackImage("Share unavailable");
+  const { build, test, diffs, results } = rendered;
 
-  const data = await getShareDataBySlug(slug);
-  const diffs = data?.diffs ?? [];
-  const results = data?.results ?? [];
-
-  const domain =
-    ctx.share.targetDomain || ctx.test?.name || "Visual regression check";
-  const total = ctx.build.totalTests ?? 0;
-  const status = ctx.build.overallStatus;
-  const failed = ctx.build.failedCount ?? 0;
-  const kind = ctx.share.kind ?? "regression";
+  const domain = share.targetDomain || test?.name || "Visual regression check";
+  const total = build.totalTests ?? 0;
+  const status = build.overallStatus;
+  const failed = build.failedCount ?? 0;
+  const kind = share.kind ?? "regression";
 
   // Resolve a clean domain string for the headline (strip protocol + trailing slash)
   const cleanDomain = String(domain)
@@ -227,8 +222,8 @@ async function renderShareOg({
   const facts = deriveShareFacts({
     results,
     diffs,
-    test: ctx.test,
-    build: ctx.build,
+    test,
+    build,
   });
 
   // Card model, chosen by share.kind. A demo card NEVER shows change counts,

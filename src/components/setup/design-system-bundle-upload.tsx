@@ -29,7 +29,7 @@ import { toast } from "sonner";
 import {
   uploadRepoDesignSystemBundle,
   clearRepoDesignSystem,
-} from "@/server/actions/design-system-overrides";
+} from "@lastest/plugin-design-system/actions";
 import { DesignSystemPreview } from "./design-system-preview";
 import type { DesignSystemConfig, DesignTokenCategory } from "@/lib/db/schema";
 

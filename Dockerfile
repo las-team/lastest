@@ -126,6 +126,28 @@ RUN ln -sf .pnpm/playwright@1.57.0/node_modules/playwright ./node_modules/playwr
 COPY --from=builder --chown=nextjs:nodejs /app/drizzle ./drizzle
 COPY --from=builder --chown=nextjs:nodejs /app/drizzle.config.ts ./drizzle.config.ts
 COPY --from=builder --chown=nextjs:nodejs /app/packages/db/src/schema.ts ./packages/db/src/schema.ts
+# The barrel `export * from "./schema/<mod>"` is a VALUE re-export that esbuild
+# must resolve, so the split schema modules have to come along with it.
+COPY --from=builder --chown=nextjs:nodejs /app/packages/db/src/schema/ ./packages/db/src/schema/
+# drizzle.config.ts's schema glob also covers ./plugins/*/src/schema.ts (each
+# plugin owns its own tables) — without these, push silently creates none of
+# those tables. Same erasure argument as core's schema.ts above; add a line
+# here whenever a new plugin that OWNS TABLES is registered in
+# src/lib/core/runtime.ts's MANIFESTS. Plugins with no `schema` in their
+# manifest (events, design-system) must NOT be listed: COPY of a file that
+# does not exist fails the build.
+COPY --from=builder --chown=nextjs:nodejs /app/plugins/a11y/src/schema.ts ./plugins/a11y/src/schema.ts
+COPY --from=builder --chown=nextjs:nodejs /app/plugins/awards/src/schema.ts ./plugins/awards/src/schema.ts
+COPY --from=builder --chown=nextjs:nodejs /app/plugins/ci/src/schema.ts ./plugins/ci/src/schema.ts
+COPY --from=builder --chown=nextjs:nodejs /app/plugins/data-sources/src/schema.ts ./plugins/data-sources/src/schema.ts
+COPY --from=builder --chown=nextjs:nodejs /app/plugins/explorer/src/schema.ts ./plugins/explorer/src/schema.ts
+COPY --from=builder --chown=nextjs:nodejs /app/plugins/gamification/src/schema.ts ./plugins/gamification/src/schema.ts
+COPY --from=builder --chown=nextjs:nodejs /app/plugins/launch/src/schema.ts ./plugins/launch/src/schema.ts
+COPY --from=builder --chown=nextjs:nodejs /app/plugins/playground/src/schema.ts ./plugins/playground/src/schema.ts
+COPY --from=builder --chown=nextjs:nodejs /app/plugins/qa-agent/src/schema.ts ./plugins/qa-agent/src/schema.ts
+COPY --from=builder --chown=nextjs:nodejs /app/plugins/ranger/src/schema.ts ./plugins/ranger/src/schema.ts
+COPY --from=builder --chown=nextjs:nodejs /app/plugins/scheduling/src/schema.ts ./plugins/scheduling/src/schema.ts
+COPY --from=builder --chown=nextjs:nodejs /app/plugins/share/src/schema.ts ./plugins/share/src/schema.ts
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/drizzle-kit ./node_modules/drizzle-kit
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.bin/drizzle-kit ./node_modules/.bin/drizzle-kit

@@ -1,0 +1,20 @@
+{
+  "name": "@lastest/github",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GitHub Contents/Trees/Compare REST client + pure tree helpers. Caller-supplied token, no credential resolution, no DB — the third tier of docs/architecture/core-scope.md §3.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5"
+  },
+  "license": "FSL-1.1-ALv2"
+}

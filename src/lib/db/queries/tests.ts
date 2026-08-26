@@ -1,4 +1,5 @@
 import { db } from "../index";
+import { notifyTestCreated } from "../test-hooks";
 import {
   functionalAreas,
   tests,
@@ -16,6 +17,7 @@ import {
   testSpecs,
 } from "../schema";
 import type {
+  BotKind,
   NewFunctionalArea,
   NewTest,
   NewTestRun,
@@ -150,10 +152,29 @@ export async function getTest(id: string) {
   return row;
 }
 
+/**
+ * Batched `id → name` lookup. One query for the sitemap's share enrichment
+ * instead of a `getTest` round trip per share.
+ */
+export async function getTestNamesByIds(ids: string[]) {
+  if (ids.length === 0) return [];
+  return db
+    .select({ id: tests.id, name: tests.name })
+    .from(tests)
+    .where(inArray(tests.id, ids));
+}
+
 export async function createTest(
   data: Omit<NewTest, "id" | "createdAt" | "updatedAt">,
   branch?: string | null,
   viewport?: { width?: number; height?: number } | null,
+  /**
+   * "An agent of this kind authored the test." Callers that know which agent
+   * they are but not its per-team bot row id pass this instead of
+   * `data.createdByBotId`; the listener resolves and stamps it. See
+   * `@/lib/db/test-hooks`.
+   */
+  createdByAgent?: BotKind | null,
 ) {
   const id = uuid();
   const now = new Date();
@@ -177,16 +198,15 @@ export async function createTest(
     createdAt: now,
   });
 
-  // Gamification: stamp creator + award test_created. Dynamic import to break
-  // the module-eval cycle (queries → auth → queries). Never throws.
-  import("@/lib/gamification/hooks")
-    .then((m) =>
-      m.onTestCreated(id, {
-        createdByUserId: data.createdByUserId ?? null,
-        createdByBotId: data.createdByBotId ?? null,
-      }),
-    )
-    .catch(() => {});
+  // Raise the domain notification and move on. Core does not know who listens
+  // — that is the whole point of `test-hooks`, which replaced a dynamic
+  // `import("@/lib/gamification/hooks")` here. Never throws, never awaited.
+  notifyTestCreated({
+    testId: id,
+    createdByUserId: data.createdByUserId ?? null,
+    createdByBotId: data.createdByBotId ?? null,
+    createdByAgent: createdByAgent ?? null,
+  });
 
   return { id, ...data, createdAt: now, updatedAt: now };
 }
@@ -625,6 +645,75 @@ export async function getTestResultsByRun(testRunId: string) {
     .select()
     .from(testResults)
     .where(eq(testResults.testRunId, testRunId));
+}
+
+/**
+ * Per-run result summaries: status plus the artefacts and measurements a
+ * viewer renders, and nothing else. Optionally narrowed to a single test.
+ *
+ * Deliberately not `getTestResultsByRun`: that returns the whole row,
+ * including the network-request and DOM-snapshot columns, which is a large
+ * payload to hand to a page that only draws screenshots, a video and a
+ * timing strip.
+ */
+export async function getTestResultSummariesByRun(
+  testRunId: string,
+  testId?: string | null,
+) {
+  return db
+    .select({
+      testId: testResults.testId,
+      status: testResults.status,
+      screenshotPath: testResults.screenshotPath,
+      videoPath: testResults.videoPath,
+      durationMs: testResults.durationMs,
+      screenshots: testResults.screenshots,
+      webVitals: testResults.webVitals,
+      stepTimings: testResults.stepTimings,
+    })
+    .from(testResults)
+    .where(
+      testId
+        ? and(
+            eq(testResults.testRunId, testRunId),
+            eq(testResults.testId, testId),
+          )
+        : eq(testResults.testRunId, testRunId),
+    );
+}
+
+/**
+ * Batched video lookup for the sitemap's share enrichment: every result across
+ * these runs that actually recorded a video.
+ */
+export async function getTestResultVideosByRuns(testRunIds: string[]) {
+  if (testRunIds.length === 0) return [];
+  return db
+    .select({
+      testRunId: testResults.testRunId,
+      testId: testResults.testId,
+      videoPath: testResults.videoPath,
+      durationMs: testResults.durationMs,
+    })
+    .from(testResults)
+    .where(
+      and(
+        inArray(testResults.testRunId, testRunIds),
+        isNotNull(testResults.videoPath),
+      ),
+    );
+}
+
+/**
+ * Platform-wide count of every test result ever recorded. Powers the "N test
+ * runs completed" figure on the public share page — no tenancy filter by
+ * design, it is an aggregate over the whole install.
+ */
+export async function countAllTestResults(): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`COUNT(*)::int` })
+    .from(testResults);
+  return row?.n ?? 0;
 }
 
 export async function getTestResultsByTest(testId: string) {
@@ -1284,6 +1373,25 @@ export async function unlinkSpec(specId: string) {
       updatedAt: new Date(),
     })
     .where(eq(testSpecs.id, specId));
+}
+
+/**
+ * `id → functionalAreaId` for the given tests.
+ *
+ * Lifted out of `src/lib/rca/run.ts`, which ran this `inArray` select against
+ * the `tests` table itself. That direct `drizzle-orm` import was the counted
+ * `rca::db` boundary violation; `@lastest/plugin-rca` now asks for the same
+ * rows through `RcaHost.getTestAreaIds`, and the query lives here with the
+ * rest of the test queries.
+ */
+export async function getTestFunctionalAreaIds(
+  testIds: string[],
+): Promise<{ id: string; areaId: string | null }[]> {
+  if (!testIds.length) return [];
+  return db
+    .select({ id: tests.id, areaId: tests.functionalAreaId })
+    .from(tests)
+    .where(inArray(tests.id, testIds));
 }
 
 /**

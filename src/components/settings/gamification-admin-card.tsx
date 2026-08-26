@@ -19,7 +19,7 @@ import {
   endCurrentSeason,
   startBugBlitz,
   endBugBlitz,
-} from "@/server/actions/gamification";
+} from "@lastest/plugin-gamification/actions";
 
 interface Props {
   enabled: boolean;

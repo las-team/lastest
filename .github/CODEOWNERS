@@ -1,0 +1,87 @@
+# Code owners — R3 of docs/architecture/core-plugin-refactor.md.
+#
+# Everything listed here is CORE. A PR that touches it cannot merge without an
+# explicit review from an owner (requires "Require review from Code Owners" in
+# branch protection for `main` — the file alone only requests the review).
+#
+# Two groups are listed, because the refactor has not happened yet:
+#
+#   1. The TARGET layout (`core/`, plus the packages that are core by nature).
+#      Empty or already-owned today; listed so the protection is in place before
+#      the first package lands.
+#
+#   2. TODAY'S core inside `src/` (§6.1 of the RFC). This is the group that makes
+#      phase 0 worth landing on its own — without it, "core is protected" would
+#      only become true at the end of a quarter-long migration.
+#
+# `tools/architecture/boundaries.test.ts` asserts that every core path in
+# `tools/architecture/boundaries.mjs` is covered by a rule below, so the two
+# cannot drift apart.
+
+# ── Target layout ────────────────────────────────────────────────────────────
+/core/                          @ewyct
+/plugins/*/package.json         @ewyct
+
+# ── Core packages ────────────────────────────────────────────────────────────
+/packages/db/                   @ewyct
+/packages/eb-protocol/          @ewyct
+/packages/pool-service/         @ewyct
+/packages/embedded-browser/     @ewyct
+/packages/shared/               @ewyct
+
+# ── Today's core inside src/ (RFC §6.1) ──────────────────────────────────────
+/src/lib/db/                    @ewyct
+/src/lib/eb/                    @ewyct
+/src/lib/execution/             @ewyct
+/src/lib/diff/                  @ewyct
+/src/lib/ai/                    @ewyct
+/src/lib/auth/                  @ewyct
+/src/lib/billing/               @ewyct
+/src/lib/security/              @ewyct
+/src/lib/rate-limit/            @ewyct
+/src/lib/verify/                @ewyct
+/src/lib/comparison/            @ewyct
+/src/lib/ws/                    @ewyct
+/src/lib/storage/               @ewyct
+/src/lib/ocr/                   @ewyct
+/src/lib/http/                  @ewyct
+/src/lib/settings/              @ewyct
+/src/lib/constants/             @ewyct
+/src/lib/vars/                  @ewyct
+/src/lib/hooks/                 @ewyct
+/src/lib/setup/                 @ewyct
+/src/lib/playwright/            @ewyct
+# No UI — this is the engine behind the documented public API
+# (`POST /api/v1/snapshot`, `POST /api/v1/diff`). See boundaries.mjs.
+/src/lib/url-diff/              @ewyct
+/src/server/actions/url-diff.ts @ewyct
+# What is left of the old `scm` pseudo-plugin after `@lastest/plugin-ci` took the
+# CI-configuration half: OAuth authorize/exchange/refresh, encrypted token
+# resolution, webhook signature verification, repo-content reads. Credential
+# boundaries, and `src/lib/auth/auth.ts` imports them.
+/src/lib/github/                @ewyct
+/src/lib/gitlab/                @ewyct
+# Demo/sandbox seeding, called only from core auth + onboarding. Was the `demo`
+# pseudo-plugin until its two server actions were confirmed dead and deleted;
+# what is left has no user surface of its own. See boundaries.mjs.
+/src/lib/demo/                  @ewyct
+# Caption authoring for demo videos. Split out of `share` during that migration
+# (it was never in share's map entry) and reached only from an app-level server
+# action and the v1 API route. See boundaries.mjs.
+/src/lib/demo-captions/         @ewyct
+/src/lib/utils.ts               @ewyct
+/src/lib/logger.ts              @ewyct
+/src/lib/crypto.ts              @ewyct
+/src/lib/crypto-fields.ts       @ewyct
+
+# ── Infrastructure and the rules themselves ──────────────────────────────────
+# The boundary map is core: widening it is how you would quietly grant a plugin a
+# capability it should not have.
+/tools/architecture/            @ewyct
+/.github/                       @ewyct
+/k8s/                           @ewyct
+/scripts/                       @ewyct
+/drizzle.config.ts              @ewyct
+/next.config.ts                 @ewyct
+/eslint.config.mjs              @ewyct
+/pnpm-workspace.yaml            @ewyct

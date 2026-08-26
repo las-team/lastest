@@ -1,11 +1,23 @@
 import { db } from "../index";
 import {
+  embeddedSessions,
+  remoteRecordingEvents,
   runners,
   runnerCommands,
   runnerCommandResults,
   tests,
 } from "@lastest/db/schema";
-import { eq, and, inArray, lt, or, isNull, notExists, sql } from "drizzle-orm";
+import {
+  eq,
+  and,
+  gt,
+  inArray,
+  lt,
+  or,
+  isNull,
+  notExists,
+  sql,
+} from "drizzle-orm";
 
 import type {
   NewRunnerCommand,
@@ -41,6 +53,93 @@ const RESULT_BEARING_COMMAND_TYPES = ["command:run_test", "command:run_setup"];
 export async function getRunnerById(runnerId: string) {
   const [row] = await db.select().from(runners).where(eq(runners.id, runnerId));
   return row;
+}
+
+/**
+ * The live stream endpoint for whatever Embedded Browser is backing this
+ * runner, if any. `instanceId` is what the front proxy re-derives the EB's
+ * `STREAM_AUTH_TOKEN` from, so the two travel together or not at all.
+ */
+export async function getEmbeddedSessionStreamByRunnerId(runnerId: string) {
+  const [row] = await db
+    .select({
+      streamUrl: embeddedSessions.streamUrl,
+      instanceId: embeddedSessions.instanceId,
+    })
+    .from(embeddedSessions)
+    .where(eq(embeddedSessions.runnerId, runnerId));
+  return row;
+}
+
+/**
+ * Runner status alongside its Embedded Browser session's status, in one join.
+ *
+ * The left join matters: a runner with no `embedded_sessions` row is a static
+ * or remote runner, and a null session status there means "not an EB", not
+ * "an EB that went idle" — callers deciding whether a runner is still working
+ * have to be able to tell those apart.
+ */
+export async function getRunnerWithSessionStatus(runnerId: string) {
+  const [row] = await db
+    .select({
+      runnerStatus: runners.status,
+      sessionStatus: embeddedSessions.status,
+    })
+    .from(runners)
+    .leftJoin(embeddedSessions, eq(embeddedSessions.runnerId, runners.id))
+    .where(eq(runners.id, runnerId))
+    .limit(1);
+  return row;
+}
+
+// ============================================
+// Remote recording events
+// ============================================
+// The shared inbox between the pod that owns the in-memory recording session
+// and the pod the EB actually POSTs its events to. See the table comment in
+// `packages/db/src/schema/runs.ts` for why it exists at all.
+
+/**
+ * Every persisted event for a recording session, oldest first; `sinceSequence`
+ * narrows it to what a poller has not seen yet.
+ */
+export async function getRemoteRecordingEventsBySession(
+  sessionId: string,
+  sinceSequence?: number,
+) {
+  return db
+    .select()
+    .from(remoteRecordingEvents)
+    .where(
+      sinceSequence !== undefined
+        ? and(
+            eq(remoteRecordingEvents.sessionId, sessionId),
+            gt(remoteRecordingEvents.sequence, sinceSequence),
+          )
+        : eq(remoteRecordingEvents.sessionId, sessionId),
+    )
+    .orderBy(remoteRecordingEvents.sequence);
+}
+
+/**
+ * Replace one event's `data` payload in place, keyed by the unique
+ * `(sessionId, sequence)` pair. Used to fold late-arriving OCR selectors back
+ * into an already-persisted event; a sequence that is not there is a no-op.
+ */
+export async function updateRemoteRecordingEventData(
+  sessionId: string,
+  sequence: number,
+  data: Record<string, unknown>,
+) {
+  await db
+    .update(remoteRecordingEvents)
+    .set({ data })
+    .where(
+      and(
+        eq(remoteRecordingEvents.sessionId, sessionId),
+        eq(remoteRecordingEvents.sequence, sequence),
+      ),
+    );
 }
 
 // ============================================

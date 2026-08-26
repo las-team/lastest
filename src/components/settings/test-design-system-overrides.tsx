@@ -27,8 +27,8 @@ import { toast } from "sonner";
 import {
   saveTestDesignSystemFromCss,
   resetTestDesignSystemOverrides,
-} from "@/server/actions/design-system-overrides";
-import { parseDesignSystemCss } from "@/lib/design-system/tokens";
+} from "@lastest/plugin-design-system/actions";
+import { parseDesignSystemCss } from "@lastest/design-tokens";
 import type { DesignSystemConfig, DesignTokenCategory } from "@/lib/db/schema";
 
 interface TestDesignSystemOverridesProps {

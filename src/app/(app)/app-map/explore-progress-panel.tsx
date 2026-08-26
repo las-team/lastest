@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { AlertTriangle, Loader2, Radar, Square, X } from "lucide-react";
-import { useQaAgent } from "@/components/qa-agent/use-qa-agent";
+import { useQaAgent } from "@lastest/plugin-qa-agent/ui/use-qa-agent";
 import { BrowserViewer } from "@/components/embedded-browser/browser-viewer-client";
-import { cancelQaAgent } from "@/server/actions/qa-agent";
-import type { QaExplorerState } from "@/lib/db/schema";
+import { cancelQaAgent } from "@lastest/plugin-qa-agent/actions";
+import type { QaExplorerState } from "@lastest/eb-protocol";
 
 const STATUS_DOT: Record<QaExplorerState["status"], string> = {
   claiming: "bg-muted-foreground/50",
@@ -28,6 +28,15 @@ function formatClock(ms: number): string {
  * thumbnail), amber BLOCKED rows, and header totals with a Stop button.
  * State comes from the same 2s /api/qa-agent/[sessionId] polling the QA
  * agent page uses.
+ *
+ * **Why this one component stayed in the app** while the rest of App Map's UI
+ * moved to `plugins/app-map`: it renders a *QA-agent* session (`useQaAgent`,
+ * now `@lastest/plugin-qa-agent`'s — a sibling plugin app-map may not import)
+ * inside core's EB stream viewer (`BrowserViewer`, which no plugin may
+ * import). Composing the two is exactly the app's job.
+ * It is handed down as `exploreProgressPanel`, the same way
+ * `src/app/(app)/explorer/page.tsx` hands down `browserViewer`. The plugin
+ * decides where it goes and when it mounts; the app decides what it is.
  */
 export function ExploreProgressPanel({
   sessionId,

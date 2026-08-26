@@ -14,7 +14,7 @@ import { AuthBrandHeader } from "@/components/auth/auth-brand-header";
 import { OAuthButtons } from "@/components/auth/oauth-buttons";
 import type { SocialProvider } from "@/lib/auth/social-providers";
 import { recordRegistrationConsent } from "@/server/actions/consent";
-import { isValidShareSlug } from "@/lib/share/slug";
+import { isValidShareSlug } from "@lastest/plugin-share";
 import { track } from "@/lib/analytics/umami";
 import { Events } from "@/lib/analytics/events";
 

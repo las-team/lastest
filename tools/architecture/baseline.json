@@ -1,0 +1,10 @@
+{
+  "$comment": "Burndown ratchet for docs/architecture/core-plugin-refactor.md §7. Counts may only decrease. Regenerate with: pnpm arch:baseline",
+  "total": 1,
+  "byRule": {
+    "core-to-plugin": 1
+  },
+  "byPluginRule": {
+    "core::core-to-plugin": 1
+  }
+}

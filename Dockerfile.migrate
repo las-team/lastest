@@ -15,7 +15,9 @@
 # No @lastest/* workspace packages are needed: packages/db/src/schema.ts imports
 # @lastest/eb-protocol as `import type` only (and re-exports it as `export type`),
 # both of which esbuild — drizzle-kit's schema loader — erases without resolving.
-# So only the schema file itself is copied; its cross-package imports vanish.
+# So only the schema barrel plus its own ./schema/ directory are copied; the
+# cross-package imports vanish. The barrel `export * from "./schema/<mod>"` is a
+# VALUE re-export, so esbuild DOES resolve it — the directory must come along.
 #
 # Only DATABASE_URL is required at run time (migrate.js + drizzle.config.ts).
 # Versions are pinned to the repo lockfile — bump them together.
@@ -34,12 +36,38 @@ RUN npm install --no-audit --no-fund \
       postgres@3.4.8 \
     && npm cache clean --force
 
-# The schema (type-only @lastest imports are erased by drizzle-kit's esbuild
-# loader), the config that points at it, and the migration script. `drizzle-kit
-# push` reads no migration files, so the drizzle/ out-dir is intentionally absent.
+# The schema barrel + the ./schema/ modules it re-exports (their type-only
+# @lastest imports are erased by drizzle-kit's esbuild loader), the config that
+# points at it, and the migration script. `drizzle-kit push` reads no migration
+# files, so the drizzle/ out-dir is intentionally absent.
 COPY packages/db/src/schema.ts ./packages/db/src/schema.ts
+COPY packages/db/src/schema/ ./packages/db/src/schema/
 COPY drizzle.config.ts ./
 COPY scripts/migrate.js ./scripts/migrate.js
+
+# drizzle.config.ts's schema glob also covers ./plugins/*/src/schema.ts (each
+# plugin owns its own tables — see that file's own comment). Docker's COPY
+# wildcard flattens matched files into one directory instead of preserving
+# plugins/<name>/src/, so each plugin needs its own line here — add one
+# whenever a new plugin that OWNS TABLES is registered in
+# src/lib/core/runtime.ts's MANIFESTS, the same way scripts/migrate.js's
+# PRE_CREATE_SQL grows with new tables. Plugins with no `schema` in their
+# manifest (events, design-system) must NOT be listed: COPY of a file that
+# does not exist fails the build.
+# Each plugin schema's own `./types` import is type-only and erases the same
+# way the workspace imports above do, so nothing else needs to come along.
+COPY plugins/a11y/src/schema.ts ./plugins/a11y/src/schema.ts
+COPY plugins/awards/src/schema.ts ./plugins/awards/src/schema.ts
+COPY plugins/ci/src/schema.ts ./plugins/ci/src/schema.ts
+COPY plugins/data-sources/src/schema.ts ./plugins/data-sources/src/schema.ts
+COPY plugins/explorer/src/schema.ts ./plugins/explorer/src/schema.ts
+COPY plugins/gamification/src/schema.ts ./plugins/gamification/src/schema.ts
+COPY plugins/launch/src/schema.ts ./plugins/launch/src/schema.ts
+COPY plugins/playground/src/schema.ts ./plugins/playground/src/schema.ts
+COPY plugins/qa-agent/src/schema.ts ./plugins/qa-agent/src/schema.ts
+COPY plugins/ranger/src/schema.ts ./plugins/ranger/src/schema.ts
+COPY plugins/scheduling/src/schema.ts ./plugins/scheduling/src/schema.ts
+COPY plugins/share/src/schema.ts ./plugins/share/src/schema.ts
 
 # Non-root: migrate.js only touches the DB, no filesystem writes outside /app.
 RUN useradd --uid 1002 --shell /usr/sbin/nologin --no-create-home migrate && \

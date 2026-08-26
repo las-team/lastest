@@ -52,7 +52,7 @@ import { ImportFromSpecDialog } from "@/components/ai/import-from-spec-dialog";
 import { CodeDiffScanDialog } from "@/components/ai/code-diff-scan-dialog";
 import { useAiEnabled } from "@/components/ai/ai-availability-context";
 import { McpCtaHint } from "@/components/mcp/mcp-cta-hint";
-import { ValidateDiffDialog } from "@/components/api-tests/validate-diff-dialog";
+import { ValidateDiffDialog } from "@/components/validate-diff/validate-diff-dialog";
 import {
   createArea,
   deleteArea,

@@ -75,22 +75,35 @@ import {
   approveAllDiffsCore,
   getDiffCore,
 } from "@/lib/diff/core";
-import { awardScore } from "@/server/actions/gamification";
+import { awardScore } from "@lastest/plugin-gamification/actions";
+import * as gamificationReads from "@lastest/plugin-gamification/reads";
 import { getCurrentSession } from "@/lib/auth";
 import { startUrlDiff } from "@/server/actions/url-diff";
 import { captureUrl, loadCaptureFromDisk } from "@/lib/url-diff/capture";
 import { buildUrlDiff } from "@/lib/url-diff/engine";
 import {
-  validateTargetUrl,
+  assertSafeOutboundUrl,
   SsrfBlockedError,
   extractSourceIp,
-} from "@/lib/url-diff/ssrf";
-import { checkRateLimit } from "@/lib/url-diff/rate-limit";
+} from "@/lib/security/outbound-url";
+import { checkRateLimit } from "@/lib/rate-limit/endpoint-bucket";
 import {
   generateAndStoreCaptionsForBuild,
   storeCaptionsForBuild,
-} from "@/lib/share/generate-captions";
-import type { VideoCaption } from "@/lib/db/schema";
+} from "@/lib/demo-captions/generate-captions";
+import type { VideoCaption } from "@lastest/plugin-share";
+import {
+  getPublicShareById,
+  listPublicSharesForBuild,
+  listPublicSharesForTest,
+  revokePublicShareById,
+} from "@lastest/plugin-share";
+import { publishBuildShare } from "@lastest/plugin-share/actions";
+import { getPluginRuntime } from "@/lib/core/runtime";
+// Server-side reads of the qa-agent plugin's own tables (tasks, triggers) —
+// plain functions, not actions; ownership is verified by this route before
+// each call, same as every other read here.
+import * as qaReads from "@lastest/plugin-qa-agent/reads";
 
 // Helper to verify API auth. `getCurrentSession` already handles both cookie
 // sessions and `Authorization: Bearer <token>` headers, so v1 and any
@@ -295,7 +308,7 @@ async function verifyShareOwnership(
   shareId: string,
   session: { team?: { id: string } | null },
 ) {
-  const share = await queries.getPublicShareById(shareId);
+  const share = await getPublicShareById(shareId);
   if (!share) return { ok: false, share: null } as const;
   if (!session.team || share.ownerTeamId !== session.team.id) {
     return { ok: false, share: null } as const;
@@ -773,8 +786,8 @@ export async function GET(
         const [live, recent, tasks, trigger] = await Promise.all([
           queries.getActiveAgentSession(id, "qa"),
           queries.getRecentAgentSessions(id, "qa", 5),
-          queries.getQaTasksByRepo(id, { terminalLimit: 10 }),
-          queries.getQaAgentTrigger(id),
+          qaReads.getQaTasksByRepo(id, { terminalLimit: 10 }),
+          qaReads.getQaAgentTrigger(id),
         ]);
         const summarySource = recent.find((s) => s.metadata.qaSummary);
         return NextResponse.json({
@@ -803,7 +816,7 @@ export async function GET(
 
       // GET /api/v1/repos/:id/qa-tasks — direction-queue tasks
       if (subResource === "qa-tasks") {
-        const tasks = await queries.getQaTasksByRepo(id);
+        const tasks = await qaReads.getQaTasksByRepo(id);
         return NextResponse.json(tasks);
       }
 
@@ -888,7 +901,7 @@ export async function GET(
         }
       }
       if (subResource === "shares") {
-        const shares = await queries.listPublicSharesForTest(id);
+        const shares = await listPublicSharesForTest(id);
         return NextResponse.json(shares);
       }
       const [enriched] = await enrichTestsWithStatus([test]);
@@ -1127,7 +1140,7 @@ export async function GET(
         if (!(await verifyBuildOwnership(id, session))) {
           return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
-        const shares = await queries.listPublicSharesForBuild(id);
+        const shares = await listPublicSharesForBuild(id);
         return NextResponse.json(shares);
       }
 
@@ -1186,12 +1199,16 @@ export async function GET(
     }
 
     // QuickStart agent session: GET /api/v1/quickstart/:sessionId
+    //
+    // Tenancy is the plugin action's: `getQuickstartSession` resolves scope
+    // through the kernel and returns null for another team's session, so
+    // there is no team check to duplicate here — same pattern as `ranger`.
     if (resource === "quickstart" && id) {
-      const sessionRow = await queries.getAgentSession(id);
-      if (!sessionRow || sessionRow.kind !== "quickstart") {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
-      }
-      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
+      await getPluginRuntime();
+      const { getQuickstartSession } =
+        await import("@lastest/plugin-quickstart/actions");
+      const sessionRow = await getQuickstartSession(id);
+      if (!sessionRow) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       // Surface demo notes inline once written, so the panel can auto-show them
@@ -1211,7 +1228,7 @@ export async function GET(
         : null;
       return NextResponse.json({
         id: sessionRow.id,
-        kind: sessionRow.kind,
+        kind: "quickstart",
         repositoryId: sessionRow.repositoryId,
         status: sessionRow.status,
         currentStepId: sessionRow.currentStepId,
@@ -1262,17 +1279,21 @@ export async function GET(
     }
 
     // Ranger session: GET /api/v1/ranger/:sessionId
+    //
+    // Tenancy is the plugin action's: `getRangerSession` resolves scope
+    // through the kernel and returns null for another team's session, so
+    // there is no team check to duplicate here — same pattern as `explorer`.
     if (resource === "ranger" && id) {
-      const sessionRow = await queries.getAgentSession(id);
-      if (!sessionRow || sessionRow.kind !== "ranger") {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
-      }
-      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
+      await getPluginRuntime();
+      const { getRangerSession } =
+        await import("@lastest/plugin-ranger/actions");
+      const sessionRow = await getRangerSession(id);
+      if (!sessionRow) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       return NextResponse.json({
         id: sessionRow.id,
-        kind: sessionRow.kind,
+        kind: "ranger",
         repositoryId: sessionRow.repositoryId,
         status: sessionRow.status,
         currentStepId: sessionRow.currentStepId,
@@ -1301,45 +1322,52 @@ export async function GET(
 
     // Explorer session: GET /api/v1/explorer/:sessionId
     // GET /api/v1/explorer/:sessionId/findings returns the full finding rows.
+    //
+    // Tenancy is the plugin action's: `getExplorerSession` resolves scope
+    // through the kernel and returns null for another team's session, so there
+    // is no team check to duplicate (or to forget) here.
     if (resource === "explorer" && id) {
-      const sessionRow = await queries.getAgentSession(id);
-      if (!sessionRow || sessionRow.kind !== "explorer") {
+      await getPluginRuntime();
+      const { getExplorerSession, listExplorerFindings } =
+        await import("@lastest/plugin-explorer/actions");
+      const sessionRow = await getExplorerSession(id);
+      if (!sessionRow) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
-      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
-      }
+      // No `.catch(() => [])` here: `sessionRow` above already proved this
+      // session exists and belongs to the caller, so a failure here is a real
+      // error (DB outage, etc.), not "no findings yet" — it must reach the
+      // handler's outer catch as a 500, not read as a legitimate empty state.
+      const findings = await listExplorerFindings(id);
       if (subResource === "findings") {
-        const findings = await queries.listFindingsBySession(id);
         return NextResponse.json({ findings });
       }
-      const findings = await queries.listFindingsBySession(id).catch(() => []);
       return NextResponse.json({
         id: sessionRow.id,
-        kind: sessionRow.kind,
+        kind: "explorer",
         repositoryId: sessionRow.repositoryId,
         status: sessionRow.status,
         currentStepId: sessionRow.currentStepId,
-        steps: sessionRow.steps.map((s) => ({
-          id: s.id,
-          status: s.status,
-          label: s.label,
-          iteration: s.iteration,
-          startedAt: s.startedAt,
-          completedAt: s.completedAt,
-          error: s.error,
-          result: s.result,
+        steps: sessionRow.steps.map((step) => ({
+          id: step.id,
+          status: step.status,
+          label: step.label,
+          iteration: step.iteration,
+          startedAt: step.startedAt,
+          completedAt: step.completedAt,
+          error: step.error,
+          result: step.result,
         })),
         metadata: {
-          targetUrl: sessionRow.metadata.explorerTargetUrl,
-          iteration: sessionRow.metadata.explorerIteration ?? 0,
-          maxIterations: sessionRow.metadata.explorerMaxIterations,
-          // Live EB screencast — host-routable, secret-free; watch it explore.
+          targetUrl: sessionRow.metadata.targetUrl,
+          iteration: sessionRow.metadata.iteration ?? 0,
+          maxIterations: sessionRow.metadata.maxIterations,
+          // Live EB screencast — a signed, expiring grant, never a pod address.
           streamUrl: sessionRow.metadata.streamUrl,
           queuedForBrowser: sessionRow.metadata.queuedForBrowser,
-          stuck: sessionRow.metadata.explorerStuck ?? false,
-          report: sessionRow.metadata.explorerReport ?? null,
-          keptTestIds: sessionRow.metadata.explorerKeptTestIds ?? [],
+          stuck: sessionRow.metadata.stuck ?? false,
+          report: sessionRow.metadata.report ?? null,
+          keptTestIds: sessionRow.metadata.keptTestIds ?? [],
         },
         findingsSummary: {
           total: findings.length,
@@ -1407,7 +1435,7 @@ export async function POST(
         );
       }
       const { startQaAgentFromTrigger } =
-        await import("@/server/actions/qa-agent");
+        await import("@lastest/plugin-qa-agent/actions");
       const result = await startQaAgentFromTrigger({
         repositoryId: id,
         teamId: repo.teamId,
@@ -1445,7 +1473,7 @@ export async function POST(
       ) {
         return NextResponse.json({ error: "title required" }, { status: 400 });
       }
-      const { addQaTask } = await import("@/server/actions/qa-agent");
+      const { addQaTask } = await import("@lastest/plugin-qa-agent/actions");
       const { taskId } = await addQaTask({
         repositoryId: id,
         title: body.title,
@@ -1453,7 +1481,7 @@ export async function POST(
           typeof body.description === "string" ? body.description : undefined,
         source: "mcp",
       });
-      const task = await queries.getQaTask(taskId);
+      const task = await qaReads.getQaTask(taskId);
       return NextResponse.json(task, { status: 201 });
     }
 
@@ -1758,7 +1786,7 @@ export async function POST(
         return NextResponse.json({ error: "url required" }, { status: 400 });
       }
       try {
-        await validateTargetUrl(body.url, { sourceIp });
+        await assertSafeOutboundUrl(body.url, { sourceIp });
       } catch (err) {
         if (err instanceof SsrfBlockedError) {
           return NextResponse.json(
@@ -1768,7 +1796,7 @@ export async function POST(
         }
         throw err;
       }
-      const { scoutUrlStatic } = await import("@/lib/playwright/static-scout");
+      const { scoutUrlStatic } = await import("@lastest/static-scout");
       try {
         const scout = await scoutUrlStatic(body.url);
         return NextResponse.json(scout, { headers: rl.headers });
@@ -1847,7 +1875,7 @@ export async function POST(
         return NextResponse.json({ error: "url required" }, { status: 400 });
       }
       try {
-        await validateTargetUrl(body.url, { sourceIp });
+        await assertSafeOutboundUrl(body.url, { sourceIp });
       } catch (err) {
         if (err instanceof SsrfBlockedError) {
           return NextResponse.json(
@@ -1940,8 +1968,8 @@ export async function POST(
       }
       try {
         await Promise.all([
-          validateTargetUrl(body.urlA, { sourceIp }),
-          validateTargetUrl(body.urlB, { sourceIp }),
+          assertSafeOutboundUrl(body.urlA, { sourceIp }),
+          assertSafeOutboundUrl(body.urlB, { sourceIp }),
         ]);
       } catch (err) {
         if (err instanceof SsrfBlockedError) {
@@ -2046,7 +2074,7 @@ export async function POST(
         // The `code` column is human-visible and snapshotted into
         // test_versions — never let credentials land in it.
         const { renderApiDefinitionForCode } =
-          await import("@/lib/api-test/redact");
+          await import("@lastest/plugin-api-test/redact");
         code =
           code && typeof code === "string"
             ? code
@@ -2081,7 +2109,10 @@ export async function POST(
         }
       }
       // Stamp MCP bot as creator when available, so gamification & attribution work
-      const mcpBot = await queries.getBotByKind(session.team!.id, "mcp_server");
+      const mcpBot = await gamificationReads.getBotByKind(
+        session.team!.id,
+        "mcp_server",
+      );
       const created = await queries.createTest({
         repositoryId,
         name,
@@ -2183,9 +2214,9 @@ export async function POST(
         }
       }
       // Dynamic import to avoid pulling in heavy AI deps at route level
-      const { agentHealTestCore } =
-        await import("@/lib/playwright/healer-agent");
-      const result = await agentHealTestCore(test.repositoryId!, testId);
+      const { agentHealTest } =
+        await import("@lastest/plugin-authoring-ai/actions");
+      const result = await agentHealTest(test.repositoryId!, testId);
       return NextResponse.json(result);
     }
 
@@ -2210,8 +2241,15 @@ export async function POST(
       if (!(await verifyRepoOwnership(body.repositoryId, session))) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
-      const { generateApiTest } = await import("@/lib/api-test/generator");
-      const gen = await generateApiTest({
+      // Through the plugin's action rather than `generateApiTest` directly:
+      // the generator now needs `ctx.ai`, and `contextFor({ repositoryId })` is
+      // what resolves it (re-running `requireRepoAccess`, which `getCurrentSession`
+      // satisfies from this route's bearer token). Persisting stays here,
+      // because bot/user attribution is core's to set and the plugin's
+      // `createApiTest` deliberately cannot express it.
+      const { generateApiTestDefinitionAction } =
+        await import("@lastest/plugin-api-test/actions");
+      const gen = await generateApiTestDefinitionAction({
         repositoryId: body.repositoryId,
         prompt: body.prompt,
         endpoint: body.endpoint,
@@ -2224,11 +2262,14 @@ export async function POST(
           { status: 422 },
         );
       }
-      const mcpBot = await queries.getBotByKind(session.team!.id, "mcp_server");
+      const mcpBot = await gamificationReads.getBotByKind(
+        session.team!.id,
+        "mcp_server",
+      );
       const name =
         body.name?.trim() || `${gen.definition.method} ${gen.definition.url}`;
       const { renderApiDefinitionForCode } =
-        await import("@/lib/api-test/redact");
+        await import("@lastest/plugin-api-test/redact");
       const created = await queries.createTest({
         repositoryId: body.repositoryId,
         name,
@@ -2317,8 +2358,6 @@ export async function POST(
       const body = await request.json().catch(() => ({}));
       const scopedTestId =
         typeof body?.scopedTestId === "string" ? body.scopedTestId : null;
-      const { publishBuildShare } =
-        await import("@/server/actions/public-shares");
       const result = await publishBuildShare(id, { scopedTestId });
       return NextResponse.json(result, { status: 201 });
     }
@@ -2475,8 +2514,9 @@ export async function POST(
           ? body.appPassword
           : undefined;
       try {
+        await getPluginRuntime();
         const { startQuickstart } =
-          await import("@/server/actions/quickstart-agent");
+          await import("@lastest/plugin-quickstart/actions");
         const result = await startQuickstart(
           id,
           emailTemplate || appEmail || appPassword
@@ -2487,7 +2527,8 @@ export async function POST(
       } catch (err) {
         const e = err as Error & { code?: string; reason?: string };
         if (e.code === "quickstart_disabled") {
-          const { gateReasonHint } = await import("@/lib/quickstart/gating");
+          const { gateReasonHint } =
+            await import("@lastest/plugin-quickstart/gating");
           const reason = e.reason ?? "no_repo";
           return NextResponse.json(
             {
@@ -2516,7 +2557,8 @@ export async function POST(
         viewport?: { width: number; height: number };
       };
       try {
-        const { startRanger } = await import("@/server/actions/ranger-agent");
+        await getPluginRuntime();
+        const { startRanger } = await import("@lastest/plugin-ranger/actions");
         const result = await startRanger(id, {
           url: typeof body.url === "string" ? body.url : undefined,
           viewport: body.viewport,
@@ -2565,8 +2607,9 @@ export async function POST(
             { status: 400 },
           );
         }
+        await getPluginRuntime();
         const { startExplorerAgent } =
-          await import("@/server/actions/explorer-agent");
+          await import("@lastest/plugin-explorer/actions");
         const result = await startExplorerAgent({
           repositoryId: id,
           targetUrl,
@@ -2603,8 +2646,9 @@ export async function POST(
         );
       }
       try {
+        await getPluginRuntime();
         const { upsertExplorerKnowledge } =
-          await import("@/server/actions/explorer-agent");
+          await import("@lastest/plugin-explorer/actions");
         const result = await upsertExplorerKnowledge({
           repositoryId: id,
           title: body.title || `Note for ${body.urlPattern}`,
@@ -3002,7 +3046,7 @@ export async function PUT(
         updates.apiDefinition = def;
         if (body.code === undefined) {
           const { renderApiDefinitionForCode } =
-            await import("@/lib/api-test/redact");
+            await import("@lastest/plugin-api-test/redact");
           updates.code = renderApiDefinitionForCode(def);
         }
         if (body.targetUrl === undefined) updates.targetUrl = def.url;
@@ -3285,7 +3329,10 @@ export async function PUT(
       if (updates.code && test.isPlaceholder && test.repositoryId) {
         const repo = await queries.getRepository(test.repositoryId);
         if (repo?.teamId) {
-          const mcpBot = await queries.getBotByKind(repo.teamId, "mcp_server");
+          const mcpBot = await gamificationReads.getBotByKind(
+            repo.teamId,
+            "mcp_server",
+          );
           if (mcpBot) {
             // Stamp bot as creator for future regression/flake attribution
             queries
@@ -3338,52 +3385,65 @@ export async function DELETE(
       if (!ok) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
-      await queries.revokePublicShareById(id);
+      await revokePublicShareById(id);
       return NextResponse.json({ success: true });
     }
 
     // Cancel QuickStart agent session: DELETE /api/v1/quickstart/:sessionId
+    //
+    // Tenancy is the plugin action's — `cancelQuickstart` resolves scope
+    // through the kernel and no-ops for another team's session — same
+    // pattern as the GET handler above and as `ranger` below.
     if (resource === "quickstart" && id) {
-      const sessionRow = await queries.getAgentSession(id);
-      if (!sessionRow || sessionRow.kind !== "quickstart") {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
-      }
-      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
-      }
+      await getPluginRuntime();
       const { cancelQuickstart } =
-        await import("@/server/actions/quickstart-agent");
+        await import("@lastest/plugin-quickstart/actions");
       const result = await cancelQuickstart(id);
       return NextResponse.json(result);
     }
 
     // Cancel Ranger session: DELETE /api/v1/ranger/:sessionId
+    //
+    // `cancelRanger` throws `RangerSessionNotFoundError` for a session outside
+    // the caller's team, so existence and tenancy are one check — the same
+    // shape as the explorer cancel handler below.
     if (resource === "ranger" && id) {
-      const sessionRow = await queries.getAgentSession(id);
-      if (!sessionRow || sessionRow.kind !== "ranger") {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      await getPluginRuntime();
+      const { cancelRanger } = await import("@lastest/plugin-ranger/actions");
+      const { RangerSessionNotFoundError } =
+        await import("@lastest/plugin-ranger/errors");
+      try {
+        return NextResponse.json(await cancelRanger(id));
+      } catch (err) {
+        if (err instanceof RangerSessionNotFoundError) {
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
+        }
+        throw err;
       }
-      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
-      }
-      const { cancelRanger } = await import("@/server/actions/ranger-agent");
-      const result = await cancelRanger(id);
-      return NextResponse.json(result);
     }
 
     // Cancel Explorer session: DELETE /api/v1/explorer/:sessionId
+    //
+    // `cancelExplorerAgent` throws `ExplorerSessionNotFoundError` for a session
+    // outside the caller's team, so the existence check and the tenancy check
+    // are the same call — one place to get right instead of three. Only that
+    // specific error maps to 404; anything else (a DB error mid-cancel, an
+    // events-emit failure) must reach the outer catch as a 500, not read as
+    // "no such session".
     if (resource === "explorer" && id) {
-      const sessionRow = await queries.getAgentSession(id);
-      if (!sessionRow || sessionRow.kind !== "explorer") {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
-      }
-      if (sessionRow.teamId && sessionRow.teamId !== session.team?.id) {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
-      }
+      await getPluginRuntime();
       const { cancelExplorerAgent } =
-        await import("@/server/actions/explorer-agent");
-      const result = await cancelExplorerAgent(id);
-      return NextResponse.json(result);
+        await import("@lastest/plugin-explorer/actions");
+      const { ExplorerSessionNotFoundError } =
+        await import("@lastest/plugin-explorer/errors");
+      try {
+        return NextResponse.json(await cancelExplorerAgent(id));
+      } catch (err) {
+        if (err instanceof ExplorerSessionNotFoundError) {
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
+        }
+        throw err;
+      }
     }
 
     // Delete storage state: DELETE /api/v1/storage-states/:id

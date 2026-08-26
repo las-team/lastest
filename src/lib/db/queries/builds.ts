@@ -18,7 +18,7 @@ import type {
   DesignTokenCategory,
   LayerFeedbackStatus,
 } from "../schema";
-import { getWcagLevel } from "@/lib/a11y/wcag-score";
+import { getWcagLevel } from "@lastest/wcag-score";
 import { getPlaywrightSettings, getDiffSensitivitySettings } from "./settings";
 import { getPlaywrightOverridesByTestIds } from "./tests";
 import {
@@ -28,7 +28,7 @@ import {
   effectiveVerdict,
   type CheckModeMap,
 } from "@/lib/verify/check-modes";
-import { eq, desc, and, inArray, sql } from "drizzle-orm";
+import { eq, desc, and, inArray, isNotNull, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 
 // Builds
@@ -47,6 +47,43 @@ export async function getBuildByTestRun(testRunId: string) {
     .from(builds)
     .where(eq(builds.testRunId, testRunId));
   return row;
+}
+
+/**
+ * The most recent *completed* build whose run actually executed this test.
+ *
+ * Test-scoped public shares auto-follow this rather than staying pinned to the
+ * build they were published from, so re-running the test surfaces on the
+ * existing share link without a republish.
+ */
+export async function getLatestCompletedBuildForTest(testId: string) {
+  const [latest] = await db
+    .select({ build: builds })
+    .from(builds)
+    .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
+    .innerJoin(testResults, eq(testResults.testRunId, testRuns.id))
+    .where(and(eq(testResults.testId, testId), isNotNull(builds.completedAt)))
+    .orderBy(desc(builds.createdAt))
+    .limit(1);
+  return latest?.build;
+}
+
+/**
+ * Batched build lookup for the sitemap's share enrichment — one query for up
+ * to 5000 shares instead of a round trip each.
+ */
+export async function getBuildSitemapRowsByIds(buildIds: string[]) {
+  if (buildIds.length === 0) return [];
+  return db
+    .select({
+      buildId: builds.id,
+      buildCompletedAt: builds.completedAt,
+      buildCreatedAt: builds.createdAt,
+      changesDetected: builds.changesDetected,
+      testRunId: builds.testRunId,
+    })
+    .from(builds)
+    .where(inArray(builds.id, buildIds));
 }
 
 export async function getBuildsByComparisonPairId(pairId: string) {

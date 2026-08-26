@@ -28,6 +28,7 @@ const PUBLIC_PATHS = [
   "/api/embedded/register",
   "/api/embedded/auto-register",
   "/api/embedded/stream/ws",
+  "/api/plugin-storage", // Signed-grant-only auth, no session — see route.ts
   "/api/config",
   "/api/v1/",
   "/api/media/",

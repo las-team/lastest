@@ -16,8 +16,8 @@ import {
   type IgnoreRegionRect,
 } from "@/components/diff/slider-comparison";
 import { SwipeDeck } from "@/components/diff/swipe-deck-client";
-import { RcaBadge } from "@/components/diff/rca-badge";
-import { RcaPanel } from "@/components/diff/rca-panel";
+import { RcaBadge } from "@lastest/plugin-rca/ui/rca-badge";
+import { RcaPanel } from "@lastest/plugin-rca/ui/rca-panel";
 import { useIsMobile } from "@/lib/hooks/use-is-mobile";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -175,11 +175,11 @@ import {
   RuntimeErrorsPanel,
   stripRuntimeErrorsFromMessage,
 } from "@/components/builds/runtime-errors-panel";
-import { ApiTestDialog } from "@/components/api-tests/api-test-dialog";
+import { ApiTestDialog } from "@lastest/plugin-api-test/ui/api-test-dialog";
 import {
   networkRequestToApiTest,
   type ApiTestSeed,
-} from "@/lib/api-test/from-network";
+} from "@lastest/plugin-api-test/from-network";
 import {
   CheckCircle,
   ListTodo,

@@ -1,0 +1,23 @@
+{
+  "name": "@lastest/wcag-score",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WCAG 2.2 conformance scoring: axe-core tags → level, violations + passes → a weighted 0–100 score, per-test summaries → a build rollup. Pure arithmetic over eb-protocol types — no DB, no browser, no credential resolution — the third tier of docs/architecture/core-scope.md §3.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lastest/eb-protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "vitest": "^4.1.0"
+  },
+  "license": "FSL-1.1-ALv2"
+}

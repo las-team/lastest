@@ -14,7 +14,6 @@ import {
   Building2,
   TrendingDown,
   Trophy,
-  SplitSquareHorizontal,
   ShieldCheck,
   GitCommit,
   Wrench,
@@ -32,7 +31,7 @@ import {
 import { QueueIndicator } from "@/components/queue/queue-indicator";
 import { ActivityFeedIndicator } from "@/components/activity-feed/activity-feed-indicator-client";
 import { UserMenu } from "@/components/auth/user-menu";
-import { InlineScore } from "@/components/gamification/user-score-chip";
+import { InlineScore } from "@lastest/plugin-gamification/ui/score-chip";
 import { SidebarQuickActions } from "./sidebar-quick-actions";
 import { hasQaAgentAccess } from "@/lib/billing/feature-access";
 import type { Repository, User, Team, EmbeddedSession } from "@/lib/db/schema";
@@ -70,12 +69,7 @@ const gamificationNav = [
   { name: "Leaderboard", href: "/leaderboard", icon: Trophy },
 ];
 
-const EARLY_ADOPTER_ITEMS = new Set([
-  "Compose",
-  "Compare",
-  "Impact",
-  "URL Diff",
-]);
+const EARLY_ADOPTER_ITEMS = new Set(["Compose", "Compare", "Impact"]);
 
 const definitionNav = [
   { name: "Tests", href: "/tests", icon: FileCode },
@@ -89,7 +83,6 @@ const executionNav = [
   { name: "QA Agent", href: "/qa-agent", icon: Bot },
   { name: "Explorer", href: "/explorer", icon: Compass },
   { name: "Compare", href: "/compare", icon: GitCompare },
-  { name: "URL Diff", href: "/url-diff", icon: SplitSquareHorizontal },
   { name: "Impact", href: "/analytics/impact", icon: TrendingDown },
 ];
 

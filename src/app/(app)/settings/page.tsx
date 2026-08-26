@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import * as queries from "@/lib/db/queries";
+import * as gamification from "@lastest/plugin-gamification/reads";
 import { getCurrentSession } from "@/lib/auth";
 import { Github, Check, X, Users, Bot, Mail, Terminal } from "lucide-react";
 
@@ -46,11 +47,12 @@ import { getRunners, getSystemRunners } from "@/server/actions/runners";
 import { listSystemEmbeddedSessions } from "@/server/actions/embedded-sessions";
 import { listApiTokens } from "@/server/actions/api-tokens";
 import { ApiTokensSection } from "@/components/api-tokens/api-tokens-section";
-import { GoogleSheetsSettingsCard } from "@/components/settings/google-sheets-settings-card";
+import { GoogleSheetsSettingsCard } from "@lastest/plugin-data-sources/ui/google-sheets-card";
+import { listGoogleSheetsDataSources } from "@lastest/plugin-data-sources/reads";
 import { TestingTemplateSelector } from "@/components/settings/testing-template-selector";
 import { AutoApproveToggle } from "@/components/settings/auto-approve-toggle";
 import { EarlyAdopterToggle } from "@/components/settings/early-adopter-toggle";
-import { QuickstartEmailTemplateInput } from "@/components/settings/quickstart-email-template-input";
+import { QuickstartEmailTemplateInput } from "@lastest/plugin-quickstart/ui/email-template-input";
 import { BanAiModeToggle } from "@/components/settings/ban-ai-mode-toggle";
 import { AiModeToggle } from "@/components/settings/ai-mode-toggle";
 import { GamificationToggle } from "@/components/settings/gamification-toggle";
@@ -60,10 +62,14 @@ import {
   ConnectGithubButton,
   ReconnectGithubLink,
 } from "@/components/settings/connect-github-button";
-import { GithubActionsCard } from "@/components/settings/github-actions-card-client";
+import { GithubActionsCard } from "@lastest/plugin-ci/ui/github-card";
+import {
+  listGithubActionConfigs,
+  listGitlabPipelineConfigs,
+} from "@lastest/plugin-ci/reads";
 import { ConnectGitlabButton } from "@/components/settings/connect-gitlab-button";
-import { GitlabPipelinesCard } from "@/components/settings/gitlab-pipelines-card-client";
-import { ScheduleManagerCard } from "@/components/settings/schedule-manager-client";
+import { GitlabPipelinesCard } from "@lastest/plugin-ci/ui/gitlab-card";
+import { ScheduleManagerCard } from "@lastest/plugin-scheduling/ui/schedule-manager";
 import { DiagramThumbnail } from "@/components/ui/diagram-thumbnail";
 import { TestMigrationCard } from "@/components/settings/test-migration-card";
 import { EmailPreferencesCard } from "@/components/settings/email-preferences-client";
@@ -104,8 +110,8 @@ export default async function SettingsPage({
     runners,
     sysRunners,
   ] = await Promise.all([
-    teamId ? queries.getGithubActionConfigs(teamId) : [],
-    teamId ? queries.getGitlabPipelineConfigs(teamId) : [],
+    teamId ? listGithubActionConfigs(teamId) : [],
+    teamId ? listGitlabPipelineConfigs(teamId) : [],
     teamId ? queries.getRepositoriesByTeam(teamId) : [],
     getRunners(),
     getSystemRunners(),
@@ -134,7 +140,7 @@ export default async function SettingsPage({
   const googleSheetsAccount = currentUser?.teamId
     ? await queries.getGoogleSheetsAccount(currentUser.teamId)
     : null;
-  const googleSheetsDataSources = await queries.getGoogleSheetsDataSources(
+  const googleSheetsDataSources = await listGoogleSheetsDataSources(
     selectedRepo?.id,
   );
 
@@ -153,8 +159,8 @@ export default async function SettingsPage({
   const [activeGamificationSeason, activeBugBlitz] =
     session?.team?.gamificationEnabled && teamId
       ? await Promise.all([
-          queries.getActiveSeason(teamId),
-          queries.getActiveBugBlitz(teamId),
+          gamification.getActiveSeason(teamId),
+          gamification.getActiveBugBlitz(teamId),
         ])
       : [null, null];
 
@@ -485,7 +491,10 @@ export default async function SettingsPage({
         />
       </div>
 
-      {/* GitHub Actions */}
+      {/* GitHub Actions. `connectAccountButton` and `flowDiagram` go down as
+          props because the plugin may not import app components — the OAuth
+          connect flow is core's (it holds the credential) and DiagramThumbnail
+          is built on next/image. Recipe §6. */}
       <div id="github-actions">
         <GithubActionsCard
           configs={githubActionConfigs}
@@ -493,6 +502,15 @@ export default async function SettingsPage({
           repos={teamRepos}
           hasGithubAccount={!!githubAccount}
           githubUsername={githubAccount?.githubUsername ?? null}
+          connectAccountButton={<ConnectGithubButton />}
+          flowDiagram={
+            <DiagramThumbnail
+              src="/docs/development-flow.png"
+              alt="Development & Review Flow — from code push to production with visual validation"
+              width={480}
+              height={120}
+            />
+          }
         />
       </div>
 
@@ -502,6 +520,7 @@ export default async function SettingsPage({
           runners={runners}
           repos={teamRepos}
           hasGitlabAccount={!!gitlabAccount}
+          connectAccountButton={<ConnectGitlabButton />}
         />
       </div>
     </>

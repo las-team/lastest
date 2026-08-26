@@ -1,0 +1,33 @@
+{
+  "name": "@lastest/plugin-a11y",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WCAG 2.2 AA accessibility scoring and per-rule baselines. Contributes the 'a11y' check layer.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./actions": "./src/actions.ts",
+    "./check-layer": "./src/check-layer.ts",
+    "./host": "./src/host.ts",
+    "./schema": "./src/schema.ts",
+    "./wiring": "./src/wiring.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lastest/contracts": "workspace:*",
+    "@lastest/core-data": "workspace:*",
+    "@lastest/eb-protocol": "workspace:*",
+    "@lastest/kernel": "workspace:*",
+    "drizzle-orm": "^0.45.2"
+  },
+  "devDependencies": {
+    "next": "16.2.11",
+    "typescript": "^5",
+    "vitest": "^4.1.0"
+  },
+  "license": "FSL-1.1-ALv2"
+}

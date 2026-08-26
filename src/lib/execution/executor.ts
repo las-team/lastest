@@ -35,7 +35,7 @@ import { runnerRegistry } from "@/lib/ws/runner-registry";
 import {
   mergeDesignSystemConfig,
   isConfigUsable,
-} from "@/lib/design-system/tokens";
+} from "@lastest/design-tokens";
 import { db } from "@/lib/db";
 import { runners, tests as testsTable, backgroundJobs } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
@@ -50,24 +50,28 @@ import {
   acknowledgeResults,
   getRunnerCommandById,
   getTestFixtures,
-  getGoogleSheetsDataSources,
-  getCsvDataSources,
   getSelectorStatsForTest,
 } from "@/lib/db/queries";
-import { extractTestBody, parseSteps } from "@/lib/playwright/debug-parser";
+import {
+  csvDataSourcesForRepo,
+  googleSheetsDataSourcesForRepo,
+} from "@/lib/core/data-sources-reads";
+import {
+  extractTestBody,
+  parseSteps,
+} from "@lastest/recording-codegen/debug-parser";
 import {
   resolveVarReferencesAsync,
   pickRowsForVariables,
   resolveAssignedValuesAsync,
   type AIVarRuntime,
 } from "@/lib/vars/resolver";
-import { resolveSheetReferences } from "@/lib/google-sheets/resolver";
-import { resolveCsvReferences } from "@/lib/csv/resolver";
-import type {
-  GoogleSheetsDataSource,
-  CsvDataSource,
-  TestVariable,
-} from "@/lib/db/schema";
+import {
+  resolveSheetReferences,
+  type SheetSourceLike,
+} from "@lastest/google-sheets";
+import { resolveCsvReferences, type CsvSourceLike } from "@lastest/csv";
+import type { TestVariable } from "@/lib/db/schema";
 import { getAISettings } from "@/lib/db/queries";
 import { generateWithAI, type AIProviderConfig } from "@/lib/ai";
 import { buildAIVarPrompt, sanitizeAIVarOutput } from "@/lib/vars/ai-presets";
@@ -156,8 +160,8 @@ async function buildAIVarRuntime(
  */
 async function resolveTestCodeForRunner(
   test: Test,
-  gsheetSources: GoogleSheetsDataSource[],
-  csvSources: CsvDataSource[],
+  gsheetSources: SheetSourceLike[],
+  csvSources: CsvSourceLike[],
   ai: AIVarRuntime | null,
 ): Promise<{
   resolvedCode: string;
@@ -304,6 +308,32 @@ export interface ExecutionOptions {
   cursorPlaybackSpeedOverride?: number; // One-shot per-call override (e.g. recording preview replay at 2x); takes precedence over per-test/global settings
 }
 
+/**
+ * Whether this run records video.
+ *
+ * Two independent sources, and for a long time only the first was wired up:
+ *  - `forceVideoRecording` — per-run, passed by demo/share builds that need a
+ *    clip regardless of settings;
+ *  - `playwright_settings.enableVideoRecording` — the repo-level "Video
+ *    Recording" toggle in Settings. It saved and read back correctly but no
+ *    consumer ever looked at it, so the switch did nothing.
+ *
+ * Returns `undefined` rather than `false` so the field stays off the wire when
+ * recording is off.
+ *
+ * Note this only reaches the embedded-browser executor; the remote-runner path
+ * has never recorded video.
+ */
+export function resolveVideoRecording(options: {
+  forceVideoRecording?: boolean;
+  playwrightSettings?: Pick<PlaywrightSettings, "enableVideoRecording"> | null;
+}): true | undefined {
+  return options.forceVideoRecording ||
+    options.playwrightSettings?.enableVideoRecording
+    ? true
+    : undefined;
+}
+
 export interface ExecutionProgress {
   completed: number;
   total: number;
@@ -330,7 +360,12 @@ async function executeApiTests(
   onResult?: (result: TestRunResult) => Promise<void>,
 ): Promise<TestRunResult[]> {
   if (apiTests.length === 0) return [];
-  const { runApiTest } = await import("@/lib/api-test/runner");
+  // The plugin owns the engine; the app owns the transport. `runApiTest` takes
+  // its host as an argument rather than reading the plugin's wiring slot, so
+  // this stays a plain import and a build does not depend on the plugin
+  // runtime having been booted — see `plugins/api-test/src/wiring.ts`.
+  const { runApiTest } = await import("@lastest/plugin-api-test/runner");
+  const { appApiTestHost } = await import("@/lib/core/api-test-host");
   const baseUrl = options.environmentConfig?.baseUrl ?? undefined;
   const results: TestRunResult[] = [];
 
@@ -346,7 +381,7 @@ async function executeApiTests(
         errorMessage: "API test has no apiDefinition",
       };
     } else {
-      const apiResult = await runApiTest(def, { baseUrl });
+      const apiResult = await runApiTest(appApiTestHost, def, { baseUrl });
       result = {
         testId: test.id,
         status: apiResult.passed ? "passed" : "failed",
@@ -661,10 +696,10 @@ async function executeViaRunner(
 
   // Load gsheet/csv sources once for this run — used to resolve {{sheet:}}, {{csv:}}, {{var:}} tokens.
   const gsheetSources = options.repositoryId
-    ? await getGoogleSheetsDataSources(options.repositoryId)
+    ? await googleSheetsDataSourcesForRepo(options.repositoryId)
     : [];
   const csvSources = options.repositoryId
-    ? await getCsvDataSources(options.repositoryId)
+    ? await csvDataSourcesForRepo(options.repositoryId)
     : [];
 
   // Resolve the diff-sensitivity text-diff toggle once per run. The EB pod
@@ -1042,7 +1077,7 @@ async function executeViaRunner(
           options.playwrightSettings?.grantClipboardAccess ?? false,
         acceptDownloads: options.playwrightSettings?.acceptDownloads ?? false,
         headed: options.headless === false,
-        forceVideoRecording: options.forceVideoRecording || undefined,
+        forceVideoRecording: resolveVideoRecording(options),
         recordingViewport,
         lockViewportToRecording:
           options.playwrightSettings?.lockViewportToRecording ?? false,

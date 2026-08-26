@@ -2,9 +2,15 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 
+import { architectureBoundaryRules } from "./tools/architecture/eslint-rules.mjs";
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
+  // Core/plugin import boundaries — see docs/architecture/core-plugin-refactor.md
+  // §7.3. Generated from tools/architecture/boundaries.mjs, the same map the
+  // graph test asserts against.
+  ...architectureBoundaryRules(),
   {
     rules: {
       "@typescript-eslint/no-unused-vars": [

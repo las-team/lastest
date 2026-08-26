@@ -27,9 +27,11 @@ import type {
   TestVariable,
   TestVariableSourceRowMode,
   AIVarPreset,
-  GoogleSheetsDataSource,
-  CsvDataSource,
 } from "@/lib/db/schema";
+import type {
+  CsvDataSource,
+  GoogleSheetsDataSource,
+} from "@lastest/plugin-data-sources";
 import { AI_VAR_PRESETS, AI_VAR_PRESET_KEYS } from "@/lib/vars/ai-presets";
 import { generateAIVarValuePreview } from "@/server/actions/tests";
 

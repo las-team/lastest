@@ -1,0 +1,34 @@
+{
+  "name": "@lastest/plugin-playground",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Score & leaderboard backend for the static /playground exercises: a vendored achievement registry, per-user progress and a ranked public board served over a REST API.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./api": "./src/api/handlers.ts",
+    "./config": "./src/config.ts",
+    "./host": "./src/host.ts",
+    "./registry": "./src/registry.ts",
+    "./schema": "./src/schema.ts",
+    "./wiring": "./src/wiring.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lastest/contracts": "workspace:*",
+    "@lastest/core-data": "workspace:*",
+    "@lastest/kernel": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "uuid": "^11.0.5"
+  },
+  "devDependencies": {
+    "next": "16.2.11",
+    "typescript": "^5",
+    "vitest": "^4.1.0"
+  },
+  "license": "FSL-1.1-ALv2"
+}

@@ -1,12 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
+import {
+  resolveGitlabWebhookGate,
+  type GitlabWebhookGate,
+} from "@lastest/plugin-ci/webhook";
 import { createAndRunBuild } from "@/server/actions/builds";
 import { markWebhookSeen } from "@/lib/integrations/webhook-guard";
 import * as queries from "@/lib/db/queries";
-import type {
-  GitlabPipelineConfig,
-  GitlabPipelineTriggerEvent,
-} from "@/lib/db/schema";
+
+/**
+ * This route stayed in the app when CI configuration became
+ * `@lastest/plugin-ci` (RFC §9 phase 4), and the split is the interesting part.
+ *
+ * Almost everything below is core's: resolving the repository, recording the
+ * merge request, replay protection, triggering the build. Exactly four
+ * questions belong to the plugin, and they are all questions about a *config
+ * row* — the shared secret, whether the event type is enabled, whether the
+ * branch is in the filter, and whether delivery is `ci_file` or `webhook`.
+ * `resolveGitlabWebhookGate` answers those four and nothing else.
+ *
+ * The alternative — moving the handler into the package, the way
+ * `src/app/api/v1/launch/[...path]/route.ts` did — would have needed six more
+ * host-port methods for pull-request bookkeeping and build triggering, taking
+ * a 9-method port to 15. See `plugins/ci/src/webhook.ts`.
+ *
+ * Note the plugin never sees the *presented* token: it returns the expected
+ * secret and this file does the timing-safe comparison, because comparing
+ * secrets is core's job.
+ */
 
 const ENV_GITLAB_WEBHOOK_SECRET = process.env.GITLAB_WEBHOOK_SECRET || "";
 
@@ -79,26 +100,6 @@ function isPushEvent(event: unknown): event is PushEvent {
   );
 }
 
-function eventEnabled(
-  config: GitlabPipelineConfig | undefined,
-  event: GitlabPipelineTriggerEvent,
-): boolean {
-  const events = (config?.triggerEvents ?? [
-    "push",
-    "merge_request",
-  ]) as GitlabPipelineTriggerEvent[];
-  return events.includes(event);
-}
-
-function branchAllowed(
-  config: GitlabPipelineConfig | undefined,
-  branch: string,
-): boolean {
-  const filter = config?.branchFilter ?? null;
-  if (!filter || filter.length === 0) return true; // no filter = allow all
-  return filter.includes(branch);
-}
-
 export async function POST(request: NextRequest) {
   const token = request.headers.get("x-gitlab-token");
   const eventType = request.headers.get("x-gitlab-event");
@@ -118,19 +119,18 @@ export async function POST(request: NextRequest) {
   let repo: Awaited<
     ReturnType<typeof queries.getRepositoryByGitlabProjectId>
   > | null = null;
-  let config: GitlabPipelineConfig | undefined;
   if (typeof projectId === "number") {
     repo = await queries.getRepositoryByGitlabProjectId(projectId);
-    if (repo) {
-      config = await queries.getGitlabPipelineConfigByRepo(repo.id);
-    } else {
-      config = await queries.getGitlabPipelineConfigByProjectId(projectId);
-    }
   }
+
+  const gate: GitlabWebhookGate = await resolveGitlabWebhookGate({
+    repositoryId: repo?.id ?? null,
+    gitlabProjectId: projectId,
+  });
 
   // Verify webhook token: per-config secret takes priority, else env fallback
   const expectedSecret =
-    config?.webhookSecret || ENV_GITLAB_WEBHOOK_SECRET || null;
+    gate.expectedSecret || ENV_GITLAB_WEBHOOK_SECRET || null;
   if (!verifyWebhookToken(token, expectedSecret)) {
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
   }
@@ -165,7 +165,7 @@ export async function POST(request: NextRequest) {
         mr.action === "update" ||
         mr.action === "reopen"
       ) {
-        if (!eventEnabled(config, "merge_request")) {
+        if (!gate.isEventEnabled("merge_request")) {
           return NextResponse.json({
             message: "merge_request events disabled by config",
           });
@@ -195,14 +195,14 @@ export async function POST(request: NextRequest) {
           });
         }
 
-        if (!branchAllowed(config, sourceBranch)) {
+        if (!gate.isBranchAllowed(sourceBranch)) {
           return NextResponse.json({ message: "Branch not in filter" });
         }
 
         // For 'webhook' delivery mode (or no config) trigger the build server-side.
         // For 'ci_file' mode the user's pipeline runs the runner — we still record
         // MR state above but skip the redundant server-side build.
-        if (config?.deliveryMode === "ci_file") {
+        if (gate.deliveryMode === "ci_file") {
           return NextResponse.json({
             message: "MR recorded (ci_file mode — pipeline will trigger build)",
           });
@@ -233,14 +233,14 @@ export async function POST(request: NextRequest) {
     }
 
     if (isPushEvent(data)) {
-      if (!eventEnabled(config, "push")) {
+      if (!gate.isEventEnabled("push")) {
         return NextResponse.json({ message: "push events disabled by config" });
       }
       const branch = sanitizeStr(data.ref, 500).replace("refs/heads/", "");
-      if (!branchAllowed(config, branch)) {
+      if (!gate.isBranchAllowed(branch)) {
         return NextResponse.json({ message: "Branch not monitored" });
       }
-      if (config?.deliveryMode === "ci_file") {
+      if (gate.deliveryMode === "ci_file") {
         return NextResponse.json({
           message: "Push noted (ci_file mode — pipeline will trigger build)",
         });

@@ -35,7 +35,7 @@ import {
 } from "@/server/actions/diffs";
 import { Input } from "@/components/ui/input";
 import { BrowserIcon } from "@/components/ui/browser-icon";
-import { RcaBadge } from "@/components/diff/rca-badge";
+import { RcaBadge } from "@lastest/plugin-rca/ui/rca-badge";
 
 // Filter type for the build detail page metrics
 export type FilterType =

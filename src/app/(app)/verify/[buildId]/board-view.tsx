@@ -47,8 +47,9 @@ import {
   type CheckMode,
   type CheckModeMap,
 } from "@/lib/verify/check-modes";
+import { CHECK_LAYER_BY_ID } from "@/lib/verify/check-layers";
 import type { VisualDiffLite, TestResultLite } from "./board-focus-client";
-import { RcaBadge } from "@/components/diff/rca-badge";
+import { RcaBadge } from "@lastest/plugin-rca/ui/rca-badge";
 import { useSwipeTriage } from "./use-swipe-triage";
 
 export type CaseStatus = "regression" | "done" | "missed" | "unknown";
@@ -1844,11 +1845,25 @@ function wasLayerCaptured(
     case "console":
       return result?.consoleErrors != null;
     case "a11y":
-      return result?.a11yViolations != null || result?.a11yPassesCount != null;
-    case "design":
+      // Delegated to the plugin, same as `design` below — see
+      // `plugins/a11y/src/check-layer.ts`.
       return (
-        result?.designSystemViolations != null ||
-        result?.designSystemRulesChecked != null
+        !!result &&
+        (CHECK_LAYER_BY_ID.get("a11y")?.wasCaptured?.(
+          result as unknown as Record<string, unknown>,
+        ) ??
+          false)
+      );
+    case "design":
+      // Delegates to the plugin instead of duplicating its knowledge of
+      // which result fields mean "design captured" — see
+      // `plugins/design-system/src/check-layer.ts`.
+      return (
+        !!result &&
+        (CHECK_LAYER_BY_ID.get("design")?.wasCaptured?.(
+          result as unknown as Record<string, unknown>,
+        ) ??
+          false)
       );
     case "perf":
       return result?.webVitals != null;
@@ -1925,16 +1940,20 @@ function deltaForLayer(step: StepComparison, layer: string): string {
     case "a11y": {
       const a = layers?.a11y;
       if (!a) return "";
-      return a.newViolations.length > 0
-        ? `+${a.newViolations.length}`
-        : `−${a.disappeared.length}`;
+      return (
+        CHECK_LAYER_BY_ID.get("a11y")?.delta?.(
+          a as unknown as Record<string, unknown>,
+        ) ?? ""
+      );
     }
     case "design": {
       const d = layers?.designSystem;
       if (!d) return "";
-      return d.newViolations.length > 0
-        ? `+${d.newViolations.length}`
-        : `−${d.disappeared.length}`;
+      return (
+        CHECK_LAYER_BY_ID.get("design")?.delta?.(
+          d as unknown as Record<string, unknown>,
+        ) ?? ""
+      );
     }
     case "perf": {
       const p = layers?.perf;

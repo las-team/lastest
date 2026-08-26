@@ -1,0 +1,204 @@
+/**
+ * Runtime verification for the Quickstart agent (§3, P1, "Indirect via
+ * core/ai, core/browser") — run quickstart on a fresh repo, confirm the
+ * scaffolded walkthrough test is sane (not empty/garbage).
+ *
+ * `startQuickstart` (the `"use server"` action) gates on `contextFor`, a
+ * session-based guard unavailable outside a real Next.js request. This calls
+ * `executeQuickstart` directly — the same function `startQuickstart` hands
+ * off to after its own gate checks — which is why `executeQuickstart` was
+ * changed from module-private to exported in
+ * `plugins/quickstart/src/actions.ts` (visibility only, no behavior change).
+ * `buildInitialQsSteps` lives in `plugins/quickstart/src/step-definitions.ts`
+ * (a plain module, not `"use server"` — Next.js requires every top-level
+ * export of one to be async, and this isn't). Note `qs_preflight` (the pipeline's
+ * own first step) re-checks `isQuickstartEnabled` independently, so the gate
+ * is still exercised — just not through the session-auth wrapper.
+ *
+ * `getPluginRuntime()` must run first (it calls `configureQuickstart`) —
+ * `executeQuickstart` reads the plugin's wiring slot, which is otherwise
+ * empty outside a served request (`src/instrumentation.ts` normally awaits
+ * this before the server handles one).
+ *
+ * Target: https://the-internet.herokuapp.com/login, with
+ * `credsProvided: true` and its well-known fixed demo credentials
+ * (tomsmith/SuperSecretPassword!) — routes the pipeline's `qs_auth_setup`
+ * step into LOGIN mode (sign in with provided creds) rather than SIGNUP
+ * mode (register a new account), since this public sandbox has no signup
+ * form. This is a real, supported quickstart mode (`credsProvided` is the
+ * exact flag `startQuickstart` accepts for "the user already has an
+ * account").
+ *
+ * This is the heaviest run in this file: preflight → public scout → auth
+ * setup (login) → authed scout → generate walkthrough → run+notes (build) →
+ * approve baselines → rerun for pairing (build) → publish share. Two of
+ * those steps drive a real build to completion (`BUILD_POLL_TIMEOUT_MS` =
+ * 8 minutes each in the source). Bounded generously and run with a long
+ * timeout — this is expected to take many minutes, per the task brief.
+ *
+ * Run with `pnpm test:integration`.
+ */
+import { eq } from "drizzle-orm";
+import { getPoolStatus } from "@lastest/pool-service/client";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { db } from "@/lib/db";
+import * as queries from "@/lib/db/queries";
+import { agentSessions } from "@/lib/db/schema";
+import { getPluginRuntime } from "@/lib/core/runtime";
+
+import { executeQuickstart } from "@lastest/plugin-quickstart/actions";
+import { buildInitialQsSteps } from "@lastest/plugin-quickstart/step-definitions";
+
+const TARGET = "https://the-internet.herokuapp.com";
+
+async function poolHeadroom(): Promise<number> {
+  const status = await getPoolStatus();
+  return status ? status.max - status.size : 99;
+}
+
+let teamId: string;
+let repoId: string;
+
+beforeAll(async () => {
+  const team = await queries.createTeam({ name: "quickstart-it-team" });
+  teamId = team.id;
+  const repo = await queries.createRepository({
+    teamId,
+    provider: "local",
+    owner: "quickstart-it",
+    name: "target",
+    fullName: "quickstart-it/target",
+    defaultBranch: "main",
+    // Non-local, per `isLocalUrl` in `plugins/quickstart/src/gating.ts` — a
+    // localhost baseUrl fails the gate `qs_preflight` re-checks itself.
+    branchBaseUrls: { main: TARGET },
+  });
+  repoId = repo.id;
+}, 30_000);
+
+afterAll(async () => {
+  await db.delete(agentSessions).where(eq(agentSessions.repositoryId, repoId));
+  await queries.deleteRepository(repoId);
+  await queries.deleteTeam(teamId);
+}, 30_000);
+
+describe("Quickstart — fresh repo scaffold", () => {
+  it("runs the full pipeline against a real target and produces a sane (non-empty, valid) walkthrough test", async () => {
+    await expect
+      .poll(poolHeadroom, { timeout: 90_000, interval: 1_000 })
+      .toBeGreaterThanOrEqual(1);
+
+    await getPluginRuntime();
+
+    const session = await queries.createAgentSession({
+      repositoryId: repoId,
+      teamId,
+      kind: "quickstart",
+      status: "active",
+      currentStepId: "qs_preflight",
+      steps: buildInitialQsSteps(),
+      metadata: {
+        credsProvided: true,
+        quickstartEmail: "tomsmith",
+        quickstartPassword: "SuperSecretPassword!",
+      },
+    });
+
+    // `executeQuickstart` can reject outright (not just resolve with a
+    // "failed" session) — `startQuickstart` itself wraps the call in
+    // exactly this `.catch()` for that reason. One real boundary hit
+    // running this session-free: `qs_run_and_notes` (step 6) calls
+    // `getBuildSummary`, which goes through `requireBuildOwnership` →
+    // `requireTeamAccess` → `requireAuth` → `headers()` — a genuine session
+    // dependency inside the pipeline itself, not just the outer
+    // `startQuickstart` wrapper. That is a real architectural fact about
+    // quickstart (unlike explorer's or QA agent's trigger dispatch, its
+    // step pipeline was not built to run outside a request) confirmed by
+    // reading `runQsRunAndNotes` — untouched by this refactor, not a
+    // regression. Caught here the same way `startQuickstart` catches it, so
+    // this test can still evaluate whatever the pipeline produced first.
+    let executeError: unknown;
+    await executeQuickstart(session.id, repoId, teamId).catch((err) => {
+      executeError = err;
+    });
+    if (executeError) {
+      await queries.updateAgentSession(session.id, {
+        status: "failed",
+        completedAt: new Date(),
+      });
+    }
+
+    const [after] = await db
+      .select()
+      .from(agentSessions)
+      .where(eq(agentSessions.id, session.id));
+    expect(after).toBeTruthy();
+    expect(["completed", "failed"]).toContain(after.status);
+
+    // The scout half, asserted unconditionally. Everything below this point is
+    // allowed to degrade (see the `headers()` boundary noted above), so
+    // without these the test can report green having exercised none of the
+    // refactor's central claim: `qs_scout_public` is the first step that needs
+    // the whole `ctx.browser.withBrowser` → `ctx.ai.generate({ browserTools })`
+    // → `@playwright/mcp` chain to work.
+    //
+    // These assert *evidence that a browser actually read the DOM*, not a
+    // particular verdict. Pinning the verdict was tried and is flaky: across
+    // three runs against this same target the scout returned
+    // `login_email_password` once and `no_public_register` twice. Both are
+    // defensible readings — the-internet.herokuapp.com has no signup page at
+    // all, and whether the model applies the `login_email_password` OVERRIDE
+    // (register unavailable BUT a plain email+password login exists) varies
+    // run to run. A test that pins one of them fails for a reason that has
+    // nothing to do with the code under test.
+    const publicScoutStep = after.steps.find((s) => s.id === "qs_scout_public");
+    // Surface the step's own error in the failure message — otherwise this
+    // reads as a bare 'failed' !== 'completed' and the actual reason (AI
+    // provider error, no browser available, MCP failure) dies with the
+    // session, which `afterAll` deletes.
+    expect(
+      publicScoutStep?.status,
+      `qs_scout_public error: ${publicScoutStep?.error ?? "(none recorded)"}`,
+    ).toBe("completed");
+
+    const publicScout = after.metadata.publicScout;
+    expect(publicScout).toBeTruthy();
+    // `unknown` is what `scout.ts`'s validation gate downgrades to when the
+    // model produced no tagline, no concept and no navLinks — i.e. when it
+    // never actually browsed. That is the failure this test exists to catch.
+    expect(publicScout!.classification).not.toBe("unknown");
+    // Concept and navLinks can only come from reading the live page: the
+    // concept is written from the hero, and navLinks are DOM-discovered
+    // `<a href>` paths the prompt explicitly forbids the model from guessing.
+    expect((publicScout!.concept ?? "").length).toBeGreaterThan(0);
+    expect(publicScout!.navLinks.length).toBeGreaterThan(0);
+
+    const walkthroughTestId = after.metadata.walkthroughTestId;
+    if (walkthroughTestId) {
+      // The core "not empty/garbage" check §3 asks for — reachable once
+      // `qs_generate` (step 5) completes, before the session-dependent tail
+      // (`qs_run_and_notes` onward).
+      const test = await queries.getTest(walkthroughTestId);
+      expect(test).toBeTruthy();
+      expect(test!.repositoryId).toBe(repoId);
+      expect(test!.code.length).toBeGreaterThan(40);
+      expect(test!.code).toContain("export async function test(");
+      expect(test!.isPlaceholder).not.toBe(true);
+      expect(test!.code).not.toMatch(/^\s*$/);
+    } else if (executeError) {
+      // No walkthrough test yet, but a real, attributable reason why (the
+      // session boundary above, or a genuine step failure) — not a silent
+      // absence.
+      expect(String(executeError)).toBeTruthy();
+    } else {
+      const failedStep = after.steps.find((s) => s.status === "failed");
+      expect(failedStep).toBeTruthy();
+    }
+
+    const statusAfter = await getPoolStatus();
+    if (statusAfter) {
+      expect(statusAfter.size).toBeLessThanOrEqual(statusAfter.max);
+    }
+  }, 1_800_000);
+});

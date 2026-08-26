@@ -52,7 +52,8 @@ import {
   STORAGE_ROOT,
   toRelativePath,
 } from "@/lib/storage/paths";
-import { awardScore } from "@/server/actions/gamification";
+import { awardScore } from "@lastest/plugin-gamification/actions";
+import * as gamificationReads from "@lastest/plugin-gamification/reads";
 import { compareBranches } from "@/lib/github/content";
 import { findAffectedTests } from "@/lib/smart-selection/file-matcher";
 
@@ -968,7 +969,9 @@ async function runBuildAsync(
           try {
             const repo = await queries.getRepository(repoId);
             if (!repo?.teamId) return;
-            const creator = await queries.getTestCreator(result.testId);
+            const creator = await gamificationReads.getTestCreator(
+              result.testId,
+            );
             if (!creator) return;
             await awardScore({
               teamId: repo.teamId,
@@ -1028,12 +1031,15 @@ async function runBuildAsync(
     try {
       const { scoreMultiLayer } = await import("@/lib/comparison/scorer");
       // E1: fold api-test assertion evidence into the step verdict.
+      // The push is also the assertion that the plugin's narrowed
+      // `ApiEvidenceItem` still matches core's `EvidenceItem` — see
+      // `plugins/api-test/src/evidence.ts`.
       const apiEvidence: import("@/lib/db/schema").EvidenceItem[] = [];
       if (result.apiResult) {
         apiEvidence.push(
-          ...(await import("@/lib/api-test/evidence")).apiResultToEvidence(
-            result.apiResult,
-          ),
+          ...(
+            await import("@lastest/plugin-api-test/evidence")
+          ).apiResultToEvidence(result.apiResult),
         );
       }
       const prevResult = await queries.getPreviousTestResultForTest(
@@ -1514,9 +1520,9 @@ async function runBuildAsync(
       designSystemTokenUsage?: import("@/lib/db/schema").DesignSystemTokenUsage;
     } = {};
     try {
-      const { aggregateA11yForBuild } = await import("@/lib/a11y/wcag-score");
+      const { aggregateA11yForBuild } = await import("@lastest/wcag-score");
       const { aggregateDesignSystemForBuild } =
-        await import("@/lib/design-system/score");
+        await import("@lastest/plugin-design-system/score");
       const testResultsForRollup = await queries.getTestResultsByRun(testRunId);
       const hasA11yData = testResultsForRollup.some(
         (r) => r.a11yViolations != null || r.a11yPassesCount != null,
@@ -1596,8 +1602,11 @@ async function runBuildAsync(
         // map with each diff's pixel/DOM signals, so it must run AFTER the
         // change map is persisted. Best-effort — the UI treats a missing
         // verdict as "unknown".
-        const { classifyBuildDiffs } = await import("@/lib/rca/run");
-        await classifyBuildDiffs(buildId).catch((e) => {
+        const [{ classifyBuildDiffs }, { appRcaHost }] = await Promise.all([
+          import("@lastest/plugin-rca"),
+          import("@/lib/core/rca-host"),
+        ]);
+        await classifyBuildDiffs(appRcaHost, buildId).catch((e) => {
           console.error(`[rca] classify failed for build ${buildId}:`, e);
         });
       })
@@ -1605,10 +1614,10 @@ async function runBuildAsync(
 
     // Fire-and-forget Lastest awards recompute. Updates the repo's tier and
     // category badges based on the latest build. Tier only downgrades on a
-    // confirmed regression — see src/lib/awards/criteria.ts.
+    // confirmed regression — see plugins/awards/src/domain/criteria.ts.
     if (repositoryId) {
       const repoId = repositoryId;
-      import("@/lib/awards/recompute")
+      import("@lastest/plugin-awards")
         .then(({ recomputeRepoAward }) => {
           recomputeRepoAward(repoId).catch((e) => {
             console.error(`[awards] recompute failed for repo ${repoId}:`, e);
@@ -1739,8 +1748,18 @@ async function runBuildAsync(
     }
   }
 
-  revalidatePath("/builds");
-  revalidatePath("/");
+  // `runBuildAsync` is fire-and-forget: it routinely outlives the request that
+  // started it, and the queued-build consumer calls it with no request at all.
+  // Outside a request scope `revalidatePath` throws "Invariant: static
+  // generation store missing", which — from a floating promise — surfaces as an
+  // unhandled rejection that can take the process down. Cache invalidation is
+  // best-effort here; the build rows are already committed.
+  try {
+    revalidatePath("/builds");
+    revalidatePath("/");
+  } catch {
+    // No request scope — nothing to revalidate against.
+  }
 
   // Process next queued job for this specific runner.
   // Pool-managed queue (targetRunner='auto') is handled by releasePoolEB + periodic consumer.

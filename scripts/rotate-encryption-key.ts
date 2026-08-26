@@ -13,6 +13,18 @@
  * detected by attempting decryption with the old key — if that fails, the
  * value is skipped as already rotated.
  *
+ * Covers every encrypted-at-rest field:
+ *   - github_accounts.access_token / refresh_token
+ *   - gitlab_accounts.access_token / refresh_token / oauth_client_secret
+ *   - oauth_accounts.access_token / refresh_token / id_token
+ *   - google_sheets_accounts.access_token / refresh_token
+ *   - ai_settings.* API keys
+ *   - storage_states.storage_state_json
+ *   - setup_configs.auth_config (token / password / header values)
+ *   - agent_sessions.metadata.quickstartPassword / .qaAuthContext
+ *   - explorer_sessions.metadata.password        (plugin table)
+ *   - explorer_knowledge.cred_password           (plugin table)
+ *
  * Usage:
  *   OLD_ENCRYPTION_KEY=<old> pnpm tsx --env-file=.env scripts/rotate-encryption-key.ts
  *   OLD_ENCRYPTION_KEY=<old> pnpm tsx --env-file=.env scripts/rotate-encryption-key.ts --dry-run
@@ -29,6 +41,10 @@ import {
   setupConfigs,
   agentSessions,
 } from "../src/lib/db/schema";
+import {
+  explorerKnowledge,
+  explorerSessions,
+} from "@lastest/plugin-explorer/schema";
 import { encrypt, decryptWithKey, ENC_PREFIX } from "../src/lib/crypto";
 import { eq } from "drizzle-orm";
 
@@ -257,20 +273,35 @@ async function rotateSetupConfigs(oldKey: Buffer) {
   }
 }
 
-// agent_sessions.metadata.quickstartPassword — JSONB.
+// agent_sessions.metadata — JSONB; quickstartPassword and qaAuthContext are
+// both encrypted on write by encryptSessionMetadata (src/lib/crypto-fields.ts).
 async function rotateAgentSessions(oldKey: Buffer) {
   console.log("\n[agentSessions]");
   const rows = await db.select().from(agentSessions);
   for (const row of rows) {
     const meta = row.metadata;
-    const re = reEncryptField(meta?.quickstartPassword, oldKey);
-    if (!meta || re == null) {
+    if (!meta) {
       skipped++;
       continue;
     }
-    const next = { ...meta, quickstartPassword: re };
+    const next = { ...meta };
+    const changedFields: string[] = [];
+    const quickstartPassword = reEncryptField(meta.quickstartPassword, oldKey);
+    if (quickstartPassword != null) {
+      next.quickstartPassword = quickstartPassword;
+      changedFields.push("metadata.quickstartPassword");
+    }
+    const qaAuthContext = reEncryptField(meta.qaAuthContext, oldKey);
+    if (qaAuthContext != null) {
+      next.qaAuthContext = qaAuthContext;
+      changedFields.push("metadata.qaAuthContext");
+    }
+    if (changedFields.length === 0) {
+      skipped++;
+      continue;
+    }
     console.log(
-      `  agentSession ${row.id}: rotating metadata.quickstartPassword`,
+      `  agentSession ${row.id}: rotating ${changedFields.join(", ")}`,
     );
     if (!dryRun)
       await db
@@ -278,6 +309,62 @@ async function rotateAgentSessions(oldKey: Buffer) {
         .set({ metadata: next })
         .where(eq(agentSessions.id, row.id));
     rotated++;
+  }
+}
+
+// ── Explorer plugin tables ───────────────────────────────────────────────────
+// These live in plugins/explorer/src/schema.ts, and the plugin encrypts them
+// through ExplorerHost.encryptField — the same aes-256-gcm primitive under the
+// same ENCRYPTION_KEY, so rotation is core's job. The drizzle table objects are
+// imported from @lastest/plugin-explorer/schema (a maintenance script sits
+// outside the core/plugin boundary zones, so the import is legal); `db` was
+// constructed with the core schema only, but the SQL builder takes table
+// objects as arguments, so plugin tables work fine (only `db.query.*` would
+// not). On a database that predates the explorer migration these tables are
+// absent and the selects throw, aborting the run — deliberately: exiting 0
+// while credentials still sit un-rotated under the old table names
+// (agent_knowledge.cred_password) would silently strand them under a retired
+// key. Run `pnpm db:push` before rotating.
+
+// explorer_sessions.metadata.password — JSONB (target-app login credential).
+async function rotateExplorerSessions(oldKey: Buffer) {
+  console.log("\n[explorerSessions]");
+  const rows = await db.select().from(explorerSessions);
+  for (const row of rows) {
+    const meta = row.metadata;
+    const re = reEncryptField(meta?.password, oldKey);
+    if (!meta || re == null) {
+      skipped++;
+      continue;
+    }
+    const next = { ...meta, password: re };
+    console.log(`  explorerSession ${row.id}: rotating metadata.password`);
+    if (!dryRun)
+      await db
+        .update(explorerSessions)
+        .set({ metadata: next })
+        .where(eq(explorerSessions.id, row.id));
+    rotated++;
+  }
+}
+
+// explorer_knowledge.cred_password — flat text column.
+async function rotateExplorerKnowledge(oldKey: Buffer) {
+  console.log("\n[explorerKnowledge]");
+  const rows = await db.select().from(explorerKnowledge);
+  for (const row of rows) {
+    await rotateRow(
+      "explorerKnowledge",
+      row.id,
+      { credPassword: row.credPassword },
+      oldKey,
+      async (id, updates) => {
+        await db
+          .update(explorerKnowledge)
+          .set(updates)
+          .where(eq(explorerKnowledge.id, id));
+      },
+    );
   }
 }
 
@@ -293,6 +380,8 @@ async function main() {
   await rotateStorageStates(oldKey);
   await rotateSetupConfigs(oldKey);
   await rotateAgentSessions(oldKey);
+  await rotateExplorerSessions(oldKey);
+  await rotateExplorerKnowledge(oldKey);
 
   console.log(
     `\nDone. ${rotated} row(s) re-encrypted, ${skipped} skipped (already rotated or plaintext).`,

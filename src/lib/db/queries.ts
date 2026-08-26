@@ -14,22 +14,21 @@ export * from "./queries/settings";
 export * from "./queries/routes";
 export * from "./queries/areas";
 export * from "./queries/background-jobs";
+export * from "./queries/plugin-jobs";
 export * from "./queries/auth";
 export * from "./queries/setup";
 export * from "./queries/runners";
 export * from "./queries/integrations";
-export * from "./queries/csv-sources";
 export * from "./queries/misc";
-export * from "./queries/github-actions";
-export * from "./queries/gitlab-pipelines";
 export * from "./queries/analytics";
 export * from "./queries/fixtures";
 export * from "./queries/storage-states";
-export * from "./queries/schedules";
+// build_schedules moved to plugins/scheduling/src/data/queries.ts (RFC §9
+// phase 4) — import from @lastest/plugin-scheduling instead.
 export * from "./queries/activity-events";
-export * from "./queries/gamification";
 export * from "./queries/storage";
-export * from "./queries/public-shares";
+// public-shares moved to plugins/share/src/data/queries.ts (RFC §9 phase 4) —
+// import from @lastest/plugin-share instead.
 export * from "./queries/step-comparisons";
 export * from "./queries/inspector";
 export * from "./queries/change-maps";
@@ -38,11 +37,7 @@ export * from "./queries/app-fixes";
 export * from "./queries/layer-baselines";
 export * from "./queries/layer-feedback";
 export * from "./queries/awards";
-export * from "./queries/launch";
-export * from "./queries/playground";
 export * from "./queries/billing";
-export * from "./queries/qa-tasks";
-export * from "./queries/qa-agent-triggers";
-export * from "./queries/explorer";
-export * from "./queries/agent-knowledge";
-export * from "./queries/agent-experience";
+// qa_tasks/qa_agent_triggers moved to plugins/qa-agent/src/data/ (RFC §9
+// phase 4) — server components and routes read them through
+// @lastest/plugin-qa-agent/reads, actions through the plugin's own handle.

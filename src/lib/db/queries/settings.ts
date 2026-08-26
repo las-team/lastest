@@ -186,6 +186,23 @@ export async function updatePlaywrightSettings(
     .where(eq(playwrightSettings.id, id));
 }
 
+/**
+ * Patch a repo's Playwright settings row *if it exists*.
+ *
+ * Not `upsertPlaywrightSettings`: clearing a field on a repo that has never
+ * opened the settings page must stay a no-op rather than materialise a row
+ * whose only content is the absence of the thing being cleared.
+ */
+export async function updatePlaywrightSettingsByRepo(
+  repositoryId: string,
+  data: Partial<NewPlaywrightSettings>,
+) {
+  await db
+    .update(playwrightSettings)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(playwrightSettings.repositoryId, repositoryId));
+}
+
 export async function upsertPlaywrightSettings(
   repositoryId: string | null,
   data: Partial<NewPlaywrightSettings>,

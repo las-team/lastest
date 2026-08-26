@@ -60,6 +60,12 @@ export async function POST(
         signal: AbortSignal.timeout(FORWARD_TIMEOUT_MS),
       });
       const text = await res.text();
+      // Only a healthy umami is worth proxying back. A 4xx/5xx (unknown
+      // website id, umami's own DB down) is not actionable by the browser,
+      // and forwarding it turns a dead analytics box into a console error on
+      // every page of the product — which, among other things, fails our own
+      // console check layer. Degrade to no-recording, same as the catch below.
+      if (!res.ok) return new Response(null, { status: 204 });
       return new Response(text, {
         status: res.status,
         headers: { "content-type": "application/json" },

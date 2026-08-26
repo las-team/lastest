@@ -387,7 +387,7 @@ export async function discoverAreas(
 }> {
   if (baseURL) {
     const { agentDiscoverAreas } =
-      await import("@/lib/playwright/planner-agent");
+      await import("@lastest/plugin-authoring-ai/actions");
     return agentDiscoverAreas(repositoryId, baseURL);
   }
   return aiScanRoutes(repositoryId, branch, intelligence);
@@ -415,9 +415,12 @@ export async function mcpExploreRoutes(
       existingPaths,
       intelligence,
     );
+    // `billTeamId` is the third argument here: this claim's browser time is
+    // metered to the repo's team, so an agent EB can't run unbilled.
     const eb = await claimEmbeddedBrowserForAgent(
-      { billTeamId: team.id },
       5 * 60 * 1000,
+      undefined,
+      team.id,
     ).catch(() => undefined);
     if (!eb) {
       return {
