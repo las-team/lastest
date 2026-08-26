@@ -227,6 +227,85 @@ const EXPLORER_RENAMES = [
   ["agent_findings", "explorer_findings"],
 ];
 
+// `agent_sessions.metadata` was a shared jsonb bag for five agent kinds, so
+// every explorer field carried an `explorer`/`quickstart` prefix to stay out of
+// the other four agents' namespace. `ExplorerSessionMetadata` in
+// plugins/explorer/src/types.ts is a *closed* bag owned by one feature, so the
+// prefixes are gone — and nothing in the plugin reads the old names or maps
+// them. A verbatim copy therefore hands the plugin rows it silently reads as
+// empty. Two consequences, both of which this map exists to prevent:
+//
+//   1. Functional: a resumed legacy session loses its target URL, its
+//      credentials, its BFS frontier and its resume cursor — the plugin sees
+//      `metadata.targetUrl === undefined` and refuses to run.
+//   2. Security: `quickstartPassword` holds an AES-256-GCM ciphertext, and
+//      scripts/rotate-encryption-key.ts's `rotateExplorerSessions` re-encrypts
+//      `metadata.password` and nothing else. A ciphertext left under the old
+//      key is invisible to every future key rotation — permanently orphaned,
+//      decryptable only with a retired key. This is why the transform below
+//      REMOVES the old key rather than duplicating the value into the new one.
+//
+// Left-hand side verified against `AgentSessionMetadata` on `main`
+// (packages/db/src/schema.ts) and against the writers in
+// `main:src/server/actions/explorer-agent.ts`; right-hand side against
+// `ExplorerSessionMetadata` in the plugin. Keys read UNCHANGED by the plugin
+// (`credsProvided`, `streamUrl`, `queuedForBrowser`) are deliberately absent —
+// they must pass through untouched, and so must anything else in the bag.
+const EXPLORER_METADATA_KEY_MAP = [
+  ["explorerTargetUrl", "targetUrl"],
+  ["explorerMaxIterations", "maxIterations"],
+  ["explorerIteration", "iteration"],
+  ["explorerStyleRotation", "styleRotation"],
+  ["explorerStateHistory", "stateHistory"],
+  ["explorerFrontier", "frontier"],
+  ["explorerVisitedUrls", "visitedUrls"],
+  ["explorerPageMap", "pageMap"],
+  ["explorerCurrentState", "currentState"],
+  ["explorerCurrentPlan", "currentPlan"],
+  ["explorerActionLogs", "actionLogs"],
+  ["explorerFindingIds", "findingIds"],
+  ["explorerReport", "report"],
+  ["explorerKeptTestIds", "keptTestIds"],
+  ["explorerAuth", "auth"],
+  ["explorerTrigger", "trigger"],
+  ["explorerStuck", "stuck"],
+  // The two credential fields the explorer borrowed from QuickStart so they
+  // would get the query layer's encryption-at-rest treatment. `password` is
+  // the ciphertext the key-rotation script tracks.
+  ["quickstartEmail", "email"],
+  ["quickstartPassword", "password"],
+];
+
+// `array['explorerTargetUrl', …]::text[]` — the legacy keys, for both the `-`
+// removal and the repair pass's guard.
+const EXPLORER_LEGACY_KEYS_SQL = `array[${EXPLORER_METADATA_KEY_MAP.map(
+  ([oldKey]) => `'${oldKey}'`,
+).join(", ")}]::text[]`;
+
+// A jsonb expression that rewrites `col` (a jsonb metadata value) old → new:
+//
+//   (metadata - <legacy keys>)          drop every old key, whatever else stays
+//   || jsonb_strip_nulls(jsonb_build_object(
+//        'targetUrl', coalesce(metadata->'targetUrl', metadata->'explorerTargetUrl'),
+//        …))                            set each new key from new-then-old
+//
+// `coalesce(new, old)` is the precedence rule: a row that somehow already has
+// the new key keeps its value — a legacy leftover never clobbers a newer one.
+// A pair where neither key is present coalesces to SQL NULL, which
+// `jsonb_build_object` turns into a JSON null and `jsonb_strip_nulls` then
+// removes, so absent fields are not resurrected as nulls. Every `->` reads the
+// ORIGINAL column value (one expression, one row), so the `-` on the left
+// cannot starve the lookups on the right.
+//
+// Idempotent by construction: over a row with no legacy keys the `-` is a
+// no-op, each `coalesce` returns the new key's own value, and the `||` puts it
+// back unchanged.
+const explorerMetadataRemapSql = (col) =>
+  `(${col} - ${EXPLORER_LEGACY_KEYS_SQL}) || jsonb_strip_nulls(jsonb_build_object(${EXPLORER_METADATA_KEY_MAP.map(
+    ([oldKey, newKey]) =>
+      `'${newKey}', coalesce(${col} -> '${newKey}', ${col} -> '${oldKey}')`,
+  ).join(", ")}))`;
+
 async function migrateExplorerTables() {
   if (!process.env.DATABASE_URL) return;
   let sql;
@@ -284,6 +363,11 @@ async function migrateExplorerTables() {
 
     // `agent_sessions` holds five agent kinds; only the `explorer` slice moves,
     // as a filtered copy (source rows stay in place, re-runnable/reversible).
+    // The copy is NOT verbatim: `metadata` is rewritten through
+    // `EXPLORER_METADATA_KEY_MAP` above, because the plugin reads the
+    // unprefixed key names. `agent_sessions` itself is never rewritten — the
+    // source rows keep their legacy keys so the copy stays reversible, and the
+    // other four agent kinds still read that bag under the old names.
     if (
       (await tableExists("agent_sessions")) &&
       (await columnExists("agent_sessions", "kind"))
@@ -318,13 +402,51 @@ async function migrateExplorerTables() {
           await sql.unsafe(`
             create table explorer_sessions as
             select id, repository_id, team_id, status, current_step_id,
-                   steps, metadata, created_at, updated_at, completed_at
+                   steps,
+                   ${explorerMetadataRemapSql("metadata")} as metadata,
+                   created_at, updated_at, completed_at
               from agent_sessions
              where kind = 'explorer' and team_id is not null`);
           console.log(
-            `[migrate] agent_sessions -> explorer_sessions: copied explorer rows (source left in place)`,
+            `[migrate] agent_sessions -> explorer_sessions: copied explorer rows with metadata keys remapped (source left in place)`,
           );
         }
+      }
+    }
+
+    // Repair pass for rows an EARLIER version of this script already copied
+    // verbatim, before the mapping above existed. Those rows sit in
+    // `explorer_sessions` carrying `explorerTargetUrl`/`quickstartPassword`
+    // etc., and the copy block above will never revisit them — it skips a
+    // populated destination by design (that skip is what makes the copy safe
+    // to re-run). Without this pass such a database stays broken forever: the
+    // sessions are unresumable and their password ciphertext is out of reach
+    // of the key-rotation script.
+    //
+    // Guarded so it costs nothing on a database that does not need it: the
+    // table may not exist yet (fresh DB — push creates it), and the UPDATE's
+    // WHERE matches only rows that still carry at least one legacy key, so an
+    // already-mapped or already-repaired DB updates zero rows.
+    //
+    // `jsonb_exists_any(metadata, keys)` is the function spelling of the `?|`
+    // operator — used here so no literal `?` goes through `sql.unsafe()`.
+    if (
+      (await tableExists("explorer_sessions")) &&
+      (await columnExists("explorer_sessions", "metadata"))
+    ) {
+      const repaired = await sql.unsafe(`
+        update explorer_sessions
+           set metadata = ${explorerMetadataRemapSql("metadata")}
+         where jsonb_exists_any(metadata, ${EXPLORER_LEGACY_KEYS_SQL})`);
+      const repairedCount = (repaired && repaired.count) || 0;
+      if (repairedCount > 0) {
+        console.warn(
+          `[migrate] explorer_sessions: remapped legacy metadata keys on ${repairedCount} row(s)` +
+            ` previously copied verbatim (explorerTargetUrl -> targetUrl,` +
+            ` quickstartEmail -> email, quickstartPassword -> password, …) —` +
+            ` their credentials are readable by the plugin and visible to` +
+            ` scripts/rotate-encryption-key.ts again`,
+        );
       }
     }
   } catch (e) {
