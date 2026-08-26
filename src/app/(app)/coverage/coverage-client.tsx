@@ -39,15 +39,15 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CoverageDimension } from "@/lib/db/schema";
-import type { CoverageSpec, SpecCell } from "@/lib/coverage/spec";
-import type { CoverageMetrics, StopReason } from "@/lib/coverage/stop";
+import type { CoverageSpec, SpecCell } from "@lastest/coverage-model";
+import type { CoverageMetrics, StopReason } from "@lastest/coverage-model";
 import {
   syncCoverageAction,
   setCoverageDimensionEnabledAction,
   setCoverageCellStatusAction,
   getCoverageSpecAction,
 } from "@/server/actions/coverage";
-import { uploadCsvSource } from "@/server/actions/csv-sources";
+import { uploadCsvSource } from "@lastest/plugin-data-sources/actions";
 import {
   CoverageTrendPanel,
   type CoverageTrendPoint,

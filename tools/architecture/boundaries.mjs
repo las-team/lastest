@@ -294,6 +294,45 @@ export const PSEUDO_PLUGINS = {
     lib: [],
     actions: ["spec-import.ts"],
   },
+  // `coverage` is new — it did not exist when phase 4 ran, so it has never
+  // been costed as a migration. Data-driven coverage: dimension profiling
+  // over CSV/Sheet caches and historical `test_results.assignedVariables`,
+  // the cells that actually occur, a t-way stopping rule, and matrix
+  // execution (one test x N data rows = N runs in one build).
+  //
+  // Entered on the ledger rather than left invisible, for the reason
+  // `ai-routes` was: without an entry `crossPluginPatternsFor()` generates no
+  // pattern for it and every edge into or out of it is unenforced. Adding it
+  // surfaced three real violations, all now closed by the recipe §5 promotion
+  // that landed with it rather than by a migration:
+  //
+  //   - The pure model — profiling, cells, weighting, the stopping rule,
+  //     matrix expansion, the row-filter grammar, the spec renderer, the two
+  //     SUT profilers — moved to `libs/coverage-model`. It imports nothing
+  //     (§5 row one). Its value types and `DEFAULT_*` policies moved with it
+  //     and `packages/db/src/schema/{coverage,tests}.ts` now import and
+  //     re-export them, so `@/lib/db/schema` exports the same names as before
+  //     — the arrangement the schema already had with `@lastest/eb-protocol`.
+  //     Row types stay in the schema; the package narrows them (`CellLike`,
+  //     `DimensionLike`, `TestVariableLike`).
+  //   - `coverage-budget.ts` was sitting under `src/lib/qa-agent` while being
+  //     coverage's own logic. It moved into the model as `budget.ts`, and its
+  //     `MAX_PLAN_ITEMS` import became an injected `hardCap` — the planner
+  //     owns its wall-clock ceiling, the model measures a data space.
+  //   - `src/server/actions/qa-agent.ts` calling `ensureFreshCoverage`
+  //     directly now routes through `src/lib/core/coverage-reads.ts`, the
+  //     `share-reads.ts` / `data-sources-reads.ts` shape, and the same route
+  //     `src/lib/core/scheduler.ts` already used for the other caller.
+  //
+  // What is left below is the genuinely stateful half — the queries, sync
+  // orchestration, snapshots, attribution and the SUT profilers' execution.
+  // It has NOT been costed for a migration; see
+  // `docs/architecture/coverage-migration-brief.md` for the survey.
+  coverage: {
+    lib: ["src/lib/coverage"],
+    actions: ["coverage.ts"],
+    components: ["src/app/(app)/coverage"],
+  },
   // `ai-routes` is `authoring-ai`'s second sideways orphan, and it is here for
   // the same reason `spec-import` is: to exist on the ledger at all. Until now
   // its only classification anywhere was prose in

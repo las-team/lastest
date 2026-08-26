@@ -71,6 +71,7 @@ import {
   itemGroups,
   itemPlaywrightOverrides,
   matchPlanToExistingTests,
+  MAX_PLAN_ITEMS,
   mergeRefinedJourneys,
   normalizeQaGroups,
   sanitizeQaPlan,
@@ -84,8 +85,8 @@ import {
   buildCoverageDirective,
   buildStopSummary,
   computePlanBudget,
-} from "@/lib/qa-agent/coverage-budget";
-import { ensureFreshCoverage } from "@/lib/coverage/sync";
+} from "@lastest/coverage-model";
+import { ensureCoverageFresh } from "@/lib/core/coverage-reads";
 import {
   buildTaskPlanFromTriage,
   buildTaskTriageSystemPrompt,
@@ -2087,16 +2088,18 @@ async function runQaPlan(
   // the case where nobody has opened the Coverage page since the data moved,
   // and planning against yesterday's cell set produces a queue of gaps that no
   // longer exist. A failed re-sync degrades to the stale model, never to none.
-  const coverageState = await ensureFreshCoverage(repositoryId).catch((err) => {
-    console.warn("[qa-agent] coverage report unavailable:", err);
-    return null;
-  });
+  const coverageState = await ensureCoverageFresh(repositoryId);
   if (coverageState?.stale) {
     console.warn(
       `[qa-agent] planning against a stale coverage model for repo ${repositoryId}`,
     );
   }
-  const planBudget = computePlanBudget({ stop: coverageState?.stop ?? null });
+  const planBudget = computePlanBudget({
+    stop: coverageState?.stop ?? null,
+    // The planner owns the wall-clock ceiling, not the coverage model — see
+    // the inversion note in `src/lib/coverage/budget.ts`.
+    hardCap: MAX_PLAN_ITEMS,
+  });
   // Excluded cells are deliberately absent from stop.queue, so they have to be
   // read back from the ledger — sourcing them from the queue yielded an always
   // empty list and the "do NOT plan these" section never rendered.

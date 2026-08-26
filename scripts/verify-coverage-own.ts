@@ -31,7 +31,7 @@ import { parseCsvBuffer } from "@/lib/csv/api";
 import { STORAGE_DIRS } from "@/lib/storage/paths";
 import { describeSources } from "@/lib/coverage/source-rows";
 import { syncCoverage, getCoverageReport } from "@/lib/coverage/sync";
-import { buildCoverageSpec, renderSpecMarkdown } from "@/lib/coverage/spec";
+import { buildCoverageSpec, renderSpecMarkdown } from "@lastest/coverage-model";
 import {
   computePlanBudget,
   buildCoverageDirective,

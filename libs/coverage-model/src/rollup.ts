@@ -7,10 +7,13 @@
  * once and used for both the QA agent and the evidence pack.
  */
 
-import type { CoverageCell, CoverageDimension } from "@/lib/db/schema";
+import type {
+  CellLike as CoverageCell,
+  DimensionLike as CoverageDimension,
+} from "./types";
 import { cartesianSize } from "./cells";
 import { computeMetrics, type StopCell } from "./stop";
-import { DEFAULT_COVERAGE_STOP_POLICY } from "@/lib/db/schema";
+import { DEFAULT_COVERAGE_STOP_POLICY } from "./policy";
 
 export interface ObjectTypeRollup {
   objectType: string;

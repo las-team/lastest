@@ -9,7 +9,7 @@
  * merely reflects what happens to be in a spreadsheet.
  */
 
-import type { CoverageDimensionValue } from "@/lib/db/schema";
+import type { CoverageDimensionValue } from "../policy";
 
 export interface ProfileQuery {
   /** Object type / table to profile ('call__v', 'orders'). */

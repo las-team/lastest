@@ -31,7 +31,7 @@ import {
   getCoverageReport,
   attributeBuildRuns,
 } from "@/lib/coverage/sync";
-import { buildCoverageSpec, renderSpecMarkdown } from "@/lib/coverage/spec";
+import { buildCoverageSpec, renderSpecMarkdown } from "@lastest/coverage-model";
 import { VaultProfiler, profileFromSut } from "@/lib/coverage/profilers";
 import {
   computePlanBudget,

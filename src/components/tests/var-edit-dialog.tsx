@@ -34,8 +34,8 @@ import type {
 } from "@lastest/plugin-data-sources";
 import { AI_VAR_PRESETS, AI_VAR_PRESET_KEYS } from "@/lib/vars/ai-presets";
 import { generateAIVarValuePreview } from "@/server/actions/tests";
-import { selectRowIndices } from "@/lib/coverage/row-filter";
-import { tableToRecords } from "@/lib/coverage/cells";
+import { selectRowIndices } from "@lastest/coverage-model";
+import { tableToRecords } from "@lastest/coverage-model";
 
 export interface VarEditDialogProps {
   open: boolean;

@@ -35,6 +35,7 @@ const nextConfig: NextConfig = {
     "@lastest/ai-kit",
     "@lastest/analytics",
     "@lastest/cron",
+    "@lastest/coverage-model",
     "@lastest/csv",
     "@lastest/github",
     "@lastest/google-sheets",

@@ -19,6 +19,8 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
+import type { MatrixPolicy } from "@lastest/coverage-model";
+
 import type {
   DomSnapshotData,
   A11yViolation,
@@ -453,36 +455,11 @@ export interface TestVariable {
   description?: string;
 }
 
-/** How a matrix test's expanded runs are selected and which of them capture a
- *  visual baseline. */
-export interface MatrixPolicy {
-  /** 'all' runs every selected row. 'pairwise' reduces to a t-way covering set,
-   *  which is normally a fraction of the rows for the same defect yield. */
-  selection: "all" | "pairwise";
-  /** t for 'pairwise' selection. 2 unless a slice is high risk. */
-  strength: number;
-  /**
-   * Visual layer policy across expanded runs.
-   *
-   * 'representative' (the default) captures a PNG baseline for ONE run per
-   * slice; the rest run the cheap layers only (dom/network/url/console). This
-   * is not a nicety — a per-cell PNG baseline for a 40-cell matrix multiplies
-   * storage and human review load by 40, which is what makes matrix testing
-   * unusable in practice. 'all' opts into per-cell visual baselines anyway;
-   * 'none' disables the visual layer for expanded runs entirely.
-   */
-  visual: "representative" | "all" | "none";
-  /** Hard ceiling on expanded runs per test. A data source that grows
-   *  unexpectedly must not silently turn one test into thousands of runs. */
-  maxRuns: number;
-}
-
-export const DEFAULT_MATRIX_POLICY: MatrixPolicy = {
-  selection: "pairwise",
-  strength: 2,
-  visual: "representative",
-  maxRuns: 50,
-};
+// Matrix-execution policy lives in `@lastest/coverage-model` (the pure half
+// of the coverage feature, which owns matrix expansion) and is re-exported
+// here so `@/lib/db/schema` keeps exporting the name.
+export type { MatrixPolicy } from "@lastest/coverage-model";
+export { DEFAULT_MATRIX_POLICY } from "@lastest/coverage-model";
 
 // ── Multi-layer comparison types (v1.13) ─────────────────────────────────────
 

@@ -12,11 +12,14 @@
  * rather than two that can disagree.
  */
 
-import type { CoverageCell, CoverageDimension } from "@/lib/db/schema";
+import type {
+  CellLike as CoverageCell,
+  DimensionLike as CoverageDimension,
+} from "./types";
 import {
   DEFAULT_COVERAGE_STOP_POLICY,
   type CoverageStopPolicy,
-} from "@/lib/db/schema";
+} from "./policy";
 import type { CoverageReport } from "./rollup";
 import { isCovered } from "./rollup";
 import type { StopDecision } from "./stop";

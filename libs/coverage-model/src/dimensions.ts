@@ -10,13 +10,9 @@
  *      already persisted per run. Each variable name is a candidate dimension.
  */
 
-import type {
-  CoverageDimensionValue,
-  CoverageValueSource,
-  CsvDataSource,
-  GoogleSheetsDataSource,
-} from "@/lib/db/schema";
-import { DEFAULT_COVERAGE_STOP_POLICY } from "@/lib/db/schema";
+import type { CoverageDimensionValue, CoverageValueSource } from "./policy";
+import type { SourceTable } from "./source-types";
+import { DEFAULT_COVERAGE_STOP_POLICY } from "./policy";
 
 export interface ProfiledDimension {
   objectType: string;
@@ -134,34 +130,23 @@ export function profileTable(opts: {
 }
 
 /**
- * `table` overrides the cached rows — coverage resolves the full file rather
- * than the capped UI cache, so that the record counts it reports are the real
- * distribution and not its first page. Omitted, the cache is used.
+ * Profile a resolved source table into candidate dimensions.
+ *
+ * Takes the `SourceTable` rather than a data-source row: the rows may have
+ * come from the cache or from the full stored file, and which one it was is
+ * the caller's business, not the profiler's. `valueSource` only labels where
+ * the domain came from.
  */
-export function profileCsvSource(
-  source: CsvDataSource,
+export function profileSourceTable(
+  table: SourceTable,
+  valueSource: Extract<CoverageValueSource, "csv" | "sheet">,
   options?: ProfileOptions,
-  table?: { headers: string[]; rows: string[][] },
 ) {
   return profileTable({
-    alias: source.alias,
-    headers: table?.headers ?? source.cachedHeaders ?? [],
-    rows: table?.rows ?? source.cachedData ?? [],
-    valueSource: "csv",
-    options,
-  });
-}
-
-export function profileSheetSource(
-  source: GoogleSheetsDataSource,
-  options?: ProfileOptions,
-  table?: { headers: string[]; rows: string[][] },
-) {
-  return profileTable({
-    alias: source.alias,
-    headers: table?.headers ?? source.cachedHeaders ?? [],
-    rows: table?.rows ?? source.cachedData ?? [],
-    valueSource: "sheet",
+    alias: table.alias,
+    headers: table.headers,
+    rows: table.rows,
+    valueSource,
     options,
   });
 }

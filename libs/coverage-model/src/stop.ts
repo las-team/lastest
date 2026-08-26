@@ -15,7 +15,7 @@
 import {
   DEFAULT_COVERAGE_STOP_POLICY,
   type CoverageStopPolicy,
-} from "@/lib/db/schema";
+} from "./policy";
 import { tupleKeys, coveredTupleKeys } from "./weight";
 
 export interface StopCell {

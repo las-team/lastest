@@ -15,7 +15,7 @@ import {
   RestProfiler,
   VaultProfiler,
 } from "@/lib/coverage/profilers";
-import { buildCoverageSpec, renderSpecMarkdown } from "@/lib/coverage/spec";
+import { buildCoverageSpec, renderSpecMarkdown } from "@lastest/coverage-model";
 import { DEFAULT_COVERAGE_ENVIRONMENT } from "@/lib/db/schema";
 import type { CoverageCellStatus } from "@/lib/db/schema";
 

@@ -1,37 +1,30 @@
 /**
- * Full-fidelity row access for tabular data sources.
+ * Sample-size bookkeeping for resolved data-source tables.
  *
- * `csvDataSources.cachedData` is capped (MAX_CACHED_ROWS in the upload action)
- * because it backs a UI preview and matrix row-walking — it is not, and should
- * not become, the whole file. Coverage is different: profiling a 6,000-row
- * production extract off its first 1,000 rows reports record counts that are a
- * sample while presenting them as the distribution, and silently loses every
- * combination that only occurs past the cap.
+ * The rows themselves arrive already resolved — `csvDataSourceTablesForRepo`
+ * in `src/lib/core/data-sources-reads.ts` reads them out of the `data-sources`
+ * plugin, which owns both the row and the uploaded file. That split matters:
+ * `cachedData` is capped at 1,000 rows because it backs a UI preview, and
+ * profiling a 6,000-row extract off its first 1,000 reports a *sample* while
+ * presenting it as the distribution. Resolving the full file is the plugin's
+ * job (it owns the blob namespace); saying so honestly is this module's.
  *
- * So coverage resolves rows from the stored file when the cache is short of
- * `rowCount`, and falls back to the cache (flagged truncated) when the original
- * is gone. Either way the caller learns how many rows the numbers rest on.
+ * Everything here is pure — no storage, no filesystem, no database.
  */
 
-import fs from "fs/promises";
-import path from "path";
-import { STORAGE_DIRS } from "@/lib/storage/paths";
-import { parseCsvBuffer } from "@/lib/csv/api";
-import type { CsvDataSource, GoogleSheetsDataSource } from "@/lib/db/schema";
+import type { SourceTable } from "@lastest/coverage-model";
 
-export interface SourceTable {
-  alias: string;
-  headers: string[];
-  rows: string[][];
-  /** Rows the profile is actually based on. */
+export type { SourceTable };
+
+export interface SourceSampleInfo {
+  objectType: string;
   profiledRows: number;
-  /** Rows the source reports having in total. */
   totalRows: number;
-  /** True when profiledRows < totalRows — the numbers are a sample. */
   truncated: boolean;
 }
 
-function fromCache(
+/** Build a table from a cached header/row pair that reports its own total. */
+export function tableFromCache(
   alias: string,
   headers: string[] | null,
   rows: string[][] | null,
@@ -49,62 +42,7 @@ function fromCache(
   };
 }
 
-/** Resolve a CSV source's rows, preferring the stored file over the cache. */
-export async function loadCsvTable(
-  source: CsvDataSource,
-): Promise<SourceTable> {
-  const cached = fromCache(
-    source.alias,
-    source.cachedHeaders,
-    source.cachedData,
-    source.rowCount,
-  );
-  if (!cached.truncated || !source.storagePath) return cached;
-
-  const abs = path.join(
-    STORAGE_DIRS["csv-sources"],
-    source.storagePath.replace(/^\/csv-sources\//, ""),
-  );
-  try {
-    const parsed = parseCsvBuffer(await fs.readFile(abs));
-    return {
-      alias: source.alias,
-      headers: parsed.headers,
-      rows: parsed.rows,
-      profiledRows: parsed.rows.length,
-      totalRows: parsed.rowCount,
-      truncated: parsed.rows.length < parsed.rowCount,
-    };
-  } catch {
-    // Original no longer on disk — the cache is all we have, and it is
-    // already flagged truncated so the caveat still reaches the user.
-    return cached;
-  }
-}
-
-export interface SourceSampleInfo {
-  objectType: string;
-  profiledRows: number;
-  totalRows: number;
-  truncated: boolean;
-}
-
-/**
- * The sample sizes behind a repo's coverage numbers, resolved the same way
- * profiling resolves them — so the spec's disclosure can never drift from what
- * was actually read.
- */
-export async function describeSources(
-  csvSources: CsvDataSource[],
-  sheetSources: GoogleSheetsDataSource[],
-): Promise<SourceSampleInfo[]> {
-  const out: SourceSampleInfo[] = [];
-  for (const s of csvSources) out.push(summarize(await loadCsvTable(s)));
-  for (const s of sheetSources) out.push(summarize(loadSheetTable(s)));
-  return out;
-}
-
-function summarize(t: SourceTable): SourceSampleInfo {
+export function summarize(t: SourceTable): SourceSampleInfo {
   return {
     objectType: t.alias,
     profiledRows: t.profiledRows,
@@ -113,13 +51,11 @@ function summarize(t: SourceTable): SourceSampleInfo {
   };
 }
 
-/** Sheets cache their whole range and track no separate total, so the cache
- *  IS the full table — never a sample. */
-export function loadSheetTable(source: GoogleSheetsDataSource): SourceTable {
-  return fromCache(
-    source.alias,
-    source.cachedHeaders,
-    source.cachedData,
-    source.cachedData?.length ?? 0,
-  );
+/**
+ * The sample sizes behind a repo's coverage numbers, taken from the same
+ * tables profiling read — so the spec's disclosure can never drift from what
+ * was actually measured.
+ */
+export function describeSources(tables: SourceTable[]): SourceSampleInfo[] {
+  return tables.map(summarize);
 }

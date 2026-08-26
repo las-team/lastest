@@ -27,8 +27,11 @@ import {
   type CoverageSnapshotSource,
 } from "@/lib/db/schema";
 import * as queries from "@/lib/db/queries";
-import { computeMetrics, type StopCell } from "./stop";
-import { isCovered } from "./rollup";
+import {
+  computeMetrics,
+  type StopCell,
+  isCovered,
+} from "@lastest/coverage-model";
 
 /** The numbers one snapshot row carries, independent of how they were sourced. */
 export interface CoverageTotals {

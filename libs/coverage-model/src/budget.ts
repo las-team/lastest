@@ -1,10 +1,10 @@
 /**
  * P3 — replaces the QA agent's hardcoded plan cap with a measured stopping rule.
  *
- * Before this, `MAX_PLAN_ITEMS = 20` WAS the agent's answer to "how far should
- * I go?" — a constant, documented as a defensive backstop, with no relationship
- * to the application or its data. The agent could not say why it stopped at 20,
- * nor what it had chosen not to test.
+ * Before this, the QA agent's `MAX_PLAN_ITEMS = 20` WAS its answer to "how far
+ * should I go?" — a constant, documented as a defensive backstop, with no
+ * relationship to the application or its data. The agent could not say why it
+ * stopped at 20, nor what it had chosen not to test.
  *
  * Here the budget comes from the data space instead: how many cells remain
  * uncovered, weighted by real volume and risk, against t-way coverage targets.
@@ -15,10 +15,21 @@
 import {
   DEFAULT_COVERAGE_STOP_POLICY,
   type CoverageStopPolicy,
-} from "@/lib/db/schema";
-import type { CoverageReport } from "@/lib/coverage/rollup";
-import type { StopCell, StopDecision } from "@/lib/coverage/stop";
-import { MAX_PLAN_ITEMS } from "./plan";
+} from "./policy";
+import type { CoverageReport } from "./rollup";
+import type { StopCell, StopDecision } from "./stop";
+
+/**
+ * Absolute fallback ceiling, used only when the caller names none.
+ *
+ * The planner's own `MAX_PLAN_ITEMS` is the number that actually binds in
+ * production, and it is passed in rather than imported: this module measures a
+ * data space and has no business knowing which consumer is asking or what its
+ * wall-clock limit is. That inversion is also what keeps the coverage model
+ * free of an import into the QA agent — see the `coverage` entry in
+ * `tools/architecture/boundaries.mjs`.
+ */
+const DEFAULT_HARD_CAP = 20;
 
 export interface PlanBudget {
   /** Effective cap on plan items for this run. */
@@ -49,7 +60,7 @@ export function computePlanBudget(opts: {
   hardCap?: number;
 }): PlanBudget {
   const policy = { ...DEFAULT_COVERAGE_STOP_POLICY, ...(opts.policy ?? {}) };
-  const hardCap = opts.hardCap ?? MAX_PLAN_ITEMS;
+  const hardCap = opts.hardCap ?? DEFAULT_HARD_CAP;
 
   if (!opts.stop || opts.stop.metrics.eligibleCells === 0) {
     return {

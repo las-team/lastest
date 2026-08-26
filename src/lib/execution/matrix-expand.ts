@@ -13,12 +13,9 @@
  * from rippling through the executor.
  */
 
-import type {
-  CsvDataSource,
-  GoogleSheetsDataSource,
-  Test,
-} from "@/lib/db/schema";
-import { expandMatrix, matrixVariables } from "@/lib/coverage/matrix";
+import type { Test } from "@/lib/db/schema";
+import type { TabularSourceLike } from "@lastest/coverage-model";
+import { expandMatrix, matrixVariables } from "@lastest/coverage-model";
 
 export interface MatrixRunMeta {
   dataCell: string;
@@ -42,8 +39,8 @@ export interface ExpansionOutcome {
 
 export function expandTestsForMatrix(
   tests: Test[],
-  gsheetSources: GoogleSheetsDataSource[],
-  csvSources: CsvDataSource[],
+  gsheetSources: TabularSourceLike[],
+  csvSources: TabularSourceLike[],
 ): ExpansionOutcome {
   const out: RunnableTest[] = [];
   const notes: ExpansionOutcome["notes"] = [];

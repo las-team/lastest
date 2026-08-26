@@ -9,13 +9,14 @@ import { expandTestsForMatrix } from "@/lib/execution/matrix-expand";
 import {
   computePlanBudget,
   buildCoverageDirective,
-} from "@/lib/qa-agent/coverage-budget";
+} from "@lastest/coverage-model";
 import { MAX_PLAN_ITEMS } from "@/lib/qa-agent/plan";
 import { buildVqlGroupQuery, parseVaultGroups } from "./profilers/vault";
 import { groupRecords, extractRecords } from "./profilers/rest";
-import { extractChurnedObjectTypes } from "./profilers";
+import { extractChurnedObjectTypes } from "./index";
 import { groupsToDimensionValues } from "./profilers/types";
-import type { CsvDataSource, Test, TestVariable } from "@/lib/db/schema";
+import type { Test, TestVariable } from "@/lib/db/schema";
+import type { TabularSourceLike } from "@lastest/coverage-model";
 import type { StopDecision } from "./stop";
 import type { CoverageReport } from "./rollup";
 
@@ -154,14 +155,14 @@ const csvSource = (
   alias: string,
   headers: string[],
   rows: string[][],
-): CsvDataSource =>
+): TabularSourceLike =>
   ({
     id: alias,
     alias,
     cachedHeaders: headers,
     cachedData: rows,
     rowCount: rows.length,
-  }) as CsvDataSource;
+  }) as TabularSourceLike;
 
 const matrixVar = (over: Partial<TestVariable>): TestVariable => ({
   id: over.id ?? "v1",

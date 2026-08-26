@@ -8,7 +8,6 @@ import {
   doublePrecision,
   index,
   uniqueIndex,
-  primaryKey,
 } from "drizzle-orm/pg-core";
 
 import { repositories } from "./repos";
@@ -28,94 +27,36 @@ import { testResults } from "./tests";
 // the cell coordinate of the run.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Where a dimension's value domain came from. */
-export type CoverageValueSource =
-  | "csv" // derived from a csvDataSources cached column
-  | "sheet" // derived from a googleSheetsDataSources cached column
-  | "observed" // derived from historical test_results.assignedVariables
-  | "profiled" // queried from the system under test (D3: Vault VQL / SQL / REST)
-  | "manual"; // hand-authored by the user
+// The model's value types and policies live in `@lastest/coverage-model` —
+// the pure half of this feature, which must not import the database. They are
+// re-exported here so `@lastest/db/schema` (and `@/lib/db/schema`) keep
+// exporting the same names, exactly as this schema already does for the
+// runner wire types in `@lastest/eb-protocol`.
+import type {
+  CoverageCellStatus,
+  CoverageDimensionValue,
+  CoverageSnapshotObjectType,
+  CoverageSnapshotSource,
+  CoverageValueSource,
+  CoverageWeightBreakdown,
+} from "@lastest/coverage-model";
+import { DEFAULT_COVERAGE_ENVIRONMENT } from "@lastest/coverage-model";
 
-export interface CoverageDimensionValue {
-  value: string;
-  label?: string;
-  /** How many real records carry this value. 0 when unknown (non-profiled). */
-  recordCount: number;
-  /** recordCount / total, 0..1. Equal shares when counts are unknown. */
-  share: number;
-}
-
-export type CoverageCellStatus =
-  | "uncovered"
-  | "planned"
-  | "covered"
-  | "failing"
-  | "excluded";
-
-/** Per-term contribution of the weight formula, kept so the UI can explain a
- *  ranking instead of showing an opaque number. See CoverageWeightPolicy. */
-export interface CoverageWeightBreakdown {
-  volume: number;
-  criticality: number;
-  failureHistory: number;
-  churn: number;
-  redundancy: number;
-  total: number;
-}
-
-/** Tunable weight formula. Surfaced in settings — never a black box.
- *  weight = wVolume*vol + wCriticality*crit + wFailureHistory*fail
- *         + wChurn*churn - wRedundancy*redundancy   (clamped to >= 0) */
-export interface CoverageWeightPolicy {
-  wVolume: number;
-  wCriticality: number;
-  wFailureHistory: number;
-  wChurn: number;
-  wRedundancy: number;
-}
-
-export const DEFAULT_COVERAGE_WEIGHT_POLICY: CoverageWeightPolicy = {
-  wVolume: 0.45,
-  wCriticality: 0.2,
-  wFailureHistory: 0.2,
-  wChurn: 0.15,
-  wRedundancy: 0.25,
-};
-
-/** The QA agent's stopping rule. Replaces the hardcoded MAX_PLAN_ITEMS cap
- *  (see src/lib/qa-agent/plan.ts) from P2 onward; P1 only measures against it. */
-export interface CoverageStopPolicy {
-  /** t in t-way combinatorial coverage. 2 = pairwise (the default). */
-  strength: number;
-  /** Required fraction of occurring value-pairs covered, 0..1. */
-  pairwiseTarget: number;
-  /** Required fraction of weighted record volume covered, 0..1. */
-  weightedVolumeTarget: number;
-  /** Stop when the next-best uncovered cell's weight falls below this. */
-  marginalWeightEpsilon: number;
-  /** Escalate to (strength + 1)-way for cells at or above this weight. */
-  highRiskWeight: number;
-  /** Hard ceiling on generated runs — a backstop, not the primary rule. */
-  maxRuns: number;
-  /** Skip auto-detected dimensions with more distinct values than this;
-   *  free-text fields otherwise produce thousands of useless "values". */
-  maxDimensionCardinality: number;
-}
-
-export const DEFAULT_COVERAGE_STOP_POLICY: CoverageStopPolicy = {
-  strength: 2,
-  pairwiseTarget: 1.0,
-  weightedVolumeTarget: 0.9,
-  marginalWeightEpsilon: 0.01,
-  highRiskWeight: 0.6,
-  maxRuns: 500,
-  maxDimensionCardinality: 50,
-};
-
-/** Environment scope key. Until environments become first-class (B2), every
- *  row uses DEFAULT_COVERAGE_ENVIRONMENT so the later migration is a backfill
- *  of this column rather than a table restructure. */
-export const DEFAULT_COVERAGE_ENVIRONMENT = "default";
+export type {
+  CoverageValueSource,
+  CoverageDimensionValue,
+  CoverageCellStatus,
+  CoverageWeightBreakdown,
+  CoverageWeightPolicy,
+  CoverageStopPolicy,
+  CoverageSnapshotSource,
+  CoverageSnapshotObjectType,
+} from "@lastest/coverage-model";
+export {
+  DEFAULT_COVERAGE_WEIGHT_POLICY,
+  DEFAULT_COVERAGE_STOP_POLICY,
+  DEFAULT_COVERAGE_ENVIRONMENT,
+} from "@lastest/coverage-model";
 
 export const coverageDimensions = pgTable(
   "coverage_dimensions",
@@ -246,24 +187,6 @@ export const coverageCellRuns = pgTable(
 
 export type CoverageCellRun = typeof coverageCellRuns.$inferSelect;
 export type NewCoverageCellRun = typeof coverageCellRuns.$inferInsert;
-
-/** How a snapshot came to exist. 'backfill' rows are RECONSTRUCTED from the
- *  attribution ledger against today's cell set and weights, so they answer
- *  "how much of the current model had been exercised by then" — not "what the
- *  model said at the time". Kept distinguishable so a trend chart can say so
- *  rather than implying a measurement that never happened. */
-export type CoverageSnapshotSource = "sync" | "build" | "backfill";
-
-/** Per-object-type slice of a snapshot. Mirrors ObjectTypeRollup's headline
- *  numbers (see src/lib/coverage/rollup.ts) — enough to explain a movement in
- *  the total without keeping a second copy of the whole report. */
-export interface CoverageSnapshotObjectType {
-  objectType: string;
-  totalCells: number;
-  coveredCells: number;
-  excludedCells: number;
-  cellCoverage: number;
-}
 
 /**
  * Point-in-time coverage totals. `coverage_cells` is overwritten in place by

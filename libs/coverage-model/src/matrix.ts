@@ -11,13 +11,9 @@
  * and returns the per-run variable bindings. The executor applies them.
  */
 
-import {
-  DEFAULT_MATRIX_POLICY,
-  type CsvDataSource,
-  type GoogleSheetsDataSource,
-  type MatrixPolicy,
-  type TestVariable,
-} from "@/lib/db/schema";
+import type { TabularSourceLike } from "./source-types";
+import { DEFAULT_MATRIX_POLICY, type MatrixPolicy } from "./matrix-policy";
+import type { TestVariableLike as TestVariable } from "./types";
 import { coordsKey } from "./coords";
 import { tableToRecords } from "./cells";
 import { selectRowIndices } from "./row-filter";
@@ -47,8 +43,8 @@ export interface MatrixExpansion {
 
 function sourceRecordsFor(
   variable: TestVariable,
-  gsheetSources: GoogleSheetsDataSource[],
-  csvSources: CsvDataSource[],
+  gsheetSources: TabularSourceLike[],
+  csvSources: TabularSourceLike[],
 ): Array<Record<string, string>> {
   if (!variable.sourceAlias) return [];
   if (variable.sourceType === "gsheet") {
@@ -143,8 +139,8 @@ export function pairwiseReduce<T extends { coords: Record<string, string> }>(
 
 export function expandMatrix(opts: {
   variables: TestVariable[] | null | undefined;
-  gsheetSources: GoogleSheetsDataSource[];
-  csvSources: CsvDataSource[];
+  gsheetSources: TabularSourceLike[];
+  csvSources: TabularSourceLike[];
   policy?: MatrixPolicy | null;
 }): MatrixExpansion {
   const policy = { ...DEFAULT_MATRIX_POLICY, ...(opts.policy ?? {}) };

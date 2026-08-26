@@ -4,12 +4,14 @@ import {
   getRepositoriesByTeam,
   getCoverageCells,
   getCoverageDimensions,
-  getCsvDataSources,
-  getGoogleSheetsDataSources,
   getCoverageTrend,
 } from "@/lib/db/queries";
+import {
+  csvDataSourceTablesForRepo,
+  sheetDataSourceTablesForRepo,
+} from "@/lib/core/data-sources-reads";
 import { getCoverageReport } from "@/lib/coverage/sync";
-import { buildCoverageSpec } from "@/lib/coverage/spec";
+import { buildCoverageSpec } from "@lastest/coverage-model";
 import { describeSources } from "@/lib/coverage/source-rows";
 import { DEFAULT_COVERAGE_ENVIRONMENT } from "@/lib/db/schema";
 import { AddRepoEmptyState } from "../tests/add-repo-empty-state";
@@ -46,14 +48,14 @@ export default async function CoveragePage() {
     getCoverageReport(selectedRepo.id, { environmentKey: env }),
     getCoverageCells(selectedRepo.id, { environmentKey: env }),
     getCoverageDimensions(selectedRepo.id, env),
-    getCsvDataSources(selectedRepo.id),
-    getGoogleSheetsDataSources(selectedRepo.id),
+    csvDataSourceTablesForRepo(selectedRepo.id),
+    sheetDataSourceTablesForRepo(selectedRepo.id),
     getCoverageTrend(selectedRepo.id, { environmentKey: env, limit: 60 }),
   ]);
 
   // Resolved the same way profiling resolves them, so the disclosed sample
   // size is the one the numbers were actually computed from.
-  const sourceSamples = await describeSources(csvSources, sheetSources);
+  const sourceSamples = describeSources([...csvSources, ...sheetSources]);
 
   const spec = buildCoverageSpec({
     repositoryId: selectedRepo.id,
@@ -90,28 +92,21 @@ export default async function CoveragePage() {
         weightedVolumeCoverage: s.weightedVolumeCoverage,
       }))}
       sources={[
-        ...csvSources.map((s) => ({
+        ...csvSources.map((t) => ({
           kind: "csv" as const,
-          alias: s.alias,
-          rows:
-            sourceSamples.find((x) => x.objectType === s.alias)?.totalRows ??
-            s.rowCount ??
-            0,
-          profiledRows:
-            sourceSamples.find((x) => x.objectType === s.alias)?.profiledRows ??
-            0,
-          truncated:
-            sourceSamples.find((x) => x.objectType === s.alias)?.truncated ??
-            false,
-          columns: s.cachedHeaders ?? [],
+          alias: t.alias,
+          rows: t.totalRows,
+          profiledRows: t.profiledRows,
+          truncated: t.truncated,
+          columns: t.headers,
         })),
-        ...sheetSources.map((s) => ({
+        ...sheetSources.map((t) => ({
           kind: "sheet" as const,
-          alias: s.alias,
-          rows: s.cachedData?.length ?? 0,
-          profiledRows: s.cachedData?.length ?? 0,
-          truncated: false,
-          columns: s.cachedHeaders ?? [],
+          alias: t.alias,
+          rows: t.totalRows,
+          profiledRows: t.profiledRows,
+          truncated: t.truncated,
+          columns: t.headers,
         })),
       ]}
     />

@@ -23,12 +23,14 @@ import { AlertTriangle, Grid3x3 } from "lucide-react";
 import { toast } from "sonner";
 import {
   DEFAULT_MATRIX_POLICY,
-  type CsvDataSource,
-  type GoogleSheetsDataSource,
   type MatrixPolicy,
   type TestVariable,
 } from "@/lib/db/schema";
-import { expandMatrix, matrixVariables } from "@/lib/coverage/matrix";
+import type {
+  CsvDataSource,
+  GoogleSheetsDataSource,
+} from "@lastest/plugin-data-sources";
+import { expandMatrix, matrixVariables } from "@lastest/coverage-model";
 import { saveTestMatrixPolicy } from "@/server/actions/tests";
 
 export interface MatrixPolicyCardProps {

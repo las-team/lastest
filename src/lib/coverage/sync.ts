@@ -20,19 +20,29 @@ import {
   type CoverageWeightPolicy,
 } from "@/lib/db/schema";
 import * as queries from "@/lib/db/queries";
-import { coordsKey } from "./coords";
-import { deriveCells, tableToRecords, type DerivedCell } from "./cells";
+import { type SourceTable } from "./source-rows";
 import {
-  profileCsvSource,
-  profileObservedRuns,
-  profileSheetSource,
-  type ProfiledDimension,
-} from "./dimensions";
-import { computeWeights, type WeightInput } from "./weight";
-import { loadCsvTable, loadSheetTable, type SourceTable } from "./source-rows";
-import { buildCoverageReport, isCovered, type CoverageReport } from "./rollup";
-import { evaluateStop, type StopDecision, type StopCell } from "./stop";
+  csvDataSourceTablesForRepo,
+  sheetDataSourceTablesForRepo,
+} from "@/lib/core/data-sources-reads";
 import { backfillCoverageSnapshots, captureCoverageSnapshot } from "./trend";
+import {
+  coordsKey,
+  deriveCells,
+  tableToRecords,
+  type DerivedCell,
+  profileObservedRuns,
+  profileSourceTable,
+  type ProfiledDimension,
+  computeWeights,
+  type WeightInput,
+  buildCoverageReport,
+  isCovered,
+  type CoverageReport,
+  evaluateStop,
+  type StopDecision,
+  type StopCell,
+} from "@lastest/coverage-model";
 
 /** Object type used for dimensions inferred from run history, which has no
  *  inherent object type — the variable names are all we know. */
@@ -99,8 +109,8 @@ export async function profileDimensions(
 }> {
   const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
   const [csvSources, sheetSources, runs] = await Promise.all([
-    queries.getCsvDataSources(repositoryId),
-    queries.getGoogleSheetsDataSources(repositoryId),
+    csvDataSourceTablesForRepo(repositoryId),
+    sheetDataSourceTablesForRepo(repositoryId),
     queries.getAssignedVariableRuns(repositoryId, { limit: opts.runLimit }),
   ]);
 
@@ -108,25 +118,15 @@ export async function profileDimensions(
   const rejected: ProfiledDimension[] = [];
   const sources: SourceSample[] = [];
 
-  for (const source of csvSources) {
-    const table = await loadCsvTable(source);
+  for (const table of csvSources) {
     sources.push(toSample(table));
-    const { accepted, rejected: rej } = profileCsvSource(
-      source,
-      undefined,
-      table,
-    );
+    const { accepted, rejected: rej } = profileSourceTable(table, "csv");
     proposed.push(...accepted);
     rejected.push(...rej);
   }
-  for (const source of sheetSources) {
-    const table = loadSheetTable(source);
+  for (const table of sheetSources) {
     sources.push(toSample(table));
-    const { accepted, rejected: rej } = profileSheetSource(
-      source,
-      undefined,
-      table,
-    );
+    const { accepted, rejected: rej } = profileSourceTable(table, "sheet");
     proposed.push(...accepted);
     rejected.push(...rej);
   }
@@ -218,8 +218,8 @@ export async function deriveAndPersistCells(
   }
 
   const [csvSources, sheetSources, runs] = await Promise.all([
-    queries.getCsvDataSources(repositoryId),
-    queries.getGoogleSheetsDataSources(repositoryId),
+    csvDataSourceTablesForRepo(repositoryId),
+    sheetDataSourceTablesForRepo(repositoryId),
     queries.getAssignedVariableRuns(repositoryId, { limit: opts.runLimit }),
   ]);
 
@@ -245,7 +245,7 @@ export async function deriveAndPersistCells(
     const records =
       objectType === OBSERVED_OBJECT_TYPE
         ? runs.map((r) => r.assignedVariables)
-        : await recordsForObjectType(objectType, csvSources, sheetSources);
+        : recordsForObjectType(objectType, csvSources, sheetSources);
     derived.push(...deriveCells({ objectType, fields, records }));
   }
 
@@ -286,25 +286,18 @@ export async function deriveAndPersistCells(
   return { derived: derived.length, pruned };
 }
 
-async function recordsForObjectType(
+function recordsForObjectType(
   objectType: string,
-  csvSources: Awaited<ReturnType<typeof queries.getCsvDataSources>>,
-  sheetSources: Awaited<ReturnType<typeof queries.getGoogleSheetsDataSources>>,
-): Promise<Array<Record<string, string>>> {
+  csvSources: SourceTable[],
+  sheetSources: SourceTable[],
+): Array<Record<string, string>> {
   // objectType defaults to the source alias during profiling, so match on it.
   // Cells are derived from the same full-file view the dimensions were
   // profiled from, or the two disagree about which combinations occur.
-  const csv = csvSources.find((s) => s.alias === objectType);
-  if (csv) {
-    const table = await loadCsvTable(csv);
-    return tableToRecords(table.headers, table.rows);
-  }
-  const sheet = sheetSources.find((s) => s.alias === objectType);
-  if (sheet) {
-    const table = loadSheetTable(sheet);
-    return tableToRecords(table.headers, table.rows);
-  }
-  return [];
+  const table =
+    csvSources.find((s) => s.alias === objectType) ??
+    sheetSources.find((s) => s.alias === objectType);
+  return table ? tableToRecords(table.headers, table.rows) : [];
 }
 
 /**

@@ -218,7 +218,7 @@ export async function saveTestVariables(
             `Variable "${v.name}" can only use matrix mode with a CSV or Google Sheet source`,
           );
         }
-        const { parseRowFilter } = await import("@/lib/coverage/row-filter");
+        const { parseRowFilter } = await import("@lastest/coverage-model");
         const parsed = parseRowFilter(v.rowFilter);
         if (parsed.errors.length > 0) {
           throw new Error(

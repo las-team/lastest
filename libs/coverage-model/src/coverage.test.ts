@@ -11,7 +11,10 @@ import {
 } from "./weight";
 import { computeMetrics, evaluateStop } from "./stop";
 import { buildCoverageReport } from "./rollup";
-import type { CoverageCell, CoverageDimension } from "@/lib/db/schema";
+import type {
+  CellLike as CoverageCell,
+  DimensionLike as CoverageDimension,
+} from "./types";
 
 describe("coordsKey", () => {
   it("is stable regardless of key order", () => {

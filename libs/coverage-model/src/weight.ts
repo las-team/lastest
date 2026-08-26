@@ -14,7 +14,7 @@ import {
   DEFAULT_COVERAGE_WEIGHT_POLICY,
   type CoverageWeightBreakdown,
   type CoverageWeightPolicy,
-} from "@/lib/db/schema";
+} from "./policy";
 import { projectCoords, coordsKey } from "./coords";
 
 export interface WeightInput {
