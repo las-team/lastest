@@ -895,7 +895,12 @@ export function AppMapClient({
     }
   }, []);
 
-  if (!graph) {
+  // With no app-supplied views there is nothing else on this screen, so an
+  // undiscovered app *is* the screen. With them, the empty state has to stay
+  // inside the Map view: it would otherwise hide the coverage setup behind a
+  // crawl the user has not run yet — and profiling data sources is exactly
+  // what someone does before they have ever pointed the app at their site.
+  if (!graph && !dataView && !gapsView) {
     return (
       <EmptyState
         reason={emptyReason}
@@ -952,9 +957,11 @@ export function AppMapClient({
           {filtered.hiddenCount > 0 && ` · ${filtered.hiddenCount} hidden`}
           {coverageSummary ? ` · ${coverageSummary}` : ""}
         </span>
-        <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-          {graph.branch}
-        </span>
+        {graph && (
+          <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+            {graph.branch}
+          </span>
+        )}
         <div className="ml-auto flex items-center gap-2">
           {exploringSessionId ? (
             <div className="flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/5 px-2.5 py-1 text-xs">
@@ -1000,7 +1007,17 @@ export function AppMapClient({
           alone and the two never fight for the same edge. */}
       <div className="flex flex-1 min-h-0">
         <div className="relative flex flex-1 min-w-0 min-h-0 flex-col">
-          {view === "map" && (
+          {/* An undiscovered app still renders the strip above, so the empty
+              state belongs to the canvas views rather than to the screen. */}
+          {!graph && !COVERAGE_VIEWS.has(view) && (
+            <EmptyState
+              reason={emptyReason}
+              onRefresh={refresh}
+              refreshing={refreshing}
+            />
+          )}
+
+          {view === "map" && graph && (
             <>
               {/* Toolbar */}
               <div
@@ -1236,11 +1253,11 @@ export function AppMapClient({
             </>
           )}
 
-          {view === "screens" && (
+          {view === "screens" && graph && (
             <ScreensGallery nodes={filtered.nodes} onSelect={setSelected} />
           )}
 
-          {view === "flows" && (
+          {view === "flows" && graph && (
             <FlowsView
               flows={flows}
               loading={flowsLoading}
