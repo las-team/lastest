@@ -794,6 +794,15 @@ async function migrateAwardsTables() {
 // `google_sheets_accounts` (the OAuth credential table, which stays core);
 // that FK goes too, convention-only from here. `deletion.ts`'s
 // `onTeamDeleted`/`onRepoDeleted` are what replace the cascades.
+//
+// Their *shape* changed too, so — unlike the renames above — this one also
+// backfills: `repository_id` and `team_id` were both nullable in core and are
+// `.notNull()` in the plugin schema (with the FKs gone, `team_id` is the only
+// tenancy boundary these tables have left). Push cannot bridge that on its
+// own: `SET NOT NULL` against a column holding one legacy NULL is an error,
+// so a single such row blocks the deploy on every boot. Resolved here first,
+// the same add-nullable → backfill → delete-orphans → SET NOT NULL sequence
+// `migrateA11yBaselineOwnership` uses.
 const DATA_SOURCES_RENAMES = [
   ["csv_data_sources", "data_sources_csv_sources"],
   ["google_sheets_data_sources", "data_sources_google_sheets"],
@@ -818,6 +827,21 @@ async function migrateDataSourcesTables() {
         `select count(*)::text as n from "${name}"`,
       );
       return Number(rows[0]?.n ?? 0);
+    };
+    const columnExists = async (table, column) => {
+      const rows = await sql`
+        select exists (
+          select 1 from information_schema.columns
+          where table_schema = 'public' and table_name = ${table} and column_name = ${column}
+        ) as exists`;
+      return rows[0]?.exists ?? false;
+    };
+    const columnIsNullable = async (table, column) => {
+      const rows = await sql`
+        select is_nullable from information_schema.columns
+         where table_schema = 'public' and table_name = ${table}
+           and column_name = ${column}`;
+      return rows[0]?.is_nullable === "YES";
     };
 
     for (const [from, to] of DATA_SOURCES_RENAMES) {
@@ -854,9 +878,121 @@ async function migrateDataSourcesTables() {
       await sql.unsafe(`alter table ${table} drop constraint "${name}"`);
       console.log(`[migrate] ${table}: dropped FK ${name} (-> ${target})`);
     }
+
+    // Then the NOT NULL tightening, on the NEW table names (so it runs after
+    // the renames above, and on a DB where a previous invocation already did
+    // the rename). Core declared `repository_id`/`team_id` as plain nullable
+    // `.references()` columns on both tables; the plugin schema declares both
+    // `.notNull()`.
+    //
+    // Push issues a bare `ALTER … SET NOT NULL` for that delta, and Postgres
+    // refuses it outright if the column holds a single NULL — one legacy row
+    // and the whole push aborts, on this boot and every boot after it. So the
+    // NULLs are resolved here, before push ever sees the column, and the
+    // constraint is applied here too (push then finds it already satisfied).
+    for (const table of [
+      "data_sources_csv_sources",
+      "data_sources_google_sheets",
+    ]) {
+      // Fresh DB: the table was never created (push makes it NOT NULL from
+      // the start), so there is nothing to reconcile.
+      if (!(await tableExists(table))) continue;
+
+      // Defensive — a DB old enough to predate either column would otherwise
+      // fail the UPDATE below rather than the SET NOT NULL.
+      for (const col of ["repository_id", "team_id"]) {
+        if (!(await columnExists(table, col))) {
+          await sql.unsafe(`alter table "${table}" add column "${col}" text`);
+          console.log(`[migrate] ${table}: added ${col}`);
+        }
+      }
+
+      // Idempotent: a re-run (or a table push already created) finds both
+      // columns NOT NULL, which means the backfill is done and no NULL can
+      // have appeared since. Skip the scans entirely.
+      if (
+        !(await columnIsNullable(table, "repository_id")) &&
+        !(await columnIsNullable(table, "team_id"))
+      ) {
+        continue;
+      }
+
+      // 1. team_id from the row's own repository. This is the ownership these
+      //    rows always had implicitly — a data source is created inside a
+      //    repo, and `repositories.team_id` is who that repo belongs to.
+      const byRepo = await sql.unsafe(`
+        update "${table}" d
+           set team_id = r.team_id
+          from repositories r
+         where d.repository_id = r.id
+           and d.team_id is null
+           and r.team_id is not null`);
+      const byRepoCount = (byRepo && byRepo.count) || 0;
+      if (byRepoCount > 0) {
+        console.log(
+          `[migrate] ${table}: backfilled team_id on ${byRepoCount} row(s) from repositories.team_id`,
+        );
+      }
+
+      // 2. Sheets only: the second derivation path. A sheet row points at the
+      //    `google_sheets_accounts` OAuth row it was linked through, and that
+      //    account carries the team — so a sheet whose repo is gone or whose
+      //    repo has no team can still be resolved. CSV rows have no such
+      //    second reference; the repo is their only link to a team.
+      if (
+        table === "data_sources_google_sheets" &&
+        (await columnExists(table, "google_sheets_account_id")) &&
+        (await tableExists("google_sheets_accounts"))
+      ) {
+        const byAccount = await sql.unsafe(`
+          update "${table}" d
+             set team_id = a.team_id
+            from google_sheets_accounts a
+           where d.google_sheets_account_id = a.id
+             and d.team_id is null
+             and a.team_id is not null`);
+        const byAccountCount = (byAccount && byAccount.count) || 0;
+        if (byAccountCount > 0) {
+          console.log(
+            `[migrate] ${table}: backfilled team_id on ${byAccountCount} row(s) from google_sheets_accounts.team_id`,
+          );
+        }
+      }
+
+      // 3. Whatever is still NULL cannot satisfy the new schema. `team_id`
+      //    has no third derivation, and `repository_id` has none at all —
+      //    nothing anywhere records which repo a repo-less source belonged
+      //    to. Deleted rather than migrated, the same call
+      //    `migrateA11yBaselineOwnership` makes: a source with no repo is
+      //    already unreachable from the UI, which lists them per repo.
+      const [{ n: orphaned }] = await sql.unsafe(
+        `select count(*)::text as n from "${table}"
+          where repository_id is null or team_id is null`,
+      );
+      if (Number(orphaned) > 0) {
+        await sql.unsafe(
+          `delete from "${table}" where repository_id is null or team_id is null`,
+        );
+        console.warn(
+          `[migrate] ${table}: deleted ${orphaned} row(s) with an unresolvable` +
+            ` repository_id/team_id (no repo to derive a team from, and no repo` +
+            ` to attribute the row to) — the plugin schema requires both NOT NULL`,
+        );
+      }
+
+      await sql.unsafe(
+        `alter table "${table}" alter column repository_id set not null`,
+      );
+      await sql.unsafe(
+        `alter table "${table}" alter column team_id set not null`,
+      );
+      console.log(`[migrate] ${table}: repository_id/team_id set not null`);
+    }
   } catch (e) {
-    // FATAL — a skipped rename means push DROPs both data-source tables.
-    // Rethrow so main() exits before push (see migrateExplorerTables).
+    // FATAL — a skipped rename means push DROPs both data-source tables, and a
+    // skipped backfill means push hits `SET NOT NULL` over a NULL and aborts,
+    // blocking the deploy on every boot. Rethrow so main() exits before push
+    // (see migrateExplorerTables).
     console.error("[migrate] data-sources table migration FAILED:", e.message);
     throw e;
   } finally {
