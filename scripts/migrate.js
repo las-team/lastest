@@ -5,6 +5,14 @@
  *
  * Pre-creates tables that drizzle-kit might confuse with renames
  * (e.g. user_consents vs suites) to avoid interactive prompts.
+ *
+ * Failure policy: the plugin-table rename/backfill/FK-drop steps below are
+ * FATAL on unexpected errors — they rethrow, main() exits non-zero, and
+ * `drizzle-kit push --force` never runs. Push cannot see a rename: a skipped
+ * rename step means old-name-present/new-name-absent, which push resolves as
+ * DROP old + CREATE new, destroying the rows these steps exist to protect.
+ * Only steps whose skip cannot make push destructive (preCreate, nullOrphans,
+ * bumpPoolDefaults, ensureUniqueIndexes) stay warn-and-continue.
  */
 const { execSync } = require("child_process");
 
@@ -46,6 +54,8 @@ async function preCreate() {
     await sql.unsafe(PRE_CREATE_SQL);
     console.log("[migrate] Pre-create done");
   } catch (e) {
+    // Safe to skip against push --force: these tables are in the schema, so a
+    // missed pre-create only leaves push to CREATE them itself — never a DROP.
     console.log("[migrate] Pre-create skipped:", e.message);
   } finally {
     if (sql) await sql.end();
@@ -89,6 +99,8 @@ async function nullOrphans() {
           );
         }
       } catch (e) {
+        // Safe to skip against push --force: leftover orphans make push FAIL
+        // on the FK re-add (exit non-zero) — a stuck boot, not lost rows.
         console.warn(
           `[migrate] orphan-null skipped for ${t.table}.${t.col}:`,
           e.message,
@@ -96,6 +108,8 @@ async function nullOrphans() {
       }
     }
   } catch (e) {
+    // Safe to skip against push --force: same as above — worst case push
+    // fails on the FK constraint and exits non-zero; nothing is dropped.
     console.log("[migrate] orphan cleanup skipped:", e.message);
   } finally {
     if (sql) await sql.end();
@@ -128,6 +142,8 @@ async function bumpPoolDefaults() {
       );
     }
   } catch (e) {
+    // Safe to skip against push --force: a pure UPDATE of settings values —
+    // no table/column shape changes, so push has nothing extra to drop.
     console.warn("[migrate] pool default bump skipped:", e.message);
   } finally {
     if (sql) await sql.end();
@@ -181,6 +197,8 @@ async function ensureUniqueIndexes() {
           `CREATE UNIQUE INDEX IF NOT EXISTS "${ix.indexName}" ON "${ix.table}" (${cols})`,
         );
       } catch (e) {
+        // Safe to skip against push --force: without the dedup, push merely
+        // fails the CREATE UNIQUE INDEX DDL and moves on — no DROP involved.
         console.warn(
           `[migrate] unique-index ensure skipped for ${ix.indexName}:`,
           e.message,
@@ -188,6 +206,8 @@ async function ensureUniqueIndexes() {
       }
     }
   } catch (e) {
+    // Safe to skip against push --force: same as above — a failed index DDL
+    // in push is non-destructive.
     console.log("[migrate] unique-index ensure skipped:", e.message);
   } finally {
     if (sql) await sql.end();
@@ -308,7 +328,13 @@ async function migrateExplorerTables() {
       }
     }
   } catch (e) {
-    console.warn("[migrate] explorer table migration skipped:", e.message);
+    // FATAL — never warn-and-continue here. A transient failure (lock timeout
+    // on the ALTER, dropped connection) would leave the old names in place,
+    // and `drizzle-kit push --force` below would resolve that as DROP old +
+    // CREATE new, destroying the rows. Rethrow so main() exits before push;
+    // `finally` still closes the connection on this path.
+    console.error("[migrate] explorer table migration FAILED:", e.message);
+    throw e;
   } finally {
     if (sql) await sql.end();
   }
@@ -412,7 +438,12 @@ async function migrateA11yBaselineOwnership() {
       console.log(`[migrate] a11y_baselines: dropped FK ${name}`);
     }
   } catch (e) {
-    console.warn("[migrate] a11y baseline migration skipped:", e.message);
+    // FATAL — a half-done run (columns added but not backfilled/NOT NULL, FK
+    // still present) is exactly what push must never see: it would apply the
+    // NOT NULL/FK delta itself, and against a populated table that path can
+    // drop rows. Rethrow so main() exits before push (see migrateExplorerTables).
+    console.error("[migrate] a11y baseline migration FAILED:", e.message);
+    throw e;
   } finally {
     if (sql) await sql.end();
   }
@@ -459,7 +490,12 @@ async function dropPluginUserForeignKeys() {
       console.log(`[migrate] ${table}: dropped FK ${name} (-> users)`);
     }
   } catch (e) {
-    console.warn("[migrate] plugin FK migration skipped:", e.message);
+    // FATAL — if these FKs survive into push, it drops them by schema-derived
+    // names that don't match the implicitly-created ones, and how --force
+    // reconciles that mismatch is not something to bet the launch_* rows on.
+    // Rethrow so main() exits before push (see migrateExplorerTables).
+    console.error("[migrate] plugin FK migration FAILED:", e.message);
+    throw e;
   } finally {
     if (sql) await sql.end();
   }
@@ -522,7 +558,11 @@ async function migrateGamificationTables() {
       console.log(`[migrate] renamed ${from} -> ${to}`);
     }
   } catch (e) {
-    console.warn("[migrate] gamification rename skipped:", e.message);
+    // FATAL — a skipped rename means push DROPs `bots` et al. and CREATEs the
+    // `gamification_*` names empty. Rethrow so main() exits before push
+    // (see migrateExplorerTables).
+    console.error("[migrate] gamification rename FAILED:", e.message);
+    throw e;
   } finally {
     if (sql) await sql.end();
   }
@@ -603,7 +643,11 @@ async function migrateCiTables() {
       console.log(`[migrate] ${table}: dropped FK ${name} (-> ${target})`);
     }
   } catch (e) {
-    console.warn("[migrate] ci table migration skipped:", e.message);
+    // FATAL — a skipped rename means push DROPs the old config tables,
+    // webhook secrets included. Rethrow so main() exits before push
+    // (see migrateExplorerTables).
+    console.error("[migrate] ci table migration FAILED:", e.message);
+    throw e;
   } finally {
     if (sql) await sql.end();
   }
@@ -652,7 +696,10 @@ async function migrateShareTables() {
       console.log(`[migrate] renamed ${from} -> ${to}`);
     }
   } catch (e) {
-    console.warn("[migrate] share table migration skipped:", e.message);
+    // FATAL — a skipped rename means push DROPs `public_shares`. Rethrow so
+    // main() exits before push (see migrateExplorerTables).
+    console.error("[migrate] share table migration FAILED:", e.message);
+    throw e;
   } finally {
     if (sql) await sql.end();
   }
@@ -724,7 +771,10 @@ async function migrateAwardsTables() {
       console.log(`[migrate] ${table}: dropped FK ${name} (-> ${target})`);
     }
   } catch (e) {
-    console.warn("[migrate] awards table migration skipped:", e.message);
+    // FATAL — a skipped rename means push DROPs `repo_awards`. Rethrow so
+    // main() exits before push (see migrateExplorerTables).
+    console.error("[migrate] awards table migration FAILED:", e.message);
+    throw e;
   } finally {
     if (sql) await sql.end();
   }
@@ -805,7 +855,10 @@ async function migrateDataSourcesTables() {
       console.log(`[migrate] ${table}: dropped FK ${name} (-> ${target})`);
     }
   } catch (e) {
-    console.warn("[migrate] data-sources table migration skipped:", e.message);
+    // FATAL — a skipped rename means push DROPs both data-source tables.
+    // Rethrow so main() exits before push (see migrateExplorerTables).
+    console.error("[migrate] data-sources table migration FAILED:", e.message);
+    throw e;
   } finally {
     if (sql) await sql.end();
   }
@@ -876,7 +929,10 @@ async function migrateSchedulingTables() {
       console.log(`[migrate] ${table}: dropped FK ${name} (-> ${target})`);
     }
   } catch (e) {
-    console.warn("[migrate] scheduling table migration skipped:", e.message);
+    // FATAL — a skipped rename means push DROPs `build_schedules`. Rethrow so
+    // main() exits before push (see migrateExplorerTables).
+    console.error("[migrate] scheduling table migration FAILED:", e.message);
+    throw e;
   } finally {
     if (sql) await sql.end();
   }
@@ -909,4 +965,10 @@ async function main() {
   }
 }
 
-main();
+// A rethrown pre-push step lands here: the step already console.error'd and
+// closed its connection in `finally`; exit non-zero so `drizzle-kit push
+// --force` never runs against a half-migrated database.
+main().catch((e) => {
+  console.error("[migrate] aborted before drizzle-kit push:", e.message);
+  process.exit(1);
+});
