@@ -117,7 +117,10 @@ export async function requestCoverage(input: {
 }): Promise<{ taskId: string }> {
   const { host } = await scope(input.repositoryId);
   const result = await host.requestCoverage(input);
-  revalidatePath("/app-map");
+  // The map renders at /coverage now (it is the canvas view of core's Coverage
+  // screen); /app-map is only a redirect, so revalidating that would refresh
+  // nothing anyone is looking at.
+  revalidatePath("/coverage");
   return result;
 }
 
@@ -169,7 +172,7 @@ export async function startExploration(
     email: input.email,
     password: input.password,
   });
-  revalidatePath("/app-map");
+  revalidatePath("/coverage");
   return { sessionId };
 }
 

@@ -22,8 +22,18 @@ import {
   type NewCoverageCell,
   type NewCoverageDimension,
   type NewCoverageSnapshot,
+  type UrlTrajectoryStep,
 } from "../schema";
-import { and, asc, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  notInArray,
+  sql,
+} from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 
 // ── Dimensions ──────────────────────────────────────────────────────────────
@@ -353,6 +363,61 @@ export async function getDataCellResults(testRunId: string): Promise<
       ),
     );
   return rows;
+}
+
+/**
+ * Every recorded cell↔run pairing that also carries a URL trajectory.
+ *
+ * The raw material for page-level attribution: `coverage_cell_runs` says which
+ * run exercised which cell, and `test_results.urlTrajectory` says which pages
+ * that same run walked through. Joining them on the run is what lets the
+ * Coverage canvas answer "which data cells went through *this* page" — a
+ * question neither the cell table nor the app map can answer alone.
+ *
+ * Deliberately not filtered by verdict: a failing run still exercised the
+ * combination on that page, and hiding it would overstate the gap.
+ */
+export async function getCoverageCellRunTrajectories(
+  repositoryId: string,
+  opts: { environmentKey?: string; limit?: number } = {},
+): Promise<
+  Array<{
+    cellId: string;
+    coordsKey: string;
+    objectType: string;
+    coords: Record<string, string>;
+    observedCount: number;
+    verdict: string | null;
+    ranAt: Date | null;
+    urlTrajectory: UrlTrajectoryStep[] | null;
+  }>
+> {
+  return db
+    .select({
+      cellId: coverageCells.id,
+      coordsKey: coverageCells.coordsKey,
+      objectType: coverageCells.objectType,
+      coords: coverageCells.coords,
+      observedCount: coverageCells.observedCount,
+      verdict: coverageCellRuns.verdict,
+      ranAt: coverageCellRuns.ranAt,
+      urlTrajectory: testResults.urlTrajectory,
+    })
+    .from(coverageCellRuns)
+    .innerJoin(coverageCells, eq(coverageCellRuns.cellId, coverageCells.id))
+    .innerJoin(testResults, eq(coverageCellRuns.testResultId, testResults.id))
+    .where(
+      and(
+        eq(coverageCells.repositoryId, repositoryId),
+        eq(
+          coverageCells.environmentKey,
+          opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT,
+        ),
+        isNotNull(testResults.urlTrajectory),
+      ),
+    )
+    .orderBy(desc(coverageCellRuns.ranAt))
+    .limit(opts.limit ?? 20000);
 }
 
 /** Record cell↔run attribution. Idempotent per (cell, testResult). */

@@ -87,13 +87,36 @@ export type ExploreProgressPanelComponent = React.ComponentType<{
   onClose: () => void;
 }>;
 
+/**
+ * The data-coverage rail beside the canvas, supplied by the app.
+ *
+ * Same arrangement as `ExploreProgressPanelComponent`, for the same reason:
+ * the coverage model, its queries and its server actions are core, and a
+ * plugin may not hold them. What the plugin owns is the *placement* — it knows
+ * which node is selected, so it is the only thing that can tell the rail what
+ * to scope itself to. Everything it passes is a page fact it already had; no
+ * coverage type crosses the boundary.
+ */
+export type CoverageRailComponent = React.ComponentType<{
+  /** Canonical path of the selected node, or null when nothing is selected. */
+  selectedPath: string | null;
+  selectedTitle: string | null;
+  selectedStatus: CoverageStatus | null;
+  /** Switch the tab strip to the app-supplied views. */
+  onOpenGaps: () => void;
+  onOpenData: () => void;
+}>;
+
 // ── Layout constants ──────────────────────────────────────────────────────────
 // Thumbnail is 16:9 (matches the default 1920×1080 run viewport), so
 // NODE_H = 248 * 9/16 (≈140) + card body (~82).
 const NODE_W = 248;
 const NODE_H = 222;
 
-type MapView = "map" | "screens" | "flows";
+type MapView = "map" | "screens" | "flows" | "data" | "gaps";
+
+/** The views the app can add to the tab strip — see `AppMapClientProps`. */
+const COVERAGE_VIEWS = new Set<MapView>(["data", "gaps"]);
 
 function edgeStyle(kind: AppMapEdge["kind"]): React.CSSProperties {
   if (kind === "redirect")
@@ -323,6 +346,18 @@ interface AppMapClientProps {
   exploreProgressPanel: ExploreProgressPanelComponent;
   /** App-supplied — cancelling a QA-agent session is qa-agent's action. */
   onCancelExploration: (sessionId: string) => Promise<void>;
+  /**
+   * App-supplied data-coverage surfaces, all optional — without them this is
+   * the standalone App Map it has always been. With them the same screen also
+   * answers the data-space question, which is what `/coverage` mounts.
+   */
+  dataView?: React.ReactNode;
+  gapsView?: React.ReactNode;
+  coverageRail?: CoverageRailComponent;
+  /** Appended to the counts line in the tab strip (e.g. "62 cells · 41 covered"). */
+  coverageSummary?: string;
+  /** Badge on the Gaps tab. */
+  coverageGapCount?: number;
 }
 
 export function AppMapClient({
@@ -335,6 +370,11 @@ export function AppMapClient({
   activeExploration,
   exploreProgressPanel: ExploreProgressPanel,
   onCancelExploration,
+  dataView,
+  gapsView,
+  coverageRail: CoverageRail,
+  coverageSummary,
+  coverageGapCount = 0,
 }: AppMapClientProps) {
   const [graph, setGraph] = useState<AppMapGraph | null>(initialGraph);
   const [selected, setSelected] = useState<AppMapNode | null>(null);
@@ -351,7 +391,13 @@ export function AppMapClient({
   // jumping after fitView.
   const stateStorageKey = `app-map:state:${repositoryId}`;
   const legacyFilterKey = `app-map:filters:${repositoryId}`;
-  const [view, setView] = useState<MapView>("map");
+  const [storedView, setView] = useState<MapView>("map");
+  // A restored app-supplied view that this mount was not given must not strand
+  // the user on a blank tab — the standalone App Map route supplies neither.
+  const view: MapView =
+    (storedView === "data" && !dataView) || (storedView === "gaps" && !gapsView)
+      ? "map"
+      : storedView;
   const [excludePatterns, setExcludePatterns] = useState<string[]>([]);
   const [entryRootId, setEntryRootId] = useState<string | null>(null);
   const [outlineOpen, setOutlineOpen] = useState(false);
@@ -387,7 +433,9 @@ export function AppMapClient({
         if (
           parsed?.view === "map" ||
           parsed?.view === "screens" ||
-          parsed?.view === "flows"
+          parsed?.view === "flows" ||
+          parsed?.view === "data" ||
+          parsed?.view === "gaps"
         ) {
           setView(parsed.view);
         }
@@ -875,12 +923,34 @@ export function AppMapClient({
             <TabsTrigger value="flows" className="text-xs">
               Flows
             </TabsTrigger>
+            {/* The app-supplied half of the strip. Separated by a rule rather
+                than a second TabsList: they are peer views of one screen, and
+                two lists would re-draw the seam this screen exists to remove. */}
+            {(dataView || gapsView) && (
+              <span className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+            )}
+            {dataView && (
+              <TabsTrigger value="data" className="text-xs">
+                Data
+              </TabsTrigger>
+            )}
+            {gapsView && (
+              <TabsTrigger value="gaps" className="text-xs">
+                Gaps
+                {coverageGapCount > 0 && (
+                  <span className="ml-1 rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
+                    {coverageGapCount}
+                  </span>
+                )}
+              </TabsTrigger>
+            )}
           </TabsList>
         </Tabs>
         <span className="hidden text-xs text-muted-foreground sm:block">
           {filtered.nodes.length} pages · {coveredCount} covered ·{" "}
           {uncoveredCount} uncovered
           {filtered.hiddenCount > 0 && ` · ${filtered.hiddenCount} hidden`}
+          {coverageSummary ? ` · ${coverageSummary}` : ""}
         </span>
         <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
           {graph.branch}
@@ -924,36 +994,41 @@ export function AppMapClient({
         </div>
       </div>
 
-      {/* View content */}
-      <div className="relative flex flex-1 min-h-0 flex-col">
-        {view === "map" && (
-          <>
-            {/* Toolbar */}
-            <div
-              className={`absolute top-3 z-10 flex items-center gap-2 rounded-lg border bg-card/95 px-3 py-2 shadow-sm backdrop-blur ${
-                outlineOpen && tree ? "left-[268px]" : "left-3"
-              }`}
-            >
-              <Waypoints className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm font-semibold">App Map</span>
-              {hierarchyActive && (
-                <button
-                  type="button"
-                  onClick={() => onSetEntryRoot(null)}
-                  className="flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium text-primary hover:bg-muted"
-                  title="Clear the entry root and return to the free-form layout"
-                >
-                  <Home className="h-3 w-3" /> {entryRootId}
-                  <X className="h-3 w-3" />
-                </button>
-              )}
-            </div>
+      {/* View content — canvas column plus the app-supplied coverage rail. The
+          rail is a sibling, not an overlay, so the node detail panel (which is
+          absolutely positioned inside the column) still slides over the canvas
+          alone and the two never fight for the same edge. */}
+      <div className="flex flex-1 min-h-0">
+        <div className="relative flex flex-1 min-w-0 min-h-0 flex-col">
+          {view === "map" && (
+            <>
+              {/* Toolbar */}
+              <div
+                className={`absolute top-3 z-10 flex items-center gap-2 rounded-lg border bg-card/95 px-3 py-2 shadow-sm backdrop-blur ${
+                  outlineOpen && tree ? "left-[268px]" : "left-3"
+                }`}
+              >
+                <Waypoints className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-semibold">App Map</span>
+                {hierarchyActive && (
+                  <button
+                    type="button"
+                    onClick={() => onSetEntryRoot(null)}
+                    className="flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium text-primary hover:bg-muted"
+                    title="Clear the entry root and return to the free-form layout"
+                  >
+                    <Home className="h-3 w-3" /> {entryRootId}
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
 
-            {/* Legend + actions */}
-            <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
-              <div className="hidden items-center gap-2 rounded-lg border bg-card/95 px-3 py-2 text-[11px] shadow-sm backdrop-blur sm:flex">
-                {(["covered", "planned", "uncovered"] as CoverageStatus[]).map(
-                  (c) => (
+              {/* Legend + actions */}
+              <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
+                <div className="hidden items-center gap-2 rounded-lg border bg-card/95 px-3 py-2 text-[11px] shadow-sm backdrop-blur sm:flex">
+                  {(
+                    ["covered", "planned", "uncovered"] as CoverageStatus[]
+                  ).map((c) => (
                     <span key={c} className="flex items-center gap-1">
                       <span
                         className="h-2.5 w-2.5 rounded-full"
@@ -961,246 +1036,271 @@ export function AppMapClient({
                       />
                       {COVERAGE_LABEL[c]}
                     </span>
-                  ),
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => setOutlineOpen((o) => !o)}
-                className={`flex items-center gap-1 rounded-lg border bg-card/95 px-2.5 py-2 text-xs font-medium shadow-sm backdrop-blur hover:bg-muted ${
-                  outlineOpen ? "text-primary border-primary/40" : ""
-                }`}
-                title="Toggle the page-hierarchy outline"
-              >
-                <PanelLeft className="h-4 w-4" />
-              </button>
-              <div className="relative">
+                  ))}
+                </div>
                 <button
                   type="button"
-                  onClick={() => setFilterOpen((o) => !o)}
+                  onClick={() => setOutlineOpen((o) => !o)}
                   className={`flex items-center gap-1 rounded-lg border bg-card/95 px-2.5 py-2 text-xs font-medium shadow-sm backdrop-blur hover:bg-muted ${
-                    excludePatterns.length > 0
-                      ? "text-primary border-primary/40"
-                      : ""
+                    outlineOpen ? "text-primary border-primary/40" : ""
                   }`}
-                  title="Filter pages"
+                  title="Toggle the page-hierarchy outline"
                 >
-                  <Filter className="h-4 w-4" />
-                  {excludePatterns.length > 0 && (
-                    <span className="rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground">
-                      {excludePatterns.length}
-                    </span>
-                  )}
+                  <PanelLeft className="h-4 w-4" />
                 </button>
-
-                {filterOpen && (
-                  <div className="absolute right-0 top-full z-20 mt-2 w-72 rounded-lg border bg-card p-3 shadow-xl">
-                    <div className="mb-2 text-xs font-semibold">Hide pages</div>
-                    <form
-                      className="flex gap-1.5"
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        addPattern(patternDraft);
-                      }}
-                    >
-                      <input
-                        value={patternDraft}
-                        onChange={(e) => setPatternDraft(e.target.value)}
-                        placeholder="/r/*"
-                        className="h-7 min-w-0 flex-1 rounded-md border bg-background px-2 font-mono text-xs outline-none focus:ring-1 focus:ring-ring"
-                      />
-                      <button
-                        type="submit"
-                        disabled={!patternDraft.trim()}
-                        className="flex h-7 items-center gap-1 rounded-md border bg-muted px-2 text-xs font-medium hover:bg-muted/70 disabled:opacity-50"
-                      >
-                        <Plus className="h-3 w-3" /> Add
-                      </button>
-                    </form>
-                    <p className="mt-1.5 text-[10px] text-muted-foreground">
-                      Glob patterns against the page path — <code>*</code>{" "}
-                      matches anything.
-                    </p>
-
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setFilterOpen((o) => !o)}
+                    className={`flex items-center gap-1 rounded-lg border bg-card/95 px-2.5 py-2 text-xs font-medium shadow-sm backdrop-blur hover:bg-muted ${
+                      excludePatterns.length > 0
+                        ? "text-primary border-primary/40"
+                        : ""
+                    }`}
+                    title="Filter pages"
+                  >
+                    <Filter className="h-4 w-4" />
                     {excludePatterns.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {excludePatterns.map((p) => (
-                          <button
-                            key={p}
-                            type="button"
-                            onClick={() => removePattern(p)}
-                            className="group flex items-center gap-1 rounded-full border bg-muted px-2 py-0.5 font-mono text-[11px] hover:border-destructive/50"
-                            title="Remove filter"
-                          >
-                            {p}
-                            <X className="h-3 w-3 text-muted-foreground group-hover:text-destructive" />
-                          </button>
-                        ))}
-                      </div>
+                      <span className="rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground">
+                        {excludePatterns.length}
+                      </span>
                     )}
+                  </button>
 
-                    {suggestions.length > 0 && (
-                      <div className="mt-2">
-                        <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                          Suggested
-                        </div>
-                        <div className="flex flex-wrap gap-1">
-                          {suggestions.map((p) => (
+                  {filterOpen && (
+                    <div className="absolute right-0 top-full z-20 mt-2 w-72 rounded-lg border bg-card p-3 shadow-xl">
+                      <div className="mb-2 text-xs font-semibold">
+                        Hide pages
+                      </div>
+                      <form
+                        className="flex gap-1.5"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          addPattern(patternDraft);
+                        }}
+                      >
+                        <input
+                          value={patternDraft}
+                          onChange={(e) => setPatternDraft(e.target.value)}
+                          placeholder="/r/*"
+                          className="h-7 min-w-0 flex-1 rounded-md border bg-background px-2 font-mono text-xs outline-none focus:ring-1 focus:ring-ring"
+                        />
+                        <button
+                          type="submit"
+                          disabled={!patternDraft.trim()}
+                          className="flex h-7 items-center gap-1 rounded-md border bg-muted px-2 text-xs font-medium hover:bg-muted/70 disabled:opacity-50"
+                        >
+                          <Plus className="h-3 w-3" /> Add
+                        </button>
+                      </form>
+                      <p className="mt-1.5 text-[10px] text-muted-foreground">
+                        Glob patterns against the page path — <code>*</code>{" "}
+                        matches anything.
+                      </p>
+
+                      {excludePatterns.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {excludePatterns.map((p) => (
                             <button
                               key={p}
                               type="button"
-                              onClick={() => addPattern(p)}
-                              className="flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 font-mono text-[11px] text-muted-foreground hover:bg-muted"
+                              onClick={() => removePattern(p)}
+                              className="group flex items-center gap-1 rounded-full border bg-muted px-2 py-0.5 font-mono text-[11px] hover:border-destructive/50"
+                              title="Remove filter"
                             >
-                              <Plus className="h-3 w-3" /> {p}
+                              {p}
+                              <X className="h-3 w-3 text-muted-foreground group-hover:text-destructive" />
                             </button>
                           ))}
                         </div>
-                      </div>
-                    )}
+                      )}
 
-                    {filtered.hiddenCount > 0 && (
-                      <div className="mt-2 text-[11px] text-muted-foreground">
-                        {filtered.hiddenCount} page
-                        {filtered.hiddenCount === 1 ? "" : "s"} hidden
-                      </div>
-                    )}
-                  </div>
-                )}
+                      {suggestions.length > 0 && (
+                        <div className="mt-2">
+                          <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                            Suggested
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {suggestions.map((p) => (
+                              <button
+                                key={p}
+                                type="button"
+                                onClick={() => addPattern(p)}
+                                className="flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 font-mono text-[11px] text-muted-foreground hover:bg-muted"
+                              >
+                                <Plus className="h-3 w-3" /> {p}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {filtered.hiddenCount > 0 && (
+                        <div className="mt-2 text-[11px] text-muted-foreground">
+                          {filtered.hiddenCount} page
+                          {filtered.hiddenCount === 1 ? "" : "s"} hidden
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={resetView}
+                  className="flex items-center gap-1 rounded-lg border bg-card/95 px-2.5 py-2 text-xs font-medium shadow-sm backdrop-blur hover:bg-muted"
+                  title="Reset view — clears filters, moved cards, entry root, and zoom"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={refresh}
+                  disabled={refreshing}
+                  className="flex items-center gap-1 rounded-lg border bg-card/95 px-2.5 py-2 text-xs font-medium shadow-sm backdrop-blur hover:bg-muted disabled:opacity-60"
+                  title="Rebuild the map"
+                >
+                  <RefreshCw
+                    className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleFullscreen}
+                  className="flex items-center gap-1 rounded-lg border bg-card/95 px-2.5 py-2 text-xs font-medium shadow-sm backdrop-blur hover:bg-muted"
+                  title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                >
+                  {isFullscreen ? (
+                    <Minimize2 className="h-4 w-4" />
+                  ) : (
+                    <Maximize2 className="h-4 w-4" />
+                  )}
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={resetView}
-                className="flex items-center gap-1 rounded-lg border bg-card/95 px-2.5 py-2 text-xs font-medium shadow-sm backdrop-blur hover:bg-muted"
-                title="Reset view — clears filters, moved cards, entry root, and zoom"
-              >
-                <RotateCcw className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                onClick={refresh}
-                disabled={refreshing}
-                className="flex items-center gap-1 rounded-lg border bg-card/95 px-2.5 py-2 text-xs font-medium shadow-sm backdrop-blur hover:bg-muted disabled:opacity-60"
-                title="Rebuild the map"
-              >
-                <RefreshCw
-                  className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+
+              {hydrated && (
+                <ReactFlow
+                  nodes={nodes}
+                  edges={edges}
+                  onNodesChange={onNodesChange}
+                  onEdgesChange={onEdgesChange}
+                  onNodeClick={onNodeClick}
+                  nodeTypes={nodeTypes}
+                  nodesDraggable
+                  onInit={(instance) => {
+                    rfInstanceRef.current = instance;
+                  }}
+                  // Restore the last visit's pan/zoom; fall back to fitting the graph.
+                  fitView={!viewportRef.current}
+                  defaultViewport={viewportRef.current ?? undefined}
+                  onMoveEnd={(_, viewport) => {
+                    viewportRef.current = viewport;
+                    persistState();
+                  }}
+                  onNodeDragStop={(_, node) => {
+                    setPositionOverrides((prev) => ({
+                      ...prev,
+                      [node.id]: { x: node.position.x, y: node.position.y },
+                    }));
+                  }}
+                  minZoom={0.05}
+                  maxZoom={2}
+                  proOptions={{ hideAttribution: true }}
+                >
+                  <Background
+                    variant={BackgroundVariant.Dots}
+                    gap={20}
+                    size={1}
+                  />
+                  <Controls showInteractive={false} />
+                  <MiniMap
+                    pannable
+                    zoomable
+                    nodeColor={(n) =>
+                      COVERAGE_COLOR[
+                        ((n.data as PageNodeData)?.node?.coverageStatus ??
+                          "uncovered") as CoverageStatus
+                      ]
+                    }
+                  />
+                </ReactFlow>
+              )}
+
+              {outlineOpen && tree && (
+                <TreeOutline
+                  tree={tree}
+                  nodesById={nodesById}
+                  selectedId={selected?.id ?? null}
+                  onSelect={onOutlineSelect}
                 />
-              </button>
-              <button
-                type="button"
-                onClick={toggleFullscreen}
-                className="flex items-center gap-1 rounded-lg border bg-card/95 px-2.5 py-2 text-xs font-medium shadow-sm backdrop-blur hover:bg-muted"
-                title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
-              >
-                {isFullscreen ? (
-                  <Minimize2 className="h-4 w-4" />
-                ) : (
-                  <Maximize2 className="h-4 w-4" />
-                )}
-              </button>
-            </div>
+              )}
+            </>
+          )}
 
-            {hydrated && (
-              <ReactFlow
-                nodes={nodes}
-                edges={edges}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
-                onNodeClick={onNodeClick}
-                nodeTypes={nodeTypes}
-                nodesDraggable
-                onInit={(instance) => {
-                  rfInstanceRef.current = instance;
-                }}
-                // Restore the last visit's pan/zoom; fall back to fitting the graph.
-                fitView={!viewportRef.current}
-                defaultViewport={viewportRef.current ?? undefined}
-                onMoveEnd={(_, viewport) => {
-                  viewportRef.current = viewport;
-                  persistState();
-                }}
-                onNodeDragStop={(_, node) => {
-                  setPositionOverrides((prev) => ({
-                    ...prev,
-                    [node.id]: { x: node.position.x, y: node.position.y },
-                  }));
-                }}
-                minZoom={0.05}
-                maxZoom={2}
-                proOptions={{ hideAttribution: true }}
-              >
-                <Background
-                  variant={BackgroundVariant.Dots}
-                  gap={20}
-                  size={1}
-                />
-                <Controls showInteractive={false} />
-                <MiniMap
-                  pannable
-                  zoomable
-                  nodeColor={(n) =>
-                    COVERAGE_COLOR[
-                      ((n.data as PageNodeData)?.node?.coverageStatus ??
-                        "uncovered") as CoverageStatus
-                    ]
-                  }
-                />
-              </ReactFlow>
-            )}
+          {view === "screens" && (
+            <ScreensGallery nodes={filtered.nodes} onSelect={setSelected} />
+          )}
 
-            {outlineOpen && tree && (
-              <TreeOutline
-                tree={tree}
-                nodesById={nodesById}
-                selectedId={selected?.id ?? null}
-                onSelect={onOutlineSelect}
-              />
-            )}
-          </>
-        )}
+          {view === "flows" && (
+            <FlowsView
+              flows={flows}
+              loading={flowsLoading}
+              onOpenFlow={openFlow}
+            />
+          )}
 
-        {view === "screens" && (
-          <ScreensGallery nodes={filtered.nodes} onSelect={setSelected} />
-        )}
+          {view === "data" && dataView ? (
+            <div className="min-h-0 flex-1 overflow-y-auto">{dataView}</div>
+          ) : null}
 
-        {view === "flows" && (
-          <FlowsView
-            flows={flows}
-            loading={flowsLoading}
-            onOpenFlow={openFlow}
-          />
-        )}
+          {view === "gaps" && gapsView ? (
+            <div className="min-h-0 flex-1 overflow-y-auto">{gapsView}</div>
+          ) : null}
 
-        {exploringSessionId && !panelHidden && (
-          <ExploreProgressPanel
-            sessionId={exploringSessionId}
-            repositoryId={repositoryId}
-            onFinished={() => {
-              setExploringSessionId(null);
-              getAppMap({ repositoryId, branch })
-                .then((r) => {
-                  if (r.ok) setGraph(r.graph);
-                })
-                .catch(() => {});
-            }}
-            onClose={() => setPanelHidden(true)}
-          />
-        )}
+          {exploringSessionId && !panelHidden && (
+            <ExploreProgressPanel
+              sessionId={exploringSessionId}
+              repositoryId={repositoryId}
+              onFinished={() => {
+                setExploringSessionId(null);
+                getAppMap({ repositoryId, branch })
+                  .then((r) => {
+                    if (r.ok) setGraph(r.graph);
+                  })
+                  .catch(() => {});
+              }}
+              onClose={() => setPanelHidden(true)}
+            />
+          )}
 
-        {selected && (
-          <NodeDetailPanel
-            node={selected}
-            queued={queued.has(selected.path)}
-            requesting={requesting === selected.path}
-            qaAgentEnabled={qaAgentEnabled}
-            isEntryRoot={entryRootId === selected.id}
-            flows={flows}
-            onRequestCoverage={onRequestCoverage}
-            onSetEntryRoot={onSetEntryRoot}
-            onOpenFlow={openFlow}
-            onClose={() => setSelected(null)}
-          />
+          {selected && (
+            <NodeDetailPanel
+              node={selected}
+              queued={queued.has(selected.path)}
+              requesting={requesting === selected.path}
+              qaAgentEnabled={qaAgentEnabled}
+              isEntryRoot={entryRootId === selected.id}
+              flows={flows}
+              onRequestCoverage={onRequestCoverage}
+              onSetEntryRoot={onSetEntryRoot}
+              onOpenFlow={openFlow}
+              onClose={() => setSelected(null)}
+            />
+          )}
+        </div>
+
+        {/* The rail scopes itself to the selected node, so it belongs beside
+            the canvas views — on Data and Gaps it would only repeat what the
+            view already shows at full width. */}
+        {CoverageRail && !COVERAGE_VIEWS.has(view) && (
+          <div className="hidden w-80 shrink-0 border-l bg-card lg:block">
+            <CoverageRail
+              selectedPath={selected?.path ?? null}
+              selectedTitle={selected?.title ?? null}
+              selectedStatus={selected?.coverageStatus ?? null}
+              onOpenGaps={() => setView("gaps")}
+              onOpenData={() => setView("data")}
+            />
+          </div>
         )}
       </div>
 
