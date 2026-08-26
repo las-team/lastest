@@ -20,7 +20,7 @@ import {
 } from "@/lib/storage/paths";
 import { awardScore } from "@lastest/plugin-gamification/actions";
 import * as gamificationReads from "@lastest/plugin-gamification/reads";
-import { createVisualDiffIssue } from "@/lib/integrations/github-issues";
+import { createRepoIssue } from "@/lib/integrations/github-issues";
 import { buildVisualDiffBody } from "@/lib/integrations/github-issue-body";
 import { approveDiffCore, rejectDiffCore } from "@/lib/diff/core";
 
@@ -662,7 +662,7 @@ export async function submitDiffAsIssue(diffId: string): Promise<{
   // without a human dispatcher.
   const assignees = notif.issueAssignee ? [notif.issueAssignee] : undefined;
 
-  const result = await createVisualDiffIssue(
+  const result = await createRepoIssue(
     ghAccount.accessToken,
     repo.owner,
     repo.name,

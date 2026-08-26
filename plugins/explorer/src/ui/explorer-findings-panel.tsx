@@ -12,7 +12,8 @@ import {
 import type { ExplorerFinding } from "../schema";
 import type { ExplorerReport, ExplorerSeverity } from "../types";
 import { setFindingStatus } from "../actions";
-import { Bug, Sparkles } from "lucide-react";
+import { FileIssueDialog } from "./file-issue-dialog";
+import { Bug, ExternalLink, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 const SEVERITY_STYLES: Record<ExplorerSeverity, string> = {
@@ -33,11 +34,24 @@ const SEVERITY_ORDER: ExplorerSeverity[] = [
 
 function FindingRow({
   finding,
+  issue,
   onStatusChange,
+  onFileIssue,
 }: {
   finding: ExplorerFinding;
+  /** Locally filed this session, before the row is re-fetched. */
+  issue?: { url: string; number?: number };
   onStatusChange: (id: string, status: "dismissed" | "triaged") => void;
+  onFileIssue: (finding: ExplorerFinding) => void;
 }) {
+  const filed =
+    issue ??
+    (finding.githubIssueUrl
+      ? {
+          url: finding.githubIssueUrl,
+          number: finding.githubIssueNumber ?? undefined,
+        }
+      : undefined);
   return (
     <div className="rounded-md border p-3 space-y-1.5">
       <div className="flex items-start justify-between gap-2">
@@ -51,15 +65,26 @@ function FindingRow({
           <span className="text-sm font-medium truncate">{finding.title}</span>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          {finding.status === "open" ? (
+          {filed ? (
+            // A filed finding shows where the work went, not a status word.
+            <a
+              href={filed.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <ExternalLink className="h-3 w-3" />
+              {filed.number ? `#${filed.number}` : "Issue"}
+            </a>
+          ) : finding.status === "open" ? (
             <>
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-6 text-xs"
-                onClick={() => onStatusChange(finding.id, "triaged")}
+                onClick={() => onFileIssue(finding)}
               >
-                Triage
+                File issue
               </Button>
               <Button
                 variant="ghost"
@@ -111,6 +136,12 @@ export function ExplorerFindingsPanel({
   report?: ExplorerReport;
 }) {
   const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [filing, setFiling] = useState<ExplorerFinding | null>(null);
+  // Polling stops once a run ends, so a finding filed after that would keep
+  // offering "File issue" until a reload without this.
+  const [filed, setFiled] = useState<
+    Record<string, { url: string; number?: number }>
+  >({});
   const visible = useMemo(
     () => findings.filter((f) => !hidden.has(f.id)),
     [findings, hidden],
@@ -207,7 +238,9 @@ export function ExplorerFindingsPanel({
                         <FindingRow
                           key={f.id}
                           finding={f}
+                          issue={filed[f.id]}
                           onStatusChange={handleStatus}
+                          onFileIssue={setFiling}
                         />
                       ))}
                     </div>
@@ -226,10 +259,28 @@ export function ExplorerFindingsPanel({
               <FindingRow
                 key={f.id}
                 finding={f}
+                issue={filed[f.id]}
                 onStatusChange={handleStatus}
+                onFileIssue={setFiling}
               />
             ))}
           </div>
+        )}
+        {filing && (
+          <FileIssueDialog
+            key={filing.id}
+            finding={filing}
+            open
+            onClose={() => setFiling(null)}
+            onFiled={(issue) => {
+              setFiled((prev) => ({ ...prev, [filing.id]: issue }));
+              toast.success(
+                issue.number
+                  ? `Filed as issue #${issue.number}`
+                  : "Issue created",
+              );
+            }}
+          />
         )}
       </CardContent>
     </Card>

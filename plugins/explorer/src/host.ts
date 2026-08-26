@@ -10,16 +10,19 @@
  * moved to `ctx.repos.baseUrl`, called directly from `actions.ts` where the old
  * host method was.
  *
- * **Five remain.** One (`getSettings`) is not a core API at all — a table that
- * should have moved and did not. The other four are real, waiting on core PRs
+ * **Six remain.** One (`getSettings`) is not a core API at all — a table that
+ * should have moved and did not. The other five are real, waiting on core PRs
  * this migration's brief explicitly forbade bundling in (RFC §7.2: core and
- * plugin changes are separate PRs).
+ * plugin changes are separate PRs). `createIssue` is the newest of them: core
+ * files a verify case as a GitHub issue today, from a server action a plugin
+ * cannot call, so filing an explorer finding needed the same reach declared
+ * here rather than a second OAuth-token holder in a feature package.
  *
  * ### Why a port and not `ctx`, for what is left
  *
  * `docs/architecture/core-scope.md` §6: *"To learn anything about a core
  * entity it calls a core function."* For `resolveExistingAuth`,
- * `assertSafeOutboundUrl` and the field-crypto pair, that function does not
+ * `assertSafeOutboundUrl`, `createIssue` and the field-crypto pair, that function does not
  * exist yet, so the gap is declared here as a port the composition root fills
  * — the same shape `core/browser` uses for `BrowserHost`, for the same reason:
  * injecting the primitive keeps this package free of `@/…` imports.
@@ -57,6 +60,57 @@ export interface ExplorerActivityEvent {
   stepId?: string;
   detail?: Record<string, unknown>;
   artifact?: { type: "test"; id: string; label: string };
+}
+
+/**
+ * What filing a finding as an issue needs from the tracker, and what comes
+ * back.
+ *
+ * Deliberately provider-agnostic and body-agnostic: the plugin renders the
+ * markdown (it is the only thing that knows what a finding *is* — see
+ * `domain/issue-body.ts`), core owns the credential and the API call. That
+ * split is `core-scope.md` §2.4 read literally — a GitHub installation token
+ * is a credential, so a feature must never hold one — and it is the same shape
+ * core already uses for a verify case in `src/server/actions/verify-issues.ts`.
+ */
+export interface ExplorerIssueRequest {
+  /** Proven repo scope. Comes from `ctx.repo.id`, never from the client. */
+  repositoryId: string;
+  title: string;
+  /** Rendered markdown. Core posts it verbatim. */
+  body: string;
+  labels: string[];
+}
+
+/**
+ * Who would be filing, and where.
+ *
+ * Two facts the body composer needs and a plugin has no route to: the repo's
+ * `owner/name` on the provider (`RepoRef` carries an id and a short name by
+ * design) and the signed-in reviewer's email for attribution. The precedent is
+ * `ShareHost`, which returns the same pair for the same reason.
+ *
+ * `connected: false` is the answer, not an error — the findings panel uses it
+ * to offer a Connect-GitHub link before the reviewer writes a note they would
+ * lose.
+ */
+export interface ExplorerIssueContext {
+  connected: boolean;
+  repoFullName: string | null;
+  reporterEmail: string | null;
+  /** Why filing is unavailable, when `connected` is false. */
+  error?: string;
+  code?: string;
+}
+
+export interface ExplorerIssueResult {
+  ok: boolean;
+  issueUrl?: string;
+  issueNumber?: number;
+  error?: string;
+  /** `"github_not_connected"` when the team has no GitHub account attached —
+   *  the UI keys off it to offer a Connect link instead of a dead-end error. */
+  code?: string;
 }
 
 export interface ExplorerSettings {
@@ -118,4 +172,22 @@ export interface ExplorerHost {
    */
   encryptField(plaintext: string): string;
   decryptField(stored: string): string;
+
+  /**
+   * **→ `core/integrations` (issue trackers).**
+   *
+   * File one issue on the repository's tracker and return its URL. The repo's
+   * provider, the team's OAuth token and the HTTP call are all core's; the
+   * plugin supplies a title, a body it rendered itself, and labels.
+   *
+   * Never throws for an expected failure — a missing GitHub connection, a
+   * non-GitHub repo or a rejected POST all come back as `{ ok: false }` with a
+   * message the findings panel can show, because "could not file" must not
+   * lose the finding the reviewer was looking at.
+   */
+  createIssue(req: ExplorerIssueRequest): Promise<ExplorerIssueResult>;
+
+  /** Whether this repo can accept a filed issue, and the two attribution
+   *  facts the body needs. Never throws — see `ExplorerIssueContext`. */
+  issueContext(repositoryId: string): Promise<ExplorerIssueContext>;
 }
