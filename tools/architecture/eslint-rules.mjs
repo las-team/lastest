@@ -23,6 +23,7 @@
 import {
   CORE_GLOB,
   FORBIDDEN_CORE_IMPORTS,
+  FORBIDDEN_CORE_SRC_IMPORTS,
   FORBIDDEN_HOST_IMPORTS,
   FORBIDDEN_LIB_IMPORTS,
   FORBIDDEN_PLUGIN_IMPORTS,
@@ -32,6 +33,7 @@ import {
   PLUGIN_GLOB,
   PSEUDO_PLUGIN_IMPORTS,
   PSEUDO_PLUGINS,
+  coreSrcFiles,
   crossPluginPatternsFor,
   pseudoPluginFiles,
 } from "./boundaries.mjs";
@@ -169,6 +171,39 @@ export function architectureBoundaryRules() {
       "@typescript-eslint/no-restricted-imports": [
         "error",
         toHostRestrictions(FORBIDDEN_HOST_IMPORTS),
+      ],
+    },
+  });
+
+  // ── Today's core: the other half of the `core-to-plugin` ban ────────────────
+  // Mirrors `scanCoreSrc` — `architecture/core` above covers the target
+  // layout's still-empty `core/**`; this covers the `CORE_SRC_PATHS` ledger,
+  // which is where core actually lives today.
+  //
+  // `warn`, unlike `architecture/core-hosts` right above it, and the reason is
+  // the one stated at the top of this file: severity follows the ratchet, not
+  // the rule's importance. The host rule landed at zero and can afford `error`;
+  // this one landed with a real violation still standing
+  // (`executor.ts` → `@lastest/plugin-api-test/runner`), so `error` would mean
+  // `pnpm lint` is red until somebody inverts a dependency. The enforcement is
+  // the ratchet in `boundaries.test.ts`; the warning is the nudge — exactly the
+  // arrangement the pseudo-plugin blocks below have.
+  //
+  // The sanctioned check-layer registration point is an `ignores` entry rather
+  // than a pattern exception, because it is the *file* that is blessed and not
+  // any particular specifier. `scanCoreSrc` skips the same list via the rule's
+  // `allowFiles`, so ESLint and the ratchet disagree about nothing.
+  blocks.push({
+    name: "architecture/core-src",
+    files: coreSrcFiles(),
+    ignores: [
+      ...TARGET_LAYOUT_TEST_IGNORES,
+      ...FORBIDDEN_CORE_SRC_IMPORTS.flatMap((r) => r.allowFiles ?? []),
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "warn",
+        { patterns: toPatterns(FORBIDDEN_CORE_SRC_IMPORTS) },
       ],
     },
   });

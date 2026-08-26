@@ -9,7 +9,7 @@
  */
 
 import type { A11yViolation, WcagScoreSummary } from "@/lib/db/schema";
-import { calculateWcagScore } from "@lastest/plugin-a11y/wcag-score";
+import { calculateWcagScore } from "@lastest/wcag-score";
 
 export interface A11yNodeDelta {
   ruleId: string;

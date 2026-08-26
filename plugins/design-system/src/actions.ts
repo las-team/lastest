@@ -4,7 +4,10 @@ import { revalidatePath } from "next/cache";
 import JSZip from "jszip";
 import type { DesignSystemConfig } from "@lastest/eb-protocol";
 
-import { parseDesignSystemCss, mergeDesignSystemConfig } from "./tokens";
+import {
+  parseDesignSystemCss,
+  mergeDesignSystemConfig,
+} from "@lastest/design-tokens";
 import { designSystemHost } from "./wiring";
 
 export async function saveTestDesignSystemOverrides(

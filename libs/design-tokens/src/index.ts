@@ -11,6 +11,18 @@
  * predictable). A property whose value parses as a color goes into the
  * color bucket; one that parses as `<int>px` goes into either radii or
  * spacing depending on its custom-property name; etc.
+ *
+ * Lives in `libs/` rather than in `@lastest/plugin-design-system`, where it
+ * started, for the reason `core-scope.md` §3 gives: it is *useful to many* and
+ * guards nothing. The plugin's own actions parse an uploaded bundle with it,
+ * but so does core — `src/lib/execution/executor.ts` merges the repo config
+ * with a test's overrides (`mergeDesignSystemConfig`) and decides whether the
+ * result is worth harvesting (`isConfigUsable`) on every run — and two Setup/
+ * Settings components render previews from it. Leaving it in the plugin pointed
+ * the dependency arrow the wrong way (core importing plugin domain logic);
+ * promoting it makes those imports legal without weakening anything, because it
+ * holds no tenancy, capacity, money or credential boundary. It is string
+ * parsing and normalization over `@lastest/eb-protocol` types.
  */
 
 import type {

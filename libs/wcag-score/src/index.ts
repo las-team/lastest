@@ -1,6 +1,18 @@
 /**
  * WCAG compliance score calculation.
  * Computes a 0–100 score from axe-core violations with severity weighting.
+ *
+ * Lives in `libs/` rather than in `@lastest/plugin-a11y`, where it started, for
+ * the reason `core-scope.md` §3 gives: it is *useful to many* and guards
+ * nothing. Core's own build pipeline needs the same arithmetic the plugin does —
+ * `src/lib/diff/a11y-diff.ts` scores both sides of a diff,
+ * `src/lib/url-diff/capture.ts` scores an ad-hoc capture, and
+ * `src/lib/db/queries/builds.ts` resolves a violation's conformance level while
+ * shaping a row. Leaving it in the plugin pointed the dependency arrow the wrong
+ * way (core importing plugin domain logic); promoting it makes every one of
+ * those imports legal without weakening anything, because it holds no tenancy,
+ * capacity, money or credential boundary. It is pure arithmetic over
+ * `@lastest/eb-protocol` types.
  */
 
 import type { A11yViolation, WcagScoreSummary } from "@lastest/eb-protocol";

@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   scanCompositionHosts,
+  scanCoreSrc,
   scanPseudoPlugins,
   scanTargetLayout,
   tally,
@@ -26,9 +27,14 @@ const ROOT = join(HERE, "..", "..");
 const BASELINE_PATH = join(HERE, "baseline.json");
 
 // The current layout is the pseudo-plugins *plus* the composition root's host
-// adapters, which ratchet on the same `<plugin>::<rule>` key under the
-// pseudo-plugin id `host`. One list, one baseline.
-const pseudo = [...scanPseudoPlugins(ROOT), ...scanCompositionHosts(ROOT)];
+// adapters *plus* today's core (`CORE_SRC_PATHS`), which ratchet on the same
+// `<plugin>::<rule>` key under the pseudo-plugin ids `host` and `core`. One
+// list, one baseline.
+const pseudo = [
+  ...scanPseudoPlugins(ROOT),
+  ...scanCompositionHosts(ROOT),
+  ...scanCoreSrc(ROOT),
+];
 const target = scanTargetLayout(ROOT);
 
 if (process.argv.includes("--baseline")) {

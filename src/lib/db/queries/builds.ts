@@ -18,7 +18,7 @@ import type {
   DesignTokenCategory,
   LayerFeedbackStatus,
 } from "../schema";
-import { getWcagLevel } from "@lastest/plugin-a11y/wcag-score";
+import { getWcagLevel } from "@lastest/wcag-score";
 import { getPlaywrightSettings, getDiffSensitivitySettings } from "./settings";
 import { getPlaywrightOverridesByTestIds } from "./tests";
 import {

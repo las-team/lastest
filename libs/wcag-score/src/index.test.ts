@@ -3,7 +3,7 @@ import {
   getWcagLevel,
   calculateWcagScore,
   aggregateA11yForBuild,
-} from "./wcag-score";
+} from "./index";
 import type { A11yViolation } from "@lastest/eb-protocol";
 
 function makeViolation(overrides: Partial<A11yViolation> = {}): A11yViolation {

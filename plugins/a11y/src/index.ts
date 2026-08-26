@@ -14,8 +14,8 @@ import { createDeletionHook } from "./deletion";
  * It needs exactly one thing core owns — a place to keep its baselines — and
  * that is `ctx.data` over its own `a11y_baselines` table. The a11y columns
  * on `test_results`/`test_runs` (`a11y_violations`, `a11y_score`, …) are
- * core's: core's build pipeline writes them, calling this plugin's *pure*
- * scoring functions (`./wcag-score`) to compute the values. Nothing here
+ * core's: core's build pipeline writes them, calling the *pure* scoring
+ * functions in `@lastest/wcag-score` to compute the values. Nothing here
  * reaches a core table, so there is no gap for a port to paper over.
  */
 export const a11yPlugin = definePlugin({

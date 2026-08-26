@@ -1520,8 +1520,7 @@ async function runBuildAsync(
       designSystemTokenUsage?: import("@/lib/db/schema").DesignSystemTokenUsage;
     } = {};
     try {
-      const { aggregateA11yForBuild } =
-        await import("@lastest/plugin-a11y/wcag-score");
+      const { aggregateA11yForBuild } = await import("@lastest/wcag-score");
       const { aggregateDesignSystemForBuild } =
         await import("@lastest/plugin-design-system/score");
       const testResultsForRollup = await queries.getTestResultsByRun(testRunId);

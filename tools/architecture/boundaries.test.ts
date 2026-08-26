@@ -12,7 +12,14 @@
  *      fail; removing one and forgetting to lower the baseline also fails, so the
  *      number tracks reality instead of drifting upward quietly.
  */
-import { readFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,6 +30,8 @@ import { describe, expect, it } from "vitest";
 import {
   CORE_PACKAGES,
   CORE_SRC_PATHS,
+  FORBIDDEN_CORE_IMPORTS,
+  FORBIDDEN_CORE_SRC_IMPORTS,
   FORBIDDEN_HOST_IMPORTS,
   PSEUDO_PLUGINS,
   pseudoPluginPaths,
@@ -31,6 +40,7 @@ import {
   importsIn,
   matchesPattern,
   scanCompositionHosts,
+  scanCoreSrc,
   scanPseudoPlugins,
   scanTargetLayout,
   stripNonCode,
@@ -67,12 +77,14 @@ describe("target layout (core/** + plugins/**)", () => {
 });
 
 describe("current layout burndown", () => {
-  // The pseudo-plugins plus the composition root's host adapters, which carry
-  // `plugin: "host"` so they ratchet on the same `<plugin>::<rule>` key
-  // (`host::db`) rather than needing a second baseline file.
+  // The pseudo-plugins plus the composition root's host adapters plus today's
+  // core, which carry `plugin: "host"` / `plugin: "core"` so they ratchet on
+  // the same `<plugin>::<rule>` key (`host::db`, `core::core-to-plugin`)
+  // rather than needing a second baseline file.
   const violations = [
     ...scanPseudoPlugins(ROOT),
     ...scanCompositionHosts(ROOT),
+    ...scanCoreSrc(ROOT),
   ] as Violation[];
   const actual = tallyByPluginRule(violations) as Record<string, number>;
 
@@ -193,6 +205,115 @@ describe("composition-root hosts (src/lib/core/*-host.ts)", () => {
       (s) => !patterns.some((p) => matchesPattern(s, p)),
     );
     expect(missed).toEqual([]);
+  });
+});
+
+describe("today's core (CORE_SRC_PATHS)", () => {
+  /**
+   * The walker takes a root, so a planted violation goes in a throwaway tree
+   * rather than in `src/`. Nothing here can leave a stray file behind for
+   * `tsc`/`eslint` to trip over, and the fixture can contain the one shape
+   * that would otherwise be impossible to assert on: a core file that really
+   * does import a plugin.
+   */
+  const withFixtureRoot = (files: Record<string, string>) => {
+    const root = mkdtempSync(join(tmpdir(), "arch-core-src-"));
+    try {
+      for (const [rel, body] of Object.entries(files)) {
+        mkdirSync(dirname(join(root, rel)), { recursive: true });
+        writeFileSync(join(root, rel), body);
+      }
+      return scanCoreSrc(root) as Violation[];
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  };
+
+  const PLUGIN_IMPORT = 'import { thing } from "@lastest/plugin-a11y/host";\n';
+
+  it("imports no plugin domain logic beyond the one counted violation", () => {
+    // Ratcheted at 1 above like everything else, but asserted by *content*
+    // here so a failure names the actual problem — "core reached into a
+    // plugin" and which one — instead of a `core::core-to-plugin` count going
+    // from 1 to 2.
+    //
+    // The survivor is feature runtime, not shared math: `runApiTest` issues
+    // the request, redacts secrets and writes evidence. It cannot be promoted
+    // to `libs/` the way `wcag-score` and `design-tokens` were; it wants an
+    // inverted dependency, which is a core PR.
+    const violations = scanCoreSrc(ROOT) as Violation[];
+    expect(
+      violations.map(format),
+      "Core must not import a plugin's domain logic. Promote the shared part " +
+        "to libs/ (core-scope.md §3 — see libs/wcag-score, libs/design-tokens), " +
+        "or invert the dependency and let the plugin call a capability.",
+    ).toEqual([
+      format({
+        rule: "core-to-plugin",
+        specifier: "@lastest/plugin-api-test/runner",
+        file: "src/lib/execution/executor.ts",
+        line: 367,
+      }),
+    ]);
+  });
+
+  it("counts a planted violation", () => {
+    const violations = withFixtureRoot({
+      "src/lib/diff/planted.ts": PLUGIN_IMPORT,
+    });
+    expect(violations.map((v) => [v.plugin, v.rule, v.file])).toEqual([
+      ["core", "core-to-plugin", "src/lib/diff/planted.ts"],
+    ]);
+  });
+
+  it("does not count the sanctioned check-layer registration point", () => {
+    // `src/lib/verify/check-layers.ts` imports each plugin's narrow
+    // `./check-layer` subpath deliberately: it is bundled into client
+    // components, so it must not go through `src/lib/core/manifests.ts`, whose
+    // manifests eagerly pull in every plugin's schema (and drizzle-orm with
+    // it). A file carve-out, not a baseline entry — see the `allowFiles`
+    // comment in boundaries.mjs for why that distinction matters to the count.
+    expect(
+      withFixtureRoot({ "src/lib/verify/check-layers.ts": PLUGIN_IMPORT }),
+    ).toEqual([]);
+  });
+
+  it("points its carve-out at a file that exists and needs one", () => {
+    // An `allowFiles` entry that has gone stale — renamed file, moved
+    // directory — is worse than no entry: it exempts nothing and hides
+    // nothing, silently. Both halves are checked: the path resolves, and the
+    // file it names genuinely does import a plugin, so the exemption is still
+    // doing work rather than describing history.
+    const allowed = (
+      FORBIDDEN_CORE_SRC_IMPORTS as Array<{ allowFiles?: string[] }>
+    ).flatMap((r) => r.allowFiles ?? []);
+    expect(allowed).not.toEqual([]);
+
+    for (const rel of allowed) {
+      const src = readFileSync(join(ROOT, rel), "utf8");
+      expect(src, `${rel} no longer imports a plugin`).toContain(
+        "@lastest/plugin-",
+      );
+    }
+  });
+
+  it("ignores a test file, like every other walker", () => {
+    expect(
+      withFixtureRoot({ "src/lib/diff/planted.test.ts": PLUGIN_IMPORT }),
+    ).toEqual([]);
+  });
+
+  it("bans exactly what the target-layout rule bans", () => {
+    // The two lists are duplicated so each reads as a list (see the
+    // FORBIDDEN_CORE_SRC_IMPORTS comment). Duplication is only safe if
+    // something notices when it stops being duplication.
+    const target = (
+      FORBIDDEN_CORE_IMPORTS as Array<{ id: string; patterns: string[] }>
+    ).find((r) => r.id === "core-to-plugin");
+    const current = (
+      FORBIDDEN_CORE_SRC_IMPORTS as Array<{ id: string; patterns: string[] }>
+    ).find((r) => r.id === "core-to-plugin");
+    expect(target?.patterns).toEqual(current?.patterns);
   });
 });
 

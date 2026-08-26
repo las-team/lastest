@@ -19,6 +19,7 @@ import {
   CORE_PACKAGES,
   CORE_SRC_PATHS,
   FORBIDDEN_CORE_IMPORTS,
+  FORBIDDEN_CORE_SRC_IMPORTS,
   FORBIDDEN_HOST_IMPORTS,
   FORBIDDEN_LIB_IMPORTS,
   FORBIDDEN_PLUGIN_IMPORTS,
@@ -409,6 +410,60 @@ export function scanCompositionHosts(root) {
             line: imp.line,
             specifier: imp.specifier,
           });
+        }
+      }
+    }
+  }
+
+  return violations;
+}
+
+/**
+ * Walk **today's** core — every file under `CORE_SRC_PATHS` — for the
+ * `core-to-plugin` ban. See `FORBIDDEN_CORE_SRC_IMPORTS` in `boundaries.mjs`
+ * for why the target-layout rule needed a second home, and why its sanctioned
+ * exception is a file carve-out rather than a baseline entry.
+ *
+ * Violations carry `plugin: "core"`, so they ratchet through the same
+ * `<plugin>::<rule>` key as everything else in the current layout
+ * (`core::core-to-plugin`) — the mechanism `scanCompositionHosts` established
+ * with `host::db`, and for the same reason: one baseline file, not three.
+ *
+ * Two files are skipped, both to keep the counter honest rather than kind:
+ * a rule's own `allowFiles`, and any file a pseudo-plugin owns. The latter can
+ * only happen through a §6.2 `files` entry — a plugin-destined file sitting
+ * inside an otherwise-core directory like `src/lib/playwright` — and
+ * `scanPseudoPlugins` already counts those against the plugin. There are none
+ * today; the guard is here so the §6.2 split cannot make one violation appear
+ * twice under two different names.
+ */
+export function scanCoreSrc(root) {
+  /** @type {Array<{ rule: string, plugin: string, file: string, line: number, specifier: string }>} */
+  const violations = [];
+
+  for (const target of CORE_SRC_PATHS) {
+    const files = SOURCE_EXT.test(target)
+      ? [target]
+      : listSourceFiles(root, target);
+
+    for (const file of files) {
+      // Same carve-out the pseudo-plugin and target-layout walkers make: a
+      // test may reach for anything to build a fixture.
+      if (/\.(test|spec)\.tsx?$/.test(file)) continue;
+      if (pluginOwning(file)) continue;
+
+      for (const imp of importsOf(root, file)) {
+        for (const rule of FORBIDDEN_CORE_SRC_IMPORTS) {
+          if (rule.allowFiles?.includes(file)) continue;
+          if (ruleMatches(rule, imp)) {
+            violations.push({
+              rule: rule.id,
+              plugin: "core",
+              file,
+              line: imp.line,
+              specifier: imp.specifier,
+            });
+          }
         }
       }
     }

@@ -28,7 +28,7 @@ import {
   saveTestDesignSystemFromCss,
   resetTestDesignSystemOverrides,
 } from "@lastest/plugin-design-system/actions";
-import { parseDesignSystemCss } from "@lastest/plugin-design-system/tokens";
+import { parseDesignSystemCss } from "@lastest/design-tokens";
 import type { DesignSystemConfig, DesignTokenCategory } from "@/lib/db/schema";
 
 interface TestDesignSystemOverridesProps {

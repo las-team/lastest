@@ -20,7 +20,7 @@ import {
   Upload,
 } from "lucide-react";
 import type { DesignSystemConfig, DesignRoleToken } from "@/lib/db/schema";
-import { detectMissingFonts } from "@lastest/plugin-design-system/tokens";
+import { detectMissingFonts } from "@lastest/design-tokens";
 import { cn } from "@/lib/utils";
 
 interface DesignSystemPreviewProps {

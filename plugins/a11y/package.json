@@ -12,7 +12,6 @@
     "./check-layer": "./src/check-layer.ts",
     "./host": "./src/host.ts",
     "./schema": "./src/schema.ts",
-    "./wcag-score": "./src/wcag-score.ts",
     "./wiring": "./src/wiring.ts"
   },
   "scripts": {

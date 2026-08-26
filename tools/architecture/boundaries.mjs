@@ -529,6 +529,98 @@ export const FORBIDDEN_CORE_IMPORTS = [
 ];
 
 /**
+ * The same `core-to-plugin` ban as above, aimed at **today's** core — the
+ * `CORE_SRC_PATHS` ledger — instead of at the target layout's `core/**`.
+ *
+ * `FORBIDDEN_CORE_IMPORTS` has always described a directory that is still
+ * empty, so the rule it states most loudly ("core must never learn that a
+ * plugin exists") was enforced only where nothing lives. Meanwhile the ledger
+ * fifty lines up enumerates the code that *is* core today, and nothing counted
+ * what it imported. Five files had drifted through the gap, all of them core
+ * reaching for a plugin's **domain logic**: WCAG scoring, design-token
+ * comparison, an API-test runner. The arrow pointed exactly the wrong way.
+ *
+ * Only the `core-to-plugin` half is reused. `core-to-app` cannot apply here and
+ * never will: today's core lives *inside* the Next.js app and reaches its
+ * neighbours through `@/…` on every other line. That rule is a statement about
+ * the layout core is migrating *to*, and asserting it against `src/` would
+ * report a thousand violations describing a move nobody has made yet. The
+ * patterns are duplicated rather than derived so this list reads as a list;
+ * `boundaries.test.ts` asserts the two stay identical.
+ *
+ * **Severity is warn, and the ratchet is above zero** — unlike
+ * `FORBIDDEN_HOST_IMPORTS` below, which was written after its violations were
+ * already fixed. This one is written with one real violation still standing
+ * (`src/lib/execution/executor.ts` → `@lastest/plugin-api-test/runner`, a
+ * lazy `await import` inside the step dispatcher). That is feature *runtime*,
+ * not shared math: it drives an HTTP request, redacts secrets and writes
+ * evidence, so it cannot be promoted to `libs/` the way the other four were.
+ * It wants an inverted dependency — a capability core exposes and the plugin
+ * fills — which is a core PR, not an import swap. Counted where it can be
+ * seen, in the burndown, exactly as `video-fallback` was left counted in
+ * `shared-dependency-promotions.md` §4.
+ *
+ * The other four are gone as of this rule's arrival, and they are gone the way
+ * `core-scope.md` §3 says shared code should go — **promoted to `libs/`**, not
+ * exempted:
+ *
+ *   - `@lastest/plugin-a11y/wcag-score` → `libs/wcag-score`, killing three
+ *     (`src/lib/diff/a11y-diff.ts`, `src/lib/db/queries/builds.ts`,
+ *     `src/lib/url-diff/capture.ts`).
+ *   - `@lastest/plugin-design-system/tokens` → `libs/design-tokens`, killing
+ *     one (`src/lib/execution/executor.ts`).
+ *
+ * Both were pure arithmetic over `@lastest/eb-protocol` types that core needed
+ * as badly as the plugin did — the `libs/` tier exists precisely so that fact
+ * does not have to be settled by either importing the other.
+ */
+export const FORBIDDEN_CORE_SRC_IMPORTS = [
+  {
+    id: "core-to-plugin",
+    patterns: ["@lastest/plugin-*", "../../plugins/*", "@/lib/plugins/*"],
+    /**
+     * The one sanctioned exception, expressed as a file carve-out rather than
+     * as a baseline entry — and the distinction is the point.
+     *
+     * A baseline entry means *"wrong, not fixed yet, may only decrease"*. That
+     * would be a lie about this import: `src/lib/verify/check-layers.ts` is the
+     * check-layer registration point, and importing each plugin's narrow
+     * `./check-layer` subpath is the shape the file's own header argues for at
+     * length — it is client-bundled, so it must NOT go through
+     * `src/lib/core/manifests.ts`, whose manifests eagerly pull in every
+     * plugin's `schema`/`deletion` (drizzle-orm and friends). The alternative
+     * is not a smaller import, it is drizzle in the browser bundle.
+     *
+     * Baselining it would also be actively harmful: the ratchet is per
+     * `<plugin>::<rule>` key, so parking two sanctioned imports in
+     * `core::core-to-plugin` would raise the allowance that the *unsanctioned*
+     * executor import is measured against, and a third plugin contributing a
+     * check layer would then look like a regression while a genuinely new
+     * violation somewhere else in core would not. Encoding the exemption in
+     * the rule keeps the counted number meaning only "core reached into a
+     * plugin's domain logic".
+     *
+     * This is the same call `FORBIDDEN_HOST_IMPORTS` makes below with
+     * `allowTypeImports` and with `@/lib/db` listed as an exact specifier: a
+     * carve-out that is *permanent and correct* belongs in the rule's shape,
+     * where it can carry its reasoning, not in a ratchet file that promises
+     * someone will delete it.
+     *
+     * Deliberately narrow — one file, listed literally. `src/lib/core/` needs
+     * no entry: it is the composition root, is not in `CORE_SRC_PATHS`, and
+     * knowing every plugin by name is its entire job.
+     */
+    allowFiles: ["src/lib/verify/check-layers.ts"],
+    message:
+      "Core must not import a plugin's domain logic. If both sides genuinely " +
+      "need it, promote the shared part to libs/ (core-scope.md §3) — that is " +
+      "what libs/wcag-score and libs/design-tokens are. If it is feature " +
+      "runtime, invert the dependency: expose a capability and let the plugin " +
+      "call it.",
+  },
+];
+
+/**
  * The composition root's host adapters — `src/lib/core/*-host.ts`, the files
  * that fill a plugin's host port with app primitives.
  *
@@ -636,6 +728,18 @@ export function crossPluginPatternsFor(pluginId) {
 /** All source globs owned by a pseudo-plugin, for ESLint `files`. */
 export function pseudoPluginFiles(def) {
   return pseudoPluginPaths(def).map((p) =>
+    /\.tsx?$/.test(p) ? p : `${p}/**/*.{ts,tsx}`,
+  );
+}
+
+/**
+ * The same shape for today's core, so the ESLint block mirroring
+ * `scanCoreSrc` covers exactly the ledger the walker walks. A `CORE_SRC_PATHS`
+ * entry may be a directory or a single file, as `UNCLASSIFIED_SRC_PATHS`
+ * already shows.
+ */
+export function coreSrcFiles() {
+  return CORE_SRC_PATHS.map((p) =>
     /\.tsx?$/.test(p) ? p : `${p}/**/*.{ts,tsx}`,
   );
 }
