@@ -207,6 +207,9 @@ export default async function CoveragePage() {
 
   return (
     <CoverageDataProvider value={railData}>
+      {/* The canvas tab strip is this screen's visible header, so the document
+          outline would otherwise have no heading at all. */}
+      <h1 className="sr-only">Coverage</h1>
       <AppMapPage
         repositoryId={selectedRepo.id}
         branch={branch}

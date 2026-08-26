@@ -198,7 +198,7 @@ export function CoverageClient({
       );
       if (r.dimensionsRejected.length > 0) {
         toast.info(
-          `${r.dimensionsRejected.length} column(s) rejected as non-dimensions — see the Dimensions tab.`,
+          `${r.dimensionsRejected.length} column(s) rejected as non-dimensions — see Data → Dimensions.`,
         );
       }
       refresh();
@@ -336,124 +336,123 @@ export function CoverageClient({
 
   return (
     <div className="p-6 space-y-6">
-      {isData ? (
-        <>
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div>
-              <p className="text-sm text-muted-foreground max-w-3xl">
-                Coverage measured over the application&apos;s data space, not
-                its page count. A <strong>cell</strong> is a combination of
-                dimension values that actually occurs in the data — combinations
-                that never occur are never planned and never counted against
-                you.
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <label>
-                <input
-                  type="file"
-                  accept=".csv,text/csv"
-                  className="hidden"
-                  onChange={(e) => onUpload(e.target.files?.[0])}
-                />
-                <Button variant="outline" asChild disabled={busy !== null}>
-                  <span className="cursor-pointer">
-                    {busy === "upload" ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Upload className="h-4 w-4" />
-                    )}
-                    Upload data
-                  </span>
-                </Button>
-              </label>
-              <Button onClick={runSync} disabled={busy !== null || pending}>
-                {busy === "sync" ? (
+      {/* Shown on both views, as it was above the tab row on the old page.
+          The sampling caveats especially: a warning that the numbers come from
+          a truncated profile has to travel with the ranked gap queue, because
+          that queue is what the QA agent plans from. */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <p className="text-sm text-muted-foreground max-w-3xl">
+            Coverage measured over the application&apos;s data space, not its
+            page count. A <strong>cell</strong> is a combination of dimension
+            values that actually occurs in the data — combinations that never
+            occur are never planned and never counted against you.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <label>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => onUpload(e.target.files?.[0])}
+            />
+            <Button variant="outline" asChild disabled={busy !== null}>
+              <span className="cursor-pointer">
+                {busy === "upload" ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <RefreshCw className="h-4 w-4" />
+                  <Upload className="h-4 w-4" />
                 )}
-                Re-profile
-              </Button>
-            </div>
-          </div>
+                Upload data
+              </span>
+            </Button>
+          </label>
+          <Button onClick={runSync} disabled={busy !== null || pending}>
+            {busy === "sync" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            Re-profile
+          </Button>
+        </div>
+      </div>
 
-          {truncatedSources.length > 0 ? (
-            <Card className="border-amber-500/40 bg-amber-500/5">
-              <CardContent className="pt-6 flex gap-2 text-sm">
-                <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
-                <span>
-                  {truncatedSources
-                    .map(
-                      (s) =>
-                        `${s.alias}: ${s.profiledRows.toLocaleString()}/${s.rows.toLocaleString()} rows`,
-                    )
-                    .join(" · ")}{" "}
-                  — the original upload is no longer on disk, so profiling fell
-                  back to the cached preview. Re-upload the file to measure the
-                  full data set.
-                </span>
-              </CardContent>
-            </Card>
-          ) : null}
-
-          {spec.caveats.length > 0 ? (
-            <Card className="border-amber-500/40 bg-amber-500/5">
-              <CardContent className="pt-6 space-y-2">
-                {spec.caveats.map((c, i) => (
-                  <div key={i} className="flex gap-2 text-sm">
-                    <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
-                    <span>{c}</span>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          ) : null}
-
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard
-              label={`${spec.acceptance.strength}-way coverage`}
-              value={pct(stop.metrics.tupleCoverage)}
-              hint={`${stop.metrics.coveredTuples}/${stop.metrics.totalTuples} combinations · target ${pct(spec.acceptance.pairwiseTarget)}`}
-              tone={
-                stop.metrics.tupleCoverage >= spec.acceptance.pairwiseTarget
-                  ? "good"
-                  : "warn"
-              }
-            />
-            <StatCard
-              label="Weighted volume"
-              value={pct(stop.metrics.weightedVolumeCoverage)}
-              hint={`target ${pct(spec.acceptance.weightedVolumeTarget)}${anyProfiled ? "" : " · counts are not production volume"}`}
-              tone={
-                stop.metrics.weightedVolumeCoverage >=
-                spec.acceptance.weightedVolumeTarget
-                  ? "good"
-                  : "warn"
-              }
-            />
-            <StatCard
-              label="Cells covered"
-              value={`${stop.metrics.coveredCells}/${stop.metrics.eligibleCells}`}
-              hint={`${stop.metrics.excludedCells} excluded`}
-            />
-            <StatCard
-              label="Correctly untested"
-              value={String(spec.scope.skippedAsNonOccurring)}
-              hint="cartesian combinations that do not occur in the data"
-            />
-          </div>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">
-                {stop.shouldStop ? "Stop criteria met" : "Work remaining"}
-              </CardTitle>
-              <CardDescription>{stop.explanation}</CardDescription>
-            </CardHeader>
-          </Card>
-        </>
+      {truncatedSources.length > 0 ? (
+        <Card className="border-amber-500/40 bg-amber-500/5">
+          <CardContent className="pt-6 flex gap-2 text-sm">
+            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+            <span>
+              {truncatedSources
+                .map(
+                  (s) =>
+                    `${s.alias}: ${s.profiledRows.toLocaleString()}/${s.rows.toLocaleString()} rows`,
+                )
+                .join(" · ")}{" "}
+              — the original upload is no longer on disk, so profiling fell back
+              to the cached preview. Re-upload the file to measure the full data
+              set.
+            </span>
+          </CardContent>
+        </Card>
       ) : null}
+
+      {spec.caveats.length > 0 ? (
+        <Card className="border-amber-500/40 bg-amber-500/5">
+          <CardContent className="pt-6 space-y-2">
+            {spec.caveats.map((c, i) => (
+              <div key={i} className="flex gap-2 text-sm">
+                <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                <span>{c}</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          label={`${spec.acceptance.strength}-way coverage`}
+          value={pct(stop.metrics.tupleCoverage)}
+          hint={`${stop.metrics.coveredTuples}/${stop.metrics.totalTuples} combinations · target ${pct(spec.acceptance.pairwiseTarget)}`}
+          tone={
+            stop.metrics.tupleCoverage >= spec.acceptance.pairwiseTarget
+              ? "good"
+              : "warn"
+          }
+        />
+        <StatCard
+          label="Weighted volume"
+          value={pct(stop.metrics.weightedVolumeCoverage)}
+          hint={`target ${pct(spec.acceptance.weightedVolumeTarget)}${anyProfiled ? "" : " · counts are not production volume"}`}
+          tone={
+            stop.metrics.weightedVolumeCoverage >=
+            spec.acceptance.weightedVolumeTarget
+              ? "good"
+              : "warn"
+          }
+        />
+        <StatCard
+          label="Cells covered"
+          value={`${stop.metrics.coveredCells}/${stop.metrics.eligibleCells}`}
+          hint={`${stop.metrics.excludedCells} excluded`}
+        />
+        <StatCard
+          label="Correctly untested"
+          value={String(spec.scope.skippedAsNonOccurring)}
+          hint="cartesian combinations that do not occur in the data"
+        />
+      </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">
+            {stop.shouldStop ? "Stop criteria met" : "Work remaining"}
+          </CardTitle>
+          <CardDescription>{stop.explanation}</CardDescription>
+        </CardHeader>
+      </Card>
 
       <Tabs defaultValue={isData ? "breakdown" : "gaps"}>
         {/* Gaps is a top-level tab of the Coverage canvas, so that instance
@@ -595,7 +594,7 @@ export function CoverageClient({
             <Card>
               <CardContent className="pt-6 text-sm text-muted-foreground">
                 {spec.sections.length === 0
-                  ? "No coverage model yet — enable dimensions on the Dimensions tab, then press Re-profile."
+                  ? "No coverage model yet — enable dimensions under Data → Dimensions, then press Re-profile."
                   : "Every occurring combination has been exercised at least once."}
               </CardContent>
             </Card>
