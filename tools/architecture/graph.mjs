@@ -19,8 +19,10 @@ import {
   CORE_PACKAGES,
   CORE_SRC_PATHS,
   FORBIDDEN_CORE_IMPORTS,
+  FORBIDDEN_HOST_IMPORTS,
   FORBIDDEN_LIB_IMPORTS,
   FORBIDDEN_PLUGIN_IMPORTS,
+  HOST_GLOB,
   PACKAGED_PLUGIN_IMPORTS,
   PSEUDO_PLUGIN_IMPORTS,
   PSEUDO_PLUGINS,
@@ -159,21 +161,70 @@ export function stripNonCode(src) {
     .join("\n");
 }
 
-/** @returns {Array<{ specifier: string, line: number }>} */
-export function importsOf(root, relPath) {
-  let src;
-  try {
-    src = readFileSync(join(root, relPath), "utf8");
-  } catch {
-    return [];
-  }
+/**
+ * Is this specifier reached through a statement-level `import type … from` /
+ * `export type … from`? Those are erased at compile time, so they create no
+ * runtime edge, and a rule may opt out of counting them with
+ * `allowTypeImports`. Rules that do not say so keep counting everything, which
+ * is the behaviour every rule had before this flag existed.
+ *
+ * Found by walking back from the specifier to the nearest `import`/`export`
+ * keyword, because the `from` clause of a multi-line `import type { … }` can
+ * sit several lines below it. Only the `from` form can be type-only: a dynamic
+ * `import("x")` or a `require("x")` carries its keyword *inside* the match
+ * rather than before it, so the leading test rejects them outright instead of
+ * letting the lookback find some earlier, unrelated import.
+ *
+ * The inline form (`import { type A } from "x"`) is deliberately NOT treated
+ * as type-only. The statement is still a value import as far as the emitted
+ * module graph is concerned, and for a rule whose whole job is to notice a
+ * handle crossing a line, over-counting is the safe direction to be wrong in.
+ */
+function isTypeOnlyFromClause(code, matched, matchIndex) {
+  if (!/^from\b/.test(matched)) return false;
+  const before = code.slice(0, matchIndex);
+  let kw = -1;
+  for (const m of before.matchAll(/\b(?:import|export)\b/g)) kw = m.index;
+  if (kw === -1) return false;
+  return /^(?:import|export)\s+type\b/.test(before.slice(kw));
+}
+
+/**
+ * Same scan as `importsOf`, on source already in hand. Exported so the rules
+ * can be unit-tested without a fixture file on disk, the way `stripNonCode` is.
+ *
+ * @returns {Array<{ specifier: string, line: number, typeOnly: boolean }>}
+ */
+export function importsIn(src) {
   const code = stripNonCode(src);
   const specs = [];
   for (const m of code.matchAll(SPECIFIER_RE)) {
     const line = code.slice(0, m.index).split("\n").length;
-    specs.push({ specifier: m[1], line });
+    specs.push({
+      specifier: m[1],
+      line,
+      typeOnly: isTypeOnlyFromClause(code, m[0], m.index),
+    });
   }
   return specs;
+}
+
+/** @returns {Array<{ specifier: string, line: number, typeOnly: boolean }>} */
+export function importsOf(root, relPath) {
+  try {
+    return importsIn(readFileSync(join(root, relPath), "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Does one rule fire on one import? The single place `allowTypeImports` is
+ * honoured, so every scan below agrees about it.
+ */
+function ruleMatches(rule, imp) {
+  if (rule.allowTypeImports && imp.typeOnly) return false;
+  return rule.patterns.some((p) => matchesPattern(imp.specifier, p));
 }
 
 /** Glob-lite: only `*` (single segment) and a trailing `/*` are supported. */
@@ -253,12 +304,13 @@ export function scanPseudoPlugins(root) {
         // A plugin's own tests may reach for anything to build fixtures.
         if (/\.(test|spec)\.tsx?$/.test(file)) continue;
 
-        for (const { specifier, line } of importsOf(root, file)) {
+        for (const imp of importsOf(root, file)) {
+          const { specifier, line } = imp;
           for (const rule of [
             ...FORBIDDEN_PLUGIN_IMPORTS,
             ...PSEUDO_PLUGIN_IMPORTS,
           ]) {
-            if (rule.patterns.some((p) => matchesPattern(specifier, p))) {
+            if (ruleMatches(rule, imp)) {
               violations.push({
                 rule: rule.id,
                 plugin: id,
@@ -311,11 +363,52 @@ export function scanTargetLayout(root) {
   for (const { zone, dir, rules } of zones) {
     for (const file of listSourceFiles(root, dir)) {
       if (/\.(test|spec)\.tsx?$/.test(file)) continue;
-      for (const { specifier, line } of importsOf(root, file)) {
+      for (const imp of importsOf(root, file)) {
         for (const rule of rules) {
-          if (rule.patterns.some((p) => matchesPattern(specifier, p))) {
-            violations.push({ rule: rule.id, zone, file, line, specifier });
+          if (ruleMatches(rule, imp)) {
+            violations.push({
+              rule: rule.id,
+              zone,
+              file,
+              line: imp.line,
+              specifier: imp.specifier,
+            });
           }
+        }
+      }
+    }
+  }
+
+  return violations;
+}
+
+/**
+ * Walk the composition root's host adapters (`src/lib/core/*-host.ts`) — see
+ * `FORBIDDEN_HOST_IMPORTS` in `boundaries.mjs` for what they are and why they
+ * needed a rule of their own.
+ *
+ * Violations carry `plugin: "host"` rather than a `zone`, so they ratchet
+ * through the same `<plugin>::<rule>` key as everything else in the current
+ * layout (`host::db`) instead of needing a second baseline mechanism. The
+ * baseline stands at zero: unlike the pseudo-plugin counts this rule was
+ * introduced *after* the violations it describes were fixed, not before.
+ */
+export function scanCompositionHosts(root) {
+  /** @type {Array<{ rule: string, plugin: string, file: string, line: number, specifier: string }>} */
+  const violations = [];
+
+  for (const file of listSourceFiles(root, "src/lib/core")) {
+    if (!matchesPattern(file, HOST_GLOB)) continue;
+    for (const imp of importsOf(root, file)) {
+      for (const rule of FORBIDDEN_HOST_IMPORTS) {
+        if (ruleMatches(rule, imp)) {
+          violations.push({
+            rule: rule.id,
+            plugin: "host",
+            file,
+            line: imp.line,
+            specifier: imp.specifier,
+          });
         }
       }
     }

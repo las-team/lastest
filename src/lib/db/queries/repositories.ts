@@ -403,6 +403,21 @@ export async function deleteRepository(id: string) {
   await cascadePluginDeletion({ kind: "repo", id });
 }
 
+/**
+ * The owning team's presentation flags for a repository, in one join rather
+ * than a repo read followed by a team read. Only the flags a viewer of the
+ * repo's public artefacts is allowed to see — never plan, quota or billing.
+ */
+export async function getRepositoryOwnerTeamFlags(repositoryId: string) {
+  const [row] = await db
+    .select({ earlyAdopterMode: teams.earlyAdopterMode })
+    .from(repositories)
+    .innerJoin(teams, eq(repositories.teamId, teams.id))
+    .where(eq(repositories.id, repositoryId))
+    .limit(1);
+  return row;
+}
+
 export async function getBaselinesByRepo(repositoryId: string) {
   return db
     .select()

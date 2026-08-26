@@ -529,6 +529,62 @@ export const FORBIDDEN_CORE_IMPORTS = [
 ];
 
 /**
+ * The composition root's host adapters — `src/lib/core/*-host.ts`, the files
+ * that fill a plugin's host port with app primitives.
+ *
+ * None of the rules above reach them, and that gap is why this one exists.
+ * `src/lib/core` is not a `PSEUDO_PLUGINS` entry (it never will be — it is the
+ * wiring, not a feature), so the `drizzle-orm` ban in `PSEUDO_PLUGIN_IMPORTS`
+ * does not apply; and `FORBIDDEN_CORE_IMPORTS` describes the *target* layout's
+ * `core/**`, where importing `@/…` at all is the violation. Four hosts had
+ * drifted into the gap: `share`, `quickstart`, `design-system` and `recorder`
+ * were each writing `db.select().from(<core table>)` inline. That is a second
+ * query layer — one with no tenancy filter, no encryption-on-write and no
+ * activity event — growing next to the owned one in `src/lib/db/queries/`,
+ * which every compliant host (`awards-host.ts` is the model) delegates to.
+ *
+ * So the ban here is narrower than the plugin one: not "no database", but "no
+ * database *except* through the query layer". `@/lib/db/queries` and its
+ * submodules are deliberately absent from the patterns — they are the thing a
+ * host is supposed to call, and `@/lib/db` is listed as an exact specifier
+ * rather than a prefix precisely so it cannot swallow them.
+ *
+ * **Type-only imports are not counted** (`allowTypeImports`). `import type
+ * { Repository } from "@/lib/db/schema"` is erased before anything runs: it
+ * opens no connection and writes no row. That is the same distinction that
+ * moved `drizzle-orm` out of the plugin `db` rule and into
+ * `PSEUDO_PLUGIN_IMPORTS` in the first place — what must never cross the line
+ * is a *handle*, not the name of a shape. Four already-compliant hosts
+ * (`app-map`, `authoring-ai`, `ci`, `events`) map rows to plugin DTOs through
+ * exactly such an import, so counting them would make the rule fire hardest on
+ * the code it is meant to describe as correct. The inline form
+ * (`import { type A } from "x"`) is still counted — see the note on
+ * `isTypeOnlyFromClause` in `graph.mjs` for why erring that way is the safe
+ * direction.
+ */
+export const HOST_GLOB = "src/lib/core/*-host.ts";
+
+export const FORBIDDEN_HOST_IMPORTS = [
+  {
+    id: "db",
+    patterns: [
+      "@/lib/db",
+      "@/lib/db/schema",
+      "@lastest/db",
+      "@lastest/db/*",
+      "drizzle-orm",
+      "drizzle-orm/*",
+    ],
+    allowTypeImports: true,
+    message:
+      "A host adapter must not query the database directly. Call the owned " +
+      "query layer in src/lib/db/queries — that is where tenancy filters, " +
+      "encryption-on-write and activity events live. Type-only imports of " +
+      "schema shapes are fine.",
+  },
+];
+
+/**
  * Libraries are shared, but they are still below both other tiers: a lib that
  * imports a plugin would smuggle a feature into everything that uses the lib,
  * and a lib reaching into the Next.js app is not a lib.

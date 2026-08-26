@@ -23,10 +23,14 @@ import { describe, expect, it } from "vitest";
 import {
   CORE_PACKAGES,
   CORE_SRC_PATHS,
+  FORBIDDEN_HOST_IMPORTS,
   PSEUDO_PLUGINS,
   pseudoPluginPaths,
 } from "./boundaries.mjs";
 import {
+  importsIn,
+  matchesPattern,
+  scanCompositionHosts,
   scanPseudoPlugins,
   scanTargetLayout,
   stripNonCode,
@@ -63,7 +67,13 @@ describe("target layout (core/** + plugins/**)", () => {
 });
 
 describe("current layout burndown", () => {
-  const violations = scanPseudoPlugins(ROOT) as Violation[];
+  // The pseudo-plugins plus the composition root's host adapters, which carry
+  // `plugin: "host"` so they ratchet on the same `<plugin>::<rule>` key
+  // (`host::db`) rather than needing a second baseline file.
+  const violations = [
+    ...scanPseudoPlugins(ROOT),
+    ...scanCompositionHosts(ROOT),
+  ] as Violation[];
   const actual = tallyByPluginRule(violations) as Record<string, number>;
 
   it("introduces no new boundary violation", () => {
@@ -106,6 +116,83 @@ describe("current layout burndown", () => {
 
   it("reports a total matching the baseline", () => {
     expect(violations.length).toBe(BASELINE.total);
+  });
+});
+
+describe("composition-root hosts (src/lib/core/*-host.ts)", () => {
+  it("reaches the database only through src/lib/db/queries", () => {
+    // Ratcheted at zero above like everything else, but asserted on its own
+    // here so the failure names the actual problem — "a host adapter grew its
+    // own query layer" — instead of a `host::db` count going from 0 to 1.
+    const violations = scanCompositionHosts(ROOT) as Violation[];
+    expect(
+      violations.map(format),
+      "A host adapter must not hold the db handle, a schema table object or a " +
+        "drizzle operator. Move the query into src/lib/db/queries — the owned " +
+        "layer where tenancy filters, encryption-on-write and activity events " +
+        "live — and call it from here. See src/lib/core/awards-host.ts.",
+    ).toEqual([]);
+  });
+
+  it("does not count a type-only schema import", () => {
+    // Four compliant hosts (app-map, authoring-ai, ci, events) map rows to
+    // plugin DTOs through exactly this import. It is erased at compile time,
+    // so it opens no connection — counting it would fire the rule hardest on
+    // the code it is meant to bless.
+    const [imp] = importsIn(
+      'import type {\n  Repository,\n  Runner,\n} from "@/lib/db/schema";',
+    ) as Array<{ specifier: string; typeOnly: boolean }>;
+    expect(imp.specifier).toBe("@/lib/db/schema");
+    expect(imp.typeOnly).toBe(true);
+  });
+
+  it("counts a value import of the same module", () => {
+    const [imp] = importsIn('import { db } from "@/lib/db";') as Array<{
+      typeOnly: boolean;
+    }>;
+    expect(imp.typeOnly).toBe(false);
+  });
+
+  it("counts a dynamic import even after a type-only one", () => {
+    // The lookback that finds `import type` must not walk past a dynamic
+    // `import("…")` and pick up an unrelated earlier statement.
+    const imports = importsIn(
+      'import type { X } from "@/lib/db/schema";\nconst { db } = await import("@/lib/db");',
+    ) as Array<{ specifier: string; typeOnly: boolean }>;
+    expect(imports.map((i) => [i.specifier, i.typeOnly])).toEqual([
+      ["@/lib/db/schema", true],
+      ["@/lib/db", false],
+    ]);
+  });
+
+  it("leaves the query layer itself importable", () => {
+    // The whole point of the rule is that hosts call these, so `@/lib/db` has
+    // to be an exact specifier and not a prefix — the mistake that would
+    // otherwise ban the one import every compliant host makes.
+    const patterns = (
+      FORBIDDEN_HOST_IMPORTS as Array<{ patterns: string[] }>
+    ).flatMap((r) => r.patterns);
+    const allowed = [
+      "@/lib/db/queries",
+      "@/lib/db/queries/activity-events",
+      "@/lib/auth",
+    ];
+    const wronglyBanned = allowed.filter((s) =>
+      patterns.some((p) => matchesPattern(s, p)),
+    );
+    expect(wronglyBanned).toEqual([]);
+
+    // …and the things it is meant to catch still match.
+    const banned = [
+      "@/lib/db",
+      "@/lib/db/schema",
+      "drizzle-orm",
+      "@lastest/db",
+    ];
+    const missed = banned.filter(
+      (s) => !patterns.some((p) => matchesPattern(s, p)),
+    );
+    expect(missed).toEqual([]);
   });
 });
 

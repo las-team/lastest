@@ -23,8 +23,10 @@
 import {
   CORE_GLOB,
   FORBIDDEN_CORE_IMPORTS,
+  FORBIDDEN_HOST_IMPORTS,
   FORBIDDEN_LIB_IMPORTS,
   FORBIDDEN_PLUGIN_IMPORTS,
+  HOST_GLOB,
   LIB_GLOB,
   PACKAGED_PLUGIN_IMPORTS,
   PLUGIN_GLOB,
@@ -56,6 +58,41 @@ const toPatterns = (rules) =>
       message: rule.message,
     })),
   );
+
+/**
+ * The `FORBIDDEN_HOST_IMPORTS` shape needs two things the blocks above do not.
+ *
+ * First, exact specifiers must stay exact. `group` patterns use gitignore
+ * semantics, where a pattern naming a directory also matches everything under
+ * it — so a `patterns` entry for `@/lib/db` would fire on `@/lib/db/queries`,
+ * the one import these files are *supposed* to have. A pattern with no `*`
+ * therefore becomes a `paths` entry, matched by equality; only the wildcards
+ * stay in `patterns`.
+ *
+ * Second, `allowTypeImports`, which the core `no-restricted-imports` does not
+ * understand — hence the `@typescript-eslint/` rule at the callsite. See the
+ * `FORBIDDEN_HOST_IMPORTS` comment in `boundaries.mjs` for why type-only
+ * imports are exempt.
+ */
+function toHostRestrictions(rules) {
+  const paths = [];
+  const patterns = [];
+  for (const rule of rules) {
+    const allowTypeImports = rule.allowTypeImports === true;
+    for (const p of rule.patterns) {
+      if (p.includes("*")) {
+        patterns.push({
+          group: [anchor(p)],
+          allowTypeImports,
+          message: rule.message,
+        });
+      } else {
+        paths.push({ name: p, allowTypeImports, message: rule.message });
+      }
+    }
+  }
+  return { paths, patterns };
+}
 
 /** @returns {import("eslint").Linter.Config[]} */
 export function architectureBoundaryRules() {
@@ -109,6 +146,29 @@ export function architectureBoundaryRules() {
       "no-restricted-imports": [
         "error",
         { patterns: toPatterns(FORBIDDEN_LIB_IMPORTS) },
+      ],
+    },
+  });
+
+  // ── Composition root: the host adapters ─────────────────────────────────────
+  // `src/lib/core/*-host.ts` is inside `src/`, so unlike the target-layout
+  // globs above this block covers files that exist and are edited daily. It is
+  // still `error` rather than the pseudo-plugins' `warn`: those are warnings
+  // because their ratchet stands above zero and `pnpm lint` has to stay green
+  // through the burndown, whereas this rule was added *after* its violations
+  // were fixed and its baseline is zero. There is nothing to be lenient about.
+  //
+  // No test carve-out here, unlike every block above: the glob ends in
+  // `-host.ts`, so a `*.test.ts` cannot match it in the first place. The
+  // `scanCompositionHosts` walker skips nothing for the same reason — the two
+  // agree by construction rather than by a duplicated ignore list.
+  blocks.push({
+    name: "architecture/core-hosts",
+    files: [HOST_GLOB],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        toHostRestrictions(FORBIDDEN_HOST_IMPORTS),
       ],
     },
   });

@@ -1,6 +1,5 @@
 import "server-only";
 
-import { and, eq, gt } from "drizzle-orm";
 import type {
   FunctionalAreaRef,
   GuardedFetchOptions,
@@ -16,13 +15,7 @@ import type {
 } from "@lastest/plugin-recorder/host";
 import type { SelectorConfig } from "@lastest/plugin-recorder/types";
 
-import { db } from "@/lib/db";
 import type { DomSnapshotData } from "@/lib/db/schema";
-import {
-  embeddedSessions,
-  remoteRecordingEvents,
-  runners,
-} from "@/lib/db/schema";
 import { requireCapability, requireRepoCapability } from "@/lib/auth";
 import { requireTestOwnership } from "@/lib/auth/ownership";
 import * as queries from "@/lib/db/queries";
@@ -124,15 +117,11 @@ export const appRecorderHost: RecorderHost = {
     try {
       await Promise.all(
         events.map((event) =>
-          db
-            .update(remoteRecordingEvents)
-            .set({ data: event.data })
-            .where(
-              and(
-                eq(remoteRecordingEvents.sessionId, sessionId),
-                eq(remoteRecordingEvents.sequence, event.sequence),
-              ),
-            ),
+          queries.updateRemoteRecordingEventData(
+            sessionId,
+            event.sequence,
+            event.data,
+          ),
         ),
       );
     } catch (err) {
@@ -143,15 +132,7 @@ export const appRecorderHost: RecorderHost = {
   },
 
   async checkRunnerStillBusy(runnerId, sessionId, sinceSequence) {
-    const [runnerRow] = await db
-      .select({
-        runnerStatus: runners.status,
-        sessionStatus: embeddedSessions.status,
-      })
-      .from(runners)
-      .leftJoin(embeddedSessions, eq(embeddedSessions.runnerId, runners.id))
-      .where(eq(runners.id, runnerId))
-      .limit(1);
+    const runnerRow = await queries.getRunnerWithSessionStatus(runnerId);
 
     const stillBusy =
       !!runnerRow &&
@@ -160,18 +141,10 @@ export const appRecorderHost: RecorderHost = {
 
     if (!stillBusy || !sessionId) return { stillBusy, events: [] };
 
-    const where =
-      sinceSequence !== undefined
-        ? and(
-            eq(remoteRecordingEvents.sessionId, sessionId),
-            gt(remoteRecordingEvents.sequence, sinceSequence),
-          )
-        : eq(remoteRecordingEvents.sessionId, sessionId);
-    const rows = await db
-      .select()
-      .from(remoteRecordingEvents)
-      .where(where)
-      .orderBy(remoteRecordingEvents.sequence);
+    const rows = await queries.getRemoteRecordingEventsBySession(
+      sessionId,
+      sinceSequence,
+    );
     const events: RecordingEvent[] = rows.map((r) => ({
       type: r.type,
       timestamp: r.timestamp,

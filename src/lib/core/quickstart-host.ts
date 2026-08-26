@@ -1,7 +1,5 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
-
 import type {
   QuickstartCaptureStorageStateInput,
   QuickstartCaptureStorageStateResult,
@@ -13,8 +11,6 @@ import type {
 import { publishBuildShare } from "@lastest/plugin-share";
 
 import * as queries from "@/lib/db/queries";
-import { db } from "@/lib/db";
-import { embeddedSessions } from "@/lib/db/schema";
 import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
 import { getLogger } from "@/lib/logger";
 import { computeDiffClusters } from "@/lib/diff/diff-clusters";
@@ -162,13 +158,9 @@ async function resolveBuildStreamUrl(
   if (!build?.testRunId) return undefined;
   const testRun = await queries.getTestRun(build.testRunId);
   if (!testRun?.runnerId) return undefined;
-  const [sess] = await db
-    .select({
-      streamUrl: embeddedSessions.streamUrl,
-      instanceId: embeddedSessions.instanceId,
-    })
-    .from(embeddedSessions)
-    .where(eq(embeddedSessions.runnerId, testRun.runnerId));
+  const sess = await queries.getEmbeddedSessionStreamByRunnerId(
+    testRun.runnerId,
+  );
   return proxiedStream(sess?.streamUrl, sess?.instanceId);
 }
 

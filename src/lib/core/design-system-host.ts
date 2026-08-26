@@ -1,11 +1,9 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
 import type { DesignSystemConfig } from "@lastest/eb-protocol";
 import type { DesignSystemHost } from "@lastest/plugin-design-system";
 
-import { db } from "@/lib/db";
-import { tests, playwrightSettings } from "@/lib/db/schema";
+import * as queries from "@/lib/db/queries";
 import { requireTestOwnership } from "@/lib/auth/ownership";
 import { requireRepoAccess } from "@/lib/auth";
 
@@ -23,10 +21,7 @@ export const appDesignSystemHost: DesignSystemHost = {
     overrides: Partial<DesignSystemConfig> | null,
   ): Promise<void> {
     await requireTestOwnership(testId);
-    await db
-      .update(tests)
-      .set({ designSystemOverrides: overrides, updatedAt: new Date() })
-      .where(eq(tests.id, testId));
+    await queries.updateTest(testId, { designSystemOverrides: overrides });
   },
 
   async saveRepoConfig(
@@ -34,34 +29,21 @@ export const appDesignSystemHost: DesignSystemHost = {
     config: DesignSystemConfig,
   ): Promise<void> {
     await requireRepoAccess(repositoryId);
-    // upsert: row may not exist yet for repos that have never opened the
-    // Playwright Settings page; mirror the pattern in upsertPlaywrightSettings.
-    const [existing] = await db
-      .select()
-      .from(playwrightSettings)
-      .where(eq(playwrightSettings.repositoryId, repositoryId));
-    if (existing) {
-      await db
-        .update(playwrightSettings)
-        .set({ designSystem: config, updatedAt: new Date() })
-        .where(eq(playwrightSettings.id, existing.id));
-    } else {
-      const { v4: uuid } = await import("uuid");
-      await db.insert(playwrightSettings).values({
-        id: uuid(),
-        repositoryId,
-        designSystem: config,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-    }
+    // The row may not exist yet for repos that have never opened the
+    // Playwright Settings page, so this is an upsert — which is exactly what
+    // `upsertPlaywrightSettings` already is. This used to be a hand-rolled
+    // copy of it sitting in the composition root.
+    await queries.upsertPlaywrightSettings(repositoryId, {
+      designSystem: config,
+    });
   },
 
   async clearRepoConfig(repositoryId: string): Promise<void> {
     await requireRepoAccess(repositoryId);
-    await db
-      .update(playwrightSettings)
-      .set({ designSystem: null, updatedAt: new Date() })
-      .where(eq(playwrightSettings.repositoryId, repositoryId));
+    // Update, *not* upsert: a repo with no settings row has nothing to clear,
+    // and materialising one here would be a write the user never asked for.
+    await queries.updatePlaywrightSettingsByRepo(repositoryId, {
+      designSystem: null,
+    });
   },
 };

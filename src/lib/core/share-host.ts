@@ -1,6 +1,5 @@
 import "server-only";
 
-import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import type {
   BuildA11yViolationRow,
   ClaimSourceTest,
@@ -15,20 +14,7 @@ import type {
 import type { DemoNotes, VideoCaption } from "@lastest/plugin-share";
 import { getRepoAward as awardsGetRepoAward } from "@lastest/plugin-awards";
 
-import type { DomDiffResult } from "@lastest/eb-protocol";
-
-import { db } from "@/lib/db";
-import {
-  baselines,
-  builds,
-  repositories,
-  teams,
-  testResults,
-  tests,
-  testRuns,
-  stepComparisons,
-  visualDiffs,
-} from "@/lib/db/schema";
+import type { Build } from "@/lib/db/schema";
 import * as queries from "@/lib/db/queries";
 import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
 import { sendDiscordShareNotification } from "@/lib/integrations/discord";
@@ -90,28 +76,12 @@ async function toTeamActor(): Promise<ShareTeamActor> {
 export async function resolveShareRenderBuild(target: {
   buildId: string;
   testId: string | null;
-}): Promise<typeof builds.$inferSelect | null> {
+}): Promise<Build | null> {
   if (target.testId) {
-    const [latest] = await db
-      .select({ build: builds })
-      .from(builds)
-      .innerJoin(testRuns, eq(builds.testRunId, testRuns.id))
-      .innerJoin(testResults, eq(testResults.testRunId, testRuns.id))
-      .where(
-        and(
-          eq(testResults.testId, target.testId),
-          isNotNull(builds.completedAt),
-        ),
-      )
-      .orderBy(desc(builds.createdAt))
-      .limit(1);
-    if (latest?.build) return latest.build;
+    const latest = await queries.getLatestCompletedBuildForTest(target.testId);
+    if (latest) return latest;
   }
-  const [pinned] = await db
-    .select()
-    .from(builds)
-    .where(eq(builds.id, target.buildId));
-  return pinned ?? null;
+  return (await queries.getBuild(target.buildId)) ?? null;
 }
 
 /**
@@ -122,10 +92,7 @@ export async function resolveShareRenderBuild(target: {
  * calling core app code.
  */
 export async function getActiveBaselinesForTest(testId: string) {
-  return db
-    .select()
-    .from(baselines)
-    .where(and(eq(baselines.testId, testId), eq(baselines.isActive, true)));
+  return queries.getActiveBaselinesForTest(testId);
 }
 
 /**
@@ -173,61 +140,19 @@ export async function getSitemapEnrichment(
   if (shares.length === 0) return out;
 
   const buildIds = [...new Set(shares.map((s) => s.buildId))];
-  const rows = await db
-    .select({
-      buildId: builds.id,
-      buildCompletedAt: builds.completedAt,
-      buildCreatedAt: builds.createdAt,
-      changesDetected: builds.changesDetected,
-      testRunId: builds.testRunId,
-    })
-    .from(builds)
-    .where(
-      sql`${builds.id} IN (${sql.join(
-        buildIds.map((id) => sql`${id}`),
-        sql`, `,
-      )})`,
-    );
+  const rows = await queries.getBuildSitemapRowsByIds(buildIds);
   const buildById = new Map(rows.map((r) => [r.buildId, r]));
 
   const testIds = [
     ...new Set(shares.map((s) => s.testId).filter((v): v is string => !!v)),
   ];
-  const testRows = testIds.length
-    ? await db
-        .select({ id: tests.id, name: tests.name })
-        .from(tests)
-        .where(
-          sql`${tests.id} IN (${sql.join(
-            testIds.map((id) => sql`${id}`),
-            sql`, `,
-          )})`,
-        )
-    : [];
+  const testRows = await queries.getTestNamesByIds(testIds);
   const testNameById = new Map(testRows.map((t) => [t.id, t.name]));
 
   const testRunIds = [
     ...new Set(rows.map((r) => r.testRunId).filter((v): v is string => !!v)),
   ];
-  const resultRows = testRunIds.length
-    ? await db
-        .select({
-          testRunId: testResults.testRunId,
-          testId: testResults.testId,
-          videoPath: testResults.videoPath,
-          durationMs: testResults.durationMs,
-        })
-        .from(testResults)
-        .where(
-          and(
-            sql`${testResults.testRunId} IN (${sql.join(
-              testRunIds.map((id) => sql`${id}`),
-              sql`, `,
-            )})`,
-            isNotNull(testResults.videoPath),
-          ),
-        )
-    : [];
+  const resultRows = await queries.getTestResultVideosByRuns(testRunIds);
 
   for (const s of shares) {
     const build = buildById.get(s.buildId);
@@ -346,104 +271,20 @@ export const appShareHost: ShareHost = {
     if (!build) return null;
 
     const test = target.testId
-      ? ((
-          await db.select().from(tests).where(eq(tests.id, target.testId))
-        )[0] ?? null)
+      ? ((await queries.getTest(target.testId)) ?? null)
       : null;
 
     const testRun = build.testRunId
-      ? ((
-          await db
-            .select()
-            .from(testRuns)
-            .where(eq(testRuns.id, build.testRunId))
-        )[0] ?? null)
+      ? ((await queries.getTestRun(build.testRunId)) ?? null)
       : null;
 
-    const diffsWhere = target.testId
-      ? and(
-          eq(visualDiffs.buildId, build.id),
-          eq(visualDiffs.testId, target.testId),
-        )
-      : eq(visualDiffs.buildId, build.id);
-
-    const diffsQuery = db
-      .select({
-        id: visualDiffs.id,
-        buildId: visualDiffs.buildId,
-        testResultId: visualDiffs.testResultId,
-        testId: visualDiffs.testId,
-        stepLabel: visualDiffs.stepLabel,
-        baselineImagePath: visualDiffs.baselineImagePath,
-        currentImagePath: visualDiffs.currentImagePath,
-        diffImagePath: visualDiffs.diffImagePath,
-        status: visualDiffs.status,
-        pixelDifference: visualDiffs.pixelDifference,
-        percentageDifference: visualDiffs.percentageDifference,
-        classification: visualDiffs.classification,
-        plannedImagePath: visualDiffs.plannedImagePath,
-        plannedDiffImagePath: visualDiffs.plannedDiffImagePath,
-        mainBaselineImagePath: visualDiffs.mainBaselineImagePath,
-        mainDiffImagePath: visualDiffs.mainDiffImagePath,
-        // Pull only the domDiff sub-object out of metadata — the rest
-        // (aiAnalysis, GH links) would bloat the payload and the share page
-        // never reads it.
-        domDiff: sql<DomDiffResult | null>`${visualDiffs.metadata}->'domDiff'`,
-        testResultStatus: testResults.status,
-        testName: tests.name,
-      })
-      .from(visualDiffs)
-      .leftJoin(testResults, eq(visualDiffs.testResultId, testResults.id))
-      .leftJoin(tests, eq(visualDiffs.testId, tests.id))
-      .where(diffsWhere);
-
     const testRunId = build.testRunId;
-    const resultsQuery = testRunId
-      ? db
-          .select({
-            testId: testResults.testId,
-            status: testResults.status,
-            screenshotPath: testResults.screenshotPath,
-            videoPath: testResults.videoPath,
-            durationMs: testResults.durationMs,
-            screenshots: testResults.screenshots,
-            webVitals: testResults.webVitals,
-            stepTimings: testResults.stepTimings,
-          })
-          .from(testResults)
-          .where(
-            target.testId
-              ? and(
-                  eq(testResults.testRunId, testRunId),
-                  eq(testResults.testId, target.testId),
-                )
-              : eq(testResults.testRunId, testRunId),
-          )
-      : Promise.resolve([]);
-
-    const stepCmpWhere = target.testId
-      ? and(
-          eq(stepComparisons.buildId, build.id),
-          eq(stepComparisons.testId, target.testId),
-        )
-      : eq(stepComparisons.buildId, build.id);
-
-    const stepCmpQuery = db
-      .select({
-        id: stepComparisons.id,
-        testId: stepComparisons.testId,
-        stepLabel: stepComparisons.stepLabel,
-        stepIndex: stepComparisons.stepIndex,
-        verdict: stepComparisons.verdict,
-        layers: stepComparisons.layers,
-      })
-      .from(stepComparisons)
-      .where(stepCmpWhere);
-
     const [diffs, results, stepCmps] = await Promise.all([
-      diffsQuery,
-      resultsQuery,
-      stepCmpQuery,
+      queries.getVisualDiffsWithDomDiff(build.id, target.testId),
+      testRunId
+        ? queries.getTestResultSummariesByRun(testRunId, target.testId)
+        : Promise.resolve([]),
+      queries.getStepComparisonVerdictsByBuild(build.id, target.testId),
     ]);
 
     return {
@@ -491,20 +332,12 @@ export const appShareHost: ShareHost = {
     repositoryId: string | null,
   ): Promise<{ earlyAdopterMode: boolean } | null> {
     if (!repositoryId) return null;
-    const [row] = await db
-      .select({ earlyAdopterMode: teams.earlyAdopterMode })
-      .from(repositories)
-      .innerJoin(teams, eq(repositories.teamId, teams.id))
-      .where(eq(repositories.id, repositoryId))
-      .limit(1);
+    const row = await queries.getRepositoryOwnerTeamFlags(repositoryId);
     return row ? { earlyAdopterMode: row.earlyAdopterMode ?? false } : null;
   },
 
   async getPlatformStats(): Promise<{ testRunsCompleted: number }> {
-    const [runs] = await db
-      .select({ n: sql<number>`COUNT(*)::int` })
-      .from(testResults);
-    return { testRunsCompleted: runs?.n ?? 0 };
+    return { testRunsCompleted: await queries.countAllTestResults() };
   },
 
   async getBuildA11yViolations(
@@ -688,12 +521,7 @@ async function copyActiveBaselines(
   const path = await import("path");
   const fs = await import("fs/promises");
 
-  const activeBaselines = await db
-    .select()
-    .from(baselines)
-    .where(
-      and(eq(baselines.testId, sourceTestId), eq(baselines.isActive, true)),
-    );
+  const activeBaselines = await queries.getActiveBaselinesForTest(sourceTestId);
 
   for (const b of activeBaselines) {
     if (!b.imagePath) continue;

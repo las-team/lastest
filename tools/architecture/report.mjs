@@ -14,6 +14,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  scanCompositionHosts,
   scanPseudoPlugins,
   scanTargetLayout,
   tally,
@@ -24,7 +25,10 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..");
 const BASELINE_PATH = join(HERE, "baseline.json");
 
-const pseudo = scanPseudoPlugins(ROOT);
+// The current layout is the pseudo-plugins *plus* the composition root's host
+// adapters, which ratchet on the same `<plugin>::<rule>` key under the
+// pseudo-plugin id `host`. One list, one baseline.
+const pseudo = [...scanPseudoPlugins(ROOT), ...scanCompositionHosts(ROOT)];
 const target = scanTargetLayout(ROOT);
 
 if (process.argv.includes("--baseline")) {
