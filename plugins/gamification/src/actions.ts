@@ -10,6 +10,7 @@ import {
 } from "./domain/scoring";
 // NOTE: do NOT re-export those two types from this file. See the header.
 import type { BotKind } from "./domain/types";
+import { gamificationPlugin } from "./index";
 import { gamificationWiring } from "./wiring";
 
 /**
@@ -36,6 +37,30 @@ import { gamificationWiring } from "./wiring";
  *    `pnpm build` catches it. Types belong on a non-action module: these two
  *    are exported from `./domain/scoring` and re-exported by `./index.ts`.
  */
+
+/**
+ * The signed-in caller and the team they are acting for, or null when there
+ * is no session (a background path, or a signed-out visitor).
+ *
+ * Replaces the host's retired `currentActor` method: `contextFor` with no
+ * scope request falls through to the app's `requireTeamAccess()`, and
+ * `ctx.actor` carries the user. The catch is deliberate and matches the old
+ * contract — both call sites treat "no session" as "nothing to attribute"
+ * rather than an error, and on background paths the session lookup itself
+ * throws (`headers()` outside a request).
+ */
+async function currentViewer(): Promise<{
+  userId: string;
+  teamId: string;
+} | null> {
+  const { runtime } = gamificationWiring();
+  try {
+    const ctx = await runtime.contextFor(gamificationPlugin);
+    return ctx.actor ? { userId: ctx.actor.userId, teamId: ctx.team.id } : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Award points to an actor.
@@ -78,7 +103,7 @@ export async function onTestCreated(event: {
 }): Promise<void> {
   const { host } = gamificationWiring();
   try {
-    const actor = await host.currentActor();
+    const actor = await currentViewer();
     if (!actor) return;
 
     // Caller already named a bot row.
@@ -283,7 +308,7 @@ export async function toggleGamification(enabled: boolean) {
 
 export async function getViewerGamificationSnapshot() {
   const { host } = gamificationWiring();
-  const actor = await host.currentActor();
+  const actor = await currentViewer();
   if (!actor) return null;
   if (!(await host.isEnabledForTeam(actor.teamId))) return null;
 

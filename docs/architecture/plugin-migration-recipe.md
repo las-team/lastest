@@ -349,25 +349,31 @@ name — just pointed at every other pseudo-plugin instead of at
 ## 1.7 Before declaring a `currentActor`, try an empty `contextFor()`
 
 Four migrations in a row declared a host method for "who is calling"
-(`launch`/`playground`'s `resolveActor`, `gamification`'s `currentActor`). `ci`
-did not need one, and the reason generalises to any **team-scoped** feature:
+(`launch`/`playground`'s `resolveActor`, `gamification`'s since-retired
+`currentActor`). `ci` did not need one, and the reason generalises to any
+**team-scoped** feature:
 
 ```ts
 const ctx = await runtime.contextFor(ciPlugin);   // no scope request at all
 const teamId = ctx.team.id;                       // session-authorized
+const actor = requireActor(ctx);                  // the user: id + email
 ```
 
 `resolveScope` falls through to the app's `requireTeamAccess()` when the request
 carries neither `repositoryId` nor `teamId`, so `ctx.team.id` is a
 session-authorized tenant that **no argument influenced**. `explorer` and
 `app-map` pass a `repositoryId` because their work hangs off a repo; if yours
-hangs off a *team*, pass nothing.
+hangs off a *team*, pass nothing. On session paths the context also carries
+`ctx.actor` (user id + email) and `TeamRef`/`RepoRef` carry display names and
+the team slug — so "auth returns less than my action needs" is no longer a
+reason to put the guard on the host (`share` made that argument before these
+fields existed, and its identity methods came off the port once they landed).
 
 What this does **not** cover is *role*. RBAC capabilities are not on
 `PluginContext` and should not be, so an admin-only action still needs
 `host.requireTeamAdmin()` — shaped as "give me the authorized team id" per §3.1.
 That method is now declared verbatim in two plugins, and `core/identity` would
-retire eight identity methods across four.
+retire the remaining identity methods across several.
 
 > **While you are there, check for *relative* cross-feature imports in the
 > files you are about to delete.** `src/server/actions/play-agent.ts` held
@@ -713,6 +719,31 @@ bundles**; two copies of a module-level `let` is a failure that only appears in 
 production build. Copy `plugins/design-system/src/wiring.ts` (host only) or
 `plugins/explorer/src/wiring.ts` (host + runtime + data).
 
+### 4.1 The wiring *shape* is derived from the manifest — don't invent one
+
+There used to be five hand-assembled shapes in `runtime.ts`, each with a
+justifying comment, and "where does auth happen for this plugin" was
+pattern-dependent. Now the kernel derives the slots from the manifest
+(`wiringSlotsFor` in `core/kernel/src/wiring.ts`) and the composition root is
+a table plus a loop:
+
+- **`runtime`** iff the plugin is tenanted (`tenancy` ≠ `"none"`). Session
+  paths authorize through `contextFor()`; `ctx.actor` carries the user
+  (id/email) and `TeamRef`/`RepoRef` carry names and slugs, so a host method
+  that does "auth + enrichment in one call" is no longer needed — that gap is
+  what used to justify host-guard shapes (`share` pre-refactor).
+- **`data`** iff the manifest declares a `schema` — for the callers with no
+  scope to build a context from: deletion hooks, background dispatchers,
+  anonymous reads (awards' badge, ci's webhook gate).
+- **`storageHost`** iff the plugin consumes `storage` — its deletion hook
+  scopes it by hand (`data-sources`).
+
+A wiring that requires a slot the manifest does not grant is a **boot error**
+(`requireSlot`), so declare the manifest honestly and take exactly the granted
+slots. RBAC stays a host method (§1.7); the three host-only wirings
+(`events`, `design-system`, `recorder`) predate `contextFor` auth and keep
+their guards on the host.
+
 ## 5. Shared pure logic goes to `libs/`, not to core
 
 When two features need the same dependency-free helper, the answer is a `libs/*`
@@ -852,7 +883,7 @@ Two details worth copying:
 | `package.json` (root) | `"@lastest/plugin-<id>": "workspace:*"` |
 | `next.config.ts` | add to `transpilePackages` |
 | `src/lib/core/manifests.ts` | import + append to `MANIFESTS` |
-| `src/lib/core/runtime.ts` | import `configure<Name>` + call it in `getPluginRuntime` |
+| `src/lib/core/runtime.ts` | import `configure<Name>` + add a row to the `wire` table (slots are manifest-derived — §4.1; a missing or over-asking row is a boot error) |
 | `src/lib/core/<id>-host.ts` | the app's fill for the host port, if there is one |
 | `src/lib/core/ai-capability.ts` | if you declare `capabilities: ["ai"]`: add your `AIActionType` to `ACTION_TYPES` |
 | `scripts/migrate.js` | if tables moved: drop the FKs to core tables *by catalogue lookup*, before `drizzle-kit push` |

@@ -63,7 +63,6 @@ export type { ScoreRule } from "./domain/rules";
 export type {
   ActorProfile,
   GamificationActivityEvent,
-  GamificationActor,
   GamificationHost,
 } from "./host";
 export {

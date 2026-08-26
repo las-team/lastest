@@ -285,6 +285,8 @@ export interface CapabilityFactories {
 export interface ContextScope {
   readonly team: PluginContext["team"];
   readonly repo?: PluginContext["repo"];
+  /** The session's user, when the resolver had a session. See `ActorRef`. */
+  readonly actor?: PluginContext["actor"];
   readonly log: Logger;
 }
 
@@ -341,6 +343,7 @@ export function buildContext<
     pluginId: manifest.id,
     team: scope.team,
     repo: scope.repo,
+    actor: scope.actor,
     log: scope.log,
   };
 
@@ -355,4 +358,25 @@ export function buildContext<
   }
 
   return ctx as PluginContext<C>;
+}
+
+/**
+ * Assert the context was resolved from a session and return its user.
+ *
+ * `ctx.actor` is optional because `dispatch` and the background `teamId`
+ * branch build contexts with no session behind them. An action that writes
+ * on a user's behalf (attribution, "published by" fields) must not silently
+ * proceed without one, and `ctx.actor!` scattered through plugins is the
+ * kind of assertion that stops being checked. One helper, one error message.
+ */
+export function requireActor(
+  ctx: Pick<PluginContext, "pluginId" | "actor">,
+): NonNullable<PluginContext["actor"]> {
+  if (!ctx.actor) {
+    throw new Error(
+      `Plugin "${ctx.pluginId}" needs the acting user, but this context was ` +
+        `not resolved from a session (background scopes carry no actor)`,
+    );
+  }
+  return ctx.actor;
 }

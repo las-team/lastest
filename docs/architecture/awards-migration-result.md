@@ -1,5 +1,13 @@
 # `awards` migration result (RFC §9 phase 4, plugin 9 of 13)
 
+> **Superseded in part (wiring-shape collapse):** the `host`+`data`-only
+> wiring this doc describes gained a `runtime` — `getTeamTrophyRoom()` now
+> resolves its own session scope through `contextFor()` instead of taking a
+> caller-passed team id, and the reads moved behind
+> `@lastest/plugin-awards/reads`. The anonymous badge path and the
+> build-completion recompute still use the bare `data` handle. See recipe
+> §4.1 and `plugins/awards/src/wiring.ts`.
+
 **Status:** done. `plugins/awards/` is a workspace package; `src/lib/awards/`
 and its old query/component files are deleted;
 `tools/architecture/boundaries.mjs`'s `PSEUDO_PLUGINS.awards` entry is gone.

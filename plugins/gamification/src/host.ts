@@ -3,31 +3,31 @@ import type { ActorKind } from "./schema";
 /**
  * The core surface Beat-the-Bot needs and core does not have yet.
  *
- * **Nine methods**, the same count as `app-map`, and they group into four
- * things — one identity boundary, one feature flag on a core table, two reads
- * of core entities, and one delivery mechanism:
+ * **Eight methods** (nine until `currentActor` was retired by
+ * `runtime.contextFor()` + `ctx.actor`), grouped into four things — one
+ * identity boundary, one feature flag on a core table, two reads of core
+ * entities, and one delivery mechanism:
  *
  * | # | Method | Group | Retired by |
  * | --- | --- | --- | --- |
- * | 1 | `currentActor` | identity | `core/identity` |
- * | 2 | `requireTeamAdmin` | identity (authorization) | `core/identity` |
- * | 3 | `resolveActorProfiles` | identity (display data) | `core/identity` |
- * | 4 | `listTeamMemberIds` | identity (membership) | `core/identity` |
- * | 5 | `isEnabledForTeam` | a flag on `teams` | `ctx.team.entitlements` |
- * | 6 | `setEnabledForTeam` | authorized write to `teams` | `ctx.team` |
- * | 7 | `getTestCreator` | core entity read | `ctx.tests` |
- * | 8 | `stampTestCreator` | authorized write to `tests` | a widened `ctx.tests` |
- * | 9 | `emitActivityEvent` | delivery | **`ctx.events`** — see below |
+ * | 1 | `requireTeamAdmin` | identity (authorization) | `core/identity` |
+ * | 2 | `resolveActorProfiles` | identity (display data) | `core/identity` |
+ * | 3 | `listTeamMemberIds` | identity (membership) | `core/identity` |
+ * | 4 | `isEnabledForTeam` | a flag on `teams` | `ctx.team.entitlements` |
+ * | 5 | `setEnabledForTeam` | authorized write to `teams` | `ctx.team` |
+ * | 6 | `getTestCreator` | core entity read | `ctx.tests` |
+ * | 7 | `stampTestCreator` | authorized write to `tests` | a widened `ctx.tests` |
+ * | 8 | `emitActivityEvent` | delivery | **`ctx.events`** — see below |
  *
- * ### Four of nine are identity, and that is now the fourth plugin saying so
+ * ### Three of eight are identity, and that is now the fourth plugin saying so
  *
  * `launch` and `playground` each declared a `resolveActor` and a batched user
  * lookup; `playground`'s entire three-method port was already a duplicate of
- * `launch`'s. This adds two more shapes to the same missing capability —
- * "who is calling", "are they an admin of this team", "who are these ids",
- * "who is in this team". A `core/identity` capability would delete **four**
- * methods here and three across those two, and it is now the single
- * highest-value item on the phase-5 backlog by a wide margin.
+ * `launch`'s. "Who is calling" came off this port when `ctx.actor` landed —
+ * the session paths resolve it through `contextFor` now — but "are they an
+ * admin of this team", "who are these ids" and "who is in this team" remain.
+ * RBAC is deliberately not on `PluginContext` (recipe §1.7), so a
+ * `core/identity` capability is still the phase-5 answer for the rest.
  *
  * ### `emitActivityEvent` is a capability this plugin cannot reach
  *
@@ -52,11 +52,6 @@ import type { ActorKind } from "./schema";
  * kernel change, and it is the reason this plugin declares
  * `capabilities: ["data"]` and not `["data", "events"]`.
  */
-
-export interface GamificationActor {
-  readonly userId: string;
-  readonly teamId: string;
-}
 
 /** The public slice of a person, for the leaderboard. */
 export interface ActorProfile {
@@ -88,13 +83,6 @@ export interface GamificationActivityEvent {
 }
 
 export interface GamificationHost {
-  /**
-   * The signed-in caller and the team they are acting for, or null when there
-   * is no session (background paths). Never the raw session object — this
-   * feature has no business with a role, a plan or a cookie.
-   */
-  currentActor(): Promise<GamificationActor | null>;
-
   /**
    * Assert the caller administers their team, and return its id. Throws the
    * app's own authorization error.

@@ -9,6 +9,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./api/badge": "./src/api/badge.ts",
+    "./reads": "./src/reads.ts",
     "./host": "./src/host.ts",
     "./page": "./src/ui/page.tsx",
     "./schema": "./src/schema.ts",

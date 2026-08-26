@@ -24,6 +24,16 @@ export type Plan =
  */
 export interface TeamRef {
   readonly id: string;
+  /**
+   * Display name. Here because any plugin that names the tenant to a human
+   * (a notification, a public page, an outbound webhook) needs it, and the
+   * alternative was every such plugin declaring a host method that does auth
+   * *and* enrichment in one call — which is how the wiring shapes diverged
+   * before this field existed (see `plugins/share/src/host.ts` history).
+   */
+  readonly name: string;
+  /** URL-safe identity, for plugins that mint slugs or paths from the tenant. */
+  readonly slug: string;
   readonly plan: Plan;
   /**
    * Coarse feature gates, resolved from the plan. A plugin asks
@@ -34,11 +44,28 @@ export interface TeamRef {
   readonly entitlements: ReadonlySet<string>;
 }
 
+/**
+ * The authenticated user a scope was resolved from — present only when the
+ * scope came from a session, absent on background paths (a cron trigger, a
+ * job resuming, a deletion hook).
+ *
+ * Still a *reference*, not an entity: an id to attribute writes to and an
+ * email to name the author in outbound messages. No role (RBAC stays a host
+ * question — see `plugin-migration-recipe.md` §1.7), no cookie, no profile.
+ */
+export interface ActorRef {
+  readonly userId: string;
+  readonly email: string;
+}
+
 /** The repository in scope, when there is one. */
 export interface RepoRef {
   readonly id: string;
   readonly teamId: string;
   readonly name: string;
+  /** Display identity ("owner/name"), for plugins that name the repo to a
+   *  human — same justification as `TeamRef.name`. */
+  readonly fullName: string;
   readonly defaultBranch: string | null;
 }
 

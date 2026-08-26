@@ -8,7 +8,7 @@ import type {
   QuickstartRepoGateInfo,
   QuickstartRunFacts,
 } from "@lastest/plugin-quickstart/host";
-import { publishBuildShare } from "@lastest/plugin-share";
+import { publishBuildShare } from "@lastest/plugin-share/actions";
 
 import * as queries from "@/lib/db/queries";
 import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";

@@ -1,5 +1,13 @@
 # Gamification ("Beat the Bot") migration — result
 
+> **Superseded in part (wiring-shape collapse):** the `host`+`data`-only
+> wiring this doc describes gained a `runtime` — the session paths
+> (`getViewerGamificationSnapshot`, the `onTestCreated` listener) resolve
+> "who is calling" through `contextFor()` + `ctx.actor`, retiring the host's
+> `currentActor` method (9 → 8). `awardScore`'s caller-attested `teamId`
+> contract is unchanged. See recipe §4.1 and
+> `plugins/gamification/src/wiring.ts`.
+
 **Status:** done and building. `pnpm install`, `pnpm arch`, `pnpm lint`,
 `pnpm types`, `pnpm test` and `pnpm build` all pass.
 **Recipe:** [`plugin-migration-recipe.md`](./plugin-migration-recipe.md).

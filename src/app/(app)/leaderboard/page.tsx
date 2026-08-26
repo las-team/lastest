@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { headers } from "next/headers";
 import { getCurrentSession } from "@/lib/auth";
-import { getTeamTrophyRoom } from "@lastest/plugin-awards";
+import { getTeamTrophyRoom } from "@lastest/plugin-awards/reads";
 import * as gamification from "@lastest/plugin-gamification/reads";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -26,8 +26,10 @@ export default async function LeaderboardPage() {
   const session = await getCurrentSession();
   if (!session?.team) notFound();
 
+  // `getTeamTrophyRoom` authorizes its own scope through the plugin runtime
+  // (`contextFor` -> the app's `requireTeamAccess()`), so no team id crosses.
   const [trophyEntries, origin] = await Promise.all([
-    getTeamTrophyRoom(session.team.id),
+    getTeamTrophyRoom(),
     resolveOrigin(),
   ]);
 

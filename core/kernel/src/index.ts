@@ -11,9 +11,12 @@ export {
   CORE_PROVIDED,
   PLUGIN_ID_RE,
   PluginRegistryError,
+  requireActor,
   resolveRegistry,
   UntenantedPluginError,
 } from "./registry";
+export { requireSlot, wiringSlotsFor } from "./wiring";
+export type { WiringShapeSource, WiringSlots } from "./wiring";
 export type {
   CapabilityFactories,
   ContextScope,

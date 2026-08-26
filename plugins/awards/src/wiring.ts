@@ -1,4 +1,9 @@
-import type { DataCapability } from "@lastest/contracts";
+import type {
+  CapabilityName,
+  DataCapability,
+  PluginContext,
+  PluginManifest,
+} from "@lastest/contracts";
 
 import type { AwardsHost } from "./host";
 
@@ -8,39 +13,33 @@ import type { AwardsHost } from "./host";
  * that file's comment for why a module-level `let` is not enough under
  * Next.js bundling.
  *
- * ### `data`, no `runtime` — the same shape as `gamification`, for a
- * different reason
+ * ### The standard tenanted shape: `runtime` + `host` + `data`
  *
  * `awards_repo_awards` rows genuinely belong to a tenant (`repositoryId`,
- * cascading from a team-owned repo), so this is not the "no tenant at all"
- * shape `launch`/`playground` declare with `tenancy: "none"`. What it shares
- * with `gamification` is the *wiring* — `data` straight from the slot, no
- * `contextFor()` — because none of this plugin's three call paths would
- * benefit from one:
+ * cascading from a team-owned repo). The `runtime` serves the one session
+ * path — `getTeamTrophyRoom` resolves its own scope through
+ * `contextFor(awardsPlugin)` instead of trusting a caller-passed team id.
+ * The bare `data` handle serves the two paths that have no session to build
+ * a context from, the same route every plugin's deletion hook takes:
  *
  * - `recomputeRepoAward(repositoryId)` runs from `builds.ts` after a build
- *   completes, with a `repositoryId` the executor already resolved. There is
- *   no session on this path at all.
- * - `getTeamTrophyRoom(teamId)` runs from `/leaderboard`, which has already
- *   called `requireTeamAccess()` itself before passing the id in — the same
- *   contract `gamification`'s `awardScore` documents in its own `wiring.ts`.
+ *   completes, with a `repositoryId` the executor already resolved.
  * - `getRepoAwardBySlug(slug)` runs from the public badge route and from
  *   `ShareHost.getRepoAward` — both deliberately anonymous. A `ctx` would
  *   have nothing to authorize against.
- *
- * Building a `PluginContext` for any of these would mean either threading a
- * caller-supplied id through `contextFor` (the exact tenancy-escape shape
- * `core/kernel/src/runtime.ts` documents `ScopeRequest.teamId` as
- * background-paths-only to prevent) or asserting a session that two of the
- * three paths do not have. So the tenancy guarantee stays where it already
- * is — with whichever caller resolved the id — and this plugin receives ids
- * it treats as authorized, exactly as `src/lib/awards/recompute.ts` and
- * `src/lib/db/queries/awards.ts` did before the migration.
  */
 export interface AwardsWiring {
+  readonly runtime: AwardsRuntime;
   readonly host: AwardsHost;
   /** Scoped to this plugin's one table by `core/data`. Never a raw handle. */
   readonly data: DataCapability;
+}
+
+/** The slice of `@lastest/kernel`'s `PluginRuntime` this plugin uses. */
+export interface AwardsRuntime {
+  contextFor<C extends CapabilityName, P extends CapabilityName>(
+    manifest: PluginManifest<C, P>,
+  ): Promise<PluginContext<C>>;
 }
 
 const SLOT = Symbol.for("lastest.plugin.awards.wiring");
@@ -56,7 +55,7 @@ export function awardsWiring(): AwardsWiring {
   if (!wiring) {
     throw new Error(
       "The awards plugin is not wired. The composition root must call " +
-        "configureAwards({ host, data }) before any awards call.",
+        "configureAwards({ runtime, host, data }) before any awards call.",
     );
   }
   return wiring;

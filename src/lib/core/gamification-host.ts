@@ -5,18 +5,17 @@ import { revalidatePath } from "next/cache";
 import type {
   ActorProfile,
   GamificationActivityEvent,
-  GamificationActor,
   GamificationHost,
 } from "@lastest/plugin-gamification/host";
 
-import { getCurrentSession, requireTeamAdmin } from "@/lib/auth";
+import { requireTeamAdmin } from "@/lib/auth";
 import * as queries from "@/lib/db/queries";
 import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
 
 /**
  * The app's fill for `GamificationHost`.
  *
- * Nine adapters, no new behaviour — each is a call the pre-plugin
+ * Eight adapters, no new behaviour — each is a call the pre-plugin
  * `src/server/actions/gamification.ts` or `src/lib/db/queries/gamification.ts`
  * made inline, moved to the side of the boundary that is allowed to make it.
  *
@@ -36,15 +35,6 @@ import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
  * `core/identity` capability is in `plugins/gamification/src/host.ts`.
  */
 export const appGamificationHost: GamificationHost = {
-  async currentActor(): Promise<GamificationActor | null> {
-    const session = await getCurrentSession();
-    if (!session?.user || !session?.team) return null;
-    // Only an id and a team. No role, no plan, no cookie — this feature has no
-    // business with any of them, and `requireTeamAdmin` below is the only
-    // authorization question it is allowed to ask.
-    return { userId: session.user.id, teamId: session.team.id };
-  },
-
   async requireTeamAdmin(): Promise<string> {
     const session = await requireTeamAdmin();
     return session.team.id;

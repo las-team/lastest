@@ -414,6 +414,8 @@ describe("Recorder — real interaction → real codegen → saved test (§3 P0 
   it("derives CodeGenEvents from real DOM elements on a live EB page and generates code that references the real selectors", async () => {
     const team: TeamRef = {
       id: teamId,
+      name: "itest team",
+      slug: "itest-team",
       plan: "free" as Plan,
       entitlements: new Set(),
     };

@@ -22,17 +22,16 @@ import { createDeletionHook } from "./deletion";
  * the estimate `tools/architecture/boundaries.mjs` left when `share` landed —
  * comfortably inside the "go" range.
  *
- * ### Tenanted, but no `runtime` — the `gamification` shape, for a third
- * reason
+ * ### The standard tenanted shape
  *
  * Every row belongs to a repo (`repositoryId`, cascading from a team-owned
  * repo through a deletion hook rather than a real FK — see `schema.ts`), so
- * this is not `launch`/`playground`'s "no tenant" shape. But none of its
- * three call paths — a build-completion trigger, an already-authorized
- * team read, an anonymous slug lookup — would benefit from a
- * `PluginContext`, so `wiring.ts` takes `data` straight from the slot, the
- * same shape `gamification` uses and for the same underlying reason: the
- * caller already holds whatever authorization matters.
+ * this is not `launch`/`playground`'s "no tenant" shape, and the wiring is
+ * the standard tenanted one: `runtime` + `host` + `data`. The runtime serves
+ * the session path (`getTeamTrophyRoom` resolves its own team through
+ * `contextFor`); the bare `data` handle serves the build-completion trigger
+ * and the anonymous slug lookup, which have no session to build a context
+ * from — see `wiring.ts`.
  *
  * ### No server actions at all
  *
@@ -100,7 +99,9 @@ export type {
   RepoAward,
 } from "./schema";
 
-export { getRepoAward, getRepoAwardBySlug, getTeamTrophyRoom } from "./reads";
+// Server-component reads live behind `@lastest/plugin-awards/reads`, the
+// same subpath `gamification` uses. Re-exporting them here would put this
+// module (which `reads.ts` imports for the manifest) in an import cycle.
 export { recomputeRepoAward } from "./recompute";
 
 export {

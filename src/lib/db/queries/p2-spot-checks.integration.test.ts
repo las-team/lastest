@@ -199,7 +199,7 @@ describe("P2 spot-check — Gamification / Leaderboard / Awards", () => {
 
   it("season + leaderboard + award queries return sane shapes with no data", async () => {
     const gamification = await import("@lastest/plugin-gamification/reads");
-    const awards = await import("@lastest/plugin-awards");
+    const awards = await import("@lastest/plugin-awards/reads");
 
     const active = await gamification.getActiveSeason(teamId);
     expect(active).toBeNull(); // no season created for this fresh team

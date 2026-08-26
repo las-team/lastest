@@ -77,6 +77,8 @@ const log = {
 
 const teamOn = (plan: Plan): TeamRef => ({
   id: "t1",
+  name: "T1",
+  slug: "t1",
   plan,
   entitlements: new Set(),
 });

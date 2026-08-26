@@ -54,7 +54,7 @@ export type {
   ProviderScope,
 } from "./plugin";
 
-export type { Logger, Plan, RepoRef, TeamRef } from "./refs";
+export type { ActorRef, Logger, Plan, RepoRef, TeamRef } from "./refs";
 
 export type {
   BlobRef,

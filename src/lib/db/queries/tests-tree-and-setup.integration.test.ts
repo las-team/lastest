@@ -112,6 +112,8 @@ afterAll(async () => {
 describe("core/tests capability — ctx.tests.createQuarantined (§2.6, §3 Tests tree row)", () => {
   const team: TeamRef = {
     id: "",
+    name: "itest team",
+    slug: "itest-team",
     plan: "free",
     entitlements: new Set<string>(),
   };

@@ -12,7 +12,7 @@ export interface ClaimPageProps {
  * The claim runner's page. Session resolution (redirect to `/login` when
  * unauthenticated) stays in the app's thin wrapper
  * (`src/app/(public)/r/[slug]/claim/page.tsx`) — it is a nicer UX than
- * letting `claimPublicShare`'s own `requireTeamAccess()` throw, and
+ * letting `claimPublicShare`'s own `contextFor()` authorization throw, and
  * "resolve the session, decide whether to redirect" is app composition, not
  * this plugin's concern (`plugin-migration-recipe.md` §6).
  */

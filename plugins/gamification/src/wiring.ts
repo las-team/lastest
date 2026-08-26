@@ -1,4 +1,9 @@
-import type { DataCapability } from "@lastest/contracts";
+import type {
+  CapabilityName,
+  DataCapability,
+  PluginContext,
+  PluginManifest,
+} from "@lastest/contracts";
 
 import type { GamificationHost } from "./host";
 
@@ -9,30 +14,41 @@ import type { GamificationHost } from "./host";
  * that file's comment for why a module-level `let` is not enough under Next.js
  * bundling.
  *
- * ### No `runtime`, but this plugin *is* tenanted
+ * ### The standard tenanted shape: `runtime` + `host` + `data`
  *
- * `launch` and `playground` take this route because they have no tenant at all
- * (`tenancy: "none"`). Beat-the-Bot is the opposite: every one of its six
- * tables carries a `team_id`, and every read and write is scoped by one. It
- * still takes its `DataCapability` straight from the slot rather than building
- * a `PluginContext`, for a reason specific to how it is called.
+ * The `runtime` serves the session paths — the viewer's score card and the
+ * `onTestCreated` listener resolve "who is calling" through
+ * `contextFor(gamificationPlugin)` (`ctx.actor` + `ctx.team`), which retired
+ * the host's `currentActor` method. `requireTeamAdmin` stays on the host:
+ * RBAC is deliberately not on `PluginContext` (recipe §1.7).
  *
- * `awardScore()` is invoked from six app call sites that have *already*
- * authorized a team and pass its id in — a diff being approved, a review todo
- * being resolved, a build finishing. Building a `ctx` for those would mean
+ * The bare `data` handle serves the callers with no session to build a
+ * context from. Chief among them is `awardScore()`, invoked from six app call
+ * sites that have *already* authorized a team and pass its id in — a diff
+ * being approved, a build finishing. Building a `ctx` for those would mean
  * handing `contextFor({ teamId })` a request-supplied id, and
  * `core/kernel/src/runtime.ts` documents that field as background-paths-only
  * for exactly the reason it would be wrong here: "honouring it from a user
- * request would be a tenancy escape".
- *
- * So the tenancy guarantee stays where it already was — with the caller that
- * did `requireTeamAccess()` — and this plugin receives a team id it treats as
- * authorized, which is precisely what the pre-migration `awardScore(input)`
- * did. That is a preserved arrangement, not a new one, and `host.ts` says what
- * it costs: no `ctx.events`.
+ * request would be a tenancy escape". So on those paths the tenancy
+ * guarantee stays with the caller that did `requireTeamAccess()` — the same
+ * arrangement as before the migration, and the same route every plugin's
+ * deletion hook takes.
  */
 
+export type GamificationScopeRequest = {
+  readonly repositoryId?: string;
+};
+
+/** The slice of `@lastest/kernel`'s `PluginRuntime` this plugin uses. */
+export interface GamificationRuntime {
+  contextFor<C extends CapabilityName, P extends CapabilityName>(
+    manifest: PluginManifest<C, P>,
+    req?: GamificationScopeRequest,
+  ): Promise<PluginContext<C>>;
+}
+
 export interface GamificationWiring {
+  readonly runtime: GamificationRuntime;
   readonly host: GamificationHost;
   /** Scoped to this plugin's six tables by `core/data`. Never a raw handle. */
   readonly data: DataCapability;
@@ -51,7 +67,7 @@ export function gamificationWiring(): GamificationWiring {
   if (!wiring) {
     throw new Error(
       "The gamification plugin is not wired. The composition root must call " +
-        "configureGamification({ host, data }) before any scoring call.",
+        "configureGamification({ runtime, host, data }) before any scoring call.",
     );
   }
   return wiring;

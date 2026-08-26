@@ -10,15 +10,15 @@ import { createDeletionHook } from "./deletion";
  * after `rca`, `app-map`, `launch`, `api-test`, `playground`, `gamification`
  * and `ci`.
  *
- * ### Team-tenanted, but no `runtime` in its wiring
+ * ### The standard tenanted shape
  *
- * Every row carries an `ownerTeamId`, so this is not the "no tenant at all"
- * shape `launch`/`playground` declared. What it shares with them is the
- * *wiring* shape (`data` straight from the slot, no `contextFor()`) — see
- * `wiring.ts` for why: every action already authorizes through
- * `ShareHost.requireRepoAccess`/`requireTeamAccess`, which return more than
- * `PluginContext` carries (user id, user email, team name, repo name), so a
- * second, kernel-level check would be redundant rather than additive.
+ * Every row carries an `ownerTeamId`, and the wiring says so: `runtime` +
+ * `host` + `data`, the same shape as `ci`/`explorer`. This plugin originally
+ * shipped without a `runtime` because `PluginContext` carried less than the
+ * host's own auth guards returned (user id/email, team name, repo name);
+ * `ctx.actor` and the enriched `TeamRef` closed that gap, the identity
+ * methods came off `ShareHost`, and every session path now authorizes
+ * through `runtime.contextFor()` — see `wiring.ts` and `actions.ts`.
  *
  * ### The largest host port so far — read `host.ts` before concluding this
  * migration is small
@@ -53,10 +53,8 @@ export type {
   ShareBuildRenderContext,
   ShareHost,
   ShareNotificationPayload,
-  ShareRepoActor,
   ShareStepComparison,
   SharePublishInfo,
-  ShareTeamActor,
   ShareTest,
   ShareTestResult,
   ShareTestRun,
@@ -74,17 +72,10 @@ export type {
 } from "./types";
 export type { PublicShare, PublicShareKind, PublicShareStatus } from "./schema";
 
-export {
-  claimAndRedirect,
-  claimPublicShare,
-  listBuildShares,
-  listTestShares,
-  publishBuildShare,
-  publishLatestTestShare,
-  revokePublicShare,
-  type ClaimShareResult,
-  type PublishShareResult,
-} from "./actions";
+// Server actions live behind `@lastest/plugin-share/actions`, the same
+// subpath every other plugin uses. Re-exporting them here would also make
+// this module (which `actions.ts` imports for the manifest) part of an
+// import cycle with a `"use server"` file.
 export {
   getPublicShareById,
   getPublicShareBySlug,

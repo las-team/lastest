@@ -4,12 +4,19 @@ import { definePlugin } from "./define";
 import {
   buildContext,
   PluginRegistryError,
+  requireActor,
   resolveRegistry,
   UntenantedPluginError,
 } from "./registry";
 
 const scope = {
-  team: { id: "t1", plan: "pro" as const, entitlements: new Set(["ai"]) },
+  team: {
+    id: "t1",
+    name: "T1",
+    slug: "t1",
+    plan: "pro" as const,
+    entitlements: new Set(["ai"]),
+  },
   log: {
     info: vi.fn(),
     warn: vi.fn(),
@@ -376,6 +383,22 @@ describe("buildContext", () => {
     );
   });
 
+  it("carries the resolver's actor into the context, and omits it when absent", () => {
+    const manifest = definePlugin({ id: "rca", title: "RCA" });
+
+    const withActor = buildContext(
+      manifest,
+      { ...scope, actor: { userId: "u1", email: "u1@example.com" } },
+      factories,
+    );
+    expect(withActor.actor).toEqual({ userId: "u1", email: "u1@example.com" });
+
+    // A background scope (cron, job dispatch) resolves no session, so the
+    // context must not invent a person to attribute work to.
+    const background = buildContext(manifest, scope, factories);
+    expect(background.actor).toBeUndefined();
+  });
+
   it("refuses to build a context for an untenanted plugin", () => {
     // The backstop for what `resolveRegistry` cannot see: a composition root
     // that wires a `runtime` into an untenanted plugin, or the plugin calling
@@ -390,5 +413,18 @@ describe("buildContext", () => {
     expect(() =>
       buildContext(launch, scope, { data: () => ({ db: {} }) }),
     ).toThrow(UntenantedPluginError);
+  });
+});
+
+describe("requireActor", () => {
+  it("returns the actor when the scope was session-resolved", () => {
+    const actor = { userId: "u1", email: "u1@example.com" };
+    expect(requireActor({ pluginId: "share", actor })).toBe(actor);
+  });
+
+  it("throws for a background-resolved context, naming the plugin", () => {
+    expect(() => requireActor({ pluginId: "share" })).toThrow(
+      /Plugin "share" needs the acting user/,
+    );
   });
 });

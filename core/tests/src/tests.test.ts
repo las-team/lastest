@@ -9,7 +9,13 @@ import {
 } from "./limits";
 import type { TestsHost } from "./host";
 
-const team: TeamRef = { id: "t1", plan: "pro", entitlements: new Set() };
+const team: TeamRef = {
+  id: "t1",
+  name: "T1",
+  slug: "t1",
+  plan: "pro",
+  entitlements: new Set(),
+};
 
 function hostWith(overrides: Partial<TestsHost> = {}): TestsHost {
   return {

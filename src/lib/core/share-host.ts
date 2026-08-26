@@ -8,21 +8,19 @@ import type {
   ShareHost,
   ShareNotificationPayload,
   SharePublishInfo,
-  ShareRepoActor,
-  ShareTeamActor,
 } from "@lastest/plugin-share/host";
 import type { DemoNotes, VideoCaption } from "@lastest/plugin-share";
-import { getRepoAward as awardsGetRepoAward } from "@lastest/plugin-awards";
+import { getRepoAward as awardsGetRepoAward } from "@lastest/plugin-awards/reads";
 
 import type { Build } from "@/lib/db/schema";
 import * as queries from "@/lib/db/queries";
-import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
 import { sendDiscordShareNotification } from "@/lib/integrations/discord";
 
 /**
  * The app's fill for `ShareHost`. See `plugins/share/src/host.ts` for why
- * this port is the largest of any phase-4 plugin (15 methods) and what was
- * deliberately kept out of it.
+ * this port is the largest of any phase-4 plugin (13 methods — 15 until the
+ * identity guards moved to `runtime.contextFor()` + `ctx.actor`) and what
+ * was deliberately kept out of it.
  */
 
 function deriveTargetDomain(
@@ -34,26 +32,6 @@ function deriveTargetDomain(
   } catch {
     return null;
   }
-}
-
-async function toRepoActor(repositoryId: string): Promise<ShareRepoActor> {
-  const session = await requireRepoAccess(repositoryId);
-  return {
-    userId: session.user.id,
-    userEmail: session.user.email,
-    teamId: session.team.id,
-    teamName: session.team.name,
-    repoName: session.repo.name || session.repo.fullName,
-  };
-}
-
-async function toTeamActor(): Promise<ShareTeamActor> {
-  const session = await requireTeamAccess();
-  return {
-    userId: session.user.id,
-    teamId: session.team.id,
-    teamSlug: session.team.slug,
-  };
 }
 
 /**
@@ -175,18 +153,9 @@ export async function getSitemapEnrichment(
 
 export const appShareHost: ShareHost = {
   // ── Identity ──────────────────────────────────────────────────────────
-  async requireRepoAccess(repositoryId: string): Promise<ShareRepoActor> {
-    return toRepoActor(repositoryId);
-  },
-
-  async requireTeamAccess(): Promise<ShareTeamActor> {
-    return toTeamActor();
-  },
-
-  async requireTestAccess(testId: string): Promise<ShareRepoActor | null> {
+  async getTestRepositoryId(testId: string): Promise<string | null> {
     const test = await queries.getTest(testId);
-    if (!test?.repositoryId) return null;
-    return toRepoActor(test.repositoryId);
+    return test?.repositoryId ?? null;
   },
 
   // ── Publish flow ──────────────────────────────────────────────────────

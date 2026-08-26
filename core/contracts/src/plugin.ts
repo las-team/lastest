@@ -10,7 +10,7 @@ import type { BrowserCapability } from "./browser";
 import type { CheckLayerDescriptor } from "./check-layer";
 import type { DataCapability, DeletionHook } from "./data";
 import type { JobHandler, JobsCapability } from "./jobs";
-import type { Logger, RepoRef, TeamRef } from "./refs";
+import type { ActorRef, Logger, RepoRef, TeamRef } from "./refs";
 import type { ReposCapability } from "./repos";
 import type { StorageCapability } from "./storage";
 import type { TestsCapability } from "./tests";
@@ -98,6 +98,12 @@ export type PluginContext<C extends CapabilityName = never> = {
   readonly pluginId: string;
   readonly team: TeamRef;
   readonly repo?: RepoRef;
+  /**
+   * The authenticated user, when the scope was resolved from a session.
+   * Absent on background paths (cron, job dispatch). An action that cannot
+   * proceed without one asserts it via the kernel's `requireActor(ctx)`.
+   */
+  readonly actor?: ActorRef;
   /** Pre-scoped to the plugin id. */
   readonly log: Logger;
 } & { readonly [K in C]: CapabilityMap[K] };

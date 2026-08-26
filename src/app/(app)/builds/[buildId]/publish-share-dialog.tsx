@@ -19,14 +19,14 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { buildShareUrl } from "@lastest/plugin-share";
 import {
   publishBuildShare,
   publishLatestTestShare,
   revokePublicShare,
   listBuildShares,
   listTestShares,
-  buildShareUrl,
-} from "@lastest/plugin-share";
+} from "@lastest/plugin-share/actions";
 import { toast } from "sonner";
 
 export interface ShareRecord {

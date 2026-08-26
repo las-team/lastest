@@ -96,9 +96,9 @@ import {
   getPublicShareById,
   listPublicSharesForBuild,
   listPublicSharesForTest,
-  publishBuildShare,
   revokePublicShareById,
 } from "@lastest/plugin-share";
+import { publishBuildShare } from "@lastest/plugin-share/actions";
 import { getPluginRuntime } from "@/lib/core/runtime";
 // Server-side reads of the qa-agent plugin's own tables (tasks, triggers) —
 // plain functions, not actions; ownership is verified by this route before

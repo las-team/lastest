@@ -15,12 +15,16 @@ import { createStorageFactory } from "@lastest/core-storage";
 import { createTestsFactory } from "@lastest/core-tests";
 import {
   createRuntime,
+  requireSlot,
   resolveRegistry,
+  wiringSlotsFor,
   type ContextScope,
   type PluginRuntime,
   type ResolvedRegistry,
   type ScopeRequest,
+  type WiringSlots,
 } from "@lastest/kernel";
+import type { StorageHost } from "@lastest/core-storage";
 import { sql } from "@lastest/db";
 import { configureA11y } from "@lastest/plugin-a11y";
 import { configureApiTest } from "@lastest/plugin-api-test";
@@ -90,28 +94,51 @@ import { appTestsHost } from "@/lib/core/tests-host";
  * stays visible. See `plugins/explorer/src/host.ts`.
  */
 
-function toTeamRef(team: { id: string; plan: string }): ContextScope["team"] {
+function toTeamRef(team: {
+  id: string;
+  name: string;
+  slug: string;
+  plan: string;
+}): ContextScope["team"] {
   return {
     id: team.id,
+    name: team.name,
+    slug: team.slug,
     plan: team.plan as Plan,
     entitlements: entitlementsFor(team.plan as Plan),
   };
 }
 
+function toActorRef(user: {
+  id: string;
+  email: string;
+}): NonNullable<ContextScope["actor"]> {
+  return { userId: user.id, email: user.email };
+}
+
 function toRepoRef(
   teamId: string,
-  repo: { id: string; name: string; defaultBranch: string | null },
+  repo: {
+    id: string;
+    name: string;
+    fullName: string;
+    defaultBranch: string | null;
+  },
 ): NonNullable<ContextScope["repo"]> {
   return {
     id: repo.id,
     teamId,
     name: repo.name,
+    fullName: repo.fullName,
     defaultBranch: repo.defaultBranch ?? null,
   };
 }
 
 /**
- * Resolve the caller to a team, a repo and a logger.
+ * Resolve the caller to a team, a repo, a logger — and, on session paths, the
+ * acting user (`actor`). Background branches carry no actor, which is how a
+ * plugin can tell "a person did this" from "the scheduler did this":
+ * `requireActor(ctx)` throws on the latter.
  *
  * This is the answer to "how does a plugin's `"use server"` action get its
  * `ctx`" — it does not resolve its own scope, it is handed one. There is no
@@ -150,13 +177,14 @@ async function resolveScope(req: ScopeRequest): Promise<ContextScope> {
   }
 
   if (req.repositoryId) {
-    const { team, repo } = await requireRepoAccess(req.repositoryId);
+    const { team, repo, user } = await requireRepoAccess(req.repositoryId);
     // `repositories.teamId` is nullable in the schema, but `requireRepoAccess`
     // has already asserted it equals the session's team — so the authorized id
     // is both non-null and the correct one.
     return {
       team: toTeamRef(team),
       repo: toRepoRef(team.id, repo),
+      actor: toActorRef(user),
       log,
     };
   }
@@ -174,8 +202,8 @@ async function resolveScope(req: ScopeRequest): Promise<ContextScope> {
     return { team: toTeamRef(team), log };
   }
 
-  const { team } = await requireTeamAccess();
-  return { team: toTeamRef(team), log };
+  const { team, user } = await requireTeamAccess();
+  return { team: toTeamRef(team), actor: toActorRef(user), log };
 }
 
 let cached:
@@ -213,124 +241,136 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
     },
   });
 
-  // Hand each provider and each plugin its runtime. A plugin's `"use server"`
+  // Hand each plugin what the kernel derived for it. A plugin's `"use server"`
   // module is imported by Next.js rather than constructed, so there is no
   // other moment at which to pass one — see `plugins/explorer/src/wiring.ts`
   // for why the slots are realm-wide rather than module-level bindings.
-  configureEvents(appEventsHost);
-  configureExplorer({
-    runtime,
-    host: appExplorerHost,
-    data: data.capability("explorer"),
-  });
-  configureDesignSystem(appDesignSystemHost);
-  // No `runtime` — recorder declares no `capabilities`, so it holds no
-  // `PluginContext`. Every action's auth guard lives on the host
-  // (`host.requireRecordingAccess()`) instead. See `plugins/recorder/src/host.ts`.
-  configureRecorder(appRecorderHost);
-  configureA11y({ runtime, data: data.capability("a11y") });
-  configureRca({ runtime, host: appRcaHost });
-  configureAppMap({ runtime, host: appAppMapHost });
-  configureAuthoringAi({ runtime, host: appAuthoringAiHost });
-  configureApiTest({ runtime, host: appApiTestHost });
-  // No `runtime` — the launch board has no tenant, so there is no scope to
-  // build a `ctx` from and nothing to build one for. See
-  // `plugins/launch/src/wiring.ts`.
-  configureLaunch({ host: appLaunchHost, data: data.capability("launch") });
-  // Likewise untenanted, and now saying so: `tenancy: "none"` in its manifest
-  // is what makes the missing `runtime` here a declared fact rather than an
-  // omission — `buildContext` would refuse to give it a `ctx` at all.
-  configurePlayground({
-    host: appPlaygroundHost,
-    data: data.capability("playground"),
-  });
-  // Tenanted, but likewise no `runtime`: every caller of `awardScore` supplies
-  // a team it has already authorized, and `resolveScope` is documented not to
-  // accept a request-supplied `teamId`. See `plugins/gamification/src/wiring.ts`.
-  configureGamification({
-    host: appGamificationHost,
-    data: data.capability("gamification"),
-  });
-  // Tenanted *and* wired with a `runtime`, which no plugin before it needed
-  // both of alongside a `data`. Its actions call `contextFor(ciPlugin)` with no
-  // scope request at all — `resolveScope` falls through to `requireTeamAccess()`
-  // — while its deletion hook and its GitLab webhook gate run with no session
-  // and take the handle straight from the slot. See `plugins/ci/src/wiring.ts`.
-  configureCi({ runtime, host: appCiHost, data: data.capability("ci") });
-  // Tenanted (every row carries an ownerTeamId), but no `runtime`: every
-  // action authorizes through `ShareHost.requireRepoAccess`/
-  // `requireTeamAccess`, which return more than `PluginContext` carries
-  // (user id, user email, team name, repo name) — a `contextFor()` call
-  // would still need a second host call to fill that gap, so the host does
-  // both in one. See `plugins/share/src/wiring.ts`.
-  configureShare({ host: appShareHost, data: data.capability("share") });
-  // Tenanted (every row hangs off a repo), but no `runtime`, for the same
-  // reason as `gamification`: none of its three call paths (a build-
-  // completion trigger, an already-authorized team read, an anonymous slug
-  // lookup) would benefit from a `PluginContext`. See
-  // `plugins/awards/src/wiring.ts`.
-  configureAwards({ host: appAwardsHost, data: data.capability("awards") });
-  // Tenanted *and* wired with a `runtime`, same shape as `explorer`/`ci`:
-  // `startRanger`/`getRangerSession`/`cancelRanger` call `contextFor(rangerPlugin,
-  // { repositoryId })`, and the deletion hook takes `data` straight from the
-  // slot. See `plugins/ranger/src/wiring.ts`.
-  configureRanger({
-    runtime,
-    host: appRangerHost,
-    data: data.capability("ranger"),
-  });
-  // Tenanted *and* wired with a `runtime`, same shape as `explorer`/`ci`:
-  // repo-scoped actions (CSV upload, sheet import) call `contextFor(
-  // dataSourcesPlugin, { repositoryId })`; the three account-level actions
-  // (list/connect-info/disconnect) call it with no scope request, same as
-  // `ci`'s `read()`. `storageHost` is new — this is the first plugin to
-  // declare `capabilities: ["storage"]`, and its deletion hook needs a raw
-  // `StorageHost` to build a team-scoped `StorageCapability` from, since a
-  // deletion hook has no `ctx` to pull one from. See
-  // `plugins/data-sources/src/wiring.ts` and `deletion.ts`.
-  configureDataSources({
-    runtime,
-    host: appDataSourcesHost,
-    data: data.capability("data-sources"),
-    storageHost: appStorageHost,
-  });
-  // Tenanted *and* wired with a `runtime`, same shape as `explorer`/`ci`/
-  // `ranger`: the settings-page CRUD actions call `contextFor(schedulingPlugin,
-  // { repositoryId })`; the deletion hook and the scheduler-tick dispatcher
-  // (`dispatchDueSchedules`) take `data` straight from the slot, since neither
-  // has a session to build a context from. See `plugins/scheduling/src/wiring.ts`.
-  configureScheduling({
-    runtime,
-    host: appSchedulingHost,
-    data: data.capability("scheduling"),
-  });
-  // Tenanted *and* wired with a `runtime`, same shape as `explorer`/`ci`/
-  // `ranger`/`scheduling`: every action calls `contextFor(quickstartPlugin,
-  // { repositoryId })` (or with no scope, for the two team-only actions). Most
-  // call it purely for the authorization side effect; the two scout steps also
-  // read `ctx.ai`/`ctx.browser` back, the only capabilities QuickStart declares
-  // (see `plugins/quickstart/src/index.ts` — it declared none until
-  // `AiCallOptions.browserTools` let its scout module migrate).
-  // No `data` — QuickStart owns no schema; it persists through core's
-  // `agent_sessions`/`tests`/`build_demo_notes` tables via `appQuickstartHost`.
-  // See `plugins/quickstart/src/host.ts` for the full port.
-  configureQuickstart({ runtime, host: appQuickstartHost });
-  // Tenanted, wired with `runtime`, `host` AND `data` — the full `explorer`
-  // shape, which no plugin since the pilot has needed all three of. The
-  // runtime because every action resolves a scope through `contextFor` (a
-  // session scope for UI actions; the ownership-checked background branch for
-  // the detached pipeline, the task dispatcher and trigger fires). The host
-  // because sessions stay in core's `agent_sessions` (`kind: "qa"` — the
-  // quickstart precedent, now applied from the other side; see
-  // `plugins/qa-agent/src/host.ts` item 1 for the shared-encryption
-  // reasoning). The bare `data` handle for the three callers with no session
-  // to build a context from: the deletion hook, `dispatchDueQaTriggers` (the
-  // scheduler tick) and the `reads.ts` server-component reads.
-  configureQaAgent({
-    runtime,
-    host: appQaAgentHost,
-    data: data.capability("qa-agent"),
-  });
+  //
+  // The slots themselves are *data, not decisions*: `wiringSlotsFor` derives
+  // them from each manifest (`runtime` iff tenanted, `data` iff it owns a
+  // schema, `storageHost` iff it consumes `storage`), so this table only says
+  // which host object composes with each plugin and which of its granted
+  // slots its wiring takes. `need()` asserts a slot was granted — a wiring
+  // that asks for one its manifest does not grant is a boot error here, not a
+  // review catch. Two shapes remain, both visible at a glance:
+  //
+  // - **tenanted** (everything except launch/playground): auth happens in
+  //   `resolveScope` for every plugin that takes `need("runtime")`; the bare
+  //   `need("data")` handle beside it is for the callers that have no scope
+  //   to build a context from (deletion hooks, background dispatchers,
+  //   anonymous reads — e.g. awards' public badge, ci's webhook gate). The
+  //   host-only rows (events, design-system, recorder) predate `contextFor`
+  //   auth and keep their guards on the host — see each plugin's `host.ts`.
+  // - **untenanted** (launch, playground — `tenancy: "none"`): no runtime to
+  //   take; `buildContext` would refuse them a `ctx` anyway.
+  type Slots = WiringSlots<PluginRuntime, StorageHost>;
+  type Need = <K extends keyof Slots>(name: K) => NonNullable<Slots[K]>;
+  const wire: Readonly<Record<string, (need: Need) => void>> = {
+    events: () => configureEvents(appEventsHost),
+    "design-system": () => configureDesignSystem(appDesignSystemHost),
+    recorder: () => configureRecorder(appRecorderHost),
+    explorer: (need) =>
+      configureExplorer({
+        runtime: need("runtime"),
+        host: appExplorerHost,
+        data: need("data"),
+      }),
+    a11y: (need) =>
+      configureA11y({ runtime: need("runtime"), data: need("data") }),
+    rca: (need) => configureRca({ runtime: need("runtime"), host: appRcaHost }),
+    "app-map": (need) =>
+      configureAppMap({ runtime: need("runtime"), host: appAppMapHost }),
+    "authoring-ai": (need) =>
+      configureAuthoringAi({
+        runtime: need("runtime"),
+        host: appAuthoringAiHost,
+      }),
+    "api-test": (need) =>
+      configureApiTest({ runtime: need("runtime"), host: appApiTestHost }),
+    launch: (need) =>
+      configureLaunch({ host: appLaunchHost, data: need("data") }),
+    playground: (need) =>
+      configurePlayground({ host: appPlaygroundHost, data: need("data") }),
+    gamification: (need) =>
+      configureGamification({
+        runtime: need("runtime"),
+        host: appGamificationHost,
+        data: need("data"),
+      }),
+    ci: (need) =>
+      configureCi({
+        runtime: need("runtime"),
+        host: appCiHost,
+        data: need("data"),
+      }),
+    share: (need) =>
+      configureShare({
+        runtime: need("runtime"),
+        host: appShareHost,
+        data: need("data"),
+      }),
+    awards: (need) =>
+      configureAwards({
+        runtime: need("runtime"),
+        host: appAwardsHost,
+        data: need("data"),
+      }),
+    ranger: (need) =>
+      configureRanger({
+        runtime: need("runtime"),
+        host: appRangerHost,
+        data: need("data"),
+      }),
+    "data-sources": (need) =>
+      configureDataSources({
+        runtime: need("runtime"),
+        host: appDataSourcesHost,
+        data: need("data"),
+        storageHost: need("storageHost"),
+      }),
+    scheduling: (need) =>
+      configureScheduling({
+        runtime: need("runtime"),
+        host: appSchedulingHost,
+        data: need("data"),
+      }),
+    quickstart: (need) =>
+      configureQuickstart({
+        runtime: need("runtime"),
+        host: appQuickstartHost,
+      }),
+    "qa-agent": (need) =>
+      configureQaAgent({
+        runtime: need("runtime"),
+        host: appQaAgentHost,
+        data: need("data"),
+      }),
+  };
+
+  const registered = new Set(registry.plugins.map((p) => p.id));
+  for (const id of Object.keys(wire)) {
+    if (!registered.has(id)) {
+      throw new Error(
+        `runtime.ts wires plugin "${id}", which is not in MANIFESTS — remove ` +
+          `the row or register the manifest`,
+      );
+    }
+  }
+  for (const manifest of registry.plugins) {
+    const entry = wire[manifest.id];
+    if (!entry) {
+      throw new Error(
+        `Plugin "${manifest.id}" is registered in MANIFESTS but has no wiring ` +
+          `row in runtime.ts`,
+      );
+    }
+    const slots = wiringSlotsFor(manifest, {
+      runtime,
+      dataFor: (id) => data.capability(id),
+      storageHost: appStorageHost,
+    });
+    entry((name) => requireSlot(slots[name], manifest.id, name));
+  }
 
   // Core raises `tests` domain notifications through a port it owns; this is
   // where the feature that listens gets attached. `createTest` used to

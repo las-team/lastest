@@ -107,6 +107,8 @@ beforeAll(async () => {
   if (!row) throw new Error("no teams in the dev database — cannot verify");
   team = {
     id: row.id,
+    name: "itest team",
+    slug: "itest-team",
     plan: (row.plan as Plan) ?? "free",
     entitlements: new Set<string>(),
   };

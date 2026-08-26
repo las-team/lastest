@@ -3,6 +3,7 @@ import {
   getRepoAward as getOwnRepoAward,
   listRepoAwards,
 } from "./data/queries";
+import { awardsPlugin } from "./index";
 import type { RepoAward } from "./schema";
 import { awardsWiring } from "./wiring";
 
@@ -22,14 +23,15 @@ export async function getRepoAward(
 }
 
 /**
- * Award + repo summary for every repository owned by a team that has at
- * least one test. Repos with no award row yet come back with `award: null`
- * so the UI can grey them out as "not yet earned".
+ * Award + repo summary for every repository owned by the session's team that
+ * has at least one test. Repos with no award row yet come back with
+ * `award: null` so the UI can grey them out as "not yet earned".
  *
- * `teamId` is the caller's already-authorized team — `/leaderboard` resolves
- * its own session before calling this. See `wiring.ts`.
+ * The team is resolved here, not passed in: `contextFor` with no scope
+ * request falls through to the app's `requireTeamAccess()`, so `ctx.team.id`
+ * is a session-authorized tenant no argument influenced. See `wiring.ts`.
  */
-export async function getTeamTrophyRoom(teamId: string): Promise<
+export async function getTeamTrophyRoom(): Promise<
   Array<{
     repo: {
       id: string;
@@ -42,9 +44,10 @@ export async function getTeamTrophyRoom(teamId: string): Promise<
     proofSlug: string | null;
   }>
 > {
-  const { host } = awardsWiring();
+  const { runtime, host } = awardsWiring();
+  const ctx = await runtime.contextFor(awardsPlugin);
 
-  const repos = await host.listReposWithTests(teamId);
+  const repos = await host.listReposWithTests(ctx.team.id);
   if (repos.length === 0) return [];
 
   const repoIds = repos.map((r) => r.id);

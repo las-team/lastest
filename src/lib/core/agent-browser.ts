@@ -54,7 +54,13 @@ export async function agentBrowserCapability(
   return createBrowserCapability(
     appBrowserHost,
     {
-      team: { id: team.id, plan, entitlements: entitlementsFor(plan) },
+      team: {
+        id: team.id,
+        name: team.name,
+        slug: team.slug,
+        plan,
+        entitlements: entitlementsFor(plan),
+      },
       log: getLogger(scopeName),
     },
     // Same clamp the runtime applies: the pool cap lives in the pool service,

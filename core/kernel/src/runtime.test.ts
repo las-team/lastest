@@ -20,7 +20,13 @@ const factories = {
 function runtimeFor(
   plugins: Parameters<typeof resolveRegistry>[0],
   resolveScope = vi.fn(async () => ({
-    team: { id: "t1", plan: "pro" as const, entitlements: new Set(["ai"]) },
+    team: {
+      id: "t1",
+      name: "T1",
+      slug: "t1",
+      plan: "pro" as const,
+      entitlements: new Set(["ai"]),
+    },
     log,
   })),
 ) {
@@ -179,7 +185,13 @@ describe("dispatch", () => {
 
     expect(implement).toHaveBeenCalledWith({
       consumerId: "explorer",
-      team: { id: "t1", plan: "pro", entitlements: new Set(["ai"]) },
+      team: {
+        id: "t1",
+        name: "T1",
+        slug: "t1",
+        plan: "pro",
+        entitlements: new Set(["ai"]),
+      },
       repo: undefined,
     });
   });

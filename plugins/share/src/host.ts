@@ -25,7 +25,9 @@ import type {
 /**
  * The core surface the share plugin needs and core does not expose yet.
  *
- * Costed before starting (`plugin-migration-recipe.md` §1.5): **15 methods**.
+ * Costed before starting (`plugin-migration-recipe.md` §1.5): **15 methods**,
+ * since reduced to **13** when the identity guards moved to the kernel
+ * (`runtime.contextFor()` + `ctx.actor` — see the Identity group below).
  * That is the largest port of any phase-4 migration so far (`app-map`,
  * `gamification` and `ci` share the previous high at 9), and the reason is
  * structural, not sloppiness — this page renders almost the same evidence
@@ -39,10 +41,14 @@ import type {
  *
  * Grouped by what each method is, the way the recipe asks:
  *
- * - **Identity (3):** `requireRepoAccess`, `requireTeamAccess`,
- *   `requireTestAccess`. Do auth *and* return the actor in one call — see the
- *   note on `ShareRepoActor` below for why this plugin does not use
- *   `runtime.contextFor()` the way `ci`/`rca`/`app-map` do.
+ * - **Identity (1):** `getTestRepositoryId` — a *resolution*, not a guard.
+ *   Authorization moved to `runtime.contextFor()` the way `ci`/`rca`/
+ *   `app-map` do it, once `ctx.actor` and the enriched `TeamRef` (name,
+ *   slug) started carrying everything the old `requireRepoAccess`/
+ *   `requireTeamAccess`/`requireTestAccess` host methods returned. This
+ *   method survives only because `listTestShares` is keyed by a test id and
+ *   the kernel scopes by repository — the plugin resolves the repo here,
+ *   then authorizes it through the kernel.
  * - **Publish-flow reads/writes (2):** `getBuildPublishInfo`,
  *   `resolveOrCreateBuildForTest`.
  * - **Render-flow reads (5):** `getBuildRenderContext` (the big one — build +
@@ -83,37 +89,6 @@ import type {
  *   plugin answers its own questions, the app composes," one level up: here
  *   the plugin's only question is "which shares are indexable."
  */
-
-/**
- * The caller, already authenticated AND enriched with what a publish/claim
- * action needs beyond `ctx.team`/`ctx.repo` — user id, user email, team name,
- * repo name. None of those are on `PluginContext` (`TeamRef` carries no
- * `name`, `RepoRef` carries no email/id for the caller), so getting them via
- * `runtime.contextFor()` plus a second lookup would still need a method like
- * this one, just a smaller one. Doing the auth check AND the enrichment in a
- * single call is the same move `api-test`'s `createTest` made
- * (`plugin-migration-recipe.md` §3.1: "the guard is inside the write, not
- * beside it") — there is exactly one path to a `ShareRepoActor`, and it
- * cannot be obtained without passing the check.
- *
- * This is why `wiring.ts` carries `data` straight from the wiring slot rather
- * than a `runtime` + `contextFor()`: every action already gets its
- * authorization from one of these two methods, so a second, kernel-level
- * check would be redundant rather than additive.
- */
-export interface ShareRepoActor {
-  readonly userId: string;
-  readonly userEmail: string;
-  readonly teamId: string;
-  readonly teamName: string;
-  readonly repoName: string;
-}
-
-export interface ShareTeamActor {
-  readonly userId: string;
-  readonly teamId: string;
-  readonly teamSlug: string;
-}
 
 export interface SharePublishInfo {
   readonly repositoryId: string;
@@ -226,20 +201,17 @@ export interface ClaimSourceTest {
 
 export interface ShareHost {
   // ── Identity ──────────────────────────────────────────────────────────
-  requireRepoAccess(repositoryId: string): Promise<ShareRepoActor>;
-  requireTeamAccess(): Promise<ShareTeamActor>;
-
   /**
-   * `listTestShares`'s "resolve the test's repo, then authorize" in one
-   * call — the fifteenth method, and the one place this port could not reuse
-   * `getBuildPublishInfo` (that takes a buildId, this takes a testId, and
-   * the test may have no build yet). Null when the test does not exist or
-   * has no repository, mirroring the pre-plugin code's soft "return []"
-   * rather than a thrown error — the caller distinguishes "nothing to
-   * authorize" from "authorized" by the null, and from "unauthorized" by
-   * whatever `requireRepoAccess` itself throws for a mismatched team.
+   * The repository a test belongs to, for `listTestShares`'s "resolve the
+   * test's repo, then authorize it" — the one place this port could not
+   * reuse `getBuildPublishInfo` (that takes a buildId, this takes a testId,
+   * and the test may have no build yet). Null when the test does not exist
+   * or has no repository, mirroring the pre-plugin code's soft "return []"
+   * rather than a thrown error. This is a *resolution* only: the caller
+   * still authorizes the returned id through `runtime.contextFor()`, which
+   * is where every guard on this plugin's session paths now lives.
    */
-  requireTestAccess(testId: string): Promise<ShareRepoActor | null>;
+  getTestRepositoryId(testId: string): Promise<string | null>;
 
   // ── Publish flow ──────────────────────────────────────────────────────
   /**

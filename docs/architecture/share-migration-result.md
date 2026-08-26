@@ -1,5 +1,15 @@
 # Public share links migration — result
 
+> **Superseded in part (wiring-shape collapse):** this doc describes the
+> original `host`+`data` wiring where `ShareHost.requireRepoAccess`/
+> `requireTeamAccess`/`requireTestAccess` did auth *and* actor enrichment.
+> Those identity methods are gone: the plugin now has the standard tenanted
+> wiring (`runtime`+`host`+`data`), authorizes through
+> `runtime.contextFor()` + `requireActor(ctx)` (`ctx.actor`, `TeamRef.name`/
+> `slug`, `RepoRef.fullName` carry what the host guards used to return), and
+> its actions live behind `@lastest/plugin-share/actions` like every other
+> plugin's. See recipe §4.1 and `plugins/share/src/wiring.ts`.
+
 **Status:** done and building. `pnpm install`, `pnpm arch`, `pnpm lint`,
 `pnpm types`, `pnpm test` and `pnpm build` all pass.
 **Recipe:** [`plugin-migration-recipe.md`](./plugin-migration-recipe.md).

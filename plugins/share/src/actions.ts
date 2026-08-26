@@ -3,7 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import { requireActor } from "@lastest/kernel";
+
 import * as queries from "./data/queries";
+import { sharePlugin } from "./index";
 import { generateShareSlug, buildShareUrl } from "./slug";
 import { shareWiring } from "./wiring";
 import type { PublicShare, PublicShareKind } from "./schema";
@@ -18,18 +21,13 @@ import type { PublicShare, PublicShareKind } from "./schema";
  * `"use server"` file compiles to a module with no exports at all
  * (`plugin-migration-recipe.md` §6).
  *
- * Two deliberate simplifications from the pre-plugin code, both noted in the
- * migration result doc:
- *
- * - `claimAndRedirect` no longer calls a bare `requireAuth()` before
- *   `claimPublicShare` — the latter's own `host.requireTeamAccess()` already
- *   requires auth, so the extra call was redundant.
- * - `publishLatestTestShare` no longer authorizes before resolving/creating
- *   the underlying build — `host.resolveOrCreateBuildForTest` does that
- *   without an actor, and the `publishBuildShare` call it delegates to does
- *   the real authorization. The only visible difference: "this test has no
- *   runs yet" can now surface before an authorization check, where before it
- *   surfaced after. No share content crosses that boundary either way.
+ * Authorization is the kernel's: every session path calls
+ * `runtime.contextFor(sharePlugin, …)` — `resolveScope` runs the app's
+ * `requireRepoAccess`/`requireTeamAccess` — and `requireActor(ctx)` asserts
+ * the session where a write is attributed to a person. This replaced the
+ * `ShareHost.requireRepoAccess`/`requireTeamAccess`/`requireTestAccess`
+ * host guards once `ctx.actor` and the enriched `TeamRef` carried everything
+ * they used to return (user id/email, team name/slug, repo name).
  */
 
 const INTERNAL_SHARE_DISCORD_WEBHOOK_URL =
@@ -45,12 +43,15 @@ export async function publishBuildShare(
   buildId: string,
   options: { scopedTestId?: string | null; kind?: PublicShareKind } = {},
 ): Promise<PublishShareResult> {
-  const { host } = shareWiring();
+  const { runtime, host } = shareWiring();
 
   const info = await host.getBuildPublishInfo(buildId, options.scopedTestId);
   if (!info) throw new Error("Build not found");
 
-  const actor = await host.requireRepoAccess(info.repositoryId);
+  const ctx = await runtime.contextFor(sharePlugin, {
+    repositoryId: info.repositoryId,
+  });
+  const actor = requireActor(ctx);
 
   const kind: PublicShareKind = options.kind ?? "regression";
 
@@ -78,7 +79,7 @@ export async function publishBuildShare(
       buildId,
       testId: options.scopedTestId ?? null,
       repositoryId: info.repositoryId,
-      ownerTeamId: actor.teamId,
+      ownerTeamId: ctx.team.id,
       publishedByUserId: actor.userId,
       status: "public",
       kind,
@@ -99,9 +100,11 @@ export async function publishBuildShare(
         shareUrl,
         slug: share.slug,
         targetDomain: info.targetDomain,
-        repoName: actor.repoName,
-        publishedByEmail: actor.userEmail,
-        teamName: actor.teamName,
+        repoName: ctx.repo
+          ? ctx.repo.name || ctx.repo.fullName
+          : info.repositoryId,
+        publishedByEmail: actor.email,
+        teamName: ctx.team.name,
         scopedTestName: info.scopedTestName,
         outreachHook: demoNotes?.outreachHook ?? null,
         testingStruggles: demoNotes?.testingStruggles ?? [],
@@ -133,18 +136,19 @@ export async function publishLatestTestShare(
 }
 
 export async function listTestShares(testId: string): Promise<PublicShare[]> {
-  const { host } = shareWiring();
-  const actor = await host.requireTestAccess(testId);
-  if (!actor) return [];
+  const { runtime, host } = shareWiring();
+  const repositoryId = await host.getTestRepositoryId(testId);
+  if (!repositoryId) return [];
+  await runtime.contextFor(sharePlugin, { repositoryId });
   return queries.listPublicSharesForTest(testId);
 }
 
 export async function revokePublicShare(shareId: string): Promise<void> {
-  const { host } = shareWiring();
+  const { runtime } = shareWiring();
   const share = await queries.getPublicShareById(shareId);
   if (!share) throw new Error("Share not found");
   if (!share.repositoryId) throw new Error("Share has no repository");
-  await host.requireRepoAccess(share.repositoryId);
+  await runtime.contextFor(sharePlugin, { repositoryId: share.repositoryId });
 
   await queries.revokePublicShareById(shareId);
   revalidatePath(`/builds/${share.buildId}`);
@@ -152,10 +156,10 @@ export async function revokePublicShare(shareId: string): Promise<void> {
 }
 
 export async function listBuildShares(buildId: string): Promise<PublicShare[]> {
-  const { host } = shareWiring();
+  const { runtime, host } = shareWiring();
   const info = await host.getBuildPublishInfo(buildId);
   if (!info) return [];
-  await host.requireRepoAccess(info.repositoryId);
+  await runtime.contextFor(sharePlugin, { repositoryId: info.repositoryId });
   return queries.listPublicSharesForBuild(buildId);
 }
 
@@ -173,8 +177,12 @@ export interface ClaimShareResult {
 export async function claimPublicShare(
   slug: string,
 ): Promise<ClaimShareResult> {
-  const { host } = shareWiring();
-  const actor = await host.requireTeamAccess();
+  const { runtime, host } = shareWiring();
+  // No scope request: `resolveScope` falls through to the app's
+  // `requireTeamAccess()`, so the claimer's team is the session's and no
+  // argument influenced it.
+  const ctx = await runtime.contextFor(sharePlugin);
+  const actor = requireActor(ctx);
   const share = await queries.getPublicShareBySlug(slug);
   if (!share || share.status !== "public") {
     throw new Error("Share not found or revoked");
@@ -182,8 +190,8 @@ export async function claimPublicShare(
 
   const repoName = share.targetDomain || `claimed-${slug.slice(0, 8)}`;
   const { repositoryId: targetRepositoryId } = await host.findOrCreateClaimRepo(
-    actor.teamId,
-    actor.teamSlug,
+    ctx.team.id,
+    ctx.team.slug,
     repoName,
   );
 
@@ -199,7 +207,7 @@ export async function claimPublicShare(
   // Land the claimer in the new repo so /tests shows what they just claimed.
   await host.setSelectedRepository(actor.userId, targetRepositoryId);
 
-  await queries.markPublicShareClaimed(slug, actor.teamId, actor.userId);
+  await queries.markPublicShareClaimed(slug, ctx.team.id, actor.userId);
   revalidatePath(`/r/${slug}`);
   return {
     newRepositoryId: targetRepositoryId,
