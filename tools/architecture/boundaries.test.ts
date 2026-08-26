@@ -399,30 +399,23 @@ describe("split-PR check", () => {
     const z = classify([
       "src/lib/db/queries/tests.ts",
       "packages/pool-service/src/client.ts",
-      "src/lib/qa-agent/crawl.ts",
-      // A `components` entry, to prove the third key is classified too. It was
-      // `src/components/explorer/…` until explorer graduated to `plugins/`,
-      // then `src/components/quickstart/…` until quickstart graduated in RFC
-      // §9 phase 4 (the fourteenth and last plugin).
-      "src/components/qa-agent/qa-agent-client.tsx",
-      // An `actions` entry, from a feature with no `lib`/`components` of its
-      // own, so it proves the key in isolation. It was
-      // `src/server/actions/rca.ts` until rca graduated in RFC §9 phase 4,
-      // then `url-diff.ts` until that feature was removed and its API half
-      // reclassified as core, then `demo.ts` until that entry was dropped
-      // (its lib half reclassified core, its two actions confirmed dead and
-      // deleted).
+      // `actions` entries are all the ledger holds now: `qa-agent` — the last
+      // entry with `lib`/`components` keys, and this test's example for both
+      // (after explorer, then quickstart) — graduated in RFC §9 phase 4, so
+      // the three costed orphan action modules are what remains and only the
+      // `actions` key can be proven against the live map. (The
+      // `lib`/`components` branches of `pseudoPluginPaths` are exercised by
+      // nothing live any more; if a future entry regrows them, restore an
+      // example here.) `spec-import.ts` was `src/server/actions/rca.ts` until
+      // rca graduated, then `url-diff.ts` until that feature was reclassified
+      // core, then `demo.ts` until that entry was dropped.
       "src/server/actions/spec-import.ts",
     ]);
     expect(z.todayCore).toEqual([
       "src/lib/db/queries/tests.ts",
       "packages/pool-service/src/client.ts",
     ]);
-    expect(z.todayPlugin).toEqual([
-      "src/lib/qa-agent/crawl.ts",
-      "src/components/qa-agent/qa-agent-client.tsx",
-      "src/server/actions/spec-import.ts",
-    ]);
+    expect(z.todayPlugin).toEqual(["src/server/actions/spec-import.ts"]);
   });
 
   it("counts a src/lib/playwright change as core only, not as a feature", () => {

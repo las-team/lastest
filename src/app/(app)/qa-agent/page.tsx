@@ -8,13 +8,19 @@ import {
   getAISettings,
   getDefaultSetupSteps,
   getStorageStates,
-  getQaTasksByRepo,
-  getQaAgentTrigger,
 } from "@/lib/db/queries";
+// The plugin's own tables (tasks, triggers) are read through its reads
+// module; this page's repo selection is the authorization, same as before.
+import {
+  getQaAgentTrigger,
+  getQaTasksByRepo,
+} from "@lastest/plugin-qa-agent/reads";
 import type { AgentSession } from "@/lib/db/schema";
+import type { QaSessionRow } from "@lastest/plugin-qa-agent/types";
 import { getEnvironmentConfig } from "@/server/actions/environment";
-import { QaAgentClient } from "@/components/qa-agent/qa-agent-client";
-import { QaAgentUpgradeGate } from "@/components/qa-agent/qa-agent-upgrade-gate";
+import { QaAgentClient } from "@lastest/plugin-qa-agent/ui/qa-agent-client";
+import { QaAgentUpgradeGate } from "@lastest/plugin-qa-agent/ui/qa-agent-upgrade-gate";
+import { BrowserViewer } from "@/components/embedded-browser/browser-viewer-client";
 import {
   hasQaAgentAccess,
   qaAgentMinPlanName,
@@ -131,8 +137,12 @@ export default async function QaAgentPage() {
     ...s,
     metadata: (({ quickstartPassword: _pw, ...rest }) => rest)(s.metadata),
   });
-  const initialSession = qaSession ? sanitize(qaSession) : null;
-  const sanitizedRecent = recentSessions.map(sanitize);
+  // Cast at the boundary: the plugin's `QaSessionRow` is a narrowed view of
+  // core's `AgentSession` (same fields, QA-only unions on steps/metadata) —
+  // the same jsonb-boundary cast `src/lib/core/qa-agent-host.ts` documents.
+  const toRow = (s: AgentSession) => s as unknown as QaSessionRow;
+  const initialSession = qaSession ? toRow(sanitize(qaSession)) : null;
+  const sanitizedRecent = recentSessions.map((s) => toRow(sanitize(s)));
 
   return (
     <div className="flex-1 p-6 overflow-auto">
@@ -161,6 +171,12 @@ export default async function QaAgentPage() {
           recentSessions={sanitizedRecent}
           initialTasks={qaTasks}
           initialTriggerConfig={qaTriggerConfig}
+          // App-owned live EB viewer, handed down because the plugin may not
+          // import it — the same slot shape as explorer's `browserViewer`
+          // (recipe §6: the plugin owns the placement, the app owns the
+          // thing placed). A component reference, not a render function, so
+          // it can cross the RSC boundary.
+          BrowserViewer={BrowserViewer}
         />
       </div>
     </div>

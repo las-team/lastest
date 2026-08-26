@@ -37,12 +37,16 @@
  * could not see.
  *
  * RFC §4.3 gives two legal answers: promote the shared part, or go through
- * `ctx.jobs`. Neither is available yet — the shared part is 4,400 lines of
- * qa-agent, and `qa-agent` has no job handlers because it is not a plugin.
- * So the edge is declared here instead, and the composition root is where the
- * two features meet. That is a *demotion* of the coupling, not a removal:
- * these three become `ctx.jobs.enqueue("qa-agent.…")` when qa-agent migrates
- * (RFC §9 phase 4, last), and this comment is the note to whoever does it.
+ * `ctx.jobs`. Neither was available when this port was drawn, so the edge is
+ * declared here and the composition root is where the two features meet.
+ * qa-agent has since migrated (RFC §9 phase 4, last), which changed the far
+ * side of the seam but not its shape: the host fill now imports
+ * `@lastest/plugin-qa-agent/actions` — the ordinary composition-root
+ * cross-plugin call — because qa-agent still registers no job handlers, and
+ * converting a synchronous "queue this and return its id" into a job
+ * dispatch is a behaviour change its migration deliberately did not make.
+ * The `ctx.jobs.enqueue("qa-agent.…")` future stays open for whoever gives
+ * qa-agent job handlers first.
  *
  * ### What is deliberately NOT here
  *
@@ -204,7 +208,7 @@ export interface AppMapHost {
     opts?: { timeoutMs?: number },
   ): Promise<string | null>;
 
-  // ── qa-agent seams → `ctx.jobs` once qa-agent is a plugin ─────────────────
+  // ── qa-agent seams → `ctx.jobs` once qa-agent registers job handlers ──────
 
   /** The repo's in-flight exploration, if any. */
   getActiveExploration(

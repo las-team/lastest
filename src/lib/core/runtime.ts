@@ -35,6 +35,7 @@ import { configureExplorer } from "@lastest/plugin-explorer";
 import { configureGamification } from "@lastest/plugin-gamification";
 import { configureLaunch } from "@lastest/plugin-launch";
 import { configurePlayground } from "@lastest/plugin-playground";
+import { configureQaAgent } from "@lastest/plugin-qa-agent";
 import { configureQuickstart } from "@lastest/plugin-quickstart";
 import { configureRanger } from "@lastest/plugin-ranger";
 import { configureRca } from "@lastest/plugin-rca";
@@ -63,6 +64,7 @@ import { createAppJobsHost } from "@/lib/core/jobs-host";
 import { MANIFESTS } from "@/lib/core/manifests";
 import { appLaunchHost } from "@/lib/core/launch-host";
 import { appPlaygroundHost } from "@/lib/core/playground-host";
+import { appQaAgentHost } from "@/lib/core/qa-agent-host";
 import { appQuickstartHost } from "@/lib/core/quickstart-host";
 import { appRangerHost } from "@/lib/core/ranger-host";
 import { appRcaHost } from "@/lib/core/rca-host";
@@ -313,6 +315,22 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
   // `agent_sessions`/`tests`/`build_demo_notes` tables via `appQuickstartHost`.
   // See `plugins/quickstart/src/host.ts` for the full port.
   configureQuickstart({ runtime, host: appQuickstartHost });
+  // Tenanted, wired with `runtime`, `host` AND `data` — the full `explorer`
+  // shape, which no plugin since the pilot has needed all three of. The
+  // runtime because every action resolves a scope through `contextFor` (a
+  // session scope for UI actions; the ownership-checked background branch for
+  // the detached pipeline, the task dispatcher and trigger fires). The host
+  // because sessions stay in core's `agent_sessions` (`kind: "qa"` — the
+  // quickstart precedent, now applied from the other side; see
+  // `plugins/qa-agent/src/host.ts` item 1 for the shared-encryption
+  // reasoning). The bare `data` handle for the three callers with no session
+  // to build a context from: the deletion hook, `dispatchDueQaTriggers` (the
+  // scheduler tick) and the `reads.ts` server-component reads.
+  configureQaAgent({
+    runtime,
+    host: appQaAgentHost,
+    data: data.capability("qa-agent"),
+  });
 
   // Core raises `tests` domain notifications through a port it owns; this is
   // where the feature that listens gets attached. `createTest` used to

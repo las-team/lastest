@@ -6,7 +6,7 @@ import { getCurrentSession } from "@/lib/auth";
 import { getSelectedRepository, getAISettings } from "@/lib/db/queries";
 import { getEnvironmentConfig } from "@/server/actions/environment";
 import { ExplorerBrowserViewer } from "@/components/explorer-browser-viewer";
-import { QaAgentUpgradeGate } from "@/components/qa-agent/qa-agent-upgrade-gate";
+import { QaAgentUpgradeGate } from "@lastest/plugin-qa-agent/ui/qa-agent-upgrade-gate";
 import { qaAgentMinPlanName } from "@/lib/billing/feature-access";
 import { planConfig } from "@/lib/billing/plans";
 import { getPluginRuntime } from "@/lib/core/runtime";

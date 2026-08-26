@@ -1196,6 +1196,87 @@ async function migrateSchedulingTables() {
   }
 }
 
+// `qa_tasks` and `qa_agent_triggers` became `@lastest/plugin-qa-agent`'s own
+// tables (RFC §9 phase 4, the last pseudo-plugin to graduate). Only the first
+// needs a rename for the `qa_agent_` prefix `core/data` requires —
+// `qa_agent_triggers` was born compliant — same shape as
+// `AWARDS_RENAMES`/`SCHEDULING_RENAMES`, and for the same reason
+// `drizzle-kit push` cannot see a rename: it would drop `qa_tasks`, create
+// `qa_agent_tasks` empty, and take every queued directive, agent reply and
+// task→test link with it.
+//
+// Both tables carry a real FK to a core table
+// (`repository_id -> repositories.id ON DELETE CASCADE`), which
+// `core-scope.md` §6 forbids a plugin from declaring. Dropped by catalogue
+// lookup after the rename — implicitly-created constraint names differ
+// between environments, so `pg_constraint` is the only reliable way to find
+// them. The plugin's `deletion.ts` (`onTeamDeleted`/`onRepoDeleted`) is what
+// replaces the cascades from here on. The `UNIQUE` on
+// `qa_agent_triggers.repository_id` is untouched: uniqueness was never the
+// foreign key's doing, and the plugin schema re-declares it identically.
+const QA_AGENT_RENAMES = [["qa_tasks", "qa_agent_tasks"]];
+
+async function migrateQaAgentTables() {
+  if (!process.env.DATABASE_URL) return;
+  let sql;
+  try {
+    sql = require("postgres")(process.env.DATABASE_URL);
+
+    const tableExists = async (name) => {
+      const rows = await sql`
+        select exists (
+          select 1 from information_schema.tables
+          where table_schema = 'public' and table_name = ${name}
+        ) as exists`;
+      return rows[0]?.exists ?? false;
+    };
+    const rowCount = async (name) => {
+      const rows = await sql.unsafe(
+        `select count(*)::text as n from "${name}"`,
+      );
+      return Number(rows[0]?.n ?? 0);
+    };
+
+    for (const [from, to] of QA_AGENT_RENAMES) {
+      if (!(await tableExists(from))) continue;
+      if (await tableExists(to)) {
+        if ((await rowCount(to)) > 0) {
+          console.log(`[migrate] ${from} -> ${to}: already migrated`);
+          continue;
+        }
+        // Empty destination is what a prior `push` left behind. Safe to drop.
+        await sql.unsafe(`drop table "${to}"`);
+      }
+      await sql.unsafe(`alter table "${from}" rename to "${to}"`);
+      console.log(`[migrate] renamed ${from} -> ${to}`);
+    }
+
+    // Then the FKs into `repositories`, by catalogue lookup — `ALTER TABLE …
+    // RENAME` carries constraints across, so this runs after the rename and
+    // looks them up under the new table names.
+    const fks = await sql`
+      select rel.relname as table_name, ref.relname as points_at,
+             con.conname as name
+        from pg_constraint con
+        join pg_class rel on rel.oid = con.conrelid
+        join pg_class ref on ref.oid = con.confrelid
+       where con.contype = 'f'
+         and ref.relname = 'repositories'
+         and rel.relname in ('qa_agent_tasks', 'qa_agent_triggers')`;
+    for (const { table_name: table, points_at: target, name } of fks) {
+      await sql.unsafe(`alter table ${table} drop constraint "${name}"`);
+      console.log(`[migrate] ${table}: dropped FK ${name} (-> ${target})`);
+    }
+  } catch (e) {
+    // FATAL — a skipped rename means push DROPs `qa_tasks`. Rethrow so
+    // main() exits before push (see migrateExplorerTables).
+    console.error("[migrate] qa-agent table migration FAILED:", e.message);
+    throw e;
+  } finally {
+    if (sql) await sql.end();
+  }
+}
+
 async function main() {
   await preCreate();
   await migrateExplorerTables();
@@ -1206,6 +1287,7 @@ async function main() {
   await migrateAwardsTables();
   await migrateDataSourcesTables();
   await migrateSchedulingTables();
+  await migrateQaAgentTables();
   await dropPluginUserForeignKeys();
   await nullOrphans();
   await bumpPoolDefaults();

@@ -8,18 +8,21 @@ import type {
   QaPlanJourney,
   QaTestGroup,
   QaTestPlan,
-} from "@/lib/db/schema";
-import { itemGroups, QA_GROUPS } from "@/lib/qa-agent/plan";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
+} from "@lastest/eb-protocol";
+import { itemGroups, QA_GROUPS } from "../domain/plan";
 import {
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Checkbox,
   HoverCard,
   HoverCardContent,
   HoverCardTrigger,
-} from "@/components/ui/hover-card";
-import { Textarea } from "@/components/ui/textarea";
+  Textarea,
+} from "@lastest/ui";
 import {
   Check,
   CheckCircle2,

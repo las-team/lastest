@@ -1,40 +1,25 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import * as queries from "@/lib/db/queries";
-import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
-import {
-  assertQaAgentAccess,
-  hasQaAgentAccess,
-} from "@/lib/billing/feature-access";
-import { isBillingEnabled } from "@/lib/billing/enabled";
-import { assertAgentRunMinutesAvailable } from "@/lib/billing/agent-eb-usage";
+
+import { parseAiJson } from "@lastest/ai-kit";
+import type { BrowserSession, PluginContext } from "@lastest/contracts";
 import { getNextRunTime, isValidCron } from "@lastest/cron";
-import {
-  assertSafeOutboundUrl,
-  SsrfBlockedError,
-} from "@/lib/security/outbound-url";
-import { emitAndPersistActivityEvent } from "@/lib/db/queries/activity-events";
-import { generateWithAI } from "@/lib/ai";
-import { parseAiJson } from "@/lib/ai/json-parse";
-import { getAIConfig } from "@/lib/playwright/agent-context";
-import { runTestsCore } from "./runs";
-import { crawlTargetApp } from "@lastest/plugin-qa-agent/domain/crawl";
-import { exploreTargetApp } from "@lastest/plugin-qa-agent/domain/explore";
-import { getGlobalPoolLimits } from "@/lib/db/queries/settings";
-import {
-  findAuthLinksOnEb,
-  loginWithCredsOnEb,
-  probeAndCaptureOnEb,
-  validateStorageStateOnEb,
-} from "@lastest/plugin-qa-agent/domain/auth";
-import {
-  findExistingAuthSetup,
-  type ExistingAuthSetup,
-} from "@/lib/core/auth-setup-resolution";
-import type { BrowserSession } from "@lastest/contracts";
-import { agentBrowserCapability } from "@/lib/core/agent-browser";
-import { captureStorageState } from "@/lib/core/quickstart-storage-shared";
+import type {
+  QaAuthState,
+  QaDiscovery,
+  QaExploreBlocked,
+  QaExploreConfig,
+  QaExploreState,
+  QaExplorerState,
+  QaGeneratedTest,
+  QaPageSnapshot,
+  QaPlanItem,
+  QaRunMode,
+  QaSessionTrigger,
+  QaTestGroup,
+  QaTestPlan,
+} from "@lastest/eb-protocol";
 import {
   renderAuthLoginCode,
   renderAuthSetupCode,
@@ -43,6 +28,30 @@ import {
   slugify,
   utcStamp,
 } from "@lastest/test-templates";
+
+import { orm } from "./data/db";
+import {
+  createQaTaskRow,
+  getNextQueuedQaTaskRow,
+  getQaTaskRow,
+  getQaTasksByRepoRows,
+  updateQaTaskRow,
+} from "./data/tasks";
+import {
+  getDueQaAgentTriggerRows,
+  getQaAgentTriggerRow,
+  markQaAgentTriggerFiredRow,
+  upsertQaAgentTriggerRow,
+} from "./data/triggers";
+import {
+  findAuthLinksOnEb,
+  loginWithCredsOnEb,
+  probeAndCaptureOnEb,
+  validateStorageStateOnEb,
+} from "./domain/auth";
+import { crawlTargetApp } from "./domain/crawl";
+import { processUploadedDocs } from "./domain/docs";
+import { exploreTargetApp } from "./domain/explore";
 import {
   buildApiDefinition,
   buildDiscoveryDigest,
@@ -68,7 +77,9 @@ import {
   QA_GROUPS,
   type ExistingTestSummary,
   type RefinedJourneys,
-} from "@/lib/qa-agent/plan";
+} from "./domain/plan";
+import { extractDeclaredEndpoints } from "./domain/code-check";
+import { computePrChanges, computePrCoverage } from "./domain/pr-check";
 import {
   buildTaskPlanFromTriage,
   buildTaskTriageSystemPrompt,
@@ -77,33 +88,21 @@ import {
   isTaskTriageResult,
   triageTestsToPlanItems,
   type TaskTriageResult,
-} from "@/lib/qa-agent/task-triage";
+} from "./domain/task-triage";
+import type { QaActivityEvent, QaAgentHost, QaExistingAuthSetup } from "./host";
+import { qaAgentPlugin } from "./index";
+import type { QaAgentTask } from "./schema";
 import type {
-  ActivityEventType,
-  AgentSession,
-  AgentSessionMetadata,
-  AgentStepId,
-  AgentStepState,
-  PwAgentType,
-  QaAuthState,
-  QaDiscovery,
-  QaExploreBlocked,
-  QaExploreConfig,
-  QaExploreState,
-  QaExplorerState,
-  QaGeneratedTest,
-  QaPageSnapshot,
-  QaPlanItem,
-  QaRunMode,
-  QaSessionTrigger,
-  QaTask,
+  QaAgentRole,
+  QaSessionMetadata,
+  QaSessionRow,
+  QaSetupOverrides,
+  QaStepId,
+  QaStepState,
   QaTaskSource,
   QaTaskTestRef,
-  QaTaskTriage,
-  QaTestGroup,
-  QaTestPlan,
-  TestSetupOverrides,
-} from "@/lib/db/schema";
+} from "./types";
+import { qaAgentWiring } from "./wiring";
 
 /**
  * QA Agent — the dedicated comprehensive-suite builder behind the /qa-agent
@@ -129,10 +128,30 @@ import type {
  * every context window small while the session metadata carries the full
  * state. The step machine runs detached (fire-and-forget) and the page polls
  * /api/qa-agent/[sessionId], same as the play agent.
+ *
+ * ### How this module reaches core (post-migration shape)
+ *
+ * - **Authorization**: `runtime.contextFor(qaAgentPlugin, …)` replaces the
+ *   old inline `requireRepoAccess`/`requireTeamAccess` calls — a session
+ *   scope for UI actions, the ownership-checked `{repositoryId, teamId}`
+ *   background branch for the detached pipeline, triggers and the task
+ *   dispatcher. The plan gate is `ctx.team.entitlements.has("qa-agent")`.
+ * - **Browsers**: every claim is a `ctx.browser` scope. No CDP endpoint, no
+ *   pod address, storage states injected by id.
+ * - **AI**: the pipeline's own three JSON calls go through `ctx.ai.generate`
+ *   under their pre-migration action types (`qa_auth_extract`, `qa_plan`,
+ *   `qa_task_triage`). One observable difference, accepted and small: the
+ *   planner substep's `promptLogId` link is recorded when the call *returns*
+ *   (`AiResult.promptLogId`) rather than streamed mid-call via
+ *   `onLogCreated`, which the capability deliberately does not expose.
+ * - **Everything else** — sessions (core's `agent_sessions`, `kind: "qa"`),
+ *   tests, runs, storage states, repo/source facts, activity, the
+ *   authoring-ai generator/healer — arrives through `QaAgentHost`; see
+ *   `host.ts` for the full port and each group's honest future.
  */
 
 const QA_STEP_DEFINITIONS: Array<{
-  id: AgentStepId;
+  id: QaStepId;
   label: string;
   description: string;
 }> = [
@@ -195,6 +214,49 @@ const MAX_CRAWL_PAGES = 6;
  *  plan's ceiling (`maxHoldFor`), so this is a request, not a guarantee. */
 const CRAWL_DEADLINE_MS = 10 * 60 * 1000;
 
+// ── Wiring / context helpers ─────────────────────────────────────────────────
+
+type QaCtx = PluginContext<"browser" | "ai" | "data">;
+
+/** Resolve a context. No scope → the session's team (`requireTeamAccess`
+ *  underneath); `{repositoryId}` → session + repo ownership; both ids → the
+ *  background ownership branch (pipeline, triggers, dispatcher — no session). */
+async function qaContext(scope?: {
+  repositoryId?: string;
+  teamId?: string;
+}): Promise<{ host: QaAgentHost; ctx: QaCtx }> {
+  const { runtime, host } = qaAgentWiring();
+  const ctx = (await runtime.contextFor(qaAgentPlugin, scope)) as QaCtx;
+  return { host, ctx };
+}
+
+/** The plugin's own tables, via the wiring slot — the same handle `ctx.data`
+ *  carries. Callers authorize through `qaContext(...)` first. */
+function tasksDb() {
+  return orm(qaAgentWiring().data);
+}
+
+function hostOf(): QaAgentHost {
+  return qaAgentWiring().host;
+}
+
+/**
+ * Entitlement gate. The plugin asks for a capability name, never a plan —
+ * but the user-facing message keeps the pre-migration wording, which names
+ * the tier. "Pro" mirrors `QA_AGENT_MIN_PLAN` in core's
+ * `src/lib/billing/feature-access.ts` (the module that also feeds
+ * `entitlementsFor`); it drifts only if that ceiling changes, and the gate
+ * itself cannot drift — only the message could.
+ */
+const QA_AGENT_GATE_MESSAGE =
+  "The QA Agent requires the Pro plan. Upgrade under Settings → Billing to unlock it.";
+
+function assertEntitled(ctx: QaCtx): void {
+  if (!ctx.team.entitlements.has("qa-agent")) {
+    throw new Error(QA_AGENT_GATE_MESSAGE);
+  }
+}
+
 // ── AbortController registry (per session, in-process) ──────────────────────
 
 const activeControllers = new Map<string, AbortController>();
@@ -214,11 +276,11 @@ function emitActivity(
   teamId: string,
   repositoryId: string,
   sessionId: string,
-  eventType: ActivityEventType,
+  eventType: QaActivityEvent["eventType"],
   summary: string,
   opts?: {
     stepId?: string;
-    agentType?: PwAgentType;
+    agentType?: QaAgentRole;
     detail?: Record<string, unknown>;
     artifactType?: "test" | "build";
     artifactId?: string;
@@ -229,36 +291,30 @@ function emitActivity(
     promptLogId?: string;
   },
 ) {
-  emitAndPersistActivityEvent({
+  // Fire-and-forget by contract — the host logs failures.
+  hostOf().emitActivity({
     teamId,
     repositoryId,
     sessionId,
-    sourceType: "qa_agent",
     eventType,
     summary,
-    stepId: opts?.stepId ?? null,
-    agentType: opts?.agentType ?? null,
-    detail: opts?.detail ?? null,
-    artifactType: opts?.artifactType ?? null,
-    artifactId: opts?.artifactId ?? null,
-    artifactLabel: opts?.artifactLabel ?? null,
-    durationMs: opts?.durationMs ?? null,
-    promptLogId: opts?.promptLogId ?? null,
-  }).catch((err) => console.error("[QaAgent] activity emit error:", err));
+    ...opts,
+  });
 }
 
 async function updateStep(
   sessionId: string,
-  stepId: AgentStepId,
-  update: Partial<AgentStepState>,
+  stepId: QaStepId,
+  update: Partial<QaStepState>,
 ) {
-  const session = await queries.getAgentSession(sessionId);
+  const host = hostOf();
+  const session = await host.getSession(sessionId);
   if (!session) return;
   const steps = [...session.steps];
   const idx = steps.findIndex((s) => s.id === stepId);
   if (idx === -1) return;
   steps[idx] = { ...steps[idx], ...update };
-  await queries.updateAgentSession(sessionId, {
+  await host.updateSession(sessionId, {
     steps,
     currentStepId:
       update.status === "active"
@@ -267,18 +323,18 @@ async function updateStep(
   });
 }
 
-async function setStepActive(sessionId: string, stepId: AgentStepId) {
+async function setStepActive(sessionId: string, stepId: QaStepId) {
   await updateStep(sessionId, stepId, {
     status: "active",
     startedAt: new Date().toISOString(),
     error: undefined,
   });
-  await queries.updateAgentSession(sessionId, { currentStepId: stepId });
+  await hostOf().updateSession(sessionId, { currentStepId: stepId });
 }
 
 async function setStepCompleted(
   sessionId: string,
-  stepId: AgentStepId,
+  stepId: QaStepId,
   result?: Record<string, unknown>,
 ) {
   await updateStep(sessionId, stepId, {
@@ -290,7 +346,7 @@ async function setStepCompleted(
 
 async function setStepFailed(
   sessionId: string,
-  stepId: AgentStepId,
+  stepId: QaStepId,
   error: string,
   result?: Record<string, unknown>,
 ) {
@@ -300,7 +356,7 @@ async function setStepFailed(
     error,
     ...(result ? { result } : {}),
   });
-  await queries.updateAgentSession(sessionId, {
+  await hostOf().updateSession(sessionId, {
     status: "failed",
     completedAt: new Date(),
   });
@@ -308,7 +364,7 @@ async function setStepFailed(
 
 async function setStepSkipped(
   sessionId: string,
-  stepId: AgentStepId,
+  stepId: QaStepId,
   reason?: string,
 ) {
   await updateStep(sessionId, stepId, {
@@ -320,19 +376,20 @@ async function setStepSkipped(
 
 async function updateSubsteps(
   sessionId: string,
-  stepId: AgentStepId,
-  substeps: AgentStepState["substeps"],
+  stepId: QaStepId,
+  substeps: QaStepState["substeps"],
 ) {
   await updateStep(sessionId, stepId, { substeps: [...(substeps ?? [])] });
 }
 
 async function mergeMetadata(
   sessionId: string,
-  patch: Partial<AgentSessionMetadata>,
+  patch: Partial<QaSessionMetadata>,
 ) {
-  const session = await queries.getAgentSession(sessionId);
+  const host = hostOf();
+  const session = await host.getSession(sessionId);
   if (!session) return;
-  await queries.updateAgentSession(sessionId, {
+  await host.updateSession(sessionId, {
     metadata: { ...session.metadata, ...patch },
   });
 }
@@ -343,7 +400,7 @@ async function isStopped(
   signal: AbortSignal,
 ): Promise<boolean> {
   if (signal.aborted) return true;
-  const session = await queries.getAgentSession(sessionId);
+  const session = await hostOf().getSession(sessionId);
   if (!session) return true;
   if (session.status === "cancelled" || session.status === "paused") {
     activeControllers.get(sessionId)?.abort();
@@ -353,7 +410,7 @@ async function isStopped(
 }
 
 function credentialsFrom(
-  metadata: AgentSessionMetadata,
+  metadata: QaSessionMetadata,
 ): { email: string; password: string } | undefined {
   if (
     metadata.credsProvided &&
@@ -377,7 +434,7 @@ function credentialsFrom(
  *  generated tests start authenticated. Wiring the planner to credsProvided
  *  alone made it plan "public surface only" on storage-state runs. Mirrors the
  *  `preAuthenticated` calc in the generate step. */
-function isRunAuthenticated(metadata: AgentSessionMetadata): boolean {
+function isRunAuthenticated(metadata: QaSessionMetadata): boolean {
   return Boolean(
     metadata.credsProvided ||
     metadata.qaAuth?.storageStateId ||
@@ -390,36 +447,31 @@ function isRunAuthenticated(metadata: AgentSessionMetadata): boolean {
 async function loadExistingTests(
   repositoryId: string,
 ): Promise<ExistingTestSummary[]> {
-  const [tests, areas] = await Promise.all([
-    queries.getTestsByRepo(repositoryId),
-    queries.getFunctionalAreasByRepo(repositoryId).catch(() => []),
-  ]);
-  const areaName = new Map(areas.map((a) => [a.id, a.name]));
+  const tests = await hostOf().listTests(repositoryId);
   return tests.map((t) => ({
     id: t.id,
     name: t.name,
     testType: t.testType,
-    functionalAreaName: t.functionalAreaId
-      ? (areaName.get(t.functionalAreaId) ?? null)
-      : null,
+    functionalAreaName: t.functionalAreaName,
   }));
 }
 
 /** Prior run's ledger for coverage matching: the fill_gaps source session's,
  *  else the newest earlier session that has one. */
 async function loadPriorLedger(
-  session: AgentSession,
+  session: QaSessionRow,
 ): Promise<QaGeneratedTest[] | undefined> {
+  const host = hostOf();
   if (session.metadata.qaPlanSourceSessionId) {
-    const source = await queries
-      .getAgentSession(session.metadata.qaPlanSourceSessionId)
+    const source = await host
+      .getSession(session.metadata.qaPlanSourceSessionId)
       .catch(() => null);
     if (source?.metadata.qaGeneratedTests) {
       return source.metadata.qaGeneratedTests;
     }
   }
-  const recent = await queries
-    .getRecentAgentSessions(session.repositoryId, "qa", 10)
+  const recent = await host
+    .getRecentSessions(session.repositoryId, 10)
     .catch(() => []);
   return recent.find(
     (s) => s.id !== session.id && s.metadata.qaGeneratedTests?.length,
@@ -434,13 +486,14 @@ async function runQaSetup(
   repositoryId: string,
   _signal: AbortSignal,
 ): Promise<boolean> {
+  const host = hostOf();
   await setStepActive(sessionId, "qa_setup");
   emitActivity(teamId, repositoryId, sessionId, "step:start", "Preflight", {
     stepId: "qa_setup",
     agentType: "orchestrator",
   });
 
-  const session = await queries.getAgentSession(sessionId);
+  const session = await host.getSession(sessionId);
   if (!session) return false;
   const targetUrl = session.metadata.qaTargetUrl;
   if (!targetUrl) {
@@ -448,8 +501,8 @@ async function runQaSetup(
     return false;
   }
 
-  const aiSettings = await queries.getAISettings(repositoryId);
-  if (!aiSettings.provider || aiSettings.provider === "none") {
+  const aiProvider = await host.getAiProviderName(repositoryId);
+  if (!aiProvider) {
     await setStepFailed(
       sessionId,
       "qa_setup",
@@ -458,17 +511,12 @@ async function runQaSetup(
     return false;
   }
 
-  const ghAccount = await queries
-    .getGithubAccountByTeam(teamId)
-    .catch(() => undefined);
-  const repo = await queries.getRepository(repositoryId);
-  const githubConnected = Boolean(
-    ghAccount?.accessToken && repo?.provider === "github" && repo.owner,
-  );
+  const repoInfo = await host.getRepoInfo(repositoryId).catch(() => null);
+  const githubConnected = Boolean(repoInfo?.githubConnected);
 
   await setStepCompleted(sessionId, "qa_setup", {
     targetUrl,
-    aiProvider: aiSettings.provider,
+    aiProvider,
     githubConnected,
     credsProvided: Boolean(session.metadata.credsProvided),
   });
@@ -477,7 +525,7 @@ async function runQaSetup(
     repositoryId,
     sessionId,
     "step:complete",
-    `Preflight OK — AI: ${aiSettings.provider}, GitHub: ${githubConnected ? "connected (repo-aware discovery)" : "not connected (live discovery only)"}`,
+    `Preflight OK — AI: ${aiProvider}, GitHub: ${githubConnected ? "connected (repo-aware discovery)" : "not connected (live discovery only)"}`,
     { stepId: "qa_setup", agentType: "orchestrator" },
   );
   return true;
@@ -491,16 +539,17 @@ async function upsertQaLoginSetupTest(
   repositoryId: string,
   opts: { email: string; password: string; loginUrl: string },
 ): Promise<string | undefined> {
+  const host = hostOf();
   try {
     const name = "QA agent — auth login";
     const code = renderAuthLoginCode(opts);
-    const tests = await queries.getTestsByRepo(repositoryId);
+    const tests = await host.listTests(repositoryId);
     const existing = tests.find((t) => t.name === name);
     if (existing) {
-      await queries.updateTest(existing.id, { code });
+      await host.updateTestCode(existing.id, code);
       return existing.id;
     }
-    const created = await queries.createTest({ repositoryId, name, code });
+    const created = await host.createTest({ repositoryId, name, code });
     return created.id;
   } catch (err) {
     console.warn("[QaAgent] login setup test upsert failed:", err);
@@ -530,24 +579,23 @@ function isExtractedAuthContext(v: unknown): v is ExtractedAuthContext {
  * non-goal for v1. Best-effort: null when nothing extractable.
  */
 async function extractCredsFromAuthContext(
+  ctx: QaCtx,
   repositoryId: string,
   authContext: string,
 ): Promise<ExtractedAuthContext | null> {
   try {
-    const settings = await queries.getAISettings(repositoryId);
-    const config = getAIConfig(settings);
-    const raw = await generateWithAI(
-      config,
+    const result = await ctx.ai.generate(
       `Extract sign-in details from these instructions:\n\n${authContext.slice(0, 4000)}\n\nReturn a JSON object: {"email": string|null, "password": string|null, "loginUrl": string|null}. "email" may also be a username. Use null for anything not literally present — NEVER invent values.`,
-      "You extract structured login credentials from user-provided sign-in instructions for an automated browser. Respond with a single JSON object and nothing else.",
       {
-        repositoryId,
         actionType: "qa_auth_extract",
-        responseFormat: "json_object",
+        repositoryId,
+        systemPrompt:
+          "You extract structured login credentials from user-provided sign-in instructions for an automated browser. Respond with a single JSON object and nothing else.",
+        json: true,
         signal: AbortSignal.timeout(60_000),
       },
     );
-    const parsed = parseAiJson(raw, isExtractedAuthContext);
+    const parsed = parseAiJson(result.text, isExtractedAuthContext);
     if (!parsed) return null;
     const clean = (s: unknown): string | undefined =>
       typeof s === "string" && s.trim() ? s.trim() : undefined;
@@ -578,13 +626,15 @@ async function extractCredsFromAuthContext(
  * The step never fails the pipeline — every unresolved path degrades.
  */
 async function runQaLogin(
+  ctx: QaCtx,
   sessionId: string,
   teamId: string,
   repositoryId: string,
   signal: AbortSignal,
 ): Promise<boolean> {
+  const host = hostOf();
   await setStepActive(sessionId, "qa_login");
-  const session = await queries.getAgentSession(sessionId);
+  const session = await host.getSession(sessionId);
   if (!session?.metadata.qaTargetUrl) return false;
   const targetUrl = session.metadata.qaTargetUrl;
 
@@ -595,12 +645,13 @@ async function runQaLogin(
   let extractedLoginUrl: string | undefined;
   if (metadata.qaAuthContext && !credentialsFrom(metadata)) {
     const extracted = await extractCredsFromAuthContext(
+      ctx,
       repositoryId,
       metadata.qaAuthContext,
     );
     extractedLoginUrl = extracted?.loginUrl;
     if (extracted?.email && extracted.password) {
-      const patch: Partial<AgentSessionMetadata> = {
+      const patch: Partial<QaSessionMetadata> = {
         quickstartEmail: extracted.email,
         quickstartPassword: extracted.password,
         credsProvided: true,
@@ -618,7 +669,7 @@ async function runQaLogin(
   const SUB_CREDS = 2;
   const SUB_REGISTER = 3;
   const SUB_RESOLVE = 4;
-  const substeps: NonNullable<AgentStepState["substeps"]> = [
+  const substeps: NonNullable<QaStepState["substeps"]> = [
     { label: "Check existing setup", status: "running", agent: "orchestrator" },
     { label: "Run existing setup test", status: "pending", agent: "ranger" },
     { label: "Test provided credentials", status: "pending", agent: "ranger" },
@@ -639,9 +690,9 @@ async function runQaLogin(
     { stepId: "qa_login", agentType: "orchestrator" },
   );
 
-  const existing = await findExistingAuthSetup(repositoryId).catch(
-    (): ExistingAuthSetup => ({ defaultSetupInUse: false }),
-  );
+  const existing = await host
+    .resolveExistingAuth(repositoryId)
+    .catch((): QaExistingAuthSetup => ({ defaultSetupInUse: false }));
 
   let auth: QaAuthState | null = null;
   // A login URL named in the auth-context prose is authoritative over the
@@ -650,13 +701,14 @@ async function runQaLogin(
     loginUrl: extractedLoginUrl,
   };
   // One core-claimed browser per probe, where this used to hold a single raw
-  // CDP connection open across all of them. `agentBrowserCapability` is the
-  // composition root's `ctx.browser` for code that is not a plugin yet (see
-  // `src/lib/core/agent-browser.ts`): core claims, injects any stored session
-  // **by id**, meters the run-minutes, signs the stream grant and always
-  // releases. Three consequences, all deliberate:
+  // CDP connection open across all of them. `ctx.browser` is the same
+  // capability the pre-migration `agentBrowserCapability` bridge minted at the
+  // composition root — the bridge existed only because this file had no `ctx`
+  // yet. Core claims, injects any stored session **by id**, meters the
+  // run-minutes, signs the stream grant and always releases. Three
+  // consequences, all deliberate:
   //
-  //   - the storage-state JSON never reaches this file any more (core resolves,
+  //   - the storage-state JSON never reaches this file (core resolves,
   //     ownership-checks and injects it), which is why the "could not be
   //     loaded" branch is gone: `session.authApplied` is core's single answer
   //     to "did the stored session take", and a `false` is treated as a
@@ -665,8 +717,8 @@ async function runQaLogin(
   //     the registration step below no longer has to release ours before
   //     `captureStorageState` can claim (1-job-1-EB, honestly);
   //   - `session.streamUrl` is already proxied and grant-signed, so the live
-  //     view no longer goes through `proxiedStream()` here.
-  const browser = await agentBrowserCapability(teamId, "QaAgent");
+  //     view never sees a pod address.
+  const browser = ctx.browser;
 
   /**
    * Run one probe on a core-claimed page. `undefined` means "no browser" —
@@ -799,12 +851,13 @@ async function runQaLogin(
         detail: `Running "${stepName}"`,
       };
       await updateSubsteps(sessionId, "qa_login", substeps);
-      const source = existing.setupTestId
-        ? await queries.getTest(existing.setupTestId).catch(() => null)
-        : await queries
-            .getSetupScript(existing.setupScriptId!)
-            .catch(() => null);
-      const code = source?.code;
+      const code = await host
+        .getAuthSetupCode(
+          existing.setupTestId
+            ? { testId: existing.setupTestId }
+            : { scriptId: existing.setupScriptId },
+        )
+        .catch(() => null);
       if (!code) {
         setupRunFailed = true;
         substeps[SUB_SETUP_RUN] = {
@@ -815,7 +868,7 @@ async function runQaLogin(
       } else {
         // Arbitrary setup code must not run in-process: captureStorageState
         // executes it in its own disposable runner/EB.
-        const captured = await captureStorageState({
+        const captured = await host.captureStorageState({
           repositoryId,
           baseUrl: targetUrl,
           testCode: code,
@@ -912,7 +965,7 @@ async function runQaLogin(
           credentials,
         });
         if (login.ok && login.storageStateJson) {
-          const persisted = await queries.createStorageState({
+          const persisted = await host.persistStorageState({
             repositoryId,
             name: `QA agent login ${utcStamp()}`,
             storageStateJson: login.storageStateJson,
@@ -969,12 +1022,12 @@ async function runQaLogin(
       // captureStorageState runs the signup in its own disposable runner/EB
       // (1-job-1-EB). Nothing to release first any more — every probe above
       // held its browser only for the length of its own `withQaPage` scope.
-      const repo = await queries.getRepository(repositoryId);
-      const team = await queries.getTeam(teamId).catch(() => undefined);
+      const repo = await host.getRepoInfo(repositoryId).catch(() => null);
+      const template = await host
+        .getTeamEmailTemplate(teamId)
+        .catch(() => "viktor+{slug}{stamp}@lastest.cloud");
       const stamp = utcStamp();
       const slug = slugify(repo?.name ?? "qa-agent");
-      const template =
-        team?.quickstartEmailTemplate ?? "viktor+{slug}{stamp}@lastest.cloud";
       const email = renderQuickstartEmail(template, slug, stamp);
       const password = renderQuickstartPassword(stamp);
       const code = renderAuthSetupCode({
@@ -982,12 +1035,12 @@ async function runQaLogin(
         password,
         registerUrl: authLinks.signupUrl,
       });
-      const setupTest = await queries.createTest({
+      const setupTest = await host.createTest({
         repositoryId,
         name: `QA agent — auth signup ${stamp}`,
         code,
       });
-      const captured = await captureStorageState({
+      const captured = await host.captureStorageState({
         repositoryId,
         baseUrl: targetUrl,
         testCode: code,
@@ -1097,7 +1150,7 @@ async function runQaLogin(
     );
     return true;
   } finally {
-    // Release is core's now — every claim above lived and died inside a
+    // Release is core's — every claim above lived and died inside a
     // `withBrowser` scope. What is left is the UI's own bookkeeping.
     await mergeMetadata(sessionId, { streamUrl: undefined }).catch(() => {});
   }
@@ -1148,6 +1201,7 @@ async function waitForSwarm(
  * per-explorer streams live on `qaExplore.explorers[i].streamUrl`.
  */
 async function runQaDiscoverSwarm(args: {
+  ctx: QaCtx;
   sessionId: string;
   teamId: string;
   repositoryId: string;
@@ -1168,14 +1222,14 @@ async function runQaDiscoverSwarm(args: {
   loginAttempted: boolean;
   finalExplore: QaExploreState;
 }> {
-  const { sessionId, teamId, repositoryId, targetUrl, signal } = args;
+  const { ctx, sessionId, teamId, repositoryId, targetUrl, signal } = args;
+  const host = hostOf();
   const config = args.initialExplore.config;
 
   // Cap the swarm so builds keep pool headroom: min(requested, poolMax − 5).
-  const max = await getGlobalPoolLimits()
-    .then(
-      (limits) => limits?.ebPoolMax ?? config.explorers + SWARM_POOL_HEADROOM,
-    )
+  const max = await host
+    .getEbPoolMax()
+    .then((limit) => limit ?? config.explorers + SWARM_POOL_HEADROOM)
     .catch(() => config.explorers + SWARM_POOL_HEADROOM);
   const want = Math.max(
     1,
@@ -1195,7 +1249,7 @@ async function runQaDiscoverSwarm(args: {
     const now = Date.now();
     if (!force && now - lastFlushAt < 3000) return;
     lastFlushAt = now;
-    const patch: Partial<AgentSessionMetadata> = {
+    const patch: Partial<QaSessionMetadata> = {
       qaExplore: explore,
       qaDiscovery: {
         targetUrl,
@@ -1222,8 +1276,8 @@ async function runQaDiscoverSwarm(args: {
 
   // Every claim goes through core: it meters, deadlines and releases each one,
   // and a page arrives already authenticated when `storageStateId` is set —
-  // this function no longer resolves, holds or passes the session material.
-  const browser = await agentBrowserCapability(teamId, "QaAgent");
+  // this function never resolves, holds or passes the session material.
+  const browser = ctx.browser;
 
   // `withBrowserSwarm`'s callback is per session, and a shared-frontier crawl
   // is the one shape that does not fit it: every page has to be alive at the
@@ -1341,9 +1395,8 @@ async function runQaDiscoverSwarm(args: {
       loginUrl: args.loginUrl,
       // Same UA the executor would use for this repo — these crawls run on a
       // core-claimed EB's existing context, so newContext() never applies it.
-      userAgentOverride: await queries
-        .getPlaywrightSettings(repositoryId)
-        .then((s) => s.userAgentOverride)
+      userAgentOverride: await host
+        .getUserAgentOverride(repositoryId)
         .catch(() => null),
       signal,
       onPage: (snapshot, explorerIndex, totalMapped) => {
@@ -1446,17 +1499,19 @@ async function runQaDiscoverSwarm(args: {
 // ── Step: qa_discover ────────────────────────────────────────────────────────
 
 async function runQaDiscover(
+  ctx: QaCtx,
   sessionId: string,
   teamId: string,
   repositoryId: string,
   signal: AbortSignal,
 ): Promise<boolean> {
+  const host = hostOf();
   await setStepActive(sessionId, "qa_discover");
-  const session = await queries.getAgentSession(sessionId);
+  const session = await host.getSession(sessionId);
   if (!session?.metadata.qaTargetUrl) return false;
   const targetUrl = session.metadata.qaTargetUrl;
 
-  const substeps: NonNullable<AgentStepState["substeps"]> = [
+  const substeps: NonNullable<QaStepState["substeps"]> = [
     { label: "Static route scan", status: "running", agent: "scout" },
     { label: "Code analysis", status: "pending", agent: "diver" },
     { label: "Live crawl", status: "pending", agent: "ranger" },
@@ -1471,38 +1526,21 @@ async function runQaDiscover(
     { stepId: "qa_discover", agentType: "scout" },
   );
 
-  const repo = await queries.getRepository(repositoryId);
-  const ghAccount = await queries
-    .getGithubAccountByTeam(teamId)
-    .catch(() => undefined);
-  const githubConnected = Boolean(
-    ghAccount?.accessToken && repo?.provider === "github" && repo.owner,
-  );
-  const branch = repo?.selectedBranch || repo?.defaultBranch || "main";
-  const baseBranch = repo?.defaultBranch || "main";
+  const repoInfo = await host.getRepoInfo(repositoryId).catch(() => null);
+  const githubConnected = Boolean(repoInfo?.githubConnected);
+  const branch = repoInfo?.selectedBranch || repoInfo?.defaultBranch || "main";
+  const baseBranch = repoInfo?.defaultBranch || "main";
 
   // 1) Static routes: reuse a prior scan; else run the GitHub-tree scanner.
+  //    Both live behind one host read — the scanner needs the team's GitHub
+  //    token, which never crosses into this package.
   let staticRoutes: Array<{ path: string; type: string }> = [];
   let framework: string | undefined;
   try {
-    const existing = await queries.getRoutesByRepo(repositoryId);
-    if (existing.length > 0) {
-      staticRoutes = existing.map((r) => ({ path: r.path, type: r.type }));
-      framework = existing[0]?.framework ?? undefined;
-    } else if (githubConnected && repo && ghAccount?.accessToken) {
-      const { RemoteRouteScanner } = await import("@lastest/route-scan");
-      const scanner = new RemoteRouteScanner({
-        accessToken: ghAccount.accessToken,
-        owner: repo.owner ?? "",
-        repo: repo.name ?? "",
-        branch,
-      });
-      const result = await scanner.scan();
-      staticRoutes = result.routes.map((r) => ({
-        path: r.path,
-        type: r.type,
-      }));
-      framework = result.framework;
+    const scanned = await host.getStaticRoutes(repositoryId);
+    if (scanned) {
+      staticRoutes = scanned.routes;
+      framework = scanned.framework;
     }
     substeps[0] = {
       ...substeps[0],
@@ -1531,34 +1569,21 @@ async function runQaDiscover(
   let prChanges: QaDiscovery["prChanges"];
   substeps[1] = { ...substeps[1], status: "running" };
   await updateSubsteps(sessionId, "qa_discover", substeps);
-  if (githubConnected && repo && ghAccount?.accessToken) {
+  const source = githubConnected
+    ? await host.getSourceAccess(repositoryId).catch(() => null)
+    : null;
+  if (source) {
     try {
-      const [
-        { gatherCodebaseIntelligence },
-        { getRepoTree, getFileContent, compareBranches },
-      ] = await Promise.all([
-        import("@/lib/ai/codebase-intelligence"),
-        import("@lastest/github"),
-      ]);
-      const { extractDeclaredEndpoints } =
-        await import("@/lib/qa-agent/code-check");
-      const token = ghAccount.accessToken;
-      const owner = repo.owner ?? "";
-      const name = repo.name ?? "";
       const [intel, tree, comparison] = await Promise.all([
-        gatherCodebaseIntelligence(token, owner, name, branch).catch(
-          () => null,
-        ),
-        getRepoTree(token, owner, name, branch).catch(() => null),
-        branch !== baseBranch
-          ? compareBranches(token, owner, name, baseBranch, branch).catch(
-              () => null,
-            )
+        source.gatherIntelligence().catch(() => null),
+        source.getRepoTree().catch(() => null),
+        source.branch !== source.baseBranch
+          ? source.compareBranches().catch(() => null)
           : Promise.resolve(null),
       ]);
       const declaredEndpoints = tree
-        ? await extractDeclaredEndpoints(tree.tree, (path) =>
-            getFileContent(token, owner, name, path, branch),
+        ? await extractDeclaredEndpoints(tree, (path) =>
+            source.getFileContent(path),
           )
         : [];
       if (intel || declaredEndpoints.length > 0) {
@@ -1577,7 +1602,6 @@ async function runQaDiscover(
         };
       }
       if (comparison && comparison.files.length > 0) {
-        const { computePrChanges } = await import("@/lib/qa-agent/pr-check");
         const computed = computePrChanges(comparison, declaredEndpoints);
         if (computed.files.length > 0) prChanges = computed;
       }
@@ -1637,7 +1661,7 @@ async function runQaDiscover(
     const now = Date.now();
     if (now - lastFlushAt < 3000) return;
     lastFlushAt = now;
-    const patch: Partial<AgentSessionMetadata> = {
+    const patch: Partial<QaSessionMetadata> = {
       qaDiscovery: {
         targetUrl,
         crawledPages: [...livePages],
@@ -1680,6 +1704,7 @@ async function runQaDiscover(
       // at claim time, so the swarm never holds session material.
       const storageStateId = qaAuth?.storageStateId;
       const result = await runQaDiscoverSwarm({
+        ctx,
         sessionId,
         teamId,
         repositoryId,
@@ -1722,7 +1747,7 @@ async function runQaDiscover(
       // is what "pre-authenticated" now means — the storage-state blob never
       // reaches this file.
       const qaAuth = session.metadata.qaAuth;
-      const browser = await agentBrowserCapability(teamId, "QaAgent");
+      const browser = ctx.browser;
       const ran = await browser
         .withBrowser(
           {
@@ -1797,9 +1822,8 @@ async function runQaDiscover(
               // Same UA the executor would use for this repo — this crawl runs
               // on a core-claimed EB's existing context, so newContext() never
               // applies it here.
-              userAgentOverride: await queries
-                .getPlaywrightSettings(repositoryId)
-                .then((s) => s.userAgentOverride)
+              userAgentOverride: await hostOf()
+                .getUserAgentOverride(repositoryId)
                 .catch(() => null),
               signal,
               onPage: (snapshot, index) => {
@@ -1874,7 +1898,7 @@ async function runQaDiscover(
                   qaAuth.strategy === "creds_untested" &&
                   probe.storageStateJson
                 ) {
-                  const persisted = await queries.createStorageState({
+                  const persisted = await hostOf().persistStorageState({
                     repositoryId,
                     name: `QA agent login ${utcStamp()}`,
                     storageStateJson: probe.storageStateJson,
@@ -1997,13 +2021,15 @@ async function runQaDiscover(
 // ── Step: qa_plan ────────────────────────────────────────────────────────────
 
 async function runQaPlan(
+  ctx: QaCtx,
   sessionId: string,
   teamId: string,
   repositoryId: string,
   signal: AbortSignal,
 ): Promise<boolean> {
+  const host = hostOf();
   await setStepActive(sessionId, "qa_plan");
-  const session = await queries.getAgentSession(sessionId);
+  const session = await host.getSession(sessionId);
   const discovery = session?.metadata.qaDiscovery;
   if (!session || !discovery) {
     await setStepFailed(sessionId, "qa_plan", "Missing discovery data");
@@ -2017,7 +2043,7 @@ async function runQaPlan(
   const authenticated = isRunAuthenticated(session.metadata);
   const feedback = session.metadata.qaPlannerFeedback;
 
-  const substeps: NonNullable<AgentStepState["substeps"]> = [
+  const substeps: NonNullable<QaStepState["substeps"]> = [
     {
       label: "Planner designing test plan",
       status: "running",
@@ -2049,11 +2075,8 @@ async function runQaPlan(
       : undefined;
 
   const callPlanner = async (extraFeedback?: string): Promise<string> => {
-    const settings = await queries.getAISettings(repositoryId);
-    const config = getAIConfig(settings);
     const timeoutSignal = AbortSignal.timeout(PLANNER_TIMEOUT_MS);
-    return generateWithAI(
-      config,
+    const result = await ctx.ai.generate(
       buildPlannerUserPrompt({
         digest,
         groups,
@@ -2063,18 +2086,21 @@ async function runQaPlan(
         feedback:
           [feedback, extraFeedback].filter(Boolean).join("\n") || undefined,
       }),
-      systemPrompt,
       {
-        repositoryId,
         actionType: "qa_plan",
-        responseFormat: "json_object",
+        repositoryId,
+        systemPrompt,
+        json: true,
         signal: AbortSignal.any([signal, timeoutSignal]),
-        onLogCreated: (logId) => {
-          substeps[0] = { ...substeps[0], promptLogId: logId };
-          updateSubsteps(sessionId, "qa_plan", substeps).catch(() => {});
-        },
       },
     );
+    // Post-call rather than mid-call: `AiResult.promptLogId` is the
+    // capability's replacement for the old `onLogCreated` hook.
+    if (result.promptLogId) {
+      substeps[0] = { ...substeps[0], promptLogId: result.promptLogId };
+      updateSubsteps(sessionId, "qa_plan", substeps).catch(() => {});
+    }
+    return result.text;
   };
 
   let plan: QaTestPlan | null = null;
@@ -2194,8 +2220,9 @@ async function runQaPlanReview(
   teamId: string,
   repositoryId: string,
 ): Promise<boolean> {
+  const host = hostOf();
   await setStepActive(sessionId, "qa_plan_review");
-  const session = await queries.getAgentSession(sessionId);
+  const session = await host.getSession(sessionId);
   if (session?.metadata.qaAutoApprove) {
     await updateStep(sessionId, "qa_plan_review", {
       status: "completed",
@@ -2208,7 +2235,7 @@ async function runQaPlanReview(
     status: "waiting_user",
     userAction: "Review the test plan, then approve or request changes",
   });
-  await queries.updateAgentSession(sessionId, { status: "paused" });
+  await host.updateSession(sessionId, { status: "paused" });
   emitActivity(
     teamId,
     repositoryId,
@@ -2228,8 +2255,9 @@ async function runQaGenerate(
   repositoryId: string,
   signal: AbortSignal,
 ): Promise<boolean> {
+  const host = hostOf();
   await setStepActive(sessionId, "qa_generate");
-  const session = await queries.getAgentSession(sessionId);
+  const session = await host.getSession(sessionId);
   const plan = session?.metadata.qaPlan;
   const targetUrl = session?.metadata.qaTargetUrl;
   if (!session || !plan || !targetUrl) {
@@ -2244,7 +2272,7 @@ async function runQaGenerate(
   const preAuthenticated = Boolean(
     qaAuth?.storageStateId || qaAuth?.defaultSetupInUse,
   );
-  const authSetupOverrides: TestSetupOverrides | undefined =
+  const authSetupOverrides: QaSetupOverrides | undefined =
     qaAuth?.storageStateId && !qaAuth.defaultSetupInUse
       ? {
           skippedDefaultStepIds: [],
@@ -2317,14 +2345,14 @@ async function runQaGenerate(
   // Areas: one per group, flat, prefixed for recognizability in /tests.
   const areaIdByGroup = new Map<QaTestGroup, string>();
   for (const group of new Set(items.map((i) => i.group))) {
-    const area = await queries.getOrCreateFunctionalAreaByRepo(
+    const area = await host.getOrCreateFunctionalArea(
       repositoryId,
       `QA: ${groupLabel(group)}`,
     );
     areaIdByGroup.set(group, area.id);
   }
 
-  const substeps: NonNullable<AgentStepState["substeps"]> = pending.map(
+  const substeps: NonNullable<QaStepState["substeps"]> = pending.map(
     (item) => ({
       label: `${itemLabel(item)}: ${item.title}`,
       status: "pending",
@@ -2368,25 +2396,18 @@ async function runQaGenerate(
       });
       continue;
     }
-    const test = await queries.createTest(
-      {
-        repositoryId,
-        functionalAreaId: areaIdByGroup.get(item.group),
-        name: item.title,
-        code: `// Headless API test — executed via apiDefinition (${definition.method} ${definition.url})`,
-        targetUrl,
-        testType: "api",
-        apiDefinition: definition,
-        // Authored by the play_agent bot. The bot *row* belongs to
-        // @lastest/plugin-gamification, so this passes the agent kind and lets
-        // the plugin's test-created listener resolve and stamp the id — a
-        // feature must not read another feature's table to attribute its own
-        // work. See src/lib/db/test-hooks.ts.
-      },
-      undefined,
-      undefined,
-      "play_agent",
-    );
+    // Attribution to the play_agent bot happens inside the host method — a
+    // feature must not read another feature's table to attribute its own
+    // work, and this one no longer can (see src/lib/db/test-hooks.ts).
+    const test = await host.createTest({
+      repositoryId,
+      functionalAreaId: areaIdByGroup.get(item.group),
+      name: item.title,
+      code: `// Headless API test — executed via apiDefinition (${definition.method} ${definition.url})`,
+      targetUrl,
+      testType: "api",
+      apiDefinition: definition,
+    });
     substeps[subIdx] = { ...substeps[subIdx], status: "done" };
     await updateSubsteps(sessionId, "qa_generate", substeps);
     await upsertLedger({
@@ -2414,17 +2435,16 @@ async function runQaGenerate(
   }
 
   // Browser items share one EB, generated sequentially so the live view is
-  // coherent and the pool isn't drained. `withAuthoringAiSession` claims one
-  // Embedded Browser (core injects `qaAuth.storageStateId` as part of the
-  // claim itself, so the generator sees the same post-login state the tests
-  // will run in) and hands back bound `createTest` calls that all reuse it.
+  // coherent and the pool isn't drained. `host.withAuthoringSession` claims
+  // one Embedded Browser through `@lastest/plugin-authoring-ai` (core injects
+  // `qaAuth.storageStateId` as part of the claim itself, so the generator
+  // sees the same post-login state the tests will run in) and hands back
+  // bound `createTest` calls that all reuse it.
   let stoppedEarly = false;
   try {
     if (browserItems.length > 0) {
-      const { withAuthoringAiSession } =
-        await import("@lastest/plugin-authoring-ai/actions");
       try {
-        await withAuthoringAiSession(
+        await host.withAuthoringSession(
           repositoryId,
           {
             storageStateId: qaAuth?.storageStateId,
@@ -2481,27 +2501,22 @@ async function runQaGenerate(
                   { signal: AbortSignal.any([signal, timeoutSignal]) },
                 );
                 if (result.success && result.code) {
-                  const test = await queries.createTest(
-                    {
-                      repositoryId,
-                      functionalAreaId: areaIdByGroup.get(item.group),
-                      name: item.title,
-                      code: result.code,
-                      targetUrl,
-                      playwrightOverrides: itemPlaywrightOverrides(
-                        itemGroups(item),
-                      ),
-                      // Chain the captured login session; when repo defaults already
-                      // cover auth this stays undefined (defaults apply to every test).
-                      ...(authSetupOverrides
-                        ? { setupOverrides: authSetupOverrides }
-                        : {}),
-                      // Authored by the play_agent bot — see the note above.
-                    },
-                    undefined,
-                    undefined,
-                    "play_agent",
-                  );
+                  const test = await host.createTest({
+                    repositoryId,
+                    functionalAreaId: areaIdByGroup.get(item.group),
+                    name: item.title,
+                    code: result.code,
+                    targetUrl,
+                    playwrightOverrides: itemPlaywrightOverrides(
+                      itemGroups(item),
+                    ),
+                    // Chain the captured login session; when repo defaults already
+                    // cover auth this stays undefined (defaults apply to every test).
+                    ...(authSetupOverrides
+                      ? { setupOverrides: authSetupOverrides }
+                      : {}),
+                    // play_agent attribution — inside the host, see above.
+                  });
                   substeps[subIdx] = {
                     ...substeps[subIdx],
                     status: "done",
@@ -2621,13 +2636,14 @@ async function runAndCollect(
   testIds: string[],
   signal: AbortSignal,
 ): Promise<Map<string, "passed" | "failed"> | null> {
-  // runTestsCore returns { runId, jobId } directly, or { runId: null, jobId }
+  const host = hostOf();
+  // `startRun` returns { runId, jobId } directly, or { runId: null, jobId }
   // when the pool was busy and the run got queued as a pending background job.
-  const run = await runTestsCore(testIds, repositoryId, true);
+  const run = await host.startRun(repositoryId, testIds);
   const runId = run.runId ?? undefined;
   const jobId = run.jobId;
   if (runId) {
-    const current = await queries.getAgentSession(sessionId);
+    const current = await host.getSession(sessionId);
     await mergeMetadata(sessionId, {
       qaRunIds: [...(current?.metadata.qaRunIds ?? []), runId],
     });
@@ -2637,17 +2653,12 @@ async function runAndCollect(
   for (;;) {
     if (await isStopped(sessionId, signal)) return null;
     if (Date.now() > deadline) break;
-    if (runId) {
-      const runRow = await queries.getTestRun(runId);
-      if (runRow?.status && runRow.status !== "running") break;
-    } else if (jobId) {
-      // The run was queued for a free browser; wait on the background job.
-      const job = await queries.getBackgroundJob(jobId);
-      if (job && job.status !== "pending" && job.status !== "running") break;
-      if (!job) break;
-    } else {
-      break;
-    }
+    if (!runId && !jobId) break;
+    // One host read covers both shapes: the run row's status when we have a
+    // run id, else the queued background job's (a missing row counts as
+    // settled for the job branch and as still-pending for the run branch —
+    // the exact pre-migration polling semantics).
+    if (await host.isRunSettled({ runId, jobId })) break;
     await new Promise((r) => setTimeout(r, RUN_POLL_INTERVAL_MS));
   }
 
@@ -2655,9 +2666,8 @@ async function runAndCollect(
   // direct-run and queued paths).
   const statuses = new Map<string, "passed" | "failed">();
   for (const testId of testIds) {
-    const results = await queries.getTestResultsByTest(testId);
-    const latest = results[0];
-    statuses.set(testId, latest?.status === "passed" ? "passed" : "failed");
+    const latest = await host.getLatestResultStatus(testId);
+    statuses.set(testId, latest === "passed" ? "passed" : "failed");
   }
   return statuses;
 }
@@ -2670,8 +2680,9 @@ async function runQaExecute(
   repositoryId: string,
   signal: AbortSignal,
 ): Promise<boolean> {
+  const host = hostOf();
   await setStepActive(sessionId, "qa_execute");
-  const session = await queries.getAgentSession(sessionId);
+  const session = await host.getSession(sessionId);
   const ledger = [...(session?.metadata.qaGeneratedTests ?? [])];
   // Only newly generated tests run here (plus prior failures on a resume) —
   // "covered" entries belong to the standing suite and run via normal builds.
@@ -2764,8 +2775,9 @@ async function runQaHeal(
   repositoryId: string,
   signal: AbortSignal,
 ): Promise<boolean> {
+  const host = hostOf();
   await setStepActive(sessionId, "qa_heal");
-  const session = await queries.getAgentSession(sessionId);
+  const session = await host.getSession(sessionId);
   const ledger = [...(session?.metadata.qaGeneratedTests ?? [])];
   const failing = ledger.filter((g) => g.testId && g.status === "failed");
   if (failing.length === 0) {
@@ -2797,13 +2809,11 @@ async function runQaHeal(
     return lines.join(" ");
   };
 
-  const substeps: NonNullable<AgentStepState["substeps"]> = failing.map(
-    (g) => ({
-      label: `Healing "${g.name}"`,
-      status: "pending",
-      agent: "healer",
-    }),
-  );
+  const substeps: NonNullable<QaStepState["substeps"]> = failing.map((g) => ({
+    label: `Healing "${g.name}"`,
+    status: "pending",
+    agent: "healer",
+  }));
   await updateSubsteps(sessionId, "qa_heal", substeps);
   emitActivity(
     teamId,
@@ -2817,68 +2827,70 @@ async function runQaHeal(
   const healedTestIds: string[] = [];
   let stoppedEarly = false;
   try {
-    const { withAuthoringAiSession } =
-      await import("@lastest/plugin-authoring-ai/actions");
-    await withAuthoringAiSession(
-      repositoryId,
-      {
-        onQueued: () => {
-          mergeMetadata(sessionId, { queuedForBrowser: true }).catch(() => {});
+    await host
+      .withAuthoringSession(
+        repositoryId,
+        {
+          onQueued: () => {
+            mergeMetadata(sessionId, { queuedForBrowser: true }).catch(
+              () => {},
+            );
+          },
+          onSessionReady: (streamUrl) => {
+            mergeMetadata(sessionId, {
+              queuedForBrowser: false,
+              streamUrl: streamUrl ?? undefined,
+            }).catch(() => {});
+          },
         },
-        onSessionReady: (streamUrl) => {
-          mergeMetadata(sessionId, {
-            queuedForBrowser: false,
-            streamUrl: streamUrl ?? undefined,
-          }).catch(() => {});
-        },
-      },
-      async (browserSession) => {
-        for (let i = 0; i < failing.length; i++) {
-          if (await isStopped(sessionId, signal)) {
-            stoppedEarly = true;
-            return;
-          }
-          const entry = failing[i];
-          substeps[i] = { ...substeps[i], status: "running" };
-          await updateSubsteps(sessionId, "qa_heal", substeps);
-          try {
-            const timeoutSignal = AbortSignal.timeout(HEAL_TIMEOUT_MS);
-            const result = await browserSession.healTest(entry.testId!, {
-              signal: AbortSignal.any([signal, timeoutSignal]),
-              intent: healIntentFor(entry),
-            });
-            if (result.success && result.code) {
-              await queries.updateTest(entry.testId!, { code: result.code });
-              healedTestIds.push(entry.testId!);
-              substeps[i] = { ...substeps[i], status: "done" };
-            } else {
+        async (browserSession) => {
+          for (let i = 0; i < failing.length; i++) {
+            if (await isStopped(sessionId, signal)) {
+              stoppedEarly = true;
+              return;
+            }
+            const entry = failing[i];
+            substeps[i] = { ...substeps[i], status: "running" };
+            await updateSubsteps(sessionId, "qa_heal", substeps);
+            try {
+              const timeoutSignal = AbortSignal.timeout(HEAL_TIMEOUT_MS);
+              const result = await browserSession.healTest(entry.testId!, {
+                signal: AbortSignal.any([signal, timeoutSignal]),
+                intent: healIntentFor(entry),
+              });
+              if (result.success && result.code) {
+                await host.updateTestCode(entry.testId!, result.code);
+                healedTestIds.push(entry.testId!);
+                substeps[i] = { ...substeps[i], status: "done" };
+              } else {
+                substeps[i] = {
+                  ...substeps[i],
+                  status: "error",
+                  detail: result.error?.slice(0, 200),
+                };
+              }
+            } catch (err) {
               substeps[i] = {
                 ...substeps[i],
                 status: "error",
-                detail: result.error?.slice(0, 200),
+                detail:
+                  err instanceof Error ? err.message.slice(0, 200) : "failed",
               };
             }
-          } catch (err) {
-            substeps[i] = {
-              ...substeps[i],
-              status: "error",
-              detail:
-                err instanceof Error ? err.message.slice(0, 200) : "failed",
-            };
+            await updateSubsteps(sessionId, "qa_heal", substeps);
           }
-          await updateSubsteps(sessionId, "qa_heal", substeps);
+        },
+      )
+      .catch(async () => {
+        for (let i = 0; i < substeps.length; i++) {
+          substeps[i] = {
+            ...substeps[i],
+            status: "error",
+            detail: "No embedded browser available",
+          };
         }
-      },
-    ).catch(async () => {
-      for (let i = 0; i < substeps.length; i++) {
-        substeps[i] = {
-          ...substeps[i],
-          status: "error",
-          detail: "No embedded browser available",
-        };
-      }
-      await updateSubsteps(sessionId, "qa_heal", substeps);
-    });
+        await updateSubsteps(sessionId, "qa_heal", substeps);
+      });
   } finally {
     await mergeMetadata(sessionId, { streamUrl: undefined }).catch(() => {});
   }
@@ -2926,8 +2938,9 @@ async function runQaSummary(
   teamId: string,
   repositoryId: string,
 ): Promise<boolean> {
+  const host = hostOf();
   await setStepActive(sessionId, "qa_summary");
-  const session = await queries.getAgentSession(sessionId);
+  const session = await host.getSession(sessionId);
   const plan = session?.metadata.qaPlan;
   if (!session || !plan) {
     await setStepFailed(sessionId, "qa_summary", "Missing plan");
@@ -2975,7 +2988,6 @@ async function runQaSummary(
   // whether a test now covers it (the PR coverage panel).
   const prChanges = session.metadata.qaDiscovery?.prChanges;
   if (prChanges) {
-    const { computePrCoverage } = await import("@/lib/qa-agent/pr-check");
     summary.prCoverage = computePrCoverage(prChanges, plan, ledger);
   }
   await mergeMetadata(sessionId, { qaSummary: summary });
@@ -2985,7 +2997,7 @@ async function runQaSummary(
     covered: summary.covered,
     passed: summary.passed,
   });
-  await queries.updateAgentSession(sessionId, {
+  await host.updateSession(sessionId, {
     status: "completed",
     completedAt: new Date(),
   });
@@ -3009,7 +3021,7 @@ async function runQaSummary(
 
 /** Step lists per run mode — a session's `steps` array IS its pipeline; the
  *  executor walks it in order, so segmented modes just build shorter lists. */
-const MODE_PIPELINES: Record<QaRunMode, AgentStepId[]> = {
+const MODE_PIPELINES: Record<QaRunMode, QaStepId[]> = {
   full: QA_STEP_DEFINITIONS.map((s) => s.id),
   // Re-discover + re-plan against existing coverage; no generation. Summary
   // reports which plan items the current suite already covers vs. the gaps.
@@ -3039,7 +3051,7 @@ const MODE_PIPELINES: Record<QaRunMode, AgentStepId[]> = {
   explore: ["qa_setup", "qa_login", "qa_discover"],
 };
 
-function buildStepsForMode(mode: QaRunMode): AgentStepState[] {
+function buildStepsForMode(mode: QaRunMode): QaStepState[] {
   return MODE_PIPELINES[mode].map((id, i) => {
     const def = QA_STEP_DEFINITIONS.find((d) => d.id === id)!;
     return {
@@ -3055,11 +3067,12 @@ async function executeQaPipeline(
   sessionId: string,
   teamId: string,
   repositoryId: string,
-  fromStep: AgentStepId,
+  fromStep: QaStepId,
 ) {
+  const host = hostOf();
   const controller = getOrCreateController(sessionId);
   const signal = controller.signal;
-  const session = await queries.getAgentSession(sessionId);
+  const session = await host.getSession(sessionId);
   if (!session) return;
   // The session's own steps define the pipeline (mode-dependent).
   const pipeline = session.steps.map((s) => s.id);
@@ -3067,6 +3080,11 @@ async function executeQaPipeline(
   if (startIdx === -1) return;
 
   try {
+    // The detached half of every start action: no session survives into this
+    // fire-and-forget continuation, so the scope is the ownership-checked
+    // background branch — the caller already authorized both ids.
+    const { ctx } = await qaContext({ repositoryId, teamId });
+
     for (let i = startIdx; i < pipeline.length; i++) {
       if (await isStopped(sessionId, signal)) return;
       const stepId = pipeline[i];
@@ -3076,13 +3094,19 @@ async function executeQaPipeline(
           ok = await runQaSetup(sessionId, teamId, repositoryId, signal);
           break;
         case "qa_login":
-          ok = await runQaLogin(sessionId, teamId, repositoryId, signal);
+          ok = await runQaLogin(ctx, sessionId, teamId, repositoryId, signal);
           break;
         case "qa_discover":
-          ok = await runQaDiscover(sessionId, teamId, repositoryId, signal);
+          ok = await runQaDiscover(
+            ctx,
+            sessionId,
+            teamId,
+            repositoryId,
+            signal,
+          );
           break;
         case "qa_plan":
-          ok = await runQaPlan(sessionId, teamId, repositoryId, signal);
+          ok = await runQaPlan(ctx, sessionId, teamId, repositoryId, signal);
           break;
         case "qa_plan_review":
           ok = await runQaPlanReview(sessionId, teamId, repositoryId);
@@ -3105,12 +3129,12 @@ async function executeQaPipeline(
 
     // Explore pipelines end at qa_discover — no summary step marks the
     // session terminal, so finalize here once every step succeeded.
-    const finished = await queries.getAgentSession(sessionId);
+    const finished = await host.getSession(sessionId);
     if (
       finished?.metadata.qaMode === "explore" &&
       finished.status === "active"
     ) {
-      await queries.updateAgentSession(sessionId, {
+      await host.updateSession(sessionId, {
         status: "completed",
         completedAt: new Date(),
       });
@@ -3129,7 +3153,7 @@ async function executeQaPipeline(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[QaAgent] pipeline error:", err);
-    const session = await queries.getAgentSession(sessionId).catch(() => null);
+    const session = await host.getSession(sessionId).catch(() => null);
     const current = session?.currentStepId ?? fromStep;
     await setStepFailed(sessionId, current, msg).catch(() => {});
     emitActivity(
@@ -3182,34 +3206,28 @@ function explorePageBudget(depth: number): number {
 export async function startQaAgent(
   input: StartQaAgentInput,
 ): Promise<{ sessionId: string }> {
-  const { team } = await requireRepoAccess(input.repositoryId);
-  assertQaAgentAccess(team.plan, isBillingEnabled());
+  const { host, ctx } = await qaContext({ repositoryId: input.repositoryId });
+  assertEntitled(ctx);
+  const teamId = ctx.team.id;
   // Agent sessions hold embedded browsers for their whole run — metered
   // against the same run-minute quota as test runs. Covers the App Map
   // "Explore" launcher too, which funnels through here.
-  await assertAgentRunMinutesAvailable(team.id);
+  await host.assertRunMinutesAvailable(teamId);
 
   const targetUrl = input.targetUrl.trim().replace(/\/+$/, "");
   if (!/^https?:\/\//i.test(targetUrl)) {
     throw new Error("Target URL must start with http(s)://");
   }
-  try {
-    await assertSafeOutboundUrl(targetUrl);
-  } catch (err) {
-    if (err instanceof SsrfBlockedError) {
-      throw new Error(`URL rejected: ${err.message}`);
-    }
-    throw err;
+  const urlCheck = await host.checkOutboundUrl(targetUrl);
+  if (!urlCheck.ok) {
+    throw new Error(`URL rejected: ${urlCheck.reason}`);
   }
 
   // One active QA session per repo — cancel a stale one before starting.
-  const existing = await queries.getActiveAgentSession(
-    input.repositoryId,
-    "qa",
-  );
+  const existing = await host.getActiveSession(input.repositoryId);
   if (existing) {
     activeControllers.get(existing.id)?.abort();
-    await queries.updateAgentSession(existing.id, {
+    await host.updateSession(existing.id, {
       status: "cancelled",
       completedAt: new Date(),
     });
@@ -3221,7 +3239,7 @@ export async function startQaAgent(
 
   // Explore runs carry their swarm config + live progress skeleton so the App
   // Map progress UI has state to poll from the first second.
-  let exploreSeed: Partial<AgentSessionMetadata> = {};
+  let exploreSeed: Partial<QaSessionMetadata> = {};
   if (mode === "explore") {
     const requested = input.explore ?? {
       explorers: 1,
@@ -3262,9 +3280,8 @@ export async function startQaAgent(
 
   // Decode uploaded product docs into the planner's documentation digest.
   // Only the digest + per-file summaries persist — never the raw upload.
-  let docsSeed: Partial<AgentSessionMetadata> = {};
+  let docsSeed: Partial<QaSessionMetadata> = {};
   if (input.docs?.length) {
-    const { processUploadedDocs } = await import("@/lib/qa-agent/docs");
     const { summaries, digest } = await processUploadedDocs(input.docs);
     if (digest) {
       docsSeed = { qaDocs: summaries, qaDocsDigest: digest };
@@ -3273,13 +3290,9 @@ export async function startQaAgent(
 
   // fill_gaps reuses the newest stored plan (from any prior full/refresh run)
   // instead of re-discovering and re-planning.
-  let planSeed: Partial<AgentSessionMetadata> = {};
+  let planSeed: Partial<QaSessionMetadata> = {};
   if (mode === "fill_gaps") {
-    const recent = await queries.getRecentAgentSessions(
-      input.repositoryId,
-      "qa",
-      10,
-    );
+    const recent = await host.getRecentSessions(input.repositoryId, 10);
     const source = recent.find((s) => s.metadata.qaPlan);
     if (!source) {
       throw new Error(
@@ -3293,11 +3306,9 @@ export async function startQaAgent(
     };
   }
 
-  const session = await queries.createAgentSession({
+  const session = await host.createSession({
     repositoryId: input.repositoryId,
-    teamId: team.id,
-    kind: "qa",
-    status: "active",
+    teamId,
     currentStepId: "qa_setup",
     steps,
     metadata: {
@@ -3322,14 +3333,14 @@ export async function startQaAgent(
   });
 
   emitActivity(
-    team.id,
+    teamId,
     input.repositoryId,
     session.id,
     "session:start",
     `QA agent started on ${targetUrl} (${mode.replace("_", " ")})`,
   );
 
-  executeQaPipeline(session.id, team.id, input.repositoryId, "qa_setup").catch(
+  executeQaPipeline(session.id, teamId, input.repositoryId, "qa_setup").catch(
     (err) => console.error("[QaAgent] unhandled:", err),
   );
 
@@ -3338,19 +3349,21 @@ export async function startQaAgent(
 }
 
 async function requireQaSession(sessionId: string): Promise<{
-  session: AgentSession;
+  session: QaSessionRow;
   teamId: string;
 }> {
-  const { team } = await requireTeamAccess();
-  assertQaAgentAccess(team.plan, isBillingEnabled());
-  const session = await queries.getAgentSession(sessionId);
-  if (!session || session.kind !== "qa") {
+  const { host, ctx } = await qaContext();
+  assertEntitled(ctx);
+  // Kind filtering happens inside `host.getSession` — a non-QA session id
+  // resolves null here exactly as the old inline `kind !== "qa"` check did.
+  const session = await host.getSession(sessionId);
+  if (!session) {
     throw new Error("QA session not found");
   }
-  if (session.teamId && session.teamId !== team.id) {
+  if (session.teamId && session.teamId !== ctx.team.id) {
     throw new Error("QA session not found");
   }
-  return { session, teamId: team.id };
+  return { session, teamId: ctx.team.id };
 }
 
 export async function approveQaPlan(
@@ -3358,6 +3371,7 @@ export async function approveQaPlan(
   opts?: { disabledItemIds?: string[]; autoApprove?: boolean },
 ): Promise<{ success: boolean }> {
   const { session, teamId } = await requireQaSession(sessionId);
+  const host = hostOf();
   const plan = session.metadata.qaPlan;
   if (!plan) return { success: false };
 
@@ -3370,7 +3384,7 @@ export async function approveQaPlan(
     throw new Error("Cannot approve a plan with every test disabled");
   }
 
-  await queries.updateAgentSession(sessionId, { status: "active" });
+  await host.updateSession(sessionId, { status: "active" });
   await mergeMetadata(sessionId, {
     qaPlan: updatedPlan,
     ...(opts?.autoApprove !== undefined
@@ -3407,6 +3421,7 @@ export async function rerunQaPlanner(
   feedback: string,
 ): Promise<{ success: boolean }> {
   const { session, teamId } = await requireQaSession(sessionId);
+  const host = hostOf();
   await mergeMetadata(sessionId, {
     qaPlannerFeedback: feedback.slice(0, 4000),
   });
@@ -3420,7 +3435,7 @@ export async function rerunQaPlanner(
     status: "pending",
     userAction: undefined,
   });
-  await queries.updateAgentSession(sessionId, { status: "active" });
+  await host.updateSession(sessionId, { status: "active" });
 
   executeQaPipeline(sessionId, teamId, session.repositoryId, "qa_plan").catch(
     (err) => console.error("[QaAgent] unhandled:", err),
@@ -3449,7 +3464,8 @@ const REFINER_TIMEOUT_MS = 3 * 60 * 1000;
  * dispatcher (which merges a task directive into a fill-gaps run's plan).
  */
 async function refineAndMergeJourneysIntoPlan(
-  session: AgentSession,
+  ctx: QaCtx,
+  session: QaSessionRow,
   teamId: string,
   journeys: string[],
 ): Promise<{
@@ -3482,19 +3498,17 @@ async function refineAndMergeJourneysIntoPlan(
   });
 
   const callRefiner = async (extra?: string): Promise<string> => {
-    const settings = await queries.getAISettings(repositoryId);
-    const config = getAIConfig(settings);
-    return generateWithAI(
-      config,
+    const result = await ctx.ai.generate(
       extra ? `${userPrompt}\n\n${extra}` : userPrompt,
-      systemPrompt,
       {
-        repositoryId,
         actionType: "qa_plan",
-        responseFormat: "json_object",
+        repositoryId,
+        systemPrompt,
+        json: true,
         signal: AbortSignal.timeout(REFINER_TIMEOUT_MS),
       },
     );
+    return result.text;
   };
 
   let refined: RefinedJourneys | null = null;
@@ -3566,11 +3580,14 @@ export async function addQaUserJourneys(
   error?: string;
 }> {
   const { session, teamId } = await requireQaSession(sessionId);
+  // A scoped context for the refiner's AI call — the session's own repo.
+  const { ctx } = await qaContext({ repositoryId: session.repositoryId });
   const journeys = parseUserJourneys(journeysText);
   if (journeys.length === 0) {
     return { success: false, error: "No journeys were provided" };
   }
   const result = await refineAndMergeJourneysIntoPlan(
+    ctx,
     session,
     teamId,
     journeys,
@@ -3585,7 +3602,7 @@ export async function pauseQaAgent(
   const { session } = await requireQaSession(sessionId);
   if (session.status !== "active") return { success: false };
   activeControllers.get(sessionId)?.abort();
-  await queries.updateAgentSession(sessionId, { status: "paused" });
+  await hostOf().updateSession(sessionId, { status: "paused" });
   revalidatePath("/qa-agent");
   return { success: true };
 }
@@ -3602,7 +3619,7 @@ export async function resumeQaAgent(
   if (current === "qa_plan_review" && !session.metadata.qaAutoApprove) {
     return { success: false };
   }
-  await queries.updateAgentSession(sessionId, { status: "active" });
+  await hostOf().updateSession(sessionId, { status: "active" });
   executeQaPipeline(sessionId, teamId, session.repositoryId, current).catch(
     (err) => console.error("[QaAgent] unhandled:", err),
   );
@@ -3615,7 +3632,7 @@ export async function cancelQaAgent(
 ): Promise<{ success: boolean }> {
   const { session, teamId } = await requireQaSession(sessionId);
   activeControllers.get(sessionId)?.abort();
-  await queries.updateAgentSession(sessionId, {
+  await hostOf().updateSession(sessionId, {
     status: "cancelled",
     completedAt: new Date(),
   });
@@ -3637,35 +3654,29 @@ export async function rerunQaSession(
   sourceSessionId: string,
 ): Promise<{ sessionId: string }> {
   const { session: source, teamId } = await requireQaSession(sourceSessionId);
+  const host = hostOf();
   const m = source.metadata;
   const targetUrl = m.qaTargetUrl;
   if (!targetUrl) {
     throw new Error("This run has no stored target URL to re-run against");
   }
-  try {
-    await assertSafeOutboundUrl(targetUrl);
-  } catch (err) {
-    if (err instanceof SsrfBlockedError) {
-      throw new Error(`URL rejected: ${err.message}`);
-    }
-    throw err;
+  const urlCheck = await host.checkOutboundUrl(targetUrl);
+  if (!urlCheck.ok) {
+    throw new Error(`URL rejected: ${urlCheck.reason}`);
   }
 
   // One active QA session per repo — cancel a running one before starting.
-  const existing = await queries.getActiveAgentSession(
-    source.repositoryId,
-    "qa",
-  );
+  const existing = await host.getActiveSession(source.repositoryId);
   if (existing) {
     activeControllers.get(existing.id)?.abort();
-    await queries.updateAgentSession(existing.id, {
+    await host.updateSession(existing.id, {
       status: "cancelled",
       completedAt: new Date(),
     });
   }
 
   const mode: QaRunMode = m.qaMode ?? "full";
-  let planSeed: Partial<AgentSessionMetadata> = {};
+  let planSeed: Partial<QaSessionMetadata> = {};
   if (mode === "fill_gaps") {
     if (!m.qaPlan) {
       throw new Error("The original fill-gaps run has no stored plan");
@@ -3677,11 +3688,9 @@ export async function rerunQaSession(
     };
   }
 
-  const session = await queries.createAgentSession({
+  const session = await host.createSession({
     repositoryId: source.repositoryId,
     teamId,
-    kind: "qa",
-    status: "active",
     currentStepId: "qa_setup",
     steps: buildStepsForMode(mode),
     metadata: {
@@ -3720,11 +3729,11 @@ export async function rerunQaSession(
   return { sessionId: session.id };
 }
 
-// ── Direction queue (qa_tasks) ───────────────────────────────────────────────
+// ── Direction queue (qa_agent_tasks) ─────────────────────────────────────────
 //
 // The team (and external agents via MCP) drops directives into a queue; when
 // no QA session is active the dispatcher claims the oldest queued task and
-// TRIAGES it with a small logged AI call (see qa-agent/task-triage.ts):
+// TRIAGES it with a small logged AI call (see domain/task-triage.ts):
 //
 //   targeted + stored plan   fill_gaps scoped to the directive — the journey
 //                            refiner merges it into the plan and ONLY the
@@ -3752,7 +3761,7 @@ export async function rerunQaSession(
 // linked from a task:triaged activity event + the session's qaTaskTriage
 // metadata, so routing decisions can be debugged and improved later.
 
-const TERMINAL_SESSION_STATUSES: AgentSession["status"][] = [
+const TERMINAL_SESSION_STATUSES: QaSessionRow["status"][] = [
   "completed",
   "failed",
   "cancelled",
@@ -3763,7 +3772,7 @@ const MAX_TASK_DESCRIPTION = 2000;
 const TRIAGE_TIMEOUT_MS = 2 * 60 * 1000;
 
 /** The agent's reply for a completed task run — the card's "done" comment. */
-function buildTaskReply(session: AgentSession): string {
+function buildTaskReply(session: QaSessionRow): string {
   // Targeted run: report only the directive's own items, not the whole plan.
   const taskItemIds = session.metadata.qaTaskItemIds;
   if (taskItemIds?.length) {
@@ -3813,7 +3822,7 @@ function buildTaskReply(session: AgentSession): string {
 /** Tests the session's run touched for THIS task — the card's linked chips.
  *  Targeted runs list exactly the directive's items; unscoped runs list every
  *  ledger entry that produced or matched a test. */
-function buildTaskTestRefs(session: AgentSession | null): QaTaskTestRef[] {
+function buildTaskTestRefs(session: QaSessionRow | null): QaTaskTestRef[] {
   if (!session) return [];
   const taskItemIds = session.metadata.qaTaskItemIds;
   return (session.metadata.qaGeneratedTests ?? [])
@@ -3824,13 +3833,14 @@ function buildTaskTestRefs(session: AgentSession | null): QaTaskTestRef[] {
 
 /** Write a terminal session's outcome back onto its task card. */
 async function finalizeTask(
-  task: QaTask,
-  session: AgentSession | null,
+  task: QaAgentTask,
+  session: QaSessionRow | null,
   teamId: string,
   repositoryId: string,
 ): Promise<void> {
+  const db = tasksDb();
   if (session?.status === "completed") {
-    await queries.updateQaTask(task.id, {
+    await updateQaTaskRow(db, task.id, {
       status: "done",
       agentReply: buildTaskReply(session),
       tests: buildTaskTestRefs(session),
@@ -3853,7 +3863,7 @@ async function finalizeTask(
       : `The run failed at ${failedStep?.label ?? "an unexpected point"}${
           failedStep?.error ? `: ${failedStep.error}` : ""
         }. Retry to requeue it.`;
-  await queries.updateQaTask(task.id, {
+  await updateQaTaskRow(db, task.id, {
     status: "needs_input",
     agentReply: reply,
     // Partial progress still links: tests generated before the failure.
@@ -3877,11 +3887,11 @@ async function finalizeQaTaskAndDispatch(
   teamId: string,
   repositoryId: string,
 ): Promise<void> {
-  const session = await queries.getAgentSession(sessionId);
+  const session = await hostOf().getSession(sessionId);
   if (!session || !TERMINAL_SESSION_STATUSES.includes(session.status)) return;
   const taskId = session.metadata.qaTaskId;
   if (taskId) {
-    const task = await queries.getQaTask(taskId);
+    const task = await getQaTaskRow(tasksDb(), taskId);
     if (task && task.status === "working" && task.sessionId === sessionId) {
       await finalizeTask(task, session, teamId, repositoryId);
     }
@@ -3899,21 +3909,22 @@ const dispatchingRepos = new Set<string>();
  *  the task dispatcher and the schedule/PR/MCP trigger starts. */
 async function resolveQaRunSeed(repositoryId: string): Promise<{
   targetUrl: string | undefined;
-  planSource: AgentSession | undefined;
+  planSource: QaSessionRow | undefined;
   groups: QaTestGroup[];
   creds: { email: string; password: string } | undefined;
   allowRegistration: boolean;
 }> {
-  const recent = await queries.getRecentAgentSessions(repositoryId, "qa", 10);
+  const host = hostOf();
+  const recent = await host.getRecentSessions(repositoryId, 10);
   const planSource = recent.find((s) => s.metadata.qaPlan);
   let targetUrl =
     planSource?.metadata.qaTargetUrl ??
     recent.find((s) => s.metadata.qaTargetUrl)?.metadata.qaTargetUrl;
   if (!targetUrl) {
-    const env = await queries
-      .getEnvironmentConfig(repositoryId)
+    const envBaseUrl = await host
+      .getEnvironmentBaseUrl(repositoryId)
       .catch(() => null);
-    targetUrl = env?.baseUrl || undefined;
+    targetUrl = envBaseUrl || undefined;
   }
   const credSession = recent.find((s) => credentialsFrom(s.metadata));
   return {
@@ -3930,13 +3941,13 @@ async function resolveQaRunSeed(repositoryId: string): Promise<{
 /** Park a task as needs_input with an actionable reply, before or instead of
  *  a run. The human retries (→ queued) or drops it. */
 async function parkTask(
-  task: QaTask,
+  task: QaAgentTask,
   teamId: string,
   repositoryId: string,
   reply: string,
   sessionId?: string,
 ): Promise<void> {
-  await queries.updateQaTask(task.id, {
+  await updateQaTaskRow(tasksDb(), task.id, {
     status: "needs_input",
     agentReply: reply,
     completedAt: new Date(),
@@ -3956,12 +3967,11 @@ async function parkTask(
  *  promptLogId links the decision back to that row. Throws when the model
  *  can't produce a valid decision — the caller parks the task, never guesses. */
 async function triageQaTask(
+  ctx: QaCtx,
   repositoryId: string,
   directive: string,
   seed: Awaited<ReturnType<typeof resolveQaRunSeed>>,
 ): Promise<TaskTriageResult & { promptLogId?: string }> {
-  const settings = await queries.getAISettings(repositoryId);
-  const config = getAIConfig(settings);
   const plan = seed.planSource?.metadata.qaPlan;
   const knownPagePaths = plan
     ? [
@@ -3982,21 +3992,20 @@ async function triageQaTask(
   });
 
   let promptLogId: string | undefined;
-  const call = (extra?: string): Promise<string> =>
-    generateWithAI(
-      config,
+  const call = async (extra?: string): Promise<string> => {
+    const result = await ctx.ai.generate(
       extra ? `${userPrompt}\n\n${extra}` : userPrompt,
-      systemPrompt,
       {
-        repositoryId,
         actionType: "qa_task_triage",
-        responseFormat: "json_object",
+        repositoryId,
+        systemPrompt,
+        json: true,
         signal: AbortSignal.timeout(TRIAGE_TIMEOUT_MS),
-        onLogCreated: (id) => {
-          promptLogId = id;
-        },
       },
     );
+    if (result.promptLogId) promptLogId = result.promptLogId;
+    return result.text;
+  };
 
   const raw = await call();
   let triage = parseAiJson(raw, isTaskTriageResult, {
@@ -4031,11 +4040,18 @@ async function dispatchNextQaTask(
   if (dispatchingRepos.has(repositoryId)) return;
   dispatchingRepos.add(repositoryId);
   try {
+    const host = hostOf();
+    const db = tasksDb();
     // One QA session per repo — an active/paused session owns the agent.
-    const active = await queries.getActiveAgentSession(repositoryId, "qa");
+    const active = await host.getActiveSession(repositoryId);
     if (active) return;
-    const task = await queries.getNextQueuedQaTask(repositoryId);
+    const task = await getNextQueuedQaTaskRow(db, repositoryId);
     if (!task) return;
+
+    // Background scope for the triage/refine AI calls — the dispatcher runs
+    // from fire-and-forget continuations and the pipeline epilogue, where no
+    // request session exists.
+    const { ctx } = await qaContext({ repositoryId, teamId });
 
     const seed = await resolveQaRunSeed(repositoryId);
     const { targetUrl, planSource, groups, creds, allowRegistration } = seed;
@@ -4059,7 +4075,7 @@ async function dispatchNextQaTask(
     // here leaves it claimable.
     let triage: TaskTriageResult & { promptLogId?: string };
     try {
-      triage = await triageQaTask(repositoryId, directive, seed);
+      triage = await triageQaTask(ctx, repositoryId, directive, seed);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await parkTask(
@@ -4091,17 +4107,15 @@ async function dispatchNextQaTask(
         ? triageTestsToPlanItems(triage.tests, groups)
         : [];
     const mode: QaRunMode = protocol === "explore" ? "full" : "fill_gaps";
-    const qaTaskTriage: QaTaskTriage = {
+    const qaTaskTriage = {
       scope: triage.scope,
       reason: triage.reason,
       promptLogId: triage.promptLogId,
     };
 
-    const session = await queries.createAgentSession({
+    const session = await host.createSession({
       repositoryId,
       teamId,
-      kind: "qa",
-      status: "active",
       currentStepId: "qa_setup",
       steps: buildStepsForMode(mode),
       metadata: {
@@ -4139,7 +4153,7 @@ async function dispatchNextQaTask(
       },
     });
 
-    await queries.updateQaTask(task.id, {
+    await updateQaTaskRow(db, task.id, {
       status: "working",
       sessionId: session.id,
       startedAt: new Date(),
@@ -4172,14 +4186,14 @@ async function dispatchNextQaTask(
     // parks the task instead of silently running an unrelated gap-fill.
     let workingNote: string;
     if (protocol === "targeted_refine") {
-      const fresh = await queries.getAgentSession(session.id);
+      const fresh = await host.getSession(session.id);
       // One task card = ONE ask: pass the directive as a single journey so the
       // refiner doesn't treat title and description as two separate journeys.
       const merged = fresh
-        ? await refineAndMergeJourneysIntoPlan(fresh, teamId, [directive])
+        ? await refineAndMergeJourneysIntoPlan(ctx, fresh, teamId, [directive])
         : { success: false as const, error: "Session vanished before refine" };
       if (!merged.success) {
-        await queries.updateAgentSession(session.id, {
+        await host.updateSession(session.id, {
           status: "failed",
           completedAt: new Date(),
         });
@@ -4212,7 +4226,7 @@ async function dispatchNextQaTask(
       workingNote =
         "Filling coverage gaps against the stored plan (generate, run, heal).";
     }
-    await queries.updateQaTask(task.id, { agentReply: workingNote });
+    await updateQaTaskRow(db, task.id, { agentReply: workingNote });
 
     executeQaPipeline(session.id, teamId, repositoryId, "qa_setup").catch(
       (err) => console.error("[QaAgent] unhandled:", err),
@@ -4224,14 +4238,14 @@ async function dispatchNextQaTask(
 
 async function requireQaTask(
   taskId: string,
-): Promise<{ task: QaTask; teamId: string }> {
-  const { team } = await requireTeamAccess();
-  assertQaAgentAccess(team.plan, isBillingEnabled());
-  const task = await queries.getQaTask(taskId);
-  if (!task || task.teamId !== team.id) {
+): Promise<{ task: QaAgentTask; teamId: string }> {
+  const { ctx } = await qaContext();
+  assertEntitled(ctx);
+  const task = await getQaTaskRow(tasksDb(), taskId);
+  if (!task || task.teamId !== ctx.team.id) {
     throw new Error("Task not found");
   }
-  return { task, teamId: team.id };
+  return { task, teamId: ctx.team.id };
 }
 
 /** Drop a directive into the QA agent's queue. The dispatcher picks it up as
@@ -4244,24 +4258,25 @@ export async function addQaTask(input: {
    *  the board renders it with a distinct actor chip. */
   source?: QaTaskSource;
 }): Promise<{ taskId: string }> {
-  const { team, user } = await requireRepoAccess(input.repositoryId);
-  assertQaAgentAccess(team.plan, isBillingEnabled());
+  const { host, ctx } = await qaContext({ repositoryId: input.repositoryId });
+  assertEntitled(ctx);
   const title = input.title.trim().slice(0, MAX_TASK_TITLE);
   if (!title) throw new Error("The task needs a title");
-  const actorName = user.name || user.email || null;
-  const task = await queries.createQaTask({
+  const actor = await host.currentActor();
+  const actorName = actor?.name || actor?.email || null;
+  const task = await createQaTaskRow(tasksDb(), {
     repositoryId: input.repositoryId,
-    teamId: team.id,
+    teamId: ctx.team.id,
     title,
     description:
       input.description?.trim().slice(0, MAX_TASK_DESCRIPTION) || null,
     source: input.source ?? "user",
-    createdById: user.id,
+    createdById: actor?.id ?? null,
     createdByName:
       input.source === "mcp" && actorName ? `${actorName} · MCP` : actorName,
   });
   emitActivity(
-    team.id,
+    ctx.team.id,
     input.repositoryId,
     task.id,
     "task:created",
@@ -4269,7 +4284,7 @@ export async function addQaTask(input: {
   );
   // Fire-and-forget: pickup can involve an AI refine call — don't block the
   // composer on it.
-  dispatchNextQaTask(team.id, input.repositoryId).catch((err) =>
+  dispatchNextQaTask(ctx.team.id, input.repositoryId).catch((err) =>
     console.error("[QaAgent] dispatch error:", err),
   );
   revalidatePath("/qa-agent");
@@ -4284,7 +4299,7 @@ export async function retryQaTask(
   if (task.status !== "needs_input" && task.status !== "cancelled") {
     return { success: false };
   }
-  await queries.updateQaTask(taskId, {
+  await updateQaTaskRow(tasksDb(), taskId, {
     status: "queued",
     sessionId: null,
     agentReply: null,
@@ -4309,12 +4324,12 @@ export async function dropQaTask(
   }
   if (task.status === "working" && task.sessionId) {
     activeControllers.get(task.sessionId)?.abort();
-    await queries.updateAgentSession(task.sessionId, {
+    await hostOf().updateSession(task.sessionId, {
       status: "cancelled",
       completedAt: new Date(),
     });
   }
-  await queries.updateQaTask(taskId, {
+  await updateQaTaskRow(tasksDb(), taskId, {
     status: "cancelled",
     completedAt: new Date(),
   });
@@ -4332,26 +4347,29 @@ export async function dropQaTask(
 /** Board state for the client. Also does lazy reconciliation: a "working"
  *  task whose session ended without the in-process finalizer (server restart)
  *  is settled here, and an orphaned queue gets the dispatcher kicked. */
-export async function listQaTasks(repositoryId: string): Promise<QaTask[]> {
-  const { team } = await requireRepoAccess(repositoryId);
-  let tasks = await queries.getQaTasksByRepo(repositoryId);
+export async function listQaTasks(
+  repositoryId: string,
+): Promise<QaAgentTask[]> {
+  const { host, ctx } = await qaContext({ repositoryId });
+  const db = tasksDb();
+  let tasks = await getQaTasksByRepoRows(db, repositoryId);
 
   let changed = false;
   for (const task of tasks) {
     if (task.status !== "working" || !task.sessionId) continue;
-    const session = await queries.getAgentSession(task.sessionId);
+    const session = await host.getSession(task.sessionId);
     if (!session || TERMINAL_SESSION_STATUSES.includes(session.status)) {
-      await finalizeTask(task, session ?? null, team.id, repositoryId);
+      await finalizeTask(task, session ?? null, ctx.team.id, repositoryId);
       changed = true;
     }
   }
-  if (changed) tasks = await queries.getQaTasksByRepo(repositoryId);
+  if (changed) tasks = await getQaTasksByRepoRows(db, repositoryId);
 
   if (
     tasks.some((t) => t.status === "queued") &&
     !tasks.some((t) => t.status === "working")
   ) {
-    dispatchNextQaTask(team.id, repositoryId).catch(() => {});
+    dispatchNextQaTask(ctx.team.id, repositoryId).catch(() => {});
   }
   return tasks;
 }
@@ -4364,7 +4382,9 @@ export async function listQaTasks(repositoryId: string): Promise<QaTask[]> {
  *  event) when a session is already running — triggers never preempt.
  *
  *  NOT a UI action: callers are trusted server code that already resolved the
- *  team (webhook signature, scheduler row, or bearer-authed v1 route). */
+ *  team (webhook signature, scheduler row, or bearer-authed v1 route). The
+ *  `{repositoryId, teamId}` scope below is the ownership-checked background
+ *  branch of `resolveScope` — no request session is consulted. */
 export async function startQaAgentFromTrigger(opts: {
   repositoryId: string;
   teamId: string;
@@ -4376,20 +4396,28 @@ export async function startQaAgentFromTrigger(opts: {
 }): Promise<{ sessionId?: string; skipped?: string }> {
   const { repositoryId, teamId } = opts;
 
-  // Triggers respect the same plan gate as the UI.
-  const team = await queries.getTeam(teamId);
-  if (!team || !hasQaAgentAccess(team.plan, isBillingEnabled())) {
+  // Triggers respect the same plan gate as the UI. An unresolvable team (or
+  // a repo that stopped belonging to it) skips for the same reason a plan
+  // below the gate does — there is no tenant this trigger may run as.
+  let host: QaAgentHost;
+  let ctx: QaCtx;
+  try {
+    ({ host, ctx } = await qaContext({ repositoryId, teamId }));
+  } catch {
+    return { skipped: "QA agent not available on the team's plan" };
+  }
+  if (!ctx.team.entitlements.has("qa-agent")) {
     return { skipped: "QA agent not available on the team's plan" };
   }
 
   // ...and the same run-minute ceiling as a manual start.
   try {
-    await assertAgentRunMinutesAvailable(teamId);
+    await host.assertRunMinutesAvailable(teamId);
   } catch {
     return { skipped: "Monthly run-minute quota exceeded" };
   }
 
-  const active = await queries.getActiveAgentSession(repositoryId, "qa");
+  const active = await host.getActiveSession(repositoryId);
   if (active) {
     emitActivity(
       teamId,
@@ -4412,13 +4440,9 @@ export async function startQaAgentFromTrigger(opts: {
         "No target URL — run the QA agent once from the UI (or pass targetUrl)",
     };
   }
-  try {
-    await assertSafeOutboundUrl(targetUrl);
-  } catch (err) {
-    if (err instanceof SsrfBlockedError) {
-      return { skipped: `URL rejected: ${err.message}` };
-    }
-    throw err;
+  const urlCheck = await host.checkOutboundUrl(targetUrl);
+  if (!urlCheck.ok) {
+    return { skipped: `URL rejected: ${urlCheck.reason}` };
   }
 
   // Mode default: reuse the stored plan cheaply when one exists (fill_gaps);
@@ -4426,11 +4450,9 @@ export async function startQaAgentFromTrigger(opts: {
   let mode: QaRunMode = opts.mode ?? (seed.planSource ? "fill_gaps" : "full");
   if (mode === "fill_gaps" && !seed.planSource) mode = "full";
 
-  const session = await queries.createAgentSession({
+  const session = await host.createSession({
     repositoryId,
     teamId,
-    kind: "qa",
-    status: "active",
     currentStepId: "qa_setup",
     steps: buildStepsForMode(mode),
     metadata: {
@@ -4485,8 +4507,8 @@ export interface QaTriggerConfigInput {
 
 /** Current automation config for the repo (null when never configured). */
 export async function getQaTriggerConfig(repositoryId: string) {
-  await requireRepoAccess(repositoryId);
-  return (await queries.getQaAgentTrigger(repositoryId)) ?? null;
+  await qaContext({ repositoryId }); // authorization only
+  return (await getQaAgentTriggerRow(tasksDb(), repositoryId)) ?? null;
 }
 
 /** Upsert the repo's automation config; recomputes nextRunAt on save. */
@@ -4494,10 +4516,11 @@ export async function updateQaTriggerConfig(
   repositoryId: string,
   input: QaTriggerConfigInput,
 ) {
-  const { team } = await requireRepoAccess(repositoryId);
-  assertQaAgentAccess(team.plan, isBillingEnabled());
+  const { ctx } = await qaContext({ repositoryId });
+  assertEntitled(ctx);
+  const db = tasksDb();
 
-  const patch: Parameters<typeof queries.upsertQaAgentTrigger>[2] = {};
+  const patch: Parameters<typeof upsertQaAgentTriggerRow>[3] = {};
   if (input.scheduleEnabled !== undefined) {
     patch.scheduleEnabled = input.scheduleEnabled;
   }
@@ -4523,7 +4546,7 @@ export async function updateQaTriggerConfig(
   }
 
   // Recompute the next fire time from the effective (post-patch) state.
-  const existing = await queries.getQaAgentTrigger(repositoryId);
+  const existing = await getQaAgentTriggerRow(db, repositoryId);
   const effectiveEnabled =
     patch.scheduleEnabled ?? existing?.scheduleEnabled ?? false;
   const effectiveCron =
@@ -4535,7 +4558,61 @@ export async function updateQaTriggerConfig(
       ? getNextRunTime(effectiveCron, new Date())
       : null;
 
-  const row = await queries.upsertQaAgentTrigger(repositoryId, team.id, patch);
+  const row = await upsertQaAgentTriggerRow(
+    db,
+    repositoryId,
+    ctx.team.id,
+    patch,
+  );
   revalidatePath("/qa-agent");
   return row;
+}
+
+/**
+ * Fire due QA agent cron triggers — one tick, called from the app's scheduler
+ * loop (`src/lib/core/scheduler.ts`), the same call shape
+ * `dispatchDueSchedules` (scheduling) and `dispatchDueExplorerTriggers`
+ * (explorer) already use. Owns the due-trigger query, `nextRunAt` advancement
+ * (BEFORE starting, so a slow run can't double-fire) and the busy-skip —
+ * `startQaAgentFromTrigger` reports why a fire was declined.
+ *
+ * Takes the data handle from the wiring slot: a scheduler tick has no session
+ * to build a context from. Returns how many sessions were started.
+ */
+export async function dispatchDueQaTriggers(): Promise<number> {
+  const db = tasksDb();
+  const due = await getDueQaAgentTriggerRows(db);
+  let fired = 0;
+
+  for (const trigger of due) {
+    try {
+      if (!trigger.cronExpression) continue;
+      const nextRunAt = getNextRunTime(trigger.cronExpression, new Date());
+      await markQaAgentTriggerFiredRow(db, trigger.id, { nextRunAt });
+
+      const result = await startQaAgentFromTrigger({
+        repositoryId: trigger.repositoryId,
+        teamId: trigger.teamId,
+        trigger: "schedule",
+        mode: trigger.scheduleMode,
+      });
+
+      if (result.sessionId) {
+        await markQaAgentTriggerFiredRow(db, trigger.id, {
+          nextRunAt,
+          lastRunAt: new Date(),
+          lastSessionId: result.sessionId,
+        });
+        fired += 1;
+        console.log(
+          `[scheduler] Started scheduled QA agent session ${result.sessionId}`,
+        );
+      } else if (result.skipped) {
+        console.log(`[scheduler] QA agent trigger skipped: ${result.skipped}`);
+      }
+    } catch (error) {
+      console.error("[scheduler] Failed to fire QA agent trigger:", error);
+    }
+  }
+  return fired;
 }

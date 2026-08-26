@@ -20,9 +20,17 @@
  */
 
 import type {
+  QaAuthState,
+  QaDiscovery,
+  QaExploreState,
+  QaGeneratedTest,
   QaGeneratedTestStatus,
   QaRunMode,
   QaSessionTrigger,
+  QaSummaryData,
+  QaTaskTriage,
+  QaTestGroup,
+  QaTestPlan,
 } from "@lastest/eb-protocol";
 
 // ── The plugin's own table (`qa_agent_tasks`) ────────────────────────────────
@@ -77,8 +85,12 @@ export interface QaSubstep {
   label: string;
   status: "pending" | "running" | "done" | "error";
   detail?: string;
+  /** Condensed view of what the sub-agent was given (planner observability). */
+  inputSummary?: string;
+  /** Condensed view of what it produced. */
+  outputSummary?: string;
   /** Which sub-agent is handling this substep (shown as a badge in the UI).
-   *  Narrowed from core's `PwAgentType` to the five values QA emits. */
+   *  Narrowed from core's `PwAgentType` to the values QA emits. */
   agent?: QaAgentRole;
   promptLogId?: string;
   durationMs?: number;
@@ -87,10 +99,11 @@ export interface QaSubstep {
 
 /** The `PwAgentType` values this pipeline tags its work with. Narrowed rather
  *  than imported: the full union is core's, shared with the play agent and
- *  three other still-unmigrated agents. */
+ *  other agents' values this plugin never writes. */
 export type QaAgentRole =
   | "orchestrator"
   | "scout"
+  | "diver"
   | "planner"
   | "generator"
   | "healer"
@@ -106,6 +119,8 @@ export interface QaStepState {
   error?: string;
   result?: Record<string, unknown>;
   substeps?: QaSubstep[];
+  /** What the review gate is waiting on / how it was resolved. */
+  userAction?: string;
 }
 
 export type QaSessionStatus =
@@ -135,6 +150,10 @@ export interface QaSessionMetadata {
    *  see plaintext. Field names are shared with QuickStart by design. */
   quickstartEmail?: string;
   quickstartPassword?: string;
+  /** True when quickstartEmail/quickstartPassword hold real login creds. */
+  credsProvided?: boolean;
+  /** Resolved auth handshake for this run. */
+  authMode?: "login" | "signup" | "public_only";
   /** Free-text sign-in instructions from the Explore dialog. Encrypted at rest
    *  by core — the prose routinely contains a password. */
   qaAuthContext?: string;
@@ -142,8 +161,27 @@ export interface QaSessionMetadata {
    *  address: core mints it, signed and expiring, on `session.streamUrl`. */
   streamUrl?: string;
   queuedForBrowser?: boolean;
+  // The pipeline's own state, all `@lastest/eb-protocol` payload shapes (the
+  // promoted half of this file's header) — the same keys, with the same
+  // types, that core's `AgentSessionMetadata` declares for `kind: "qa"` rows.
+  qaGroups?: QaTestGroup[];
+  qaAutoApprove?: boolean;
+  qaAllowRegistration?: boolean;
+  qaAuth?: QaAuthState;
+  qaDiscovery?: QaDiscovery;
+  qaDocs?: Array<{ name: string; chars: number }>;
+  qaDocsDigest?: string;
+  qaPlan?: QaTestPlan;
+  qaPlannerFeedback?: string;
+  qaUserJourneys?: string[];
+  qaGeneratedTests?: QaGeneratedTest[];
+  qaRunIds?: string[];
+  qaSummary?: QaSummaryData;
+  qaPlanSourceSessionId?: string;
+  qaExplore?: QaExploreState;
   qaTaskId?: string;
   qaTaskItemIds?: string[];
+  qaTaskTriage?: QaTaskTriage;
   [key: string]: unknown;
 }
 

@@ -23,7 +23,8 @@ import { definePlugin } from "@lastest/kernel";
  * `"quickstart"`) and `build_demo_notes` — and owns neither. Unlike
  * `explorer`/`ranger`, it deliberately does **not** get its own session
  * table: two of its metadata fields are shared, by core's own design, with
- * the still-unmigrated `qa-agent` pseudo-plugin's rows in the same table
+ * the `qa-agent` plugin's rows in the same table (that
+ * agent has since migrated and kept the arrangement from its own side)
  * (same encryption path). See `host.ts` item 2 for the full reasoning.
  *
  * ### Two capabilities, both for the scout

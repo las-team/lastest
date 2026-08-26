@@ -1388,15 +1388,33 @@ importers:
 
   plugins/qa-agent:
     dependencies:
+      '@lastest/ai-kit':
+        specifier: workspace:*
+        version: link:../../libs/ai-kit
       '@lastest/contracts':
         specifier: workspace:*
         version: link:../../core/contracts
+      '@lastest/core-data':
+        specifier: workspace:*
+        version: link:../../core/data
+      '@lastest/cron':
+        specifier: workspace:*
+        version: link:../../libs/cron
       '@lastest/eb-protocol':
         specifier: workspace:*
         version: link:../../packages/eb-protocol
       '@lastest/github':
         specifier: workspace:*
         version: link:../../libs/github
+      '@lastest/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@lastest/test-templates':
+        specifier: workspace:*
+        version: link:../../libs/test-templates
+      '@lastest/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
       '@lastest/url-canonical':
         specifier: workspace:*
         version: link:../../libs/url-canonical
@@ -1404,6 +1422,21 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.17)(postgres@3.4.8)
     devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.8
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.3)
+      next:
+        specifier: 16.2.11
+        version: 16.2.11(@playwright/test@1.57.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: 19.2.3
+        version: 19.2.3
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       typescript:
         specifier: ^5
         version: 5.9.3

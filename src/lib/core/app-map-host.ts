@@ -17,7 +17,7 @@ import {
   safeOutboundFetch,
   SsrfBlockedError,
 } from "@/lib/security/outbound-url";
-import { addQaTask, startQaAgent } from "@/server/actions/qa-agent";
+import { addQaTask, startQaAgent } from "@lastest/plugin-qa-agent/actions";
 
 /**
  * The app's fill for `AppMapHost`.
@@ -138,9 +138,14 @@ export const appAppMapHost: AppMapHost = {
 
   // ── qa-agent seams ────────────────────────────────────────────────────────
   //
-  // The composition root is where two features are allowed to meet. When
-  // qa-agent becomes a plugin these three become `ctx.jobs.enqueue(...)` and
-  // this block disappears — see `plugins/app-map/src/host.ts`.
+  // The composition root is where two features are allowed to meet. qa-agent
+  // is now a package, so these calls are the ordinary cross-plugin shape
+  // (`share-reads.ts`/`quickstart-host.publishShare`): the host imports
+  // `@lastest/plugin-qa-agent/actions`, which only this file may do. The
+  // `ctx.jobs.enqueue(...)` future `plugins/app-map/src/host.ts` sketched
+  // remains open — qa-agent registers no job handlers yet, and converting a
+  // synchronous "queue this task and tell me its id" into a job dispatch is a
+  // behaviour change this migration deliberately did not make.
 
   async getActiveExploration(
     repositoryId: string,

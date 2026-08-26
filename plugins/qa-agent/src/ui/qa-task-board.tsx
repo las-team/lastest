@@ -2,12 +2,18 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import type { QaTask, QaTaskStatus, QaTaskTestRef } from "@/lib/db/schema";
-import { timeAgo } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import type { QaAgentTask as QaTask } from "../schema";
+import type { QaTaskStatus, QaTaskTestRef } from "../types";
+import { timeAgo } from "./format";
+import {
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Input,
+} from "@lastest/ui";
 import {
   AlertTriangle,
   Bot,

@@ -80,6 +80,14 @@ const ACTION_TYPES = new Set<string>([
   "agent_generate",
   "agent_heal",
   "enhance_test",
+  // Arrived with `@lastest/plugin-qa-agent` — the pipeline's three direct AI
+  // calls (auth-context extraction, the planner/journey refiner, task
+  // triage) have always logged under these values. Fourth hit of the same
+  // failure mode this allowlist's header warns about: omitting them would
+  // silently drop the attribution on migration.
+  "qa_auth_extract",
+  "qa_plan",
+  "qa_task_triage",
 ]);
 
 /**

@@ -1,12 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import type { AgentSession, QaSessionTrigger } from "@/lib/db/schema";
-import { timeAgo } from "@/lib/utils";
+import type { QaSessionTrigger } from "@lastest/eb-protocol";
+
+import type { QaSessionRow as AgentSession } from "../types";
+import { timeAgo } from "./format";
 import { PhaseTimeline } from "./qa-phase-timeline";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@lastest/ui";
 import {
   Ban,
   Bot,

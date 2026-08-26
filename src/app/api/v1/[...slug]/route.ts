@@ -100,6 +100,10 @@ import {
   revokePublicShareById,
 } from "@lastest/plugin-share";
 import { getPluginRuntime } from "@/lib/core/runtime";
+// Server-side reads of the qa-agent plugin's own tables (tasks, triggers) —
+// plain functions, not actions; ownership is verified by this route before
+// each call, same as every other read here.
+import * as qaReads from "@lastest/plugin-qa-agent/reads";
 
 // Helper to verify API auth. `getCurrentSession` already handles both cookie
 // sessions and `Authorization: Bearer <token>` headers, so v1 and any
@@ -782,8 +786,8 @@ export async function GET(
         const [live, recent, tasks, trigger] = await Promise.all([
           queries.getActiveAgentSession(id, "qa"),
           queries.getRecentAgentSessions(id, "qa", 5),
-          queries.getQaTasksByRepo(id, { terminalLimit: 10 }),
-          queries.getQaAgentTrigger(id),
+          qaReads.getQaTasksByRepo(id, { terminalLimit: 10 }),
+          qaReads.getQaAgentTrigger(id),
         ]);
         const summarySource = recent.find((s) => s.metadata.qaSummary);
         return NextResponse.json({
@@ -812,7 +816,7 @@ export async function GET(
 
       // GET /api/v1/repos/:id/qa-tasks — direction-queue tasks
       if (subResource === "qa-tasks") {
-        const tasks = await queries.getQaTasksByRepo(id);
+        const tasks = await qaReads.getQaTasksByRepo(id);
         return NextResponse.json(tasks);
       }
 
@@ -1431,7 +1435,7 @@ export async function POST(
         );
       }
       const { startQaAgentFromTrigger } =
-        await import("@/server/actions/qa-agent");
+        await import("@lastest/plugin-qa-agent/actions");
       const result = await startQaAgentFromTrigger({
         repositoryId: id,
         teamId: repo.teamId,
@@ -1469,7 +1473,7 @@ export async function POST(
       ) {
         return NextResponse.json({ error: "title required" }, { status: 400 });
       }
-      const { addQaTask } = await import("@/server/actions/qa-agent");
+      const { addQaTask } = await import("@lastest/plugin-qa-agent/actions");
       const { taskId } = await addQaTask({
         repositoryId: id,
         title: body.title,
@@ -1477,7 +1481,7 @@ export async function POST(
           typeof body.description === "string" ? body.description : undefined,
         source: "mcp",
       });
-      const task = await queries.getQaTask(taskId);
+      const task = await qaReads.getQaTask(taskId);
       return NextResponse.json(task, { status: 201 });
     }
 

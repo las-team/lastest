@@ -1,26 +1,29 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ComponentType } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
+import type { QaRunMode, QaTestGroup } from "@lastest/eb-protocol";
+
+// Aliased to the pre-migration names so the moved code below stays
+// verbatim: the plugin's narrowed session row stands in for core's
+// `AgentSession`, and its own table rows for the old core-schema types
+// (recipe §6.1).
 import type {
-  ActivitySourceType,
-  AgentSession,
-  QaAgentTrigger,
-  QaRunMode,
-  QaTask,
-  QaTestGroup,
-} from "@/lib/db/schema";
-import { QA_GROUPS } from "@/lib/qa-agent/plan";
+  QaAgentTask as QaTask,
+  QaAgentTriggerRow as QaAgentTrigger,
+} from "../schema";
+import type { QaSessionRow as AgentSession } from "../types";
+import { QA_GROUPS } from "../domain/plan";
 import { useQaAgent } from "./use-qa-agent";
 import { useQaTasks } from "./use-qa-tasks";
-import { useActivityFeed } from "@/components/activity-feed/use-activity-feed";
+import { useActivityEvents } from "./use-activity-events";
 import { QaAgentHeader } from "./qa-agent-header";
 import { PhaseTimeline } from "./qa-phase-timeline";
 import { QaPlanReview } from "./qa-plan-review";
 import { QaGeneratedTestsPanel, QaSummaryPanel } from "./qa-results-panel";
 import type { CoverageRequestHint } from "./qa-results-panel";
-import { BrowserViewer } from "@/components/embedded-browser/browser-viewer-client";
 import { QaTaskBoard } from "./qa-task-board";
 import { QaRunHistory } from "./qa-run-history";
 import {
@@ -28,13 +31,18 @@ import {
   describeTriggers,
   triggerStateFrom,
 } from "./qa-trigger-config";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
+import {
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Checkbox,
+  Input,
+  Label,
+  Switch,
+} from "@lastest/ui";
 import {
   AlertTriangle,
   Bot,
@@ -467,7 +475,9 @@ function SetupCard({
 // Main client — the ongoing agent management page
 // ---------------------------------------------------------------------------
 
-const SOURCE_LABELS: Record<ActivitySourceType, string> = {
+// Keyed loosely: the feed row's `sourceType` is core's union, which this
+// package does not import — unknown values fall through to the raw string.
+const SOURCE_LABELS: Record<string, string> = {
   play_agent: "Play agent",
   mcp_server: "MCP agent",
   generate_agent: "Generator agent",
@@ -491,6 +501,7 @@ export function QaAgentClient({
   recentSessions,
   initialTasks,
   initialTriggerConfig,
+  BrowserViewer,
 }: {
   repositoryId: string;
   repositoryName: string;
@@ -510,6 +521,16 @@ export function QaAgentClient({
   initialTasks: QaTask[];
   /** Automation config (cron/PR triggers), null when never configured. */
   initialTriggerConfig: QaAgentTrigger | null;
+  /** App-owned live EB stream viewer, handed down by the page — the plugin
+   *  owns the placement, the app owns the thing placed (recipe §6). ~1,300
+   *  lines wired to the stream protocol; core's side of the boundary, same
+   *  as explorer's `browserViewer` slot. */
+  BrowserViewer: ComponentType<{
+    streamUrl: string;
+    interactive?: boolean;
+    hideToolbar?: boolean;
+    className?: string;
+  }>;
 }) {
   const {
     session,
@@ -540,7 +561,7 @@ export function QaAgentClient({
 
   // Team-wide live feed for this repo: powers the header narration for
   // task-run pickups and the "another agent is working via MCP" indicator.
-  const { events } = useActivityFeed({ repoId: repositoryId });
+  const { events } = useActivityEvents(repositoryId);
   const [nowTick, setNowTick] = useState(() => Date.now());
   useEffect(() => {
     const interval = setInterval(() => setNowTick(Date.now()), 30_000);

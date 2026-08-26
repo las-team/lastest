@@ -1,6 +1,5 @@
 /**
- * Runtime verification for QA Agent (`src/lib/qa-agent`,
- * `src/server/actions/qa-agent.ts`) — §3's "largest raw diff on this branch"
+ * Runtime verification for QA Agent (`plugins/qa-agent`) — §3's "largest raw diff on this branch"
  * row (§2.11) — and, sharing the same fixture, App Map (§3's P1 row: "Run an
  * Explore session, confirm map/flow data it produces is retrievable").
  *
@@ -38,7 +37,7 @@ import { buildAppMap, deriveFlows } from "@lastest/plugin-app-map";
 
 import { appAppMapHost } from "@/lib/core/app-map-host";
 
-import { startQaAgentFromTrigger } from "./qa-agent";
+import { startQaAgentFromTrigger } from "@lastest/plugin-qa-agent/actions";
 
 const TARGET = "https://the-internet.herokuapp.com";
 
@@ -65,6 +64,11 @@ let teamId: string;
 let repoId: string;
 
 beforeAll(async () => {
+  // Wire the plugin runtime first — the action resolves its scope through it
+  // (`src/instrumentation.ts` does the same before a real server serves).
+  const { getPluginRuntime } = await import("@/lib/core/runtime");
+  await getPluginRuntime();
+
   const team = await queries.createTeam({ name: "qa-agent-it-team" });
   teamId = team.id;
   const repo = await queries.createRepository({

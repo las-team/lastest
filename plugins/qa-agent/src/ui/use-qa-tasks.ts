@@ -1,13 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { QaTask, QaTaskSource } from "@/lib/db/schema";
-import {
-  addQaTask,
-  dropQaTask,
-  listQaTasks,
-  retryQaTask,
-} from "@/server/actions/qa-agent";
+import type { QaAgentTask as QaTask } from "../schema";
+import type { QaTaskSource } from "../types";
+import { addQaTask, dropQaTask, listQaTasks, retryQaTask } from "../actions";
 
 const ACTIVE_POLL_MS = 5000;
 const IDLE_POLL_MS = 20000;

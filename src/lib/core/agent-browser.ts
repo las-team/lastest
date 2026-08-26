@@ -27,12 +27,17 @@ import { getLogger } from "@/lib/logger";
  * injection by id, and a signed stream grant — none of which the raw path did
  * for itself.
  *
- * **It is a migration bridge, not a permanent seam.** When `qa-agent` finishes
- * becoming a plugin its call sites read `ctx.browser` and this file loses a
- * caller; when `play-agent` follows, it loses its last one and should be
- * deleted. It is deliberately *not* exported to plugins (nothing outside
- * `src/` can import it) and deliberately does not take a `pluginId`, so it
- * cannot become a back door into a plugin's scope.
+ * **It is a migration bridge, not a permanent seam — and it is currently
+ * idle.** `qa-agent` finished becoming a plugin and its call sites read
+ * `ctx.browser` now, which was this file's only actual consumer. `play-agent`
+ * — the caller the paragraph above anticipated — never onboarded: it still
+ * claims raw EBs through `claimEmbeddedBrowserForAgent`. Kept, deliberately,
+ * as the ramp that migration should take (adopting this is a smaller step
+ * than a full plugin migration and retires its raw-CDP call sites early);
+ * if play-agent migrates straight to a plugin instead, delete this file in
+ * the same change. It is deliberately *not* exported to plugins (nothing
+ * outside `src/` can import it) and deliberately does not take a `pluginId`,
+ * so it cannot become a back door into a plugin's scope.
  *
  * SECURITY: `teamId` is the tenancy boundary, and this function does not check
  * it — the caller must already have authorized it (`requireRepoAccess()` /

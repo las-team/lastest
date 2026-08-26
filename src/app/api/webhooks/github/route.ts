@@ -103,10 +103,12 @@ export async function POST(request: NextRequest) {
         // and skips itself when a session is already running.
         if (repositoryId) {
           void (async () => {
-            const trigger = await queries.getQaAgentTrigger(repositoryId);
+            const { getQaAgentTrigger } =
+              await import("@lastest/plugin-qa-agent/reads");
+            const trigger = await getQaAgentTrigger(repositoryId);
             if (!trigger?.prEnabled) return;
             const { startQaAgentFromTrigger } =
-              await import("@/server/actions/qa-agent");
+              await import("@lastest/plugin-qa-agent/actions");
             await startQaAgentFromTrigger({
               repositoryId,
               teamId: trigger.teamId,

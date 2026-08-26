@@ -1,7 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { AgentSession, QaRunMode, QaTestGroup } from "@/lib/db/schema";
+import type { QaRunMode, QaTestGroup } from "@lastest/eb-protocol";
+
+// Aliased to the pre-migration name so the moved code below stays verbatim:
+// the plugin's narrowed session row stands in for core's `AgentSession`.
+import type { QaSessionRow as AgentSession } from "../types";
 import {
   startQaAgent,
   approveQaPlan,
@@ -12,7 +16,7 @@ import {
   resumeQaAgent,
   cancelQaAgent,
   type StartQaAgentInput,
-} from "@/server/actions/qa-agent";
+} from "../actions";
 
 const POLL_INTERVAL = 2000;
 

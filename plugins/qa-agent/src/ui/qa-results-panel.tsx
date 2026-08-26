@@ -8,12 +8,17 @@ import type {
   QaSummaryData,
   QaTestGroup,
   QaTestPlan,
-} from "@/lib/db/schema";
-import { QA_GROUPS } from "@/lib/qa-agent/plan";
-import { timeAgo } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+} from "@lastest/eb-protocol";
+import { QA_GROUPS } from "../domain/plan";
+import { timeAgo } from "./format";
+import {
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@lastest/ui";
 import {
   CheckCircle2,
   CircleDashed,
@@ -289,8 +294,9 @@ export function QaSummaryPanel({
 }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
-    // Hydration guard: timeAgo() drifts between server render and client mount.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // Hydration guard: timeAgo() drifts between server render and client
+    // mount. (The app's `react-hooks/set-state-in-effect` disable that used
+    // to sit here is not needed under the plugin lint zone.)
     setMounted(true);
   }, []);
   const groupRows = QA_GROUPS.filter((g) => summary.byGroup[g.id]);

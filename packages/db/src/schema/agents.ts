@@ -13,16 +13,7 @@
  * waiting behind each of the other three agents.
  */
 
-import {
-  pgTable,
-  text,
-  integer,
-  boolean,
-  timestamp,
-  jsonb,
-  index,
-  uniqueIndex,
-} from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, jsonb } from "drizzle-orm/pg-core";
 
 import type { PwAgentType } from "./shared";
 
@@ -311,7 +302,6 @@ import type {
   QaDiscovery,
   QaExploreState,
   QaGeneratedTest,
-  QaGeneratedTestStatus,
   QaRunMode,
   QaSessionTrigger,
   QaSummaryData,
@@ -462,100 +452,15 @@ export type AgentSession = typeof agentSessions.$inferSelect;
 
 export type NewAgentSession = typeof agentSessions.$inferInsert;
 
-// ── QA Agent Tasks (direction queue for the ongoing QA agent) ───────────────
-
-export type QaTaskStatus =
-  | "queued"
-  | "working"
-  /** The agent finished abnormally (failed/cancelled run) and left a reply —
-   *  the human decides whether to retry (→ queued) or drop (→ cancelled). */
-  | "needs_input"
-  | "done"
-  | "cancelled";
-
-export type QaTaskSource = "user" | "mcp" | "coverage_gap";
-
-/** A test the task's run touched — rendered as a linked chip on the board
- *  card when the task settles. `status` is the ledger outcome at settle time
- *  (passed/healed/failed/generated/covered). */
-export interface QaTaskTestRef {
-  testId: string;
-  name: string;
-  status: QaGeneratedTestStatus;
-}
-
-/** A directive dropped into the QA agent's queue ("test the billing flow",
- *  "increase Dashboard a11y coverage"). The dispatcher picks tasks up oldest
- *  first whenever no QA session is active, runs a task-scoped session, writes
- *  the agent's reply back, and advances the status — the /qa-agent task board
- *  renders these as kanban columns. */
-export const qaTasks = pgTable(
-  "qa_tasks",
-  {
-    id: text("id")
-      .primaryKey()
-      .$defaultFn(() => crypto.randomUUID()),
-    repositoryId: text("repository_id")
-      .references(() => repositories.id, { onDelete: "cascade" })
-      .notNull(),
-    teamId: text("team_id").notNull(),
-    title: text("title").notNull(),
-    description: text("description"),
-    status: text("status").$type<QaTaskStatus>().notNull().default("queued"),
-    source: text("source").$type<QaTaskSource>().notNull().default("user"),
-    /** Display name of who filed it (user name or MCP client name). */
-    createdByName: text("created_by_name"),
-    createdById: text("created_by_id"),
-    /** Agent session that is working (or worked) this task. */
-    sessionId: text("session_id"),
-    /** The agent's reply when it finishes — or why it needs input. */
-    agentReply: text("agent_reply"),
-    /** Tests the run generated/healed/matched for this task — board chips. */
-    tests: jsonb("tests").$type<QaTaskTestRef[]>(),
-    createdAt: timestamp("created_at").$defaultFn(() => new Date()),
-    updatedAt: timestamp("updated_at").$defaultFn(() => new Date()),
-    startedAt: timestamp("started_at"),
-    completedAt: timestamp("completed_at"),
-  },
-  (table) => [
-    index("idx_qa_tasks_repo_status").on(table.repositoryId, table.status),
-  ],
-);
-
-export type QaTask = typeof qaTasks.$inferSelect;
-
-export type NewQaTask = typeof qaTasks.$inferInsert;
-
-/** Per-repo automation config for the QA agent: an optional cron schedule and
- *  an optional PR-webhook trigger. One row per repository; both triggers start
- *  autonomous sessions (review gate auto-approved) and are skipped with an
- *  activity event when a session is already running. */
-export const qaAgentTriggers = pgTable("qa_agent_triggers", {
-  id: text("id")
-    .primaryKey()
-    .$defaultFn(() => crypto.randomUUID()),
-  repositoryId: text("repository_id")
-    .references(() => repositories.id, { onDelete: "cascade" })
-    .notNull()
-    .unique(),
-  teamId: text("team_id").notNull(),
-  /** Cron schedule (5-field expression, UTC). */
-  scheduleEnabled: boolean("schedule_enabled").notNull().default(false),
-  cronExpression: text("cron_expression"),
-  scheduleMode: text("schedule_mode")
-    .$type<QaRunMode>()
-    .notNull()
-    .default("fill_gaps"),
-  /** Run on PR opened/synchronize webhooks. */
-  prEnabled: boolean("pr_enabled").notNull().default(false),
-  prMode: text("pr_mode").$type<QaRunMode>().notNull().default("refresh_spec"),
-  nextRunAt: timestamp("next_run_at"),
-  lastRunAt: timestamp("last_run_at"),
-  lastSessionId: text("last_session_id"),
-  createdAt: timestamp("created_at").$defaultFn(() => new Date()),
-  updatedAt: timestamp("updated_at").$defaultFn(() => new Date()),
-});
-
-export type QaAgentTrigger = typeof qaAgentTriggers.$inferSelect;
-
-export type NewQaAgentTrigger = typeof qaAgentTriggers.$inferInsert;
+// ── QA Agent tasks + triggers: moved ────────────────────────────────────────
+//
+// `qa_tasks` and `qa_agent_triggers` became `@lastest/plugin-qa-agent`'s own
+// tables (RFC §9 phase 4, the last pseudo-plugin) — `qa_agent_tasks` and
+// `qa_agent_triggers` in `plugins/qa-agent/src/schema.ts`, renamed/stripped of
+// their FKs by `migrateQaAgentTables()` in `scripts/migrate.js` BEFORE
+// `drizzle-kit push` runs (push cannot see a rename — recipe §2.4). The task
+// types (`QaTaskStatus`/`QaTaskSource`/`QaTaskTestRef`) moved to the plugin's
+// `types.ts`. `agent_sessions` above deliberately stays: a QA run's own state
+// is a `kind = "qa"` row here, reached through `QaAgentHost` — see that
+// file's item 1 for why the shared field-name-keyed metadata encryption keeps
+// this table shared between the quickstart and qa-agent plugins.

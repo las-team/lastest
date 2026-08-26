@@ -2,21 +2,26 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import type { QaAgentTrigger, QaRunMode } from "@/lib/db/schema";
-import { updateQaTriggerConfig } from "@/server/actions/qa-agent";
-import { timeAgo } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import type { QaRunMode } from "@lastest/eb-protocol";
+
+import type { QaAgentTriggerRow as QaAgentTrigger } from "../schema";
+import { updateQaTriggerConfig } from "../actions";
+import { timeAgo } from "./format";
 import {
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Input,
+  Label,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
+  Switch,
+} from "@lastest/ui";
 import {
   AlertTriangle,
   CalendarClock,

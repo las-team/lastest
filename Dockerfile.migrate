@@ -64,6 +64,7 @@ COPY plugins/explorer/src/schema.ts ./plugins/explorer/src/schema.ts
 COPY plugins/gamification/src/schema.ts ./plugins/gamification/src/schema.ts
 COPY plugins/launch/src/schema.ts ./plugins/launch/src/schema.ts
 COPY plugins/playground/src/schema.ts ./plugins/playground/src/schema.ts
+COPY plugins/qa-agent/src/schema.ts ./plugins/qa-agent/src/schema.ts
 COPY plugins/ranger/src/schema.ts ./plugins/ranger/src/schema.ts
 COPY plugins/scheduling/src/schema.ts ./plugins/scheduling/src/schema.ts
 COPY plugins/share/src/schema.ts ./plugins/share/src/schema.ts

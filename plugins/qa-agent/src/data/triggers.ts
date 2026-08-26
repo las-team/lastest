@@ -1,17 +1,22 @@
-import { db } from "../index";
-import { qaAgentTriggers } from "../schema";
-import type { QaAgentTrigger } from "../schema";
-import { eq, and, lte } from "drizzle-orm";
+import { and, eq, lte } from "drizzle-orm";
+
+import { qaAgentTriggers, type QaAgentTriggerRow } from "../schema";
+import type { QaAgentDb } from "./db";
 
 /**
  * QA agent automation config — one row per repo holding the cron schedule and
- * PR-trigger switches. The build scheduler tick fires due schedules; the
- * GitHub webhook checks prEnabled on PR opened/synchronize.
+ * PR-trigger switches. `dispatchDueQaTriggers` (in `../actions.ts`, called
+ * from the app's scheduler tick) fires due schedules; the GitHub webhook
+ * checks `prEnabled` on PR opened/synchronize.
+ *
+ * Ported verbatim from `src/lib/db/queries/qa-agent-triggers.ts` (deleted
+ * with the migration), re-targeted at the plugin's own table.
  */
 
-export async function getQaAgentTrigger(
+export async function getQaAgentTriggerRow(
+  db: QaAgentDb,
   repositoryId: string,
-): Promise<QaAgentTrigger | undefined> {
+): Promise<QaAgentTriggerRow | undefined> {
   const [row] = await db
     .select()
     .from(qaAgentTriggers)
@@ -19,19 +24,20 @@ export async function getQaAgentTrigger(
   return row;
 }
 
-export async function upsertQaAgentTrigger(
+export async function upsertQaAgentTriggerRow(
+  db: QaAgentDb,
   repositoryId: string,
   teamId: string,
   patch: Partial<{
     scheduleEnabled: boolean;
     cronExpression: string | null;
-    scheduleMode: QaAgentTrigger["scheduleMode"];
+    scheduleMode: QaAgentTriggerRow["scheduleMode"];
     prEnabled: boolean;
-    prMode: QaAgentTrigger["prMode"];
+    prMode: QaAgentTriggerRow["prMode"];
     nextRunAt: Date | null;
   }>,
-): Promise<QaAgentTrigger> {
-  const existing = await getQaAgentTrigger(repositoryId);
+): Promise<QaAgentTriggerRow> {
+  const existing = await getQaAgentTriggerRow(db, repositoryId);
   const now = new Date();
   if (existing) {
     const [row] = await db
@@ -56,9 +62,10 @@ export async function upsertQaAgentTrigger(
 }
 
 /** Enabled cron triggers whose nextRunAt has passed — the scheduler's pick. */
-export async function getDueQaAgentTriggers(
+export async function getDueQaAgentTriggerRows(
+  db: QaAgentDb,
   now: Date = new Date(),
-): Promise<QaAgentTrigger[]> {
+): Promise<QaAgentTriggerRow[]> {
   return db
     .select()
     .from(qaAgentTriggers)
@@ -70,7 +77,8 @@ export async function getDueQaAgentTriggers(
     );
 }
 
-export async function markQaAgentTriggerFired(
+export async function markQaAgentTriggerFiredRow(
+  db: QaAgentDb,
   id: string,
   data: { nextRunAt: Date | null; lastRunAt?: Date; lastSessionId?: string },
 ): Promise<void> {

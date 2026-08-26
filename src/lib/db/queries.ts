@@ -38,5 +38,6 @@ export * from "./queries/layer-baselines";
 export * from "./queries/layer-feedback";
 export * from "./queries/awards";
 export * from "./queries/billing";
-export * from "./queries/qa-tasks";
-export * from "./queries/qa-agent-triggers";
+// qa_tasks/qa_agent_triggers moved to plugins/qa-agent/src/data/ (RFC §9
+// phase 4) — server components and routes read them through
+// @lastest/plugin-qa-agent/reads, actions through the plugin's own handle.

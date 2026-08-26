@@ -144,6 +144,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/plugins/explorer/src/schema.ts ./
 COPY --from=builder --chown=nextjs:nodejs /app/plugins/gamification/src/schema.ts ./plugins/gamification/src/schema.ts
 COPY --from=builder --chown=nextjs:nodejs /app/plugins/launch/src/schema.ts ./plugins/launch/src/schema.ts
 COPY --from=builder --chown=nextjs:nodejs /app/plugins/playground/src/schema.ts ./plugins/playground/src/schema.ts
+COPY --from=builder --chown=nextjs:nodejs /app/plugins/qa-agent/src/schema.ts ./plugins/qa-agent/src/schema.ts
 COPY --from=builder --chown=nextjs:nodejs /app/plugins/ranger/src/schema.ts ./plugins/ranger/src/schema.ts
 COPY --from=builder --chown=nextjs:nodejs /app/plugins/scheduling/src/schema.ts ./plugins/scheduling/src/schema.ts
 COPY --from=builder --chown=nextjs:nodejs /app/plugins/share/src/schema.ts ./plugins/share/src/schema.ts

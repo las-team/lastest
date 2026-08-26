@@ -6,19 +6,18 @@ import * as queries from "@/lib/db/queries";
  * "What does this repo already have that a run could authenticate with?"
  *
  * Composition-root code, not a feature's. It used to be `findExistingAuthSetup()`
- * in `src/lib/qa-agent/auth.ts`, and it had two consumers before that file
- * started migrating: the QA agent's own `qa_login` step, and
- * `src/lib/core/explorer-host.ts`, which is how `plugins/explorer` fills
- * `ExplorerHost.resolveExistingAuth`. That second consumer made the old
- * location a **core → feature import** — the direction `pnpm arch` does not
- * walk (`plugin-migration-recipe.md` §1.6) and the one that blocks a deletion:
- * `src/lib/qa-agent/auth.ts` cannot go away while core imports from it.
+ * in `src/lib/qa-agent/auth.ts` (a file that is now fully migrated away —
+ * `plugins/qa-agent/src/domain/auth.ts` is its page-driving half), and it has
+ * two consumers, both host fills: `src/lib/core/explorer-host.ts`
+ * (`ExplorerHost.resolveExistingAuth`) and `src/lib/core/qa-agent-host.ts`
+ * (`QaAgentHost.resolveExistingAuth`) — the same method, declared verbatim in
+ * two plugins' ports, which is recipe §1.5's signal that this wants to become
+ * a `core/browser` credential-resolution capability (its own PR).
  *
- * So it moves here rather than into `plugins/qa-agent/`, for the same reason
- * and in the same shape as `quickstart-notes-shared.ts` and
- * `quickstart-storage-shared.ts` (recipe §1.6.2): two features want it, neither
- * owns it, and it reads nothing but core tables (`setup_steps`, `tests`,
- * `setup_scripts`, `storage_states`).
+ * It lives here rather than in either plugin for the reason recipe §1.6.2
+ * gives (same shape as `quickstart-storage-shared.ts`): two features want it,
+ * neither owns it, and it reads nothing but core tables (`setup_steps`,
+ * `tests`, `setup_scripts`, `storage_states`).
  *
  * Nothing here touches a browser, which is the other half of why it did not
  * come along: `plugins/qa-agent/src/domain/auth.ts` is now page-driving code

@@ -97,21 +97,24 @@
  * the explicit `CORE_SRC_PATHS` entry it never had. See the RFC's status
  * line and `quickstart-migration-result.md` §12.
  *
- * What is left in `PSEUDO_PLUGINS` is `qa-agent` — the flagship, deliberately
- * last, and **half migrated as of the browser pass: the burndown is 0** — plus
- * three uncosted, genuinely unresolved entries: `spec-import` (oversized) and
- * `ai-routes`/`specs` (`authoring-ai`'s two sideways orphans, classified here
- * rather than left as prose in a migration doc — see their entries below).
+ * `qa-agent` — the flagship, deliberately last — has now graduated to
+ * `plugins/qa-agent/` (RFC §9 phase 4's sixteenth and final feature
+ * migration): manifest, 29-method host port, actions, UI, and its two tables
+ * (`qa_tasks` renamed to `qa_agent_tasks` by `migrateQaAgentTables()` in
+ * `scripts/migrate.js`; sessions deliberately stayed in core's
+ * `agent_sessions`, `kind: "qa"` — the `quickstart` shared-encryption
+ * precedent, applied from the other side). See
+ * `docs/architecture/qa-agent-migration-result.md`.
  *
- * **A zero here is not a finished migration**, and `qa-agent` is the reason to
- * say so out loud. Its last three violations were direct `playwright` imports
- * in `src/lib/qa-agent/{auth,crawl,explore}.ts`; those files are gone, their
- * ported halves in `plugins/qa-agent/src/domain/` are what runs, and every EB
- * claim on the path now goes through `src/lib/core/agent-browser.ts`. What did
- * *not* happen is the rest of the migration: no manifest, no host port, and
- * `src/server/actions/qa-agent.ts` (4.4k lines) plus `src/components/qa-agent`
- * are still app code, which is exactly what the entry below still covers. The
- * counter measures imports across a line, not features moved.
+ * What is left in `PSEUDO_PLUGINS` is the orphan trio `spec-import` /
+ * `ai-routes` / `specs` — formerly uncosted; **costed as part of the
+ * qa-agent migration** (recipe §1.5's counting discipline, recorded on each
+ * entry below and in the qa-agent result doc §8). The verdicts differ, which
+ * is the point of costing them separately: `ai-routes` is a Go (fold into
+ * `authoring-ai`), `specs` wants reclassification as core, and `spec-import`
+ * is a genuine stop at today's capability set. None of the three is
+ * implemented here — an entry's verdict is a recorded decision for whoever
+ * picks it up, not a side effect of somebody else's migration.
  */
 
 /** Zone globs for the target layout. */
@@ -244,15 +247,13 @@ export const UNCLASSIFIED_SRC_PATHS = [
  * Order matters only for readability; the walker builds a path→plugin index.
  */
 export const PSEUDO_PLUGINS = {
-  // Still the whole feature, minus the browser-driving domain layer that has
-  // already moved to `plugins/qa-agent/src/domain/` (crawl, explore swarm,
-  // login probes). `src/lib/qa-agent` is now the non-browser half — planning,
-  // task triage, PR/code checks, docs ingestion.
-  "qa-agent": {
-    lib: ["src/lib/qa-agent"],
-    actions: ["qa-agent.ts"],
-    components: ["src/components/qa-agent"],
-  },
+  // `qa-agent` graduated to `plugins/qa-agent/` (RFC §9 phase 4, sixteenth
+  // and last feature migration) — see
+  // `docs/architecture/qa-agent-migration-result.md`. `src/lib/qa-agent`,
+  // `src/server/actions/qa-agent.ts` and `src/components/qa-agent` are
+  // deleted, not left as re-exports; the domain layer that migrated ahead in
+  // the browser pass (`plugins/qa-agent/src/domain/`) is now internal to the
+  // package rather than exported back to app code.
   // `demo`'s entry is gone — see the `CORE_SRC_PATHS` comment above for
   // `src/lib/demo`. It was never a migration candidate.
   // `awards` graduated to `plugins/awards/` (RFC §9 phase 4, ninth plugin) —
@@ -273,6 +274,22 @@ export const PSEUDO_PLUGINS = {
   // generation, not a data source — so it did not move with them. It gets
   // its own entry below, uncosted, rather than being silently dropped from
   // the burndown.
+  //
+  // COSTED (qa-agent migration's §1.5 pass — evidence in
+  // `qa-agent-migration-result.md` §8): 1,569 LOC calling **16 distinct
+  // `queries.*` symbols** plus five more core modules (`@/lib/ai` +
+  // `runParallel`, `@/lib/eb/claim-for-agent` — a RAW EB claim, the shape
+  // `authoring-ai` had to wait for `AiCallOptions.browserTools` to shed —
+  // `@/lib/github` content reads, `git-utils`, `agent_sessions` persistence).
+  // Groups to ~10 debt items, past the recipe's ~8–15 band with a
+  // browser-conversion prerequisite on top. **Verdict: stop** — the
+  // `url-diff` row of §1.6's table, *without* the reclassify-core consolation:
+  // unlike `url-diff` this is a real feature (its own dialog UI, its own
+  // `spec_imports` table, AI story extraction) rather than a documented public
+  // API, so it stays a pseudo-plugin until the port shrinks. What would
+  // shrink it is already on the phase-5 list: the test-CRUD capability
+  // (declared by api-test/quickstart/qa-agent), `core/identity`, and
+  // converting its raw claim to `ctx.browser`/`browserTools`.
   "spec-import": {
     lib: [],
     actions: ["spec-import.ts"],
@@ -299,9 +316,22 @@ export const PSEUDO_PLUGINS = {
   // scanning (`scanBranchDiff`) over core's `routes`/`functionalAreas` tables:
   // 799 LOC with its own three-component UI surface. Whether it graduates to a
   // plugin, folds into `authoring-ai`, or reclassifies to core the way
-  // `route-scan` did is a costing exercise nobody has run — note the shape is
+  // `route-scan` did is a costing exercise nobody had run — note the shape is
   // closer to `route-scan`'s (heavy `queries.*` against core tables) than to
   // `ranger`'s.
+  //
+  // COSTED (qa-agent migration's §1.5 pass): that guess was wrong — 803 LOC
+  // calling only **6 distinct `queries.*` symbols** (3 route reads/writes, 1
+  // area create, AI settings → `ctx.ai`, a GitHub token resolve that stays
+  // host-side), nowhere near `route-scan`'s ~26. **Verdict: migrate — as a
+  // fold into `authoring-ai`**, not a standalone plugin: `authoring-ai`
+  // already reaches this file through `AuthoringAiHost.aiScanRoutes` (the
+  // composition-root seam its own migration left), the two share the
+  // AI-route-scanning domain outright, and the fold retires that host method
+  // instead of declaring a sibling port. Its one raw
+  // `claimEmbeddedBrowserForAgent` call (mcpExploreRoutes) converts to the
+  // `ctx.browser` + `AiCallOptions.browserTools` shape `authoring-ai`
+  // already uses. Evidence in `qa-agent-migration-result.md` §8.
   "ai-routes": {
     lib: [],
     actions: ["ai-routes.ts"],
@@ -312,8 +342,20 @@ export const PSEUDO_PLUGINS = {
   // splitting them would just leave the ledger half-corrected. 643 LOC of
   // test-spec CRUD and area plan/spec sync over core's `functionalAreas`/
   // `tests` tables, three component callers plus one
-  // `AuthoringAiHost.syncAreaPlanAndSpecs` method. Uncosted; same three open
-  // outcomes as `ai-routes`.
+  // `AuthoringAiHost.syncAreaPlanAndSpecs` method.
+  //
+  // COSTED (qa-agent migration's §1.5 pass): 643 LOC calling **14 distinct
+  // `queries.*` symbols**, essentially all of them spec/test/area CRUD
+  // against core tables (`test_specs`, `tests`, `functional_areas`) with no
+  // domain layer of its own — a port at the stop line for a feature smaller
+  // than `ranger`. **Verdict: reclassify as core** (§1.6's second row, the
+  // `route-scan` outcome): test specs are core's own test-authoring surface
+  // — consumed by the record panel, the test-definition page and the areas
+  // panel, all core UI — and "a thin orchestration of core" is exactly the
+  // shape §1.5 says not to wrap in a keyhole port. Implementing that
+  // reclassification (a `CORE_SRC_PATHS`-adjacent decision plus CODEOWNERS)
+  // is its own change, deliberately not bundled here. Evidence in
+  // `qa-agent-migration-result.md` §8.
   specs: {
     lib: [],
     actions: ["specs.ts"],

@@ -2,12 +2,12 @@
  * §2.9 / §3 "Settings — Billing": confirms the billing-gating signature change
  * (`hasQaAgentAccess`/`assertQaAgentAccess` now take an explicit
  * `billingEnabled` param — src/lib/billing/feature-access.ts) actually holds
- * at a real call site inside `src/server/actions/qa-agent.ts`, not just in
+ * at a real call site inside `plugins/qa-agent/src/actions.ts`, not just in
  * the pure-function unit test (src/lib/billing/feature-access.test.ts, which
  * already covers `hasQaAgentAccess`/`assertQaAgentAccess` in isolation with
  * explicit plan/billingEnabled combinations).
  *
- * `startQaAgentFromTrigger` (qa-agent.ts, called by
+ * `startQaAgentFromTrigger` (plugins/qa-agent/src/actions.ts, called by
  * `POST /api/v1/repos/:id/qa-agent/runs`) is used here specifically because
  * it is the one QA-agent entry point that does NOT go through
  * `requireAuth()`/`requireRepoAccess()` — those call `next/headers()`, which
@@ -16,8 +16,9 @@
  * sibling files and the §3 report for the auth/repo-access rows). This
  * function instead resolves the team straight from a `teamId` — trusted
  * server-to-server input (webhook, scheduler, this test) — so the plan gate
- * at its top (qa-agent.ts, `assertQaAgentAccess`-adjacent:
- * `hasQaAgentAccess(team.plan, isBillingEnabled())`) can be exercised for
+ * at its top (now `ctx.team.entitlements.has("qa-agent")`, which resolves
+ * through the same `hasQaAgentAccess(plan, isBillingEnabled())` in
+ * `src/lib/core/entitlements.ts`) can be exercised for
  * real, with explicit plan values AND an explicitly toggled `billingEnabled`
  * (via `STRIPE_SECRET_KEY`), not just this environment's ambient
  * billing-disabled default.
@@ -67,6 +68,12 @@ let teamId: string;
 const originalStripeKey = process.env.STRIPE_SECRET_KEY;
 
 beforeAll(async () => {
+  // The action now lives in `@lastest/plugin-qa-agent` and resolves its scope
+  // through the plugin runtime — wire it the way a booted server would
+  // (`src/instrumentation.ts` awaits the same call before serving requests).
+  const { getPluginRuntime } = await import("@/lib/core/runtime");
+  await getPluginRuntime();
+
   const team = await queries.createTeam({
     name: `qa-billing-gate-test-${randomUUID()}`,
   });
@@ -109,7 +116,7 @@ describe("startQaAgentFromTrigger — real call site, billing gate", () => {
     process.env.STRIPE_SECRET_KEY = "sk_test_fake_for_gate_check";
     await setPlan("free");
     const { startQaAgentFromTrigger } =
-      await import("@/server/actions/qa-agent");
+      await import("@lastest/plugin-qa-agent/actions");
 
     const result = await startQaAgentFromTrigger({
       repositoryId,
@@ -125,7 +132,7 @@ describe("startQaAgentFromTrigger — real call site, billing gate", () => {
     process.env.STRIPE_SECRET_KEY = "sk_test_fake_for_gate_check";
     await setPlan("starter");
     const { startQaAgentFromTrigger } =
-      await import("@/server/actions/qa-agent");
+      await import("@lastest/plugin-qa-agent/actions");
 
     const result = await startQaAgentFromTrigger({
       repositoryId,
@@ -140,7 +147,7 @@ describe("startQaAgentFromTrigger — real call site, billing gate", () => {
     process.env.STRIPE_SECRET_KEY = "sk_test_fake_for_gate_check";
     await setPlan("pro");
     const { startQaAgentFromTrigger } =
-      await import("@/server/actions/qa-agent");
+      await import("@lastest/plugin-qa-agent/actions");
 
     const result = await startQaAgentFromTrigger({
       repositoryId,
@@ -155,7 +162,7 @@ describe("startQaAgentFromTrigger — real call site, billing gate", () => {
     delete process.env.STRIPE_SECRET_KEY;
     await setPlan("free");
     const { startQaAgentFromTrigger } =
-      await import("@/server/actions/qa-agent");
+      await import("@lastest/plugin-qa-agent/actions");
 
     const result = await startQaAgentFromTrigger({
       repositoryId,

@@ -54,17 +54,20 @@ import type {
  *    getting their own `<id>_sessions` table. QuickStart does **not** follow
  *    that precedent, and that is a deliberate deviation, not an oversight:
  *    two of its metadata fields (`quickstartEmail`/`quickstartPassword`) are
- *    *literally, deliberately* shared with the still-unmigrated `qa-agent`
- *    pseudo-plugin's own `kind: "qa"` rows (same field names, same
+ *    *literally, deliberately* shared with the `qa-agent` plugin's own
+ *    `kind: "qa"` rows (that agent has since migrated and kept the
+ *    arrangement from its own side — same field names, same
  *    encryption path — see `packages/db/src/schema/agents.ts`'s own comment
  *    on the column), and core's `crypto-fields.ts` encrypts by field name
  *    across the whole table regardless of `kind`. Splitting QuickStart onto
  *    its own table would mean either forking that encryption logic or
  *    shipping the split with QuickStart's copy unencrypted — a regression,
  *    not a cleanup. This debt item is inherited (the shared-table cost
- *    `ranger-migration-result.md` §1 named), and it does not clear until
- *    `qa-agent` migrates too — recipe §1.6.2's "blocked on that migration
- *    landing first," paid down in kind rather than in full.
+ *    `ranger-migration-result.md` §1 named). qa-agent's own migration made
+ *    the mirror-image call (its `host.ts` item 1 cites this paragraph):
+ *    both agents now reach the shared table through their hosts, and the
+ *    debt clears only when the two move together onto a core credential
+ *    capability — a core PR, not either plugin's migration.
  *
  * 3. **Test CRUD** (`createTest`, `getTest`, `updateTest`, 3 methods). Same
  *    shape and the same reasoning as `api-test`'s two: an *authored test* is

@@ -1,10 +1,8 @@
 "use client";
 
-import type { AgentSession, QaTask } from "@/lib/db/schema";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
+import type { QaAgentTask as QaTask } from "../schema";
+import type { QaSessionRow as AgentSession } from "../types";
+import { Badge, Button, Card, CardContent, Progress } from "@lastest/ui";
 import {
   Ban,
   Bot,

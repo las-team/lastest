@@ -1,8 +1,10 @@
 "use client";
 
-import type { AgentSession, AgentStepState } from "@/lib/db/schema";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import type {
+  QaSessionRow as AgentSession,
+  QaStepState as AgentStepState,
+} from "../types";
+import { Badge, Card, CardContent } from "@lastest/ui";
 import {
   AlertTriangle,
   CheckCircle2,

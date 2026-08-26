@@ -6,15 +6,16 @@ import "server-only";
  * walkthrough test can re-use it via setupOverrides.extraSteps.
  *
  * Moved here, unchanged, from `src/lib/quickstart/storage-capture.ts` during
- * the QuickStart plugin migration (recipe §1.6.2). `qa-agent.ts` — a second,
- * still-unmigrated pseudo-plugin — calls `captureStorageState` directly
- * (`pnpm arch`'s `qa-agent::cross-plugin` entry, pre-migration), and once
- * QuickStart became `plugins/quickstart/`, that import would have become a
- * forbidden `@lastest/plugin-quickstart` cross-plugin edge. This file is the
- * resolution: composition-root code both `src/lib/core/quickstart-host.ts`
- * (QuickStart's own host fill) and `qa-agent.ts` call into, the same shape
- * `share-reads.ts` set for a *core→plugin* read, extended here to a
- * *pseudo-plugin↔pseudo-plugin* share where neither side has migrated first.
+ * the QuickStart plugin migration (recipe §1.6.2), when `qa-agent` was still
+ * a pseudo-plugin calling `captureStorageState` directly. qa-agent has since
+ * migrated too, and the "re-examine when that lands" note from
+ * `quickstart-migration-result.md` §11 resolves to: **it stays shared** —
+ * both callers are now host fills (`src/lib/core/quickstart-host.ts` and
+ * `src/lib/core/qa-agent-host.ts`), so this is composition-root code two
+ * packaged plugins reach through their ports, the `awards`↔`share` outcome
+ * that section anticipated. Neither plugin owns it: the security posture
+ * below (disposable-runner execution, in-process fallback for pool-less
+ * installs) is the app's decision, not a feature's.
  *
  * SECURITY: the auth-setup code is AI/user-derived arbitrary Playwright code.
  * On a provisioned (Kubernetes) deployment it is executed in a disposable

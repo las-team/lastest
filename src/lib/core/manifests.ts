@@ -11,6 +11,7 @@ import { explorerPlugin } from "@lastest/plugin-explorer";
 import { gamificationPlugin } from "@lastest/plugin-gamification";
 import { launchPlugin } from "@lastest/plugin-launch";
 import { playgroundPlugin } from "@lastest/plugin-playground";
+import { qaAgentPlugin } from "@lastest/plugin-qa-agent";
 import { quickstartPlugin } from "@lastest/plugin-quickstart";
 import { rangerPlugin } from "@lastest/plugin-ranger";
 import { rcaPlugin } from "@lastest/plugin-rca";
@@ -57,4 +58,5 @@ export const MANIFESTS: Parameters<typeof resolveRegistry>[0] = [
   dataSourcesPlugin,
   schedulingPlugin,
   quickstartPlugin,
+  qaAgentPlugin,
 ];

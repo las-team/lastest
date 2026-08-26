@@ -33,9 +33,6 @@
  */
 
 import { processLaunchCohorts } from "@lastest/plugin-launch/cohorts";
-import { getNextRunTime } from "@lastest/cron";
-
-import * as queries from "@/lib/db/queries";
 
 let started = false;
 let intervalId: ReturnType<typeof setInterval> | null = null;
@@ -117,51 +114,21 @@ async function processDueBuildSchedules() {
 
 let qaProcessing = false;
 
-/** Fire due QA agent cron triggers. Mirrors processDueBuildSchedules:
- *  nextRunAt is advanced BEFORE starting so a slow run can't double-fire; a
- *  busy agent means the fire is skipped (startQaAgentFromTrigger reports
- *  why). */
+/** Fire due QA agent cron triggers. The plugin's own dispatcher owns the
+ *  due-trigger query, nextRunAt advancement (BEFORE starting, so a slow run
+ *  can't double-fire) and the busy-skip; this only has to wire the runtime
+ *  first, the same reason `processDueBuildSchedules` above and
+ *  `processDueExplorerTriggers` below do. */
 async function processDueQaTriggers() {
   if (qaProcessing) return;
   qaProcessing = true;
 
   try {
-    const due = await queries.getDueQaAgentTriggers();
-
-    for (const trigger of due) {
-      try {
-        if (!trigger.cronExpression) continue;
-        const nextRunAt = getNextRunTime(trigger.cronExpression, new Date());
-        await queries.markQaAgentTriggerFired(trigger.id, { nextRunAt });
-
-        // Import dynamically to avoid circular dependencies
-        const { startQaAgentFromTrigger } =
-          await import("@/server/actions/qa-agent");
-        const result = await startQaAgentFromTrigger({
-          repositoryId: trigger.repositoryId,
-          teamId: trigger.teamId,
-          trigger: "schedule",
-          mode: trigger.scheduleMode,
-        });
-
-        if (result.sessionId) {
-          await queries.markQaAgentTriggerFired(trigger.id, {
-            nextRunAt,
-            lastRunAt: new Date(),
-            lastSessionId: result.sessionId,
-          });
-          console.log(
-            `[scheduler] Started scheduled QA agent session ${result.sessionId}`,
-          );
-        } else if (result.skipped) {
-          console.log(
-            `[scheduler] QA agent trigger skipped: ${result.skipped}`,
-          );
-        }
-      } catch (error) {
-        console.error("[scheduler] Failed to fire QA agent trigger:", error);
-      }
-    }
+    const { getPluginRuntime } = await import("@/lib/core/runtime");
+    await getPluginRuntime();
+    const { dispatchDueQaTriggers } =
+      await import("@lastest/plugin-qa-agent/actions");
+    await dispatchDueQaTriggers();
   } finally {
     qaProcessing = false;
   }
