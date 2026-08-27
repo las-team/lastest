@@ -41,4 +41,5 @@ export * from "./queries/billing";
 // qa_tasks/qa_agent_triggers moved to plugins/qa-agent/src/data/ (RFC §9
 // phase 4) — server components and routes read them through
 // @lastest/plugin-qa-agent/reads, actions through the plugin's own handle.
+export * from "./queries/agents-fleet";
 export * from "./queries/coverage";

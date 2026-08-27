@@ -17,8 +17,8 @@ import {
   ShieldCheck,
   GitCommit,
   Wrench,
-  Bot,
   Compass,
+  Network,
   Lock,
   Waypoints,
 } from "lucide-react";
@@ -82,7 +82,7 @@ const definitionNav = [
 
 const executionNav = [
   { name: "Runs", href: "/run", icon: Play },
-  { name: "QA Agent", href: "/qa-agent", icon: Bot },
+  { name: "Agents", href: "/agents", icon: Network },
   { name: "Explorer", href: "/explorer", icon: Compass },
   { name: "Compare", href: "/compare", icon: GitCompare },
   { name: "Impact", href: "/analytics/impact", icon: TrendingDown },
@@ -268,7 +268,7 @@ export function Sidebar({
               const isActive =
                 pathname === item.href || pathname.startsWith(item.href);
               const isVerify = item.name === "Verify";
-              const isLockedQaAgent = item.name === "QA Agent" && qaAgentLocked;
+              const isLockedQaAgent = item.name === "Agents" && qaAgentLocked;
               return (
                 <li key={item.name}>
                   <Link
@@ -291,7 +291,7 @@ export function Sidebar({
                             : "bg-primary/10 text-primary ring-primary/20",
                         )}
                         aria-label="Pro feature"
-                        title="QA Agent is available on the Pro plan"
+                        title="The QA agent is available on the Pro plan"
                       >
                         <Lock className="h-2.5 w-2.5" />
                         Pro
