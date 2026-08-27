@@ -362,9 +362,19 @@ deploy_npm() {
     err "plugins/ci pins $(echo $pinned) but packages/runner is $runner_version - sync them first"
   fi
 
+  # npm requires a second factor to publish. A web-login session token is not
+  # one: it authenticates `whoami` but is rejected at PUT with
+  # "Two-factor authentication or granular access token with bypass 2fa
+  # enabled is required". Supply a TOTP code as NPM_OTP for an interactive
+  # publish, or configure a granular access token with 2FA bypass for CI.
+  local otp_args=()
+  if [ -n "${NPM_OTP:-}" ]; then
+    otp_args=(--otp "$NPM_OTP")
+  fi
+
   cd "$runner_dir"
   pnpm build
-  pnpm publish --no-git-checks --access public
+  pnpm publish --no-git-checks --access public "${otp_args[@]}"
   cd "$ROOT_DIR"
   ok "Published @lastest/runner@$runner_version"
 }
