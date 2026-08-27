@@ -639,6 +639,11 @@ async function testLoginScript(
     // Execute it inside the EB pod via the runner (run_setup) rather than
     // eval'ing it in the host process — connecting over CDP would still run the
     // script's JavaScript in-host, where DATABASE_URL / STRIPE_* live.
+    //
+    // No `credentials` payload, deliberately. This script already carries the
+    // one login the user handed the agent; passing the repo's whole credential
+    // set would put every stored secret inside AI-generated code, which is the
+    // exact risk docs/credentials-plan.md §9 raises about repo-wide scope.
     await executeSetupViaRunner(
       code,
       `play-agent-login-${repositoryId}`,

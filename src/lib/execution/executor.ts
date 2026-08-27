@@ -56,6 +56,7 @@ import {
   csvDataSourcesForRepo,
   googleSheetsDataSourcesForRepo,
 } from "@/lib/core/data-sources-reads";
+import { resolveRunCredentials } from "@/lib/execution/run-credentials";
 import {
   extractTestBody,
   parseSteps,
@@ -686,6 +687,9 @@ export async function executeSetupViaRunner(
   playwrightSettings?: PlaywrightSettings | null,
   browser?: "chromium" | "firefox" | "webkit",
   headed?: boolean,
+  /** Repo credentials, already decrypted by the caller at dispatch. Setup is
+   *  usually the login flow, so this is the payload's main user. */
+  credentials?: Record<string, Record<string, string>>,
 ): Promise<{
   storageState?: string;
   storageStateJson?: string;
@@ -706,6 +710,7 @@ export async function executeSetupViaRunner(
     // Apply UA override to the setup context too — auth handshakes are exactly
     // where Cloudflare Turnstile / Clerk reject HeadlessChrome fingerprints.
     userAgentOverride: playwrightSettings?.userAgentOverride || undefined,
+    credentials,
   });
 
   console.log(
@@ -810,6 +815,11 @@ async function executeViaRunner(
       }
     : undefined;
 
+  // Decrypt-at-dispatch: resolved once for the batch, handed to setup and to
+  // every run_test command, and deliberately not stored on `options` (which
+  // is copied, logged and spread in several places downstream).
+  const credentials = await resolveRunCredentials(options.repositoryId);
+
   // Run setup on runner first if setupInfo is provided (remote setup)
   if (options.setupInfo) {
     console.log(
@@ -828,6 +838,7 @@ async function executeViaRunner(
       // "Running setup steps…" overlay sits over real progress instead of a
       // frozen idle frame.
       options.headless === false,
+      credentials,
     );
     // Merge remote setup results into setupContext for test commands
     options.setupContext = {
@@ -1276,6 +1287,9 @@ async function executeViaRunner(
           options.playwrightSettings?.selectorTimeoutMs ??
           3000,
         textCaptureEnabled,
+        // NOT part of `code`/`codeHash`, and never written to
+        // test_results.assignedVariables — see docs/credentials-plan.md §1.
+        credentials,
       });
 
       // Queue command to DB
@@ -2287,6 +2301,11 @@ async function executeViaPoolWorkers(
             viewport,
             options.playwrightSettings?.navigationTimeout ?? undefined,
             options.playwrightSettings,
+            undefined,
+            undefined,
+            // Broadcast setup is the login every test in this build inherits,
+            // so it needs the same credentials the tests get.
+            await resolveRunCredentials(options.repositoryId),
           );
           // Prefer `storageStateJson` (portable JSON blob) over `storageState`
           // (may be a `persistent:<setupId>` marker pinned to the setup EB

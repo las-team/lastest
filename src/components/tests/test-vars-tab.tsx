@@ -18,9 +18,11 @@ import type {
   GoogleSheetsDataSource,
 } from "@lastest/plugin-data-sources";
 import type { MatrixPolicy } from "@/lib/db/schema";
+import type { MaskedCredential } from "@/lib/db/queries/credentials";
 import { MatrixPolicyCard } from "./matrix-policy-card";
 import { AI_VAR_PRESETS } from "@/lib/vars/ai-presets";
 import { VarEditDialog } from "./var-edit-dialog";
+import { TestCredentialsSection } from "./test-credentials-section";
 import { CsvSourcesSettingsCard } from "@lastest/plugin-data-sources/ui/csv-sources-card";
 import { GoogleSheetsSettingsCard } from "@lastest/plugin-data-sources/ui/google-sheets-card";
 import {
@@ -67,6 +69,10 @@ export interface TestVarsTabProps {
   aiVarLastValues?: Record<string, string> | null;
   /** Matrix-execution policy from tests.matrixPolicy. Null = the defaults. */
   matrixPolicy?: MatrixPolicy | null;
+  /** The repo's credentials, secrets already masked server-side. Rendered
+   *  read-only below the variables table — a second view of `repo_credentials`,
+   *  never a second store. Omit to hide the section entirely. */
+  credentials?: MaskedCredential[] | null;
 }
 
 function describeSource(v: TestVariable): string {
@@ -112,6 +118,7 @@ export function TestVarsTab({
   aiAvailable = false,
   aiVarLastValues,
   matrixPolicy = null,
+  credentials = null,
 }: TestVarsTabProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TestVariable | null>(null);
@@ -369,6 +376,8 @@ export function TestVarsTab({
           )}
         </CardContent>
       </Card>
+
+      {credentials && <TestCredentialsSection credentials={credentials} />}
 
       <MatrixPolicyCard
         testId={testId}

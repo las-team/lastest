@@ -17,11 +17,25 @@ describe("pharma seed", () => {
 
   for (const seed of [...PHARMA_SEED_TESTS]) {
     describe(seed.name, () => {
-      it("refuses to run without credentials", () => {
-        // The whole reason both tests ship quarantined. A seed that fell
-        // through to `page.goto` with an undefined user would hammer whatever
-        // the target URL happens to point at.
-        expect(seed.code).toMatch(/throw new Error\('Blocked:/);
+      it("reads its login from the credentials store, not the environment", () => {
+        // The blocker docs/pharma-restricted-scope.md §2.1 named:
+        // `process.env.VAULT_USER` inside a test resolves against the EB's own
+        // process environment, so it could never be satisfied. Both logins now
+        // come in as the injected `credentials` parameter.
+        expect(seed.code).not.toMatch(/process\.env/);
+        expect(seed.code).toMatch(/credentials\.\w+\.username/);
+        expect(seed.code).toMatch(/credentials\.\w+\.password/);
+      });
+
+      it("refuses to run when the credential is missing", () => {
+        // A seed that fell through to `page.goto` with an undefined user would
+        // hammer whatever the target URL happens to point at — and the message
+        // has to say where to go, since the fix is a UI step rather than an
+        // env var.
+        expect(seed.code).toMatch(
+          /throw new Error\('This test needs a credential named/,
+        );
+        expect(seed.code).toMatch(/Setup → Credentials/);
       });
 
       it("carries no credential of its own", () => {

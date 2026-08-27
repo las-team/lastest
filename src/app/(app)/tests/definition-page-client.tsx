@@ -1508,6 +1508,7 @@ export function DefinitionPageClient({
                     availableScripts={openTestDetailData.availableScripts}
                     sheetDataSources={openTestDetailData.sheetDataSources}
                     csvDataSources={openTestDetailData.csvDataSources}
+                    credentials={openTestDetailData.credentials}
                     googleSheetsAccount={openTestDetailData.googleSheetsAccount}
                     stabilizationDefaults={
                       openTestDetailData.stabilizationDefaults

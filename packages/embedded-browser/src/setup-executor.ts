@@ -7,6 +7,11 @@
 
 import type { Page, Locator } from "playwright";
 import { stripTypeAnnotations } from "@lastest/shared";
+import {
+  createCredentialScrubber,
+  freezeCredentials,
+  scrubError,
+} from "./credential-redaction.js";
 
 // ---------------------------------------------------------------------------
 // Page proxy – intercepts screenshots + handles relative URLs
@@ -384,6 +389,10 @@ export async function executeSetupCode(
   page: Page,
   code: string,
   baseUrl: string,
+  /** Named repo logins, decrypted by the host at dispatch. Injected as the
+   *  script's `credentials` parameter — a setup script is usually the login
+   *  itself, so this is the parameter it most needs. */
+  credentials?: Record<string, Record<string, string>>,
 ): Promise<Record<string, unknown>> {
   const processedCode = stripTypeAnnotations(code);
 
@@ -404,9 +413,14 @@ export async function executeSetupCode(
     const appStateFn = createAppState(page);
     const locateWithFallbackFn = createLocateWithFallback();
 
+    // Mask credential plaintext in anything this script prints — a script
+    // that logs what it filled is the common leak.
+    const credScrub = createCredentialScrubber(credentials);
+    const frozenCredentials = freezeCredentials(credentials);
+
     const stepLogger = {
-      log: (msg: string) => console.log(`[Setup] ${msg}`),
-      error: (msg: string) => console.error(`[Setup] ${msg}`),
+      log: (msg: string) => console.log(`[Setup] ${credScrub.scrub(msg)}`),
+      error: (msg: string) => console.error(`[Setup] ${credScrub.scrub(msg)}`),
     };
     const screenshotPath = "/tmp/setup-screenshot.png";
 
@@ -454,7 +468,7 @@ export async function executeSetupCode(
     const downloadsHelper = null;
     const networkHelper = null;
 
-    // Build async function with 11-parameter signature matching the runner
+    // Build async function with the 12-parameter signature matching the runner
     const AsyncFunction = Object.getPrototypeOf(
       async function () {},
     ).constructor;
@@ -470,25 +484,33 @@ export async function executeSetupCode(
       "clipboard",
       "downloads",
       "network",
+      "credentials",
       body,
     );
 
-    const result = await setupFn(
-      pageProxy,
-      baseUrl,
-      screenshotPath,
-      stepLogger,
-      expectFn,
-      appStateFn,
-      locateWithFallbackFn,
-      fileUploadHelper,
-      clipboardHelper,
-      downloadsHelper,
-      networkHelper,
-    );
+    let result: unknown;
+    try {
+      result = await setupFn(
+        pageProxy,
+        baseUrl,
+        screenshotPath,
+        stepLogger,
+        expectFn,
+        appStateFn,
+        locateWithFallbackFn,
+        fileUploadHelper,
+        clipboardHelper,
+        downloadsHelper,
+        networkHelper,
+        frozenCredentials,
+      );
+    } catch (err) {
+      // Playwright embeds the fill() argument in locator-timeout messages.
+      throw scrubError(err, credScrub);
+    }
 
     if (result && typeof result === "object") {
-      return result;
+      return result as Record<string, unknown>;
     }
     return {};
   }

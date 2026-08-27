@@ -630,6 +630,19 @@ export interface ServerConfig {
   healthCheckTimeout: number;
 }
 
+/**
+ * Named logins the test body reads as its `credentials` parameter:
+ * `credentials.vaultAdmin.password`.
+ *
+ * Deliberately NOT part of the substituted `code` — a credential must not
+ * reach `codeHash` (rotating a password is not a code change and must not
+ * invalidate a baseline) nor `test_results.assignedVariables` (plaintext jsonb,
+ * persisted forever). The host decrypts these at dispatch and the EB freezes
+ * them for the duration of one run; nothing persists them. See
+ * `docs/credentials-plan.md` §1.
+ */
+export type RunCredentialsPayload = Record<string, Record<string, string>>;
+
 export interface RunTestCommandPayload {
   testId: string;
   testRunId: string;
@@ -738,6 +751,10 @@ export interface RunTestCommandPayload {
   /** Capture page innerText alongside each screenshot for downstream
    *  text-diff. Resolved from the repo's diff sensitivity settings. */
   textCaptureEnabled?: boolean;
+  /** Repo credentials, decrypted at dispatch. Injected as the `credentials`
+   *  parameter of the test body and scrubbed out of logs, errors and DOM
+   *  captures — never persisted. See `RunCredentialsPayload`. */
+  credentials?: RunCredentialsPayload;
 }
 
 export interface RunTestCommand extends BaseMessage {
@@ -765,6 +782,9 @@ export interface RunSetupCommandPayload {
   /** Mirror of RunTestCommandPayload.userAgentOverride — must apply to setup too
    *  so the auth handshake runs with the same UA as the downstream tests. */
   userAgentOverride?: string;
+  /** Repo credentials, decrypted at dispatch. A login wall is exactly what a
+   *  setup script exists to get past, so this is the payload's primary user. */
+  credentials?: RunCredentialsPayload;
 }
 
 export interface RunSetupCommand extends BaseMessage {
@@ -1117,6 +1137,9 @@ export interface StartDebugCommandPayload {
   }>;
   pointerGestures?: boolean;
   cursorFPS?: number;
+  /** Repo credentials, decrypted at dispatch — the step debugger runs the same
+   *  body as a real run and must resolve `credentials.*` the same way. */
+  credentials?: RunCredentialsPayload;
 }
 
 export interface StartDebugCommand extends BaseMessage {

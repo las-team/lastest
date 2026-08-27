@@ -5,6 +5,7 @@
  * logic for the two JSONB stores that hold user-provided app credentials:
  *   - setup_configs.authConfig  (bearer token / basic-auth password / headers)
  *   - agent_sessions.metadata.quickstartPassword  (QuickStart app login)
+ *   - repo_credentials.fields  (the named logins tests inject as `credentials`)
  *
  * The explorer-knowledge helpers that used to live here left with the plugin.
  * It encrypts its own credential column through `ExplorerHost.encryptField`,
@@ -22,7 +23,11 @@
  */
 
 import { encrypt, decryptField, ENC_PREFIX } from "./crypto";
-import type { SetupAuthConfig, AgentSessionMetadata } from "./db/schema";
+import type {
+  SetupAuthConfig,
+  AgentSessionMetadata,
+  CredentialField,
+} from "./db/schema";
 
 function encField(value: string): string {
   return value.startsWith(ENC_PREFIX) ? value : encrypt(value);
@@ -93,4 +98,40 @@ export function decryptSessionMetadata<
     out = { ...out, qaAuthContext: decryptField(out.qaAuthContext) };
   }
   return out;
+}
+
+// ── repo_credentials.fields ────────────────────────────────────────────────
+// Encrypts the value of every field flagged `secret`; non-secret fields (a
+// username, a fixture document id) stay in the clear so the Credentials list
+// can render "svc-qa@acme.com / ••••••" without a decrypt per row.
+
+export function encryptCredentialFields(
+  fields: CredentialField[] | null | undefined,
+): CredentialField[] {
+  if (!fields) return [];
+  return fields.map((f) =>
+    f.secret ? { ...f, value: encField(f.value) } : { ...f },
+  );
+}
+
+export function decryptCredentialFields(
+  fields: CredentialField[] | null | undefined,
+): CredentialField[] {
+  if (!fields) return [];
+  return fields.map((f) =>
+    f.secret ? { ...f, value: decryptField(f.value) } : { ...f },
+  );
+}
+
+/**
+ * Strip every secret value, keeping the field shape. This is what leaves the
+ * server for the browser: the Credentials UI is write-only by design, so no
+ * read path ever returns a secret's plaintext (see `docs/credentials-plan.md`
+ * §4 — there is no audit log to record a reveal against yet).
+ */
+export function maskCredentialFields(
+  fields: CredentialField[] | null | undefined,
+): CredentialField[] {
+  if (!fields) return [];
+  return fields.map((f) => (f.secret ? { ...f, value: "" } : { ...f }));
 }

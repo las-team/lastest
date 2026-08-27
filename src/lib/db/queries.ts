@@ -17,6 +17,7 @@ export * from "./queries/background-jobs";
 export * from "./queries/plugin-jobs";
 export * from "./queries/auth";
 export * from "./queries/setup";
+export * from "./queries/credentials";
 export * from "./queries/runners";
 export * from "./queries/integrations";
 export * from "./queries/misc";

@@ -15,6 +15,7 @@ import {
   timestamp,
   jsonb,
   index,
+  uniqueIndex,
   real,
 } from "drizzle-orm/pg-core";
 
@@ -24,7 +25,7 @@ import type {
   StabilizationSettings,
 } from "./shared";
 
-import { teams } from "./identity";
+import { teams, users } from "./identity";
 
 import { repositories } from "./repos";
 
@@ -671,3 +672,74 @@ export const storageStates = pgTable(
 export type StorageState = typeof storageStates.$inferSelect;
 
 export type NewStorageState = typeof storageStates.$inferInsert;
+
+// ============================================
+// Repo Credentials (logins used by setup scripts and tests)
+// ============================================
+
+/**
+ * One field of a credential set. `key` is the property name the test body
+ * reads (`credentials.vaultAdmin.password` → key `password`).
+ *
+ * Secret values are stored as `enc:v1:…` ciphertext — encrypted on write and
+ * decrypted on read by `encryptCredentialFields` / `decryptCredentialFields`
+ * in `src/lib/crypto-fields.ts`, the same arrangement `setup_configs.authConfig`
+ * already uses. Non-secret values (a username, a fixture document id) are held
+ * in the clear so the list can render them without a decrypt per row.
+ */
+export interface CredentialField {
+  key: string;
+  value: string;
+  secret: boolean;
+}
+
+/**
+ * A named login a repo's setup scripts and tests use.
+ *
+ * One row per credential *set*, not per field: a username and a password
+ * belong together, and a flat bag of secrets gives the UI no way to say which
+ * password goes with which username.
+ *
+ * Credentials deliberately do NOT travel the variable-substitution path. Every
+ * other variable is textually substituted into the test source before dispatch,
+ * which would put the value in `codeHash` (rotating a password would invalidate
+ * a baseline) and in `test_results.assignedVariables` (plaintext jsonb, forever).
+ * They are injected as a frozen `credentials` parameter on the test body instead
+ * — see `docs/credentials-plan.md` §1.
+ *
+ * No `environmentId` yet: PROD vs UAT is the environment model (gap analysis
+ * B2), which re-keys half a dozen tables at once.
+ */
+export const repoCredentials = pgTable(
+  "repo_credentials",
+  {
+    id: text("id").primaryKey(),
+    repositoryId: text("repository_id")
+      .references(() => repositories.id, { onDelete: "cascade" })
+      .notNull(),
+    // The handle used in test code: `credentials.<name>.<fieldKey>`.
+    // Validated `^[a-z][A-Za-z0-9]*$` and unique per repo in the action layer.
+    name: text("name").notNull(),
+    label: text("label").notNull(),
+    description: text("description"),
+    fields: jsonb("fields").$type<CredentialField[]>().notNull(),
+    // A convenience column, not an audit trail — the audit trail is P1.
+    lastUsedAt: timestamp("last_used_at"),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at"),
+    updatedAt: timestamp("updated_at"),
+  },
+  (table) => [
+    index("idx_repo_credentials_repo").on(table.repositoryId),
+    uniqueIndex("uq_repo_credentials_repo_name").on(
+      table.repositoryId,
+      table.name,
+    ),
+  ],
+);
+
+export type RepoCredential = typeof repoCredentials.$inferSelect;
+
+export type NewRepoCredential = typeof repoCredentials.$inferInsert;

@@ -22,8 +22,15 @@ import {
   decryptAuthConfig,
   encryptSessionMetadata,
   decryptSessionMetadata,
+  encryptCredentialFields,
+  decryptCredentialFields,
+  maskCredentialFields,
 } from "./crypto-fields";
-import type { SetupAuthConfig, AgentSessionMetadata } from "./db/schema";
+import type {
+  SetupAuthConfig,
+  AgentSessionMetadata,
+  CredentialField,
+} from "./db/schema";
 
 describe("crypto primitives", () => {
   it("round-trips arbitrary strings, including unicode and large blobs", () => {
@@ -161,5 +168,77 @@ describe("encryptSessionMetadata / decryptSessionMetadata", () => {
     expect(encryptSessionMetadata(null)).toBeNull();
     expect(encryptSessionMetadata(undefined)).toBeUndefined();
     expect(decryptSessionMetadata(null)).toBeNull();
+  });
+});
+
+describe("repo_credentials field crypto", () => {
+  const fields: CredentialField[] = [
+    { key: "username", value: "svc-qa@acme.com", secret: false },
+    { key: "password", value: "hunter2-🔐", secret: true },
+    { key: "totpSecret", value: "JBSWY3DPEHPK3PXP", secret: true },
+  ];
+
+  it("encrypts only the secret fields and round-trips them", () => {
+    const enc = encryptCredentialFields(fields);
+    const byKey = Object.fromEntries(enc.map((f) => [f.key, f]));
+
+    // Non-secret values stay readable so the list can render them without a
+    // decrypt per row.
+    expect(byKey.username.value).toBe("svc-qa@acme.com");
+    expect(byKey.password.value.startsWith(ENC_PREFIX)).toBe(true);
+    expect(byKey.totpSecret.value.startsWith(ENC_PREFIX)).toBe(true);
+    expect(byKey.password.value).not.toContain("hunter2");
+
+    expect(decryptCredentialFields(enc)).toEqual(fields);
+  });
+
+  it("never double-encrypts an already-encrypted value", () => {
+    // The update path re-submits stored ciphertext for any secret the editor
+    // left untouched, so encrypt-on-write has to be idempotent.
+    const once = encryptCredentialFields(fields);
+    const twice = encryptCredentialFields(once);
+    expect(twice).toEqual(once);
+    expect(decryptCredentialFields(twice)).toEqual(fields);
+  });
+
+  it("passes legacy plaintext through on read", () => {
+    // A row written before field crypto, or by a future import path.
+    const legacy: CredentialField[] = [
+      { key: "password", value: "plain-text-password", secret: true },
+    ];
+    expect(decryptCredentialFields(legacy)).toEqual(legacy);
+  });
+
+  it("does not mutate its input", () => {
+    const input = fields.map((f) => ({ ...f }));
+    encryptCredentialFields(input);
+    expect(input).toEqual(fields);
+  });
+
+  it("masks secret values while keeping the field shape", () => {
+    // This is what leaves the server for the browser. Values are write-only:
+    // no read path returns a secret's plaintext.
+    const masked = maskCredentialFields(encryptCredentialFields(fields));
+    expect(masked.map((f) => f.key)).toEqual([
+      "username",
+      "password",
+      "totpSecret",
+    ]);
+    expect(masked.find((f) => f.key === "username")?.value).toBe(
+      "svc-qa@acme.com",
+    );
+    for (const f of masked.filter((f) => f.secret)) {
+      expect(f.value).toBe("");
+    }
+    // Neither plaintext nor ciphertext survives the mask.
+    const serialized = JSON.stringify(masked);
+    expect(serialized).not.toContain("hunter2");
+    expect(serialized).not.toContain(ENC_PREFIX);
+  });
+
+  it("treats null / undefined / empty as an empty field list", () => {
+    expect(encryptCredentialFields(null)).toEqual([]);
+    expect(decryptCredentialFields(undefined)).toEqual([]);
+    expect(maskCredentialFields([])).toEqual([]);
   });
 });

@@ -4,6 +4,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ApiConfigList } from "@/components/setup/api-config-list";
 import { DesignSystemBundleUpload } from "@/components/setup/design-system-bundle-upload";
 import { SetupStepBuilder } from "@/components/setup/setup-step-builder";
+import { CredentialList } from "@/components/setup/credential-list";
 import {
   addDefaultTeardownStep,
   removeDefaultTeardownStep,
@@ -17,6 +18,7 @@ import type {
   StorageState,
   DesignSystemConfig,
 } from "@/lib/db/schema";
+import type { MaskedCredential } from "@/lib/db/queries/credentials";
 import type { SetupStep } from "@/server/actions/setup-steps";
 import type { TeardownStep } from "@/server/actions/teardown-steps";
 
@@ -30,6 +32,7 @@ interface SetupPageClientProps {
   storageStates: StorageState[];
   designSystem: DesignSystemConfig | null;
   designSystemEnabled: boolean;
+  credentials: MaskedCredential[];
 }
 
 export function SetupPageClient({
@@ -42,6 +45,7 @@ export function SetupPageClient({
   storageStates,
   designSystem,
   designSystemEnabled,
+  credentials,
 }: SetupPageClientProps) {
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -61,6 +65,12 @@ export function SetupPageClient({
                   className="flex-1 px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm"
                 >
                   Teardown
+                </TabsTrigger>
+                <TabsTrigger
+                  value="credentials"
+                  className="flex-1 px-6 text-sm data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-sm"
+                >
+                  Credentials
                 </TabsTrigger>
               </TabsList>
 
@@ -122,6 +132,13 @@ export function SetupPageClient({
                     configs={setupConfigs}
                   />
                 </section>
+              </TabsContent>
+
+              <TabsContent value="credentials" className="mt-6">
+                <CredentialList
+                  repositoryId={repository.id}
+                  credentials={credentials}
+                />
               </TabsContent>
             </Tabs>
           </div>

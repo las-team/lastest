@@ -8,6 +8,16 @@
  * a false positive shows a `•••` where a value used to be; a false negative
  * leaks a credential. When in doubt, mask.
  *
+ * The one thing that must NOT be masked is a `credentials.<name>.<field>`
+ * reference (`CREDENTIAL_REFERENCE`). Those carry no value — the store is
+ * `repo_credentials`, and the plaintext exists only inside the EB for the
+ * duration of one run — so showing the reference is strictly better than
+ * masking it: the reader learns the test used a stored login instead of being
+ * left to assume a literal was scrubbed there. None of the passes below match
+ * one today (every pass needs a quoted value, and a reference is an
+ * expression); the constant and its test exist so a later, broader rule can't
+ * quietly start collapsing them.
+ *
  * Kept as the plugin's own file rather than promoted to `libs/` — it has no
  * consumer outside this page (`plugin-migration-recipe.md` §5: promotion is
  * for code more than one feature needs).
@@ -40,6 +50,11 @@ const STRING_LITERAL = /(["'`])((?:\\.|(?!\1)[\s\S])*)\1/g;
 // keeps the key and quoting so the shape of the code still reads as real.
 const SENSITIVE_KEY_VALUE =
   /((?:access_token|refresh_token|provider_token|id_token|client_secret|api[_-]?key|password|passwd|secret|bearer|authorization|token)\\?["'`]?\s*[:=]\s*)(\\?["'`])(?:\\.|(?!\2)[\s\S])*?\2/gi;
+
+// A stored-credential reference: `credentials.vaultAdmin.password`. Exported
+// for the invariant test — see the header for why this is the one shape that
+// must survive redaction intact.
+export const CREDENTIAL_REFERENCE = /\bcredentials\.\w+\.\w+\b/g;
 
 // Playwright typed-in payloads: the second string argument of `.fill()` /
 // `.type()` is whatever was recorded at authoring time (emails, passwords).
