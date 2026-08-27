@@ -422,3 +422,113 @@ export const stripeWebhookEvents = pgTable(
 export type StripeWebhookEvent = typeof stripeWebhookEvents.$inferSelect;
 
 export type NewStripeWebhookEvent = typeof stripeWebhookEvents.$inferInsert;
+
+// ===========================================================================
+// OAuth 2.1 authorization server (better-auth `mcp` plugin)
+// ===========================================================================
+//
+// These three tables back better-auth's `mcp` plugin, which turns this app into
+// an OAuth 2.1 authorization server for the remote MCP endpoint at `/api/mcp`.
+// They exist so a third-party agent platform (Salesforce Agentforce, ChatGPT,
+// Claude web, …) can connect *without* a human pasting a long-lived API key:
+// the client registers itself dynamically (RFC 7591), sends the user through
+// `/oauth/consent`, and receives a short-lived access token bound to that user.
+//
+// Shape is dictated by the plugin (`better-auth/plugins/oidc-provider/schema`) —
+// the JS property names below must match its field names exactly, because the
+// Drizzle adapter maps `field -> table[field]`. The table names are ours.
+// `src/lib/auth/auth.ts` wires them in under the adapter's model names
+// (`oauthApplication` / `oauthAccessToken` / `oauthConsent`).
+//
+// API keys (`sessions.kind = 'api'`) remain the other accepted credential on
+// `/api/mcp` — see `src/lib/mcp/remote-auth.ts` for how the two resolve to a
+// single identity plus a tool-policy level.
+
+/** A registered OAuth client. Rows are created by dynamic client registration. */
+export const oauthApplications = pgTable("oauth_applications", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  icon: text("icon"),
+  /** JSON blob of the client's registration metadata. */
+  metadata: text("metadata"),
+  clientId: text("client_id").notNull().unique(),
+  /** Null for public clients (PKCE-only), which is what MCP clients are. */
+  clientSecret: text("client_secret"),
+  /** Comma-separated list, per the plugin's own encoding. */
+  redirectUrls: text("redirect_urls").notNull(),
+  /** 'web' | 'native' | 'user-agent-based' | 'public' */
+  type: text("type").notNull(),
+  disabled: boolean("disabled").default(false),
+  /**
+   * The user who registered the client. Null for anonymous dynamic
+   * registration, which is the normal case for MCP clients.
+   */
+  userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+});
+
+export type OAuthApplication = typeof oauthApplications.$inferSelect;
+
+export type NewOAuthApplication = typeof oauthApplications.$inferInsert;
+
+/**
+ * An issued access/refresh token pair.
+ *
+ * `scopes` is what `src/lib/mcp/tool-policy.ts` reads to decide how much of the
+ * MCP tool surface the bearer may see — a token without `lastest:write` gets a
+ * read-only server.
+ */
+export const oauthAccessTokens = pgTable(
+  "oauth_access_tokens",
+  {
+    id: text("id").primaryKey(),
+    accessToken: text("access_token").notNull().unique(),
+    // Nullable: only minted when the client asked for `offline_access`.
+    // Postgres permits repeated NULLs under a unique index, so the plugin's
+    // uniqueness requirement and "no refresh token" coexist fine.
+    refreshToken: text("refresh_token").unique(),
+    accessTokenExpiresAt: timestamp("access_token_expires_at"),
+    refreshTokenExpiresAt: timestamp("refresh_token_expires_at"),
+    clientId: text("client_id").references(() => oauthApplications.clientId, {
+      onDelete: "cascade",
+    }),
+    userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+    /** Space-separated scope list. */
+    scopes: text("scopes"),
+    createdAt: timestamp("created_at"),
+    updatedAt: timestamp("updated_at"),
+  },
+  (table) => [
+    index("oauth_access_tokens_client_idx").on(table.clientId),
+    index("oauth_access_tokens_user_idx").on(table.userId),
+  ],
+);
+
+export type OAuthAccessToken = typeof oauthAccessTokens.$inferSelect;
+
+export type NewOAuthAccessToken = typeof oauthAccessTokens.$inferInsert;
+
+/** Remembers that a user already approved a client for a set of scopes. */
+export const oauthConsents = pgTable(
+  "oauth_consents",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").references(() => oauthApplications.clientId, {
+      onDelete: "cascade",
+    }),
+    userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+    scopes: text("scopes"),
+    consentGiven: boolean("consent_given"),
+    createdAt: timestamp("created_at"),
+    updatedAt: timestamp("updated_at"),
+  },
+  (table) => [
+    index("oauth_consents_client_idx").on(table.clientId),
+    index("oauth_consents_user_idx").on(table.userId),
+  ],
+);
+
+export type OAuthConsent = typeof oauthConsents.$inferSelect;
+
+export type NewOAuthConsent = typeof oauthConsents.$inferInsert;

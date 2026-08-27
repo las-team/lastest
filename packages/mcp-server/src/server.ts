@@ -21,10 +21,29 @@ import {
   AUTHORING_CONTRACT,
   buildRepoAuthoringGuide,
 } from "./authoring-guide.js";
+import {
+  decideTool,
+  deniedActionMessage,
+  type ToolAccessLevel,
+} from "./policy.js";
 
-type ToolHandler = (
-  params: Record<string, unknown>,
-) => Promise<{ content: Array<{ type: "text"; text: string }> }>;
+type ToolHandler = (params: Record<string, unknown>) => Promise<{
+  content: Array<{ type: "text"; text: string }>;
+  isError?: boolean;
+}>;
+
+/**
+ * Rebuild an `action` enum with only the values a caller is allowed to use,
+ * keeping the original description. Used by `defineTool` so a restricted
+ * connection is never shown an action it cannot call.
+ */
+function narrowEnum(
+  original: z.ZodEnum<[string, ...string[]]>,
+  allowed: string[],
+) {
+  const next = z.enum(allowed as [string, ...string[]]);
+  return original.description ? next.describe(original.description) : next;
+}
 
 function withActivityReporting(
   client: LastestClient,
@@ -75,15 +94,76 @@ function requireParam<T>(
   return value;
 }
 
-export function createServer(client: LastestClient): McpServer {
+export interface CreateServerOptions {
+  /**
+   * How much of the tool surface this caller may see. Defaults to `"full"`,
+   * which is the stdio CLI running under the user's own API key.
+   *
+   * Anything less is a third party acting on the user's behalf — an OAuth
+   * client that registered itself against `/api/mcp`. See `./policy.ts` for
+   * what each level covers and why.
+   */
+  accessLevel?: ToolAccessLevel;
+}
+
+export function createServer(
+  client: LastestClient,
+  options: CreateServerOptions = {},
+): McpServer {
   const server = new McpServer({
     name: "lastest",
     version: "0.5.0",
   });
 
+  const accessLevel: ToolAccessLevel = options.accessLevel ?? "full";
+
+  /**
+   * Registers a tool, subject to `accessLevel`. Every `server.tool()` call in
+   * this file goes through here — see `./policy.ts` for why filtering happens
+   * at registration time rather than inside the handlers.
+   */
+  const defineTool = (
+    name: string,
+    description: string,
+    paramsSchema: z.ZodRawShape,
+    cb: ToolHandler,
+  ): void => {
+    const decision = decideTool(name, accessLevel);
+    if (!decision.registered) return;
+
+    const param = decision.actionParam;
+    const allowed = decision.allowedActions;
+    if (!param || !allowed) {
+      server.tool(name, description, paramsSchema, cb as never);
+      return;
+    }
+
+    const original = paramsSchema[param];
+    const narrowed =
+      original instanceof z.ZodEnum
+        ? { ...paramsSchema, [param]: narrowEnum(original, allowed) }
+        : paramsSchema;
+
+    server.tool(
+      name,
+      `${description}\n\nThis connection may only use ${param}: ${allowed
+        .map((a) => `"${a}"`)
+        .join(", ")}.`,
+      narrowed,
+      (async (params: Record<string, unknown>) => {
+        // Backstop for a caller that sends an action it was never shown.
+        const requested = params[param];
+        if (typeof requested === "string" && !allowed.includes(requested)) {
+          throw new Error(deniedActionMessage(name, requested, accessLevel));
+        }
+        return cb(params);
+      }) as never,
+    );
+  };
+
   // ===== lastest_status (health, jobs, job) =====
   // Replaces lastest_health_check, lastest_list_active_jobs, lastest_get_job_status.
-  server.tool(
+  defineTool(
     "lastest_status",
     'Instance & background-job status. `action`: "health" (check connectivity to the Lastest instance), "jobs" (list currently active background jobs — builds, AI operations, etc.), "job" (get status/progress of a specific background job — requires `jobId`).',
     {
@@ -151,7 +231,7 @@ export function createServer(client: LastestClient): McpServer {
   // ===== lastest_repo (list, get, create, update, get_settings, update_settings) =====
   // Replaces lastest_list_repos, lastest_get_repo, lastest_create_repo, lastest_update_repo,
   // lastest_get_playwright_settings, lastest_update_playwright_settings.
-  server.tool(
+  defineTool(
     "lastest_repo",
     'Repository resource. `action`: "list" (all repos for the team), "get" (one repo — needs repositoryId), "create" (new local repo — needs name; optional baseUrl points the repo at an external app so generated tests target the right origin), "update" (rename / branches / baseUrl — needs repositoryId), "get_settings" (repo-level Playwright settings — needs repositoryId), "update_settings" (upsert repo-level Playwright settings — needs repositoryId + at least one field).',
     {
@@ -478,7 +558,7 @@ export function createServer(client: LastestClient): McpServer {
   // ===== lastest_area (list, create, update, delete, list_tests) =====
   // Replaces lastest_list_areas, lastest_create_area, lastest_update_area, lastest_delete_area,
   // lastest_list_tests_by_area.
-  server.tool(
+  defineTool(
     "lastest_area",
     'Functional-area resource (test groupings). `action`: "list" (areas for a repo — needs repositoryId), "create" (new area — needs name; optional repositoryId/parentId), "update" (rename/describe/reparent — needs functionalAreaId), "delete" (soft-delete; tests become unassigned — needs functionalAreaId), "list_tests" (tests within an area — needs functionalAreaId).',
     {
@@ -667,7 +747,7 @@ export function createServer(client: LastestClient): McpServer {
     cursorPlaybackSpeed: z.number().nonnegative().optional(),
     selectorTimeoutMs: z.number().nonnegative().optional(),
   });
-  server.tool(
+  defineTool(
     "lastest_test",
     'Test resource (read/update/delete). `action`: "list" (all tests in a repo with pass/fail status — needs repositoryId; pass filter:"failing" to return only failing tests with error details), "get" (full details of one test incl. code/URL/last run — needs testId), "update" (name/code/URL/area/setup wiring/runtime overrides — needs testId), "delete" (soft-delete, restorable — needs testId). To create a test use lastest_create_test; to auto-fix a failing test use lastest_heal_test. For update, pass `setupTestId` to point this test at another test for setup, or `setupScriptId` to point at a saved setup script (mutually exclusive). Use `setupOverrides`/`teardownOverrides` to skip default steps or inject extra ones. `playwrightOverrides` self-configures runtime knobs without touching repo settings. Pass `null` for any override block to clear it.',
     {
@@ -920,7 +1000,7 @@ export function createServer(client: LastestClient): McpServer {
 
   // ===== lastest_storage_state (list, create, delete) =====
   // Replaces lastest_list_storage_states, lastest_create_storage_state, lastest_delete_storage_state.
-  server.tool(
+  defineTool(
     "lastest_storage_state",
     'Storage-state resource — saved Playwright `storageState()` blobs (cookies + localStorage). `action`: "list" (metadata only for a repo; raw JSON omitted because it holds live auth tokens — needs repositoryId), "create" (save a new state from a storageState() JSON string — needs repositoryId + name + storageStateJson), "delete" (remove a state — needs storageStateId). Wire a state into a test with lastest_test action:"update" using setupOverrides.extraSteps.',
     {
@@ -1060,7 +1140,7 @@ export function createServer(client: LastestClient): McpServer {
 
   // ===== lastest_setup_script (list, get, create, update, delete) =====
   // Replaces the 5 setup-script tools.
-  server.tool(
+  defineTool(
     "lastest_setup_script",
     'Setup-script resource — reusable Playwright/API setup blocks. `action`: "list" (scripts for a repo with id/name/type/code — needs repositoryId), "get" (one script incl. code — needs setupScriptId), "create" (new script — needs repositoryId + name + type + code), "update" (name/type/code/description — needs setupScriptId), "delete" (remove; 409 if a test still references it — needs setupScriptId). Attach a script to a test via lastest_test action:"update" with setupScriptId.',
     {
@@ -1233,7 +1313,7 @@ export function createServer(client: LastestClient): McpServer {
 
   // ===== lastest_get_diffs (scope: single | build) =====
   // Replaces lastest_get_diff, lastest_get_visual_diff.
-  server.tool(
+  defineTool(
     "lastest_get_diffs",
     'Read visual diffs. `scope`: "single" (full details of one visual diff incl. pixel data, AI analysis, test info — needs diffId), "build" (all visual diffs for a build with AI classification/confidence + aiAnalysis commentary — needs buildId). For "build", pass `full: true` only if you also need the heavy joined payloads.',
     {
@@ -1334,7 +1414,7 @@ export function createServer(client: LastestClient): McpServer {
   // ===== lastest_decide_diff (approve | reject) =====
   // Replaces lastest_approve_diff, lastest_reject_diff, lastest_approve_all_diffs,
   // lastest_approve_baseline, lastest_reject_baseline.
-  server.tool(
+  defineTool(
     "lastest_decide_diff",
     'Approve or reject visual diffs (updates baselines / marks regressions). `action`: "approve" or "reject". Provide either `diffIds` (a batch of one or more diff IDs to approve/reject) OR, for action:"approve", a `buildId` to approve ALL pending diffs in that build at once. Exactly one of diffIds / buildId is required.',
     {
@@ -1417,7 +1497,7 @@ export function createServer(client: LastestClient): McpServer {
   // ===== lastest_build (list, get, review) =====
   // Replaces lastest_list_builds, lastest_get_build_status, lastest_review_build.
   // (lastest_get_test_run is dropped — build "get" covers it.)
-  server.tool(
+  defineTool(
     "lastest_build",
     'Build resource. `action`: "list" (recent builds for a repo with status/test counts — needs repositoryId; optional limit), "get" (current status & results of a build; slim diff index by default — needs buildId; pass includeDiffs:"full" for joined a11y/network/AI payloads), "review" (comprehensive QA review: build details + visual diffs + failed tests into a structured summary with action items — needs buildId).',
     {
@@ -1651,7 +1731,7 @@ export function createServer(client: LastestClient): McpServer {
   // ===== lastest_share (list, revoke) =====
   // Replaces lastest_list_build_shares, lastest_list_test_shares, lastest_revoke_share.
   // (Publishing stays as lastest_publish_share.)
-  server.tool(
+  defineTool(
     "lastest_share",
     'Manage existing public shares (publishing is lastest_publish_share). `action`: "list" (shares anchored on a build — needs buildId — or on a test — needs testId; includes revoked ones, check `status`), "revoke" (kill a share by its share ID so the /r/<slug> URL stops resolving — needs shareId; find share IDs via a "list" call).',
     {
@@ -1752,7 +1832,7 @@ export function createServer(client: LastestClient): McpServer {
 
   // ===== lastest_verify (view, change_map) =====
   // Replaces lastest_verify_build, lastest_get_change_map.
-  server.tool(
+  defineTool(
     "lastest_verify",
     'Verify-phase reads for a build (needs buildId). `action`: "view" (full verify-build view — Change Map + step comparisons grouped by regression vs intent gate, plus `visualUrlsByDiffId` clickable /api/media URLs and `testsByTestId` source/setup hints), "change_map" (just the build-level Change Map — 4-signal area ranking + AI intent/risk summary).',
     {
@@ -1792,7 +1872,7 @@ export function createServer(client: LastestClient): McpServer {
 
   // ===== lastest_insights (coverage, qa) =====
   // Replaces lastest_get_coverage, lastest_qa_summary.
-  server.tool(
+  defineTool(
     "lastest_insights",
     'Repository-level insights (needs repositoryId). `action`: "coverage" (STRUCTURAL coverage — which routes and functional areas have any test at all), "data_coverage" (DATA coverage — the combinatorial cell model: cell/t-way/weighted-volume coverage, the stopping decision, the highest-weight uncovered cells, and the coverage trend over recent builds), "qa" (comprehensive QA overview: test health, recent builds, and action items). Use "data_coverage" for "are we testing enough of the data space / is coverage improving"; "coverage" only answers "which pages have a test".',
     {
@@ -1992,7 +2072,7 @@ export function createServer(client: LastestClient): McpServer {
   );
 
   // ===== lastest_qa_agent (ongoing QA agent: status, runs, direction queue) =====
-  server.tool(
+  defineTool(
     "lastest_qa_agent",
     'Drive the ongoing QA agent for a repository (needs repositoryId). `action`: "status" (live session, latest coverage summary, task board, trigger config), "start_run" (start an autonomous run — optional mode full|refresh_spec|fill_gaps and targetUrl; 409 when a session is already running), "run_status" (poll a session by sessionId), "add_task" (queue a directive on the agent\'s task board — it picks tasks up when idle, works them with the right protocol, and replies on the card), "list_tasks" (the task board).',
     {
@@ -2154,7 +2234,7 @@ export function createServer(client: LastestClient): McpServer {
   // ===== Workflow verbs (standalone, unchanged) =====
 
   // --- lastest_run_tests ---
-  server.tool(
+  defineTool(
     "lastest_run_tests",
     "Trigger a test build and return structured results. Can run all tests in a repo, all tests inside one functional area, or specific test IDs. Pass `forceVideoRecording: true` when you intend to publish a share that should include the video player (the share page renders the embedded clip only when the build has video).",
     {
@@ -2210,7 +2290,7 @@ export function createServer(client: LastestClient): McpServer {
   );
 
   // --- lastest_validate_diff ---
-  server.tool(
+  defineTool(
     "lastest_validate_diff",
     "Diff-scoped validation in one call: pass a git diff (or a base/head branch range for GitHub repos) and Lastest maps the changed files to the affected tests, runs ONLY those, and returns a pass/fail/review verdict with the failing tests and pending visual changes. Use this in a coding-agent loop right after making a change to confirm nothing relevant broke, without running the whole suite. Blocks until the scoped build finishes by default; pass `wait: false` to get a buildId to poll instead.",
     {
@@ -2283,7 +2363,7 @@ export function createServer(client: LastestClient): McpServer {
   );
 
   // --- lastest_scout_url ---
-  server.tool(
+  defineTool(
     "lastest_scout_url",
     "Static (no-browser) scout of a URL: returns title, headings, forms, inputs, links, and candidate selectors to help you author a test. Best-effort — SPA/JS-rendered content won't appear, so prefer your own Playwright MCP for live pages and use this only as a fallback or quick map.",
     {
@@ -2309,7 +2389,7 @@ export function createServer(client: LastestClient): McpServer {
   );
 
   // --- lastest_ranger ---
-  server.tool(
+  defineTool(
     "lastest_ranger",
     "Start a 'ranger' — an Embedded Browser that navigates a URL live and returns a rendered (SPA-aware) page map: headings, landmarks, forms, inputs, buttons, links, test-ids, and candidate selectors. Unlike lastest_scout_url (static, instant), ranger drives a real browser and is WATCHABLE in the Lastest activity feed via a live stream. Async: returns a sessionId immediately — poll lastest_ranger_status for the live streamUrl and the final page map. Prefer your own Playwright MCP if you have one; use ranger when you don't, or want a watchable run on a JS-rendered page.",
     {
@@ -2348,7 +2428,7 @@ export function createServer(client: LastestClient): McpServer {
   );
 
   // --- lastest_ranger_status ---
-  server.tool(
+  defineTool(
     "lastest_ranger_status",
     "Poll a ranger session: returns its status, the live stream URL (watchable while it runs), and — once completed — the rendered page map to author tests from.",
     {
@@ -2382,7 +2462,7 @@ export function createServer(client: LastestClient): McpServer {
   );
 
   // --- lastest_explorer ---
-  server.tool(
+  defineTool(
     "lastest_explorer",
     "Start the Explorer — an autonomous exploratory-testing agent (explorbot-style). It loops research → plan → act → analyze on a live Embedded Browser: maps each page, drafts scenarios in rotating styles (normal/curious/psycho), drives the browser through them adapting as it goes, records defect/UX findings clustered by root cause, learns per-page experience reused on later runs, and keeps passing flows as quarantined tests. WATCHABLE live in the Lastest activity feed. Async: returns a sessionId — poll lastest_explorer_status.",
     {
@@ -2419,7 +2499,7 @@ export function createServer(client: LastestClient): McpServer {
   );
 
   // --- lastest_explorer_status ---
-  server.tool(
+  defineTool(
     "lastest_explorer_status",
     "Poll an explorer session: status, current iteration, live stream URL, findings summary, and — once completed — the root-cause-clustered report plus any kept test ids.",
     {
@@ -2453,7 +2533,7 @@ export function createServer(client: LastestClient): McpServer {
   );
 
   // --- lastest_explorer_findings ---
-  server.tool(
+  defineTool(
     "lastest_explorer_findings",
     "List the full finding rows (defects + UX issues with severity, root-cause cluster, page state, and evidence) recorded by an explorer session.",
     {
@@ -2481,7 +2561,7 @@ export function createServer(client: LastestClient): McpServer {
   );
 
   // --- lastest_explorer_learn ---
-  server.tool(
+  defineTool(
     "lastest_explorer_learn",
     "Teach the Explorer about the app: store a knowledge note (markdown hint) matched to pages by URL pattern — quirks, form rules, test data, navigation notes. Matching notes are injected into the explorer's planning and testing prompts on later runs (explorbot's /learn).",
     {
@@ -2526,7 +2606,7 @@ export function createServer(client: LastestClient): McpServer {
   );
 
   // --- lastest_create_test ---
-  server.tool(
+  defineTool(
     "lastest_create_test",
     'Create a test. **Preferred (MCP-first): DIRECT browser mode** — YOU write the Playwright code and pass { name, code }. First read the resource lastest://repo/{repositoryId}/authoring-guide for the exact runner contract + this repo\'s base URL, areas, and setup; discover selectors with your Playwright MCP (or lastest_scout_url). The `author-test` prompt walks the whole flow. Other modes: **AI browser** ({ url } and/or { prompt }) has the Lastest AI generate the test server-side (only if in-product AI is configured there — else fall back to direct). **direct API** (E1) — { name, testType:"api", apiDefinition } inserts a headless HTTP test (method/url/headers/body + assertions, runs without a browser). **AI API** (E1) — { testType:"api", prompt } (and optionally endpoint/openapiSpec) has the AI generate an API test. Direct modes return immediately; AI modes may take longer.',
     {
@@ -2744,7 +2824,7 @@ export function createServer(client: LastestClient): McpServer {
   );
 
   // --- lastest_heal_test ---
-  server.tool(
+  defineTool(
     "lastest_heal_test",
     "Trigger the AI healer agent to automatically fix a failing test by inspecting the live UI and updating selectors/assertions.",
     {
@@ -2774,7 +2854,7 @@ export function createServer(client: LastestClient): McpServer {
   );
 
   // --- lastest_suggest_app_fix ---
-  server.tool(
+  defineTool(
     "lastest_suggest_app_fix",
     'For a failing test classified as a real regression, get a structured APPLICATION-code fix recommendation (file, snippet, rationale) localized against the build\'s change map. This is the "fix the app" loop: it complements lastest_heal_test (which fixes the *test*). The suggestion is advisory only — Lastest never edits your application code; review and apply it yourself. Returns `not_a_regression` when the failure was triaged as flaky/environment/test-maintenance.',
     {
@@ -2811,7 +2891,7 @@ export function createServer(client: LastestClient): McpServer {
   );
 
   // --- lastest_publish_share (PROTECTED — shape unchanged) ---
-  server.tool(
+  defineTool(
     "lastest_publish_share",
     "Publish a public-share link for a build (or a single test within it). Returns a `/r/<slug>` URL anyone can view without logging in. Use after a build completes so demos and outreach messages can link directly to the visual result. Pass `scopedTestId` to scope the share to one test instead of the whole build.",
     {
@@ -2841,7 +2921,7 @@ export function createServer(client: LastestClient): McpServer {
   );
 
   // --- lastest_approve_layer ---
-  server.tool(
+  defineTool(
     "lastest_approve_layer",
     "Per-layer feedback on a step comparison: approve (Mark expected → write baseline), reject (Needs fix → create todo), or snooze (suppress for this build only).",
     {
@@ -2891,7 +2971,7 @@ export function createServer(client: LastestClient): McpServer {
   // ===== QuickStart agent (PROTECTED — shapes unchanged) =====
 
   // --- lastest_quickstart ---
-  server.tool(
+  defineTool(
     "lastest_quickstart",
     "Productized form of /gtm-lastest-saas-demo. Spins up a 2-test demo (auth setup + app walkthrough) on a repo whose baseUrl is set, runs it with video, and writes build_demo_notes. Gated by team early-adopter mode + repo baseUrl. Returns a sessionId to poll with lastest_quickstart_status.",
     {
@@ -2966,7 +3046,7 @@ export function createServer(client: LastestClient): McpServer {
   );
 
   // --- lastest_quickstart_status ---
-  server.tool(
+  defineTool(
     "lastest_quickstart_status",
     "Poll a QuickStart session by ID. Returns step-by-step status, the auth-setup outcome, the walkthrough test ID, the build ID, and whether demo notes were written.",
     {

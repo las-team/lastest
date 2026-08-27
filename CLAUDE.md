@@ -133,7 +133,7 @@ Visual regression testing platform: Next.js 16 App Router, PostgreSQL (Drizzle O
 - `packages/pool-service/` — EB pool service (separate process, `pnpm dev:pool`): k8s/process provisioning, pool caps, warm pool, EB reapers; app consumes `@lastest/pool-service/client`
 - `packages/eb-protocol/` — canonical wire protocol app ↔ runners (`@lastest/eb-protocol`): command/response messages, stream messages, persisted jsonb payload shapes (schema.ts re-exports these)
 - `packages/runner/` — remote runner CLI (npm package via tsup)
-- `packages/mcp-server/` — MCP server for AI agent integration (`@lastest/mcp-server`)
+- `packages/mcp-server/` — MCP server for AI agent integration (`@lastest/mcp-server`). Three transports off one tool surface: the stdio CLI, a standalone Streamable HTTP server (`--transport http`), and the app's own `/api/mcp` route. `src/policy.ts` holds the read/write/full access-level table applied at tool-registration time — see `docs/architecture/remote-mcp-oauth.md` for the OAuth 2.1 story (`/api/mcp` is an OAuth-protected resource; `/.well-known/oauth-*` + `/oauth/mcp/authorize` + `/oauth/consent` are the discovery/consent chain). Both `/api/mcp` and `/.well-known/` must stay in `PUBLIC_PATHS` in `src/proxy.ts`
 - `packages/embedded-browser/` — containerized browser with CDP live streaming
 - `packages/ocr-service/` — Tesseract OCR container, the ONLY OCR backend (no in-process Tesseract in the app); app-side facade in `src/lib/ocr/` requires `OCR_SERVICE_URL` — unset means OCR features are disabled. The service wakes on demand and auto-sleeps after idle
 - `packages/vscode-extension/` — VS Code extension (esbuild)
