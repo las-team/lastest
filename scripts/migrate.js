@@ -13,8 +13,19 @@
  * DROP old + CREATE new, destroying the rows these steps exist to protect.
  * Only steps whose skip cannot make push destructive (preCreate, nullOrphans,
  * bumpPoolDefaults, ensureUniqueIndexes) stay warn-and-continue.
+ *
+ * renameCarriedConstraints() is FATAL for a different reason: skipping it does
+ * not destroy anything, it HANGS the deploy on an unanswerable drizzle-kit
+ * prompt until the Job's activeDeadlineSeconds kills the pod.
  */
 const { execSync } = require("child_process");
+
+// Upper bound on `drizzle-kit push`. See the catch in main() for why a wall
+// clock is needed at all. A real push is seconds of work (26s against
+// production), so 300s is ~10x headroom while still leaving room for a second
+// attempt inside the Job's 600s activeDeadlineSeconds — the deadline reports
+// nothing but a deadline, this reports the cause.
+const PUSH_TIMEOUT_MS = Number(process.env.MIGRATE_PUSH_TIMEOUT_MS || 300_000);
 
 // Tables drizzle-kit may wrongly interpret as renames of existing tables.
 // Add CREATE TABLE IF NOT EXISTS statements here as needed.
@@ -1277,6 +1288,89 @@ async function migrateQaAgentTables() {
   }
 }
 
+// Every `alter table … rename to …` above carries the table's constraints
+// across UNCHANGED: Postgres renames the relation, not the
+// `repo_awards_repository_id_unique` sitting on it. drizzle then diffs the
+// plugin schema's `.unique()` against the catalogue, finds no
+// `awards_repo_awards_repository_id_unique`, and plans to ADD it — and against
+// a table that already holds rows, drizzle-kit 0.31.x raises its "table isn't
+// empty — do you want to truncate?" *select* prompt. `--force` does NOT
+// suppress that one.
+//
+// A Job container has no stdin/tty, so the prompt can never be answered:
+// `execSync(…, stdio: "inherit")` blocks the whole process until
+// activeDeadlineSeconds kills the pod. Observed in production on
+// `awards_repo_awards` (1 row): 26s of real work, then 9m43s hung, nothing
+// truncated. It only fires on a NON-EMPTY table, which is why every empty-table
+// test run and every schema-only dump restore passed.
+//
+// Renaming the carried constraints to their post-rename names removes the diff,
+// so no prompt exists to hang on. This runs over ALL rename pairs and keys off
+// the DESTINATION table, independently of whether this boot did the rename —
+// databases renamed by an earlier deploy are exactly the ones carrying stale
+// names today (`share_public_shares` still has `public_shares_slug_unique`; it
+// is empty now, and the first public share arms an identical hang).
+const ALL_TABLE_RENAMES = [
+  ...EXPLORER_RENAMES,
+  ...GAMIFICATION_RENAMES,
+  ...CI_RENAMES,
+  ...SHARE_RENAMES,
+  ...AWARDS_RENAMES,
+  ...DATA_SOURCES_RENAMES,
+  ...SCHEDULING_RENAMES,
+  ...QA_AGENT_RENAMES,
+];
+
+async function renameCarriedConstraints() {
+  if (!process.env.DATABASE_URL) return;
+  let sql;
+  try {
+    sql = require("postgres")(process.env.DATABASE_URL);
+    for (const [from, to] of ALL_TABLE_RENAMES) {
+      const rows = await sql`
+        select con.conname as name
+          from pg_constraint con
+          join pg_class rel on rel.oid = con.conrelid
+          join pg_namespace ns on ns.oid = rel.relnamespace
+         where ns.nspname = 'public'
+           and rel.relname = ${to}`;
+      const names = rows.map((r) => r.name);
+      // Prefix match only — `repo_awards_repository_id_unique` on
+      // `awards_repo_awards` becomes `awards_repo_awards_repository_id_unique`,
+      // which is what drizzle derives for `.unique()`. Explicitly-named indexes
+      // (`idx_…`) are untouched: a missing index is a plain CREATE INDEX in
+      // push, never a prompt.
+      for (const name of names.filter((n) => n.startsWith(`${from}_`))) {
+        const renamed = `${to}${name.slice(from.length)}`;
+        if (names.includes(renamed)) {
+          // Both names already present — push sees the one it expects, so
+          // there is no diff and no prompt. Leave the stale one alone rather
+          // than dropping a constraint we did not create.
+          console.warn(
+            `[migrate] ${to}: ${renamed} already exists, leaving ${name} in place`,
+          );
+          continue;
+        }
+        // Metadata-only; renames the backing index with it.
+        await sql.unsafe(
+          `alter table "${to}" rename constraint "${name}" to "${renamed}"`,
+        );
+        console.log(`[migrate] ${to}: constraint ${name} -> ${renamed}`);
+      }
+    }
+  } catch (e) {
+    // FATAL. Skipping this is what hangs the deploy for the full
+    // activeDeadlineSeconds and then reports a timeout instead of a cause —
+    // far worse than exiting now with the reason on stdout. Nothing here is
+    // destructive, so a failure means the database is not in the shape push
+    // expects and a human should look.
+    console.error("[migrate] carried-constraint rename FAILED:", e.message);
+    throw e;
+  } finally {
+    if (sql) await sql.end();
+  }
+}
+
 async function main() {
   await preCreate();
   await migrateExplorerTables();
@@ -1288,6 +1382,7 @@ async function main() {
   await migrateDataSourcesTables();
   await migrateSchedulingTables();
   await migrateQaAgentTables();
+  await renameCarriedConstraints();
   await dropPluginUserForeignKeys();
   await nullOrphans();
   await bumpPoolDefaults();
@@ -1296,11 +1391,32 @@ async function main() {
   console.log("[migrate] Running drizzle-kit push...");
   try {
     execSync("./node_modules/.bin/drizzle-kit push --force 2>&1", {
-      stdio: "inherit",
+      // stdin is /dev/null, never the container's. This alone does NOT save us —
+      // verified: drizzle-kit's prompt blocks on a closed stdin exactly as it
+      // does on an empty one — but it keeps push from ever reading a real tty
+      // during an interactive `node scripts/migrate.js`. The timeout is the guard.
+      stdio: ["ignore", "inherit", "inherit"],
+      // Backstop for the same class of bug. Without it an unanswerable prompt
+      // blocks until the Job's activeDeadlineSeconds kills the pod, and the only
+      // signal is a deadline: no failing statement, no exit code, no cause.
+      // Kept under the 600s activeDeadlineSeconds in k8s/migrate-job.yaml so
+      // THIS reports the reason first.
+      timeout: PUSH_TIMEOUT_MS,
+      killSignal: "SIGKILL",
     });
     console.log("[migrate] Done");
   } catch (e) {
-    console.error("[migrate] Failed:", e.message);
+    if (e.killed || e.signal === "SIGKILL") {
+      console.error(
+        `[migrate] Failed: drizzle-kit push was killed after ${PUSH_TIMEOUT_MS}ms. ` +
+          'That is almost always an interactive drizzle-kit prompt ("truncate?", ' +
+          '"is this a rename?") — --force does not suppress every one of them, and a ' +
+          "container with no tty can never answer. The question is the last thing on " +
+          "stdout above; resolve it in a pre-push step here, not by answering it.",
+      );
+    } else {
+      console.error("[migrate] Failed:", e.message);
+    }
     process.exit(1);
   }
 }
