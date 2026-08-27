@@ -335,25 +335,38 @@ deploy_olares() {
 deploy_npm() {
   log "Publishing @lastest/runner to npm"
 
-  # Sync version from root
   local runner_dir="$ROOT_DIR/packages/runner"
-  local current=$(node -p "require('$runner_dir/package.json').version")
 
-  if [ "$current" != "$VERSION" ]; then
-    log "Syncing version $current → $VERSION"
-    node -e "
-      const fs = require('fs');
-      const pkg = JSON.parse(fs.readFileSync('$runner_dir/package.json', 'utf8'));
-      pkg.version = '$VERSION';
-      fs.writeFileSync('$runner_dir/package.json', JSON.stringify(pkg, null, 2) + '\n');
-    "
+  # The runner is a published npm package on its own semver line; the root
+  # package.json version tracks the app and is unrelated. Overwriting the
+  # runner's version with the app's (as this used to) tried to republish
+  # whatever the app happened to be at — an already-published version, so the
+  # publish failed — while the version the CI workflow pins never reached the
+  # registry at all. packages/runner/package.json is the source of truth.
+  local runner_version
+  runner_version=$(node -p "require('$runner_dir/package.json').version")
+
+  # Refuse to republish. npm rejects it regardless; failing here says why.
+  if npm view "@lastest/runner@$runner_version" version >/dev/null 2>&1; then
+    err "@lastest/runner@$runner_version is already published - bump packages/runner/package.json first"
+  fi
+
+  # The CI workflow generators pin an exact runner version. Shipping one they
+  # do not reference publishes a package no generated workflow will install.
+  local pinned
+  pinned=$(grep -ho 'RUNNER_VERSION = "[^"]*"' \
+    "$ROOT_DIR/plugins/ci/src/domain/workflow-yaml.ts" \
+    "$ROOT_DIR/plugins/ci/src/domain/ci-yaml.ts" 2>/dev/null \
+    | sed 's/.*"\(.*\)"/\1/' | sort -u)
+  if [ -n "$pinned" ] && [ "$pinned" != "$runner_version" ]; then
+    err "plugins/ci pins $(echo $pinned) but packages/runner is $runner_version - sync them first"
   fi
 
   cd "$runner_dir"
   pnpm build
   pnpm publish --no-git-checks --access public
   cd "$ROOT_DIR"
-  ok "Published @lastest/runner@$VERSION"
+  ok "Published @lastest/runner@$runner_version"
 }
 
 deploy_all() {
