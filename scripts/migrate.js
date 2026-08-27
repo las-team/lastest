@@ -1364,7 +1364,10 @@ async function renameCarriedConstraints() {
     // far worse than exiting now with the reason on stdout. Nothing here is
     // destructive, so a failure means the database is not in the shape push
     // expects and a human should look.
-    console.error("[migrate] carried-constraint rename FAILED:", e.message);
+    console.error(
+      "[migrate] carried-constraint rename FAILED:",
+      e instanceof Error ? e.message : e,
+    );
     throw e;
   } finally {
     if (sql) await sql.end();
@@ -1406,7 +1409,10 @@ async function main() {
     });
     console.log("[migrate] Done");
   } catch (e) {
-    if (e.killed || e.signal === "SIGKILL") {
+    // `catch` binds `unknown`; execSync surfaces a timeout kill as `killed` /
+    // `signal` on the thrown Error, neither of which is on the Error type.
+    const err = /** @type {any} */ (e);
+    if (err.killed || err.signal === "SIGKILL") {
       console.error(
         `[migrate] Failed: drizzle-kit push was killed after ${PUSH_TIMEOUT_MS}ms. ` +
           'That is almost always an interactive drizzle-kit prompt ("truncate?", ' +
@@ -1415,7 +1421,7 @@ async function main() {
           "stdout above; resolve it in a pre-push step here, not by answering it.",
       );
     } else {
-      console.error("[migrate] Failed:", e.message);
+      console.error("[migrate] Failed:", err.message);
     }
     process.exit(1);
   }
