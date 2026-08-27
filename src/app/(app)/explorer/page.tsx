@@ -6,6 +6,7 @@ import { getCurrentSession } from "@/lib/auth";
 import { getSelectedRepository, getAISettings } from "@/lib/db/queries";
 import { getEnvironmentConfig } from "@/server/actions/environment";
 import { ExplorerBrowserViewer } from "@/components/explorer-browser-viewer";
+import { AgentBreadcrumb } from "@/components/agents/agent-breadcrumb";
 import { QaAgentUpgradeGate } from "@lastest/plugin-qa-agent/ui/qa-agent-upgrade-gate";
 import { qaAgentMinPlanName } from "@/lib/billing/feature-access";
 import { planConfig } from "@/lib/billing/plans";
@@ -61,6 +62,7 @@ export default async function Page() {
         aiSettings?.provider && aiSettings.provider !== "none",
       )}
       browserViewer={ExplorerBrowserViewer}
+      breadcrumb={<AgentBreadcrumb current="Explorer" />}
       upgradeGate={
         team ? (
           <QaAgentUpgradeGate

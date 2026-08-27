@@ -186,6 +186,52 @@ export function idleRow(kind: FleetAgentKind): FleetRow {
   };
 }
 
+/**
+ * The explorer's projection, as a roster row.
+ *
+ * Kept here beside `rowFromSession` rather than in the read port so both
+ * sources land on one shape and one set of rules — the console must not care
+ * which table a row came from.
+ */
+export function rowFromExplorer(session: {
+  id: string;
+  status: "active" | "paused";
+  stepLabel: string | null;
+  stepDetail: string | null;
+  progress: number;
+  awaitingUser: boolean;
+  startedAt: Date | null;
+  targetUrl: string | null;
+}): FleetRow {
+  const state: FleetState =
+    session.status === "paused"
+      ? "paused"
+      : session.awaitingUser
+        ? "blocked"
+        : "working";
+  const narration = session.stepLabel
+    ? session.stepDetail
+      ? `${session.stepLabel} — ${session.stepDetail}`
+      : session.stepLabel
+    : null;
+  return {
+    id: session.id,
+    kind: "explorer",
+    label: KIND_LABELS.explorer,
+    state,
+    narration: session.targetUrl
+      ? `${narration ?? "Exploring"} · ${session.targetUrl}`
+      : narration,
+    progress: session.progress,
+    // Explorer's steps carry no sub-agent role the way a QA run's do.
+    role: null,
+    href: KIND_HREFS.explorer,
+    startedAt: session.startedAt,
+    blockedOn: state === "blocked" ? session.stepLabel : null,
+    holdsBrowser: state === "working" || state === "blocked",
+  };
+}
+
 export interface FleetSummary {
   working: number;
   blocked: number;

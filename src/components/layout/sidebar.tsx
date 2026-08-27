@@ -17,7 +17,6 @@ import {
   ShieldCheck,
   GitCommit,
   Wrench,
-  Compass,
   Network,
   Lock,
   Waypoints,
@@ -83,7 +82,6 @@ const definitionNav = [
 const executionNav = [
   { name: "Runs", href: "/run", icon: Play },
   { name: "Agents", href: "/agents", icon: Network },
-  { name: "Explorer", href: "/explorer", icon: Compass },
   { name: "Compare", href: "/compare", icon: GitCompare },
   { name: "Impact", href: "/analytics/impact", icon: TrendingDown },
 ];
