@@ -33,6 +33,7 @@ import { UserMenu } from "@/components/auth/user-menu";
 import { InlineScore } from "@lastest/plugin-gamification/ui/score-chip";
 import { SidebarQuickActions } from "./sidebar-quick-actions";
 import { hasQaAgentAccess } from "@/lib/billing/feature-access";
+import { isRegulatedTeam, REGULATED_HIDDEN_NAV } from "@/lib/segment/regulated";
 import type { Repository, User, Team, EmbeddedSession } from "@/lib/db/schema";
 
 interface SidebarProps {
@@ -115,7 +116,16 @@ export function Sidebar({
     (searchParams.get("success") === "github_connected" ||
       searchParams.get("success") === "gitlab_connected");
   const earlyAdopter = team?.earlyAdopterMode ?? false;
-  const gamificationEnabled = team?.gamificationEnabled ?? false;
+  // Regulated (pharma) profile — see `src/lib/segment/regulated.ts`. Nav
+  // filtering here is merchandising, not access control: the destinations stay
+  // reachable by URL, and the one restriction that is a real control (public
+  // sharing) is refused server-side instead.
+  const regulated = isRegulatedTeam(team);
+  // Gamification is force-off under the regulated profile rather than merely
+  // filtered out of the nav list: it also drives the score chip and the
+  // Leaderboard group, which render outside `filteredDefinitionNav`.
+  const gamificationEnabled =
+    (team?.gamificationEnabled ?? false) && !regulated;
   const verifyPhaseEnabled = team?.verifyPhaseEnabled ?? false;
   // Agents is a Pro-tier feature — surface a lock on the nav item so the
   // gated destination doesn't look identical to unlocked pages.
@@ -123,9 +133,16 @@ export function Sidebar({
     ? !hasQaAgentAccess(team.plan, billingEnabled)
     : false;
 
-  const filteredDefinitionNav = earlyAdopter
-    ? definitionNav
-    : definitionNav.filter((item) => !EARLY_ADOPTER_ITEMS.has(item.name));
+  const hideForSegment = (items: typeof definitionNav) =>
+    regulated
+      ? items.filter((item) => !REGULATED_HIDDEN_NAV.has(item.name))
+      : items;
+
+  const filteredDefinitionNav = hideForSegment(
+    earlyAdopter
+      ? definitionNav
+      : definitionNav.filter((item) => !EARLY_ADOPTER_ITEMS.has(item.name)),
+  );
 
   // Verify lives in the Execution section. When the flag is on it sits at
   // the top of that group; legacy /run, /review etc remain accessible so
@@ -135,9 +152,11 @@ export function Sidebar({
     href: "/verify",
     icon: ShieldCheck,
   } as const;
-  const filteredExecutionNav = earlyAdopter
-    ? executionNav
-    : executionNav.filter((item) => !EARLY_ADOPTER_ITEMS.has(item.name));
+  const filteredExecutionNav = hideForSegment(
+    earlyAdopter
+      ? executionNav
+      : executionNav.filter((item) => !EARLY_ADOPTER_ITEMS.has(item.name)),
+  );
   const finalExecutionNav = verifyPhaseEnabled
     ? [verifyEntry, ...filteredExecutionNav]
     : filteredExecutionNav;

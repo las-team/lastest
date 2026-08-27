@@ -1,0 +1,322 @@
+/**
+ * Pharma / life-sciences onboarding seed.
+ *
+ * Creates the two suites a Veeva consultant actually came for — Vault release
+ * regression and Salesforce release regression — plus the regulated
+ * check-layer defaults, so the pharma fork of onboarding lands on a repo that
+ * already looks like their job rather than on an empty project.
+ *
+ * Both tests are seeded **quarantined**. They cannot run yet: there is no
+ * per-repo secret store, so `process.env.VAULT_USER` inside a test resolves
+ * against the embedded browser's own process environment (see
+ * `docs/pharma-restricted-scope.md` §2.1). Seeding them green-able would be a
+ * lie; seeding them quarantined, with the blocking reason in the first line of
+ * the failure, is the honest version — and it matches how the same two tests
+ * ship in the MuniConS bundle.
+ *
+ * Sibling of `sandbox-seeds.ts` and deliberately shaped like it: same
+ * area→test→version insert, same "no-op if the repo already has tests"
+ * idempotence.
+ */
+import { db } from "@/lib/db";
+import { tests, testVersions, functionalAreas } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { randomUUID as uuid } from "crypto";
+import { upsertPlaywrightSettings } from "@/lib/db/queries/settings";
+import { REGULATED_CHECK_MODES } from "@/lib/segment/regulated";
+
+const VAULT_CODE = `export async function test(page, baseUrl, screenshotPath, stepLogger) {
+  // ───────────────────────────────────────────────────────────────────────────
+  // QUARANTINED — blocked on credentials, so it never reds your first build.
+  //
+  // Vault ships three general releases a year. Each lands in your sandbox
+  // weeks before production, and every validated configuration on top of it
+  // has to be re-checked. That re-check is a person with a script and a
+  // screenshot folder. This is that person's checklist, executed on every
+  // release and diffed against the last known-good run.
+  //
+  // To unblock:
+  //   1. Point this test's target URL at a Vault SANDBOX (never production).
+  //   2. Provide a service account with a fixed, known role — a permission
+  //      change should surface as a test failure, not as noise.
+  //   3. Seed a fixture document the account may move through the lifecycle.
+  // ───────────────────────────────────────────────────────────────────────────
+  const shot = (n, slug) => screenshotPath.replace('.png', \`-\${n}-\${slug}.png\`);
+  const VAULT_USER = process.env.VAULT_USER;
+  const VAULT_PASSWORD = process.env.VAULT_PASSWORD;
+  const DOC_ID = process.env.VAULT_DOC_ID; // seeded fixture document
+
+  if (!VAULT_USER || !VAULT_PASSWORD) {
+    throw new Error('Blocked: VAULT_USER / VAULT_PASSWORD are not available to this run, and this test targets a Vault sandbox. Lastest has no per-repo secret store yet — see docs/pharma-restricted-scope.md §2.1.');
+  }
+
+  // ── 1. Authentication ─────────────────────────────────────────────────────
+  stepLogger.log('Scenario 1: Vault login');
+  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+  await page.getByLabel(/user name|username/i).fill(VAULT_USER);
+  await page.getByLabel(/password/i).fill(VAULT_PASSWORD);
+  await page.getByRole('button', { name: /log ?in|sign in/i }).click();
+  await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
+  await page.screenshot({ path: shot(1, 'vault-home') });
+
+  // ── 2. Document lifecycle state and available user actions ────────────────
+  // A release regression most often shows up as an action that quietly
+  // disappears from the lifecycle menu for a given role.
+  stepLogger.log('Scenario 2: document lifecycle actions');
+  await page.goto(new URL(\`/ui/#doc_info/\${DOC_ID}\`, baseUrl).toString(), { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('[class*="doc-info"], [data-testid="document-header"]', { timeout: 30000 });
+
+  const state = await page.locator('[class*="lifecycle-state"], [data-field="status__v"]').first().innerText();
+  stepLogger.log(\`lifecycle state: \${state}\`);
+
+  const actions = await page.locator('[class*="user-action"], [role="menuitem"]').allInnerTexts();
+  stepLogger.log(\`available user actions: \${actions.join(' | ')}\`);
+  await page.screenshot({ path: shot(2, 'doc-lifecycle-actions') });
+
+  // ── 3. 21 CFR Part 11 eSignature manifestation ────────────────────────────
+  // Part 11 §11.50 requires the signature manifestation to carry the signer's
+  // printed name, the date and time of signing, and the MEANING of the
+  // signature. Those three are asserted literally, because a template change
+  // that drops "Meaning" is a compliance finding, not a cosmetic one.
+  stepLogger.log('Scenario 3: eSignature manifestation (21 CFR Part 11 §11.50)');
+  await page.getByRole('button', { name: /approve|complete review/i }).click();
+  const signature = page.locator('[class*="esignature"], [role="dialog"]').first();
+  await signature.waitFor({ state: 'visible', timeout: 20000 });
+  await page.screenshot({ path: shot(3, 'esignature-dialog') });
+
+  const manifest = await signature.innerText();
+  const missing = ['name', 'date', 'meaning'].filter((token) => !new RegExp(token, 'i').test(manifest));
+  if (missing.length) throw new Error(\`eSignature manifestation is missing required Part 11 element(s): \${missing.join(', ')}\`);
+
+  // Cancel — do not actually sign. A signed record in a validated sandbox is
+  // an audit-trail entry that cannot be removed.
+  await page.getByRole('button', { name: /cancel/i }).click();
+
+  // ── 4. Audit trail ────────────────────────────────────────────────────────
+  stepLogger.log('Scenario 4: audit trail renders and is ordered');
+  await page.goto(new URL(\`/ui/#doc_info/\${DOC_ID}/audit_trail\`, baseUrl).toString(), { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('table, [role="grid"]', { timeout: 30000 });
+  const rows = await page.locator('table tbody tr, [role="row"]').count();
+  if (rows === 0) throw new Error('Audit trail rendered no entries — Part 11 §11.10(e) requires a retrievable audit trail.');
+  stepLogger.log(\`audit trail rows: \${rows}\`);
+  await page.screenshot({ path: shot(4, 'audit-trail') });
+
+  // ── 5. Visual baseline of the configured surfaces ─────────────────────────
+  // Everything above is a functional assertion. This is the part that catches
+  // what assertions never do: a Vault release restyling a custom layout,
+  // truncating a field label, or reflowing a section so it no longer prints.
+  stepLogger.log('Scenario 5: visual baselines for configured layouts');
+  for (const [n, [slug, hash]] of [['doc-viewer', \`#doc_info/\${DOC_ID}\`], ['library', '#library'], ['my-tasks', '#tasks']].entries()) {
+    await page.goto(new URL(\`/ui/\${hash}\`, baseUrl).toString(), { waitUntil: 'domcontentloaded' });
+    await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+    await page.screenshot({ path: shot(5 + n, \`vault-\${slug}\`), fullPage: true });
+  }
+
+  await page.screenshot({ path: screenshotPath });
+  stepLogger.log('Vault release regression pass complete.');
+}
+`;
+
+const SALESFORCE_CODE = `export async function test(page, baseUrl, screenshotPath, stepLogger) {
+  // ───────────────────────────────────────────────────────────────────────────
+  // QUARANTINED — blocked on credentials, so it never reds your first build.
+  //
+  // Salesforce ships three seasonal releases a year (Spring, Summer, Winter)
+  // and pushes them to sandboxes on a published preview window. The regression
+  // surface that actually breaks is rarely Apex — it is Lightning page
+  // layouts, LWC rendering, validation rules and Flow screens, none of which
+  // unit tests see. This test walks those.
+  //
+  // To unblock: point the target URL at a Salesforce SANDBOX or Developer org
+  // and provide SF_USER / SF_PASSWORD.
+  // ───────────────────────────────────────────────────────────────────────────
+  const shot = (n, slug) => screenshotPath.replace('.png', \`-\${n}-\${slug}.png\`);
+  const SF_USER = process.env.SF_USER;
+  const SF_PASSWORD = process.env.SF_PASSWORD;
+
+  if (!SF_USER || !SF_PASSWORD) {
+    throw new Error('Blocked: SF_USER / SF_PASSWORD are not available to this run, and this test targets a Salesforce sandbox. Lastest has no per-repo secret store yet — see docs/pharma-restricted-scope.md §2.1.');
+  }
+
+  // ── 1. Login ──────────────────────────────────────────────────────────────
+  stepLogger.log('Scenario 1: Salesforce login');
+  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+  await page.locator('#username').fill(SF_USER);
+  await page.locator('#password').fill(SF_PASSWORD);
+  await page.locator('#Login').click();
+  await page.waitForLoadState('networkidle', { timeout: 40000 }).catch(() => {});
+  await page.screenshot({ path: shot(1, 'sf-home') });
+
+  // ── 2. Lightning record page renders its configured components ────────────
+  stepLogger.log('Scenario 2: Lightning record page layout');
+  await page.goto(new URL('/lightning/o/Account/list', baseUrl).toString(), { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('table[role="grid"], .slds-table', { timeout: 40000 });
+  await page.locator('table a[data-refid="recordId"]').first().click();
+  await page.waitForSelector('.slds-page-header, records-lwc-highlights-panel', { timeout: 40000 });
+
+  // A release regression here reads as "a component silently stopped rendering".
+  for (const region of ['records-lwc-highlights-panel', 'flexipage-component2', 'records-record-layout-section']) {
+    const count = await page.locator(region).count();
+    stepLogger.log(\`\${region}: \${count} instance(s)\`);
+    if (count === 0) throw new Error(\`Lightning record page rendered no <\${region}> — a configured component is missing after the release.\`);
+  }
+  await page.screenshot({ path: shot(2, 'sf-record-page'), fullPage: true });
+
+  // ── 3. Validation rules still fire ────────────────────────────────────────
+  // Assert the org's declarative guardrails survive the upgrade. Edit and
+  // cancel — never save.
+  stepLogger.log('Scenario 3: validation rules');
+  await page.getByRole('button', { name: /^edit$/i }).first().click();
+  const modal = page.locator('.slds-modal, [role="dialog"]').first();
+  await modal.waitFor({ state: 'visible', timeout: 20000 });
+  await modal.getByLabel(/account name/i).fill('');
+  await modal.getByRole('button', { name: /save/i }).click();
+  const error = modal.locator('.slds-form-element__help, [role="alert"]').first();
+  await error.waitFor({ state: 'visible', timeout: 15000 });
+  stepLogger.log(\`validation message: \${(await error.innerText()).slice(0, 120)}\`);
+  await page.screenshot({ path: shot(3, 'sf-validation') });
+  await modal.getByRole('button', { name: /cancel/i }).click();
+
+  // ── 4. Visual baselines for the configured surfaces ───────────────────────
+  stepLogger.log('Scenario 4: visual baselines');
+  for (const [n, [slug, path]] of [['home', '/lightning/page/home'], ['accounts', '/lightning/o/Account/list'], ['reports', '/lightning/o/Report/home']].entries()) {
+    await page.goto(new URL(path, baseUrl).toString(), { waitUntil: 'domcontentloaded' });
+    await page.waitForLoadState('networkidle', { timeout: 25000 }).catch(() => {});
+    await page.screenshot({ path: shot(4 + n, \`sf-\${slug}\`), fullPage: true });
+  }
+
+  await page.screenshot({ path: screenshotPath });
+  stepLogger.log('Salesforce release regression pass complete.');
+}
+`;
+
+interface PharmaSeedTest {
+  name: string;
+  code: string;
+  targetUrl: string;
+  area: { name: string; description: string };
+}
+
+export const PHARMA_SEED_TESTS: readonly PharmaSeedTest[] = [
+  {
+    name: "Vault release regression",
+    code: VAULT_CODE,
+    // Placeholder host: the test is quarantined, and pointing a seeded test at
+    // a real Vault would be pointing it at somebody else's tenant.
+    targetUrl: "https://your-vault-sandbox.veevavault.com",
+    area: {
+      name: "Veeva Vault Release Regression",
+      description:
+        "Re-checks the customer's validated Vault configuration against each general release: lifecycle actions by role, the 21 CFR Part 11 §11.50 signature manifestation, a retrievable audit trail (§11.10(e)), and visual baselines of the configured document, library and task surfaces.",
+    },
+  },
+  {
+    name: "Salesforce release regression",
+    code: SALESFORCE_CODE,
+    targetUrl: "https://your-sandbox.my.salesforce.com",
+    area: {
+      name: "Salesforce Release Regression",
+      description:
+        "Walks the seasonal-release surface that unit tests never see: Lightning page layouts, LWC rendering, declarative validation rules, and visual baselines of home, list and report surfaces.",
+    },
+  },
+];
+
+/** Codes this module seeds. Lets callers recognise an untouched seed. */
+export const PHARMA_SEED_CODES: ReadonlySet<string> = new Set([
+  VAULT_CODE,
+  SALESFORCE_CODE,
+]);
+
+/**
+ * Seed the Vault + Salesforce suites into a repo and apply the regulated
+ * check-layer defaults.
+ *
+ * Idempotent: a no-op returning the existing first test when the repo already
+ * has any test, matching `seedSandboxTemplate`.
+ */
+export async function seedPharmaSuite(
+  repositoryId: string,
+): Promise<string | null> {
+  const existing = await db
+    .select({ id: tests.id })
+    .from(tests)
+    .where(eq(tests.repositoryId, repositoryId))
+    .limit(1);
+  if (existing.length > 0) return existing[0].id;
+
+  const now = new Date();
+  let firstTestId: string | null = null;
+
+  for (const seed of PHARMA_SEED_TESTS) {
+    const faId = uuid();
+    await db.insert(functionalAreas).values({
+      id: faId,
+      repositoryId,
+      name: seed.area.name,
+      parentId: null,
+      agentPlan: seed.area.description,
+      planGeneratedAt: now,
+    });
+
+    const testId = uuid();
+    await db.insert(tests).values({
+      id: testId,
+      repositoryId,
+      functionalAreaId: faId,
+      name: seed.name,
+      code: seed.code,
+      targetUrl: seed.targetUrl,
+      executionMode: "procedural",
+      // Neither can run until a sandbox URL and a service account exist.
+      // Quarantined tests run but never block a build.
+      quarantined: true,
+      isPlaceholder: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await db.insert(testVersions).values({
+      id: uuid(),
+      testId,
+      version: 1,
+      code: seed.code,
+      name: seed.name,
+      targetUrl: seed.targetUrl,
+      changeReason: "manual_edit",
+      createdAt: now,
+    });
+
+    firstTestId ??= testId;
+  }
+
+  await applyRegulatedCheckModes(repositoryId);
+
+  return firstTestId;
+}
+
+/**
+ * Write `REGULATED_CHECK_MODES` onto the repo's Playwright settings row.
+ *
+ * Split out so the settings toggle can re-apply the profile to an existing
+ * repo without re-seeding tests. Uses `upsert` rather than
+ * `updatePlaywrightSettingsByRepo`, because a repo created seconds ago has no
+ * settings row yet and the modes are the entire point of the profile.
+ */
+export async function applyRegulatedCheckModes(
+  repositoryId: string,
+): Promise<void> {
+  await upsertPlaywrightSettings(repositoryId, {
+    visualMode: REGULATED_CHECK_MODES.visual,
+    textMode: REGULATED_CHECK_MODES.text,
+    domMode: REGULATED_CHECK_MODES.dom,
+    networkMode: REGULATED_CHECK_MODES.network,
+    consoleMode: REGULATED_CHECK_MODES.console,
+    perfMode: REGULATED_CHECK_MODES.perf,
+    urlMode: REGULATED_CHECK_MODES.url,
+    apiMode: REGULATED_CHECK_MODES.api,
+    storageMode: REGULATED_CHECK_MODES.storage,
+    a11yMode: REGULATED_CHECK_MODES.a11y,
+    designMode: REGULATED_CHECK_MODES.design,
+  });
+}

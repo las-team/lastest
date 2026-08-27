@@ -410,7 +410,10 @@ export async function deleteRepository(id: string) {
  */
 export async function getRepositoryOwnerTeamFlags(repositoryId: string) {
   const [row] = await db
-    .select({ earlyAdopterMode: teams.earlyAdopterMode })
+    .select({
+      earlyAdopterMode: teams.earlyAdopterMode,
+      regulatedMode: teams.regulatedMode,
+    })
     .from(repositories)
     .innerJoin(teams, eq(repositories.teamId, teams.id))
     .where(eq(repositories.id, repositoryId))

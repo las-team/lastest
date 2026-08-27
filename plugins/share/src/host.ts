@@ -245,10 +245,16 @@ export interface ShareHost {
 
   /** Feature flags of the team that owns a share's repository. The share
    *  page has no session, so it reads the OWNER's flags, not the anonymous
-   *  visitor's. */
+   *  visitor's.
+   *
+   *  `regulatedMode` is the one flag here that is a *control* rather than a
+   *  presentation hint: a team on the regulated (pharma) profile may not mint
+   *  public share links at all, because an anonymous URL serving screenshots
+   *  of a validated system is a data-protection problem. `publishBuildShare`
+   *  refuses on it. */
   getOwnerTeamFlags(
     repositoryId: string | null,
-  ): Promise<{ earlyAdopterMode: boolean } | null>;
+  ): Promise<{ earlyAdopterMode: boolean; regulatedMode: boolean } | null>;
 
   /** Platform-wide "test runs completed" count for the social-proof strip.
    *  Deliberately not scoped to this share — see the query's own comment in

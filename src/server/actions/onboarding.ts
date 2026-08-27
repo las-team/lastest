@@ -3,15 +3,53 @@
 import { revalidatePath } from "next/cache";
 import * as queries from "@/lib/db/queries";
 import { requireAuth, requireTeamAccess } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth/capabilities";
 import { assertHttpScheme } from "@/lib/security/url-validation";
 import type { OnboardingPath } from "@/lib/db/schema";
 import { startPlayAgent } from "./play-agent";
 import { repointSeededSampleToSmoke } from "@/lib/demo/sandbox-seeds";
+import { seedPharmaSuite } from "@/lib/demo/pharma-seed";
+import { createLocalRepo } from "./repos";
 
 export async function setOnboardingPath(path: OnboardingPath) {
   const session = await requireAuth();
   await queries.updateUser(session.user.id, { onboardingPath: path });
   revalidatePath("/onboarding");
+}
+
+/**
+ * The pharma fork of onboarding.
+ *
+ * Turns on the regulated segment profile for the team, creates a project, and
+ * seeds the Vault + Salesforce release-regression suites so the user lands on
+ * the two tests they came for rather than on an empty repo.
+ *
+ * No base URL is passed to `createLocalRepo` on purpose: a base URL there
+ * would trip the generic smoke-test seed, and each seeded test carries its own
+ * sandbox `targetUrl` for the user to re-point. Their real sandbox URL is
+ * something only they can supply, and guessing it would produce a test that
+ * runs against nothing.
+ */
+export async function startPharmaOnboarding(projectName?: string) {
+  const session = await requireCapability("repos:manage");
+
+  // Flip the team into the regulated profile *before* creating the repo, so a
+  // failure between the two leaves a restricted team with no project rather
+  // than an unrestricted team holding a Vault suite.
+  await queries.updateTeam(session.team.id, { regulatedMode: true });
+  await queries.updateUser(session.user.id, { onboardingPath: "manual" });
+
+  const repo = await createLocalRepo(
+    projectName?.trim() || "Vault + Salesforce",
+  );
+  const seededTestId = await seedPharmaSuite(repo.id);
+
+  revalidatePath("/");
+  revalidatePath("/tests");
+  revalidatePath("/settings");
+  revalidatePath("/onboarding");
+
+  return { repositoryId: repo.id, seededTestId };
 }
 
 export async function setBaseUrl(repositoryId: string, url: string) {

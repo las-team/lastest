@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import * as queries from "@/lib/db/queries";
 import * as gamification from "@lastest/plugin-gamification/reads";
 import { getCurrentSession } from "@/lib/auth";
+import { isRegulatedTeam } from "@/lib/segment/regulated";
+import { RegulatedModeToggle } from "@/components/settings/regulated-mode-toggle";
 import { Github, Check, X, Users, Bot, Mail, Terminal } from "lucide-react";
 
 // GitLab icon SVG component
@@ -208,6 +210,9 @@ export default async function SettingsPage({
 
   const serverUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   const earlyAdopterMode = session?.team?.earlyAdopterMode ?? false;
+  // Regulated (pharma) profile — see `src/lib/segment/regulated.ts` §3.3 for
+  // why each of these cards goes away for this segment.
+  const regulated = isRegulatedTeam(session?.team);
   const banAiMode = session?.team?.banAiMode ?? false;
   const builtInAiEnabled = session?.team?.builtInAiEnabled ?? false;
 
@@ -261,20 +266,25 @@ export default async function SettingsPage({
           <CardDescription>Toggle experimental features</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <EarlyAdopterToggle
-            enabled={session?.team?.earlyAdopterMode ?? false}
-          />
-          {earlyAdopterMode && (
-            <QuickstartEmailTemplateInput
-              initial={
-                session?.team?.quickstartEmailTemplate ??
-                "viktor+{slug}{stamp}@lastest.cloud"
-              }
-            />
+          {!regulated && (
+            <>
+              <EarlyAdopterToggle
+                enabled={session?.team?.earlyAdopterMode ?? false}
+              />
+              {earlyAdopterMode && (
+                <QuickstartEmailTemplateInput
+                  initial={
+                    session?.team?.quickstartEmailTemplate ??
+                    "viktor+{slug}{stamp}@lastest.cloud"
+                  }
+                />
+              )}
+              <GamificationToggle
+                enabled={session?.team?.gamificationEnabled ?? false}
+              />
+            </>
           )}
-          <GamificationToggle
-            enabled={session?.team?.gamificationEnabled ?? false}
-          />
+          <RegulatedModeToggle enabled={regulated} />
           <VerifyPhaseToggle
             enabled={session?.team?.verifyPhaseEnabled ?? false}
           />
@@ -282,7 +292,7 @@ export default async function SettingsPage({
       </Card>
 
       {/* Gamification admin controls (admin-only) */}
-      {isAdmin && (
+      {isAdmin && !regulated && (
         <GamificationAdminCard
           enabled={session?.team?.gamificationEnabled ?? false}
           activeSeasonName={activeGamificationSeason?.name ?? null}
@@ -375,104 +385,109 @@ export default async function SettingsPage({
       )}
 
       {/* GitHub Integration */}
-      <Card id="github">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Github className="w-5 h-5" />
-            GitHub Integration
-          </CardTitle>
-          <CardDescription>
-            Connect GitHub for PR linking and automatic triggers
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {githubAccount ? (
-            <>
-              <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center">
-                    <Github className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <div className="font-medium">
-                      @{githubAccount.githubUsername}
+      {!regulated && (
+        <Card id="github">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Github className="w-5 h-5" />
+              GitHub Integration
+            </CardTitle>
+            <CardDescription>
+              Connect GitHub for PR linking and automatic triggers
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {githubAccount ? (
+              <>
+                <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center">
+                      <Github className="w-6 h-6" />
                     </div>
-                    <div className="text-sm text-muted-foreground">
-                      Connected
+                    <div>
+                      <div className="font-medium">
+                        @{githubAccount.githubUsername}
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        Connected
+                      </div>
                     </div>
                   </div>
+                  <ReconnectGithubLink />
                 </div>
-                <ReconnectGithubLink />
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Builds will automatically link to open PRs by branch name.
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="text-muted-foreground">
-                Connect your GitHub account to link builds with pull requests.
-              </p>
-              <ConnectGithubButton />
-            </>
-          )}
-        </CardContent>
-      </Card>
+                <p className="text-sm text-muted-foreground">
+                  Builds will automatically link to open PRs by branch name.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-muted-foreground">
+                  Connect your GitHub account to link builds with pull requests.
+                </p>
+                <ConnectGithubButton />
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* GitLab Integration */}
-      <Card id="gitlab">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <GitLabIcon className="w-5 h-5" />
-            GitLab Integration
-          </CardTitle>
-          <CardDescription>
-            Connect GitLab for MR linking and automatic triggers
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {gitlabAccount ? (
-            <>
-              <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center">
-                    <GitLabIcon className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <div className="font-medium">
-                      @{gitlabAccount.gitlabUsername}
+      {!regulated && (
+        <Card id="gitlab">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <GitLabIcon className="w-5 h-5" />
+              GitLab Integration
+            </CardTitle>
+            <CardDescription>
+              Connect GitLab for MR linking and automatic triggers
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {gitlabAccount ? (
+              <>
+                <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center">
+                      <GitLabIcon className="w-6 h-6" />
                     </div>
-                    <div className="text-sm text-muted-foreground">
-                      {gitlabAccount.instanceUrl === "https://gitlab.com"
-                        ? "Connected"
-                        : gitlabAccount.instanceUrl}
+                    <div>
+                      <div className="font-medium">
+                        @{gitlabAccount.gitlabUsername}
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        {gitlabAccount.instanceUrl === "https://gitlab.com"
+                          ? "Connected"
+                          : gitlabAccount.instanceUrl}
+                      </div>
                     </div>
                   </div>
+                  <a
+                    href="/api/connect/gitlab"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-primary hover:underline"
+                  >
+                    Reconnect
+                  </a>
                 </div>
-                <a
-                  href="/api/connect/gitlab"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm text-primary hover:underline"
-                >
-                  Reconnect
-                </a>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Builds will automatically link to open MRs by branch name.
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="text-muted-foreground">
-                Connect your GitLab account to link builds with merge requests.
-                Self-hosted instances supported via PAT or per-account OAuth.
-              </p>
-              <ConnectGitlabButton />
-            </>
-          )}
-        </CardContent>
-      </Card>
+                <p className="text-sm text-muted-foreground">
+                  Builds will automatically link to open MRs by branch name.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-muted-foreground">
+                  Connect your GitLab account to link builds with merge
+                  requests. Self-hosted instances supported via PAT or
+                  per-account OAuth.
+                </p>
+                <ConnectGitlabButton />
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Google Sheets Test Data */}
       <div id="google-sheets">
@@ -495,34 +510,38 @@ export default async function SettingsPage({
           props because the plugin may not import app components — the OAuth
           connect flow is core's (it holds the credential) and DiagramThumbnail
           is built on next/image. Recipe §6. */}
-      <div id="github-actions">
-        <GithubActionsCard
-          configs={githubActionConfigs}
-          runners={runners}
-          repos={teamRepos}
-          hasGithubAccount={!!githubAccount}
-          githubUsername={githubAccount?.githubUsername ?? null}
-          connectAccountButton={<ConnectGithubButton />}
-          flowDiagram={
-            <DiagramThumbnail
-              src="/docs/development-flow.png"
-              alt="Development & Review Flow — from code push to production with visual validation"
-              width={480}
-              height={120}
-            />
-          }
-        />
-      </div>
+      {!regulated && (
+        <div id="github-actions">
+          <GithubActionsCard
+            configs={githubActionConfigs}
+            runners={runners}
+            repos={teamRepos}
+            hasGithubAccount={!!githubAccount}
+            githubUsername={githubAccount?.githubUsername ?? null}
+            connectAccountButton={<ConnectGithubButton />}
+            flowDiagram={
+              <DiagramThumbnail
+                src="/docs/development-flow.png"
+                alt="Development & Review Flow — from code push to production with visual validation"
+                width={480}
+                height={120}
+              />
+            }
+          />
+        </div>
+      )}
 
-      <div id="gitlab-pipelines">
-        <GitlabPipelinesCard
-          configs={gitlabPipelineConfigs}
-          runners={runners}
-          repos={teamRepos}
-          hasGitlabAccount={!!gitlabAccount}
-          connectAccountButton={<ConnectGitlabButton />}
-        />
-      </div>
+      {!regulated && (
+        <div id="gitlab-pipelines">
+          <GitlabPipelinesCard
+            configs={gitlabPipelineConfigs}
+            runners={runners}
+            repos={teamRepos}
+            hasGitlabAccount={!!gitlabAccount}
+            connectAccountButton={<ConnectGitlabButton />}
+          />
+        </div>
+      )}
     </>
   );
 
@@ -730,7 +749,9 @@ export default async function SettingsPage({
       )}
 
       {/* Billing — plan + checkout + cancel (admin-only) */}
-      {isAdmin && teamBilling && (
+      {/* Enterprise procurement is not a Stripe portal — the regulated profile
+          bills by invoice, so the self-serve plan picker goes away. */}
+      {isAdmin && teamBilling && !regulated && (
         <div id="billing" className="space-y-2">
           {params.checkout === "success" && (
             <div className="rounded-md border border-green-500/40 bg-green-500/5 p-4 text-sm">
