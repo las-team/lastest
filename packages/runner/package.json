@@ -1,6 +1,6 @@
 {
   "name": "@lastest/runner",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "CI client for the Lastest visual regression testing platform — triggers builds and reports results",
   "type": "module",
   "bin": {

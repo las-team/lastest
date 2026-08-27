@@ -238,10 +238,24 @@ export interface BuildSummary {
   id: string;
   overallStatus: BuildStatus;
   totalTests: number;
+  /**
+   * COUNTED PER VISUAL DIFF (one per screenshot step), not per test. A single
+   * test with three changed steps contributes three. Do not add this to
+   * `passedCount`/`failedCount` — those are per test result, and mixing the two
+   * units is how the CI runner came to print "66/39 tests complete".
+   */
   changesDetected: number;
+  /** Also per visual diff at execution time. See `changesDetected`. */
   flakyCount: number;
   failedCount: number;
   passedCount: number;
+  /**
+   * Test results recorded so far, in the same unit as `totalTests`. Derived as
+   * `passedCount + failedCount`; every count adjustment (flaky retry, step-
+   * criteria override) moves a result between those two, so the sum stays
+   * equal to the number of tests that have finished.
+   */
+  completedTests: number;
   elapsedMs: number | null;
   createdAt: Date | null;
   completedAt: Date | null;
@@ -1484,10 +1498,12 @@ async function runBuildAsync(
       for (const r of resultsForEval) {
         const prevStatus = r.status;
         const evalResult = await evaluateStepCriteria(r.id);
-        if (
-          evalResult.overriddenStatus === "failed" &&
-          prevStatus !== "failed"
-        ) {
+        // `setup_failed` was already tallied into failedCount when the result
+        // was recorded, so re-counting it here inflates the total (and breaks
+        // the passed+failed = completed invariant).
+        const alreadyFailed =
+          prevStatus === "failed" || prevStatus === "setup_failed";
+        if (evalResult.overriddenStatus === "failed" && !alreadyFailed) {
           if (prevStatus === "passed") passedCount--;
           failedCount++;
         }
@@ -2781,6 +2797,7 @@ export async function buildBuildSummary(
     flakyCount: build.flakyCount ?? 0,
     failedCount: build.failedCount ?? 0,
     passedCount: build.passedCount ?? 0,
+    completedTests: (build.passedCount ?? 0) + (build.failedCount ?? 0),
     elapsedMs: build.elapsedMs,
     createdAt: build.createdAt,
     completedAt: build.completedAt,

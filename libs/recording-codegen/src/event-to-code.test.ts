@@ -215,3 +215,38 @@ describe("eventsToCodeLines — cursor tracking + selectors", () => {
     expect(joined).toContain("modifiers: ['Shift']");
   });
 });
+
+describe("eventsToCodeLines — networkIdle assertion", () => {
+  it("bounds the wait and swallows its rejection", () => {
+    const out = lines([
+      {
+        type: "assertion",
+        timestamp: 1,
+        data: { assertionType: "networkIdle" },
+      },
+    ]);
+
+    // An unbounded waitForLoadState('networkidle') never resolves against an
+    // app holding a long-lived connection open (SSE / websocket / long-poll),
+    // so it burns the full navigation timeout on every call. A recorded suite
+    // emits one per navigation, which is enough to push a test past the
+    // executor's hard cap and report a timeout instead of a real result.
+    expect(out).toEqual([
+      "// Assertion: Verify no pending network requests",
+      "await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});",
+    ]);
+  });
+
+  it("never emits an unbounded networkidle wait", () => {
+    const out = lines([
+      {
+        type: "assertion",
+        timestamp: 1,
+        data: { assertionType: "networkIdle" },
+      },
+    ]);
+    expect(out.join("\n")).not.toMatch(
+      /waitForLoadState\(\s*['"]networkidle['"]\s*\)/,
+    );
+  });
+});
