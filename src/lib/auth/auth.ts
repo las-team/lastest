@@ -1,6 +1,11 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
+// From the `plugins` barrel, not `better-auth/plugins/mcp`: better-auth 1.6.14
+// ships `dist/plugins/mcp/` but its package `exports` map only publishes
+// `./plugins/mcp/client`, so the deep path resolves under neither Turbopack nor
+// tsc. The barrel re-exports `mcp` (and `withMcpAuth`) and is the supported way in.
+import { mcp } from "better-auth/plugins";
 import { stripe as stripePlugin } from "@better-auth/stripe";
 import { db } from "@/lib/db";
 import * as schema from "@/lib/db/schema";
@@ -13,6 +18,9 @@ import { sendPasswordResetEmail } from "@/lib/email";
 import { syncReposIfStale } from "@/server/actions/repos";
 import { syncUserToTwentyCRM } from "@/lib/integrations/twenty-crm";
 import { getStripeClient } from "@/lib/billing/stripe";
+// The scope list the authorization server advertises, kept next to the
+// scope → tool-access mapping it has to agree with.
+import { MCP_OAUTH_SCOPES } from "@/lib/mcp/tool-policy";
 import {
   getCatalog,
   invalidateCatalog,
@@ -138,6 +146,10 @@ export const auth = betterAuth({
       // plugin reads/writes `teams.stripeCustomerId` directly.
       subscription: schema.subscriptions,
       organization: schema.teams,
+      // OAuth 2.1 authorization-server tables for the `mcp` plugin below.
+      oauthApplication: schema.oauthApplications,
+      oauthAccessToken: schema.oauthAccessTokens,
+      oauthConsent: schema.oauthConsents,
     },
   }),
 
@@ -368,6 +380,37 @@ export const auth = betterAuth({
 
   plugins: [
     nextCookies(),
+    // Turns this app into an OAuth 2.1 authorization server for the remote MCP
+    // endpoint at /api/mcp, so agent platforms (Salesforce Agentforce, ChatGPT,
+    // Claude web, …) can connect without a human pasting an API key.
+    //
+    // Mounted under /api/auth: /mcp/register (RFC 7591 dynamic client
+    // registration), /mcp/authorize, /mcp/token, /mcp/get-session, plus
+    // /.well-known/oauth-authorization-server. The two root-level
+    // /.well-known/* routes re-serve the discovery documents at the paths
+    // RFC 8414 / RFC 9728 clients actually probe.
+    mcp({
+      loginPage: "/login",
+      oidcConfig: {
+        loginPage: "/login",
+        // Anonymous DCR is what makes "paste the URL, click connect" work in an
+        // agent platform. Clients are public + PKCE-only; a registration row on
+        // its own grants nothing until a signed-in user approves it at
+        // /oauth/consent.
+        allowDynamicClientRegistration: true,
+        requirePKCE: true,
+        allowPlainCodeChallengeMethod: false,
+        consentPage: "/oauth/consent",
+        // `lastest:read` / `lastest:write` decide how much of the MCP tool
+        // surface the resulting token sees — see src/lib/mcp/tool-policy.ts.
+        // Deletes are never reachable over OAuth at all, at any scope.
+        scopes: [...MCP_OAUTH_SCOPES],
+        defaultScope: "openid lastest:read",
+        accessTokenExpiresIn: 3600,
+        refreshTokenExpiresIn: 60 * 60 * 24 * 30,
+        storeClientSecret: "hashed",
+      },
+    }),
     // Lazily skip the Stripe plugin when STRIPE_SECRET_KEY is unset so
     // self-hosters who don't want billing don't have to set fake env vars.
     ...buildStripePlugin(),

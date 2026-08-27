@@ -17,6 +17,8 @@ import {
   repositories,
   githubAccounts,
   tests,
+  oauthApplications,
+  oauthAccessTokens,
 } from "../schema";
 import type {
   NewTeam,
@@ -794,4 +796,41 @@ export async function revokeConsent(userId: string, consentType: ConsentType) {
         isNull(userConsents.revokedAt),
       ),
     );
+}
+
+// ===========================================================================
+// OAuth 2.1 clients (MCP)
+// ===========================================================================
+//
+// Rows here are written by better-auth's `mcp` plugin via dynamic client
+// registration; we only ever read them — to name the app on the consent screen,
+// and to list/revoke connections from settings.
+
+export async function getOAuthApplicationByClientId(clientId: string) {
+  const [row] = await db
+    .select()
+    .from(oauthApplications)
+    .where(eq(oauthApplications.clientId, clientId))
+    .limit(1);
+  return row ?? null;
+}
+
+/** Live (unexpired) OAuth connections a user has granted, newest first. */
+export async function getOAuthConnectionsForUser(userId: string) {
+  return db
+    .select({
+      id: oauthAccessTokens.id,
+      clientId: oauthAccessTokens.clientId,
+      scopes: oauthAccessTokens.scopes,
+      createdAt: oauthAccessTokens.createdAt,
+      accessTokenExpiresAt: oauthAccessTokens.accessTokenExpiresAt,
+      clientName: oauthApplications.name,
+    })
+    .from(oauthAccessTokens)
+    .leftJoin(
+      oauthApplications,
+      eq(oauthApplications.clientId, oauthAccessTokens.clientId),
+    )
+    .where(eq(oauthAccessTokens.userId, userId))
+    .orderBy(desc(oauthAccessTokens.createdAt));
 }

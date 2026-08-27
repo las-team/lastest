@@ -7,9 +7,27 @@
  */
 import * as queries from "@/lib/db/queries";
 import type { SessionData } from "./session";
+import {
+  LOOPBACK_GRANT_PREFIX,
+  verifyLoopbackGrant,
+} from "@/lib/mcp/loopback-grant";
+
 export async function verifyBearerToken(
   token: string,
 ): Promise<SessionData | null> {
+  // Server-minted, minute-long grant used by /api/mcp to make its own
+  // loopback calls on behalf of an OAuth-authenticated user. Never issued to a
+  // client, never persisted — see @/lib/mcp/loopback-grant for why OAuth
+  // access tokens themselves are deliberately not accepted here.
+  if (token.startsWith(LOOPBACK_GRANT_PREFIX)) {
+    const grant = verifyLoopbackGrant(token);
+    if (!grant) return null;
+    const user = await queries.getUserById(grant.u);
+    if (!user) return null;
+    const team = user.teamId ? await queries.getTeam(user.teamId) : null;
+    return { user, sessionId: `mcp-oauth:${grant.c}`, team: team ?? null };
+  }
+
   const result = await queries.getSessionWithUser(token);
   if (!result || result.session.expiresAt < new Date()) {
     return null;

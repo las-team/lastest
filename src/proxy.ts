@@ -20,6 +20,13 @@ const PUBLIC_PATHS = [
   "/api/og/", // Public OG/Twitter card images for shared builds
   "/api/badge/", // Public embeddable badge SVGs
   "/api/auth/",
+  "/.well-known/", // OAuth discovery documents — must be reachable unauthed,
+  // that is the entire point of them (RFC 8414 / RFC 9728).
+  "/api/mcp", // Remote MCP endpoint. Bearer-only (API key or OAuth access
+  // token) and has no cookie, so without this every MCP
+  // client gets a 307 to /login instead of a 401 carrying the
+  // WWW-Authenticate that starts the OAuth flow. The route
+  // authenticates every request itself.
   "/api/health",
   "/api/webhooks/",
   "/api/builds/",
