@@ -19,6 +19,13 @@ import {
   type FleetRow,
 } from "@/lib/agents/fleet";
 import { AgentsConsole } from "@/components/agents/agents-console-client";
+import { QaAgentUpgradeGate } from "@lastest/plugin-qa-agent/ui/qa-agent-upgrade-gate";
+import {
+  hasQaAgentAccess,
+  qaAgentMinPlanName,
+} from "@/lib/billing/feature-access";
+import { isBillingEnabled } from "@/lib/billing/enabled";
+import { planConfig } from "@/lib/billing/plans";
 
 export const dynamic = "force-dynamic";
 
@@ -34,8 +41,24 @@ export const dynamic = "force-dynamic";
  */
 export default async function AgentsPage() {
   const session = await getCurrentSession();
-  const teamId = session?.team?.id;
+  const team = session?.team;
+  const teamId = team?.id;
   const userId = session?.user?.id;
+
+  // The console is the gated surface now, not just `/qa-agent`. Gate before
+  // anything else so teams below the required plan always land on the upgrade
+  // screen — including before a repo is selected, matching `/qa-agent`.
+  if (team && !hasQaAgentAccess(team.plan, isBillingEnabled())) {
+    return (
+      <QaAgentUpgradeGate
+        currentPlanName={planConfig(team.plan).name}
+        requiredPlanName={qaAgentMinPlanName()}
+        title="Agents"
+        icon={Network}
+        description="One roster for every agent working your repo — what each is doing, what it is waiting on you for, and the browsers they are holding while they wait."
+      />
+    );
+  }
 
   const selectedRepo = teamId
     ? await getSelectedRepository(userId, teamId)
