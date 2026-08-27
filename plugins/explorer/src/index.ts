@@ -62,3 +62,6 @@ export {
   isExplorerConfigured,
   type ExplorerWiring,
 } from "./wiring";
+// The Agents console's one read into this plugin's sessions — see fleet.ts
+// for why it is a projection rather than the row.
+export { readLiveExplorerSession, type ExplorerFleetSession } from "./fleet";
