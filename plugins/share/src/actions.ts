@@ -53,6 +53,17 @@ export async function publishBuildShare(
   });
   const actor = requireActor(ctx);
 
+  // Regulated (pharma) profile: refuse outright. A `/r/<slug>` link is an
+  // anonymous, unauthenticated URL serving screenshots of what may be a
+  // validated GxP system, so hiding the button that mints one is not a
+  // control — this is. See `docs/pharma-restricted-scope.md` §3.3.
+  const ownerFlags = await host.getOwnerTeamFlags(info.repositoryId);
+  if (ownerFlags?.regulatedMode) {
+    throw new Error(
+      "Public share links are disabled for this team. Regulated mode is on, and a public link would serve run screenshots to anyone holding the URL.",
+    );
+  }
+
   const kind: PublicShareKind = options.kind ?? "regression";
 
   // Reuse an existing live share instead of minting a new URL on every

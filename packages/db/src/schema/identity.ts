@@ -86,6 +86,21 @@ export const teams = pgTable("teams", {
   /** Verify phase (v1.14+) — when true, /verify is the primary surface and
    *  appears as the first sidebar entry. /run and /review are demoted. */
   verifyPhaseEnabled: boolean("verify_phase_enabled").default(true),
+  /**
+   * Regulated (pharma / life-sciences) segment profile — set by the Pharma
+   * onboarding fork, and the single flag every restriction in
+   * `src/lib/segment/regulated.ts` reads.
+   *
+   * It encodes three rules: nothing probabilistic produces a verdict, nothing
+   * leaves the tenant without an authenticated identity attached, and nothing
+   * on screen suggests the tool is a game. See
+   * `docs/pharma-restricted-scope.md` §3.
+   *
+   * Deliberately a *team* flag rather than a per-repo one: it governs
+   * tenant-wide surfaces (public share links, the leaderboard, billing) that
+   * have no repository in scope to key off.
+   */
+  regulatedMode: boolean("regulated_mode").default(false),
   storageQuotaBytes: bigint("storage_quota_bytes", { mode: "number" }).default(
     10737418240,
   ), // 10 GB

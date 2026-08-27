@@ -299,10 +299,15 @@ export const appShareHost: ShareHost = {
 
   async getOwnerTeamFlags(
     repositoryId: string | null,
-  ): Promise<{ earlyAdopterMode: boolean } | null> {
+  ): Promise<{ earlyAdopterMode: boolean; regulatedMode: boolean } | null> {
     if (!repositoryId) return null;
     const row = await queries.getRepositoryOwnerTeamFlags(repositoryId);
-    return row ? { earlyAdopterMode: row.earlyAdopterMode ?? false } : null;
+    return row
+      ? {
+          earlyAdopterMode: row.earlyAdopterMode ?? false,
+          regulatedMode: row.regulatedMode ?? false,
+        }
+      : null;
   },
 
   async getPlatformStats(): Promise<{ testRunsCompleted: number }> {
