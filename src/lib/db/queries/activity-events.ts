@@ -47,11 +47,22 @@ export async function getActivityEventsBySession(
  */
 export async function getRecentActivityEvents(
   teamId: string,
-  opts: { limit?: number; cursor?: string; sourceType?: string } = {},
+  opts: {
+    limit?: number;
+    cursor?: string;
+    sourceType?: string;
+    /** Narrow to one repo — the per-repo consoles (QA agent) seed their feed
+     *  with this, since the SSE stream only carries events from now on. */
+    repositoryId?: string;
+  } = {},
 ): Promise<ActivityEvent[]> {
-  const { limit = 50, cursor, sourceType } = opts;
+  const { limit = 50, cursor, sourceType, repositoryId } = opts;
 
   const conditions = [eq(activityEvents.teamId, teamId)];
+
+  if (repositoryId) {
+    conditions.push(eq(activityEvents.repositoryId, repositoryId));
+  }
 
   if (sourceType) {
     conditions.push(
