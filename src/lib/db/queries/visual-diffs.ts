@@ -230,10 +230,21 @@ export async function getPendingAIApprovableDiffs(buildId: string) {
 // Baselines
 
 /**
- * Get active baseline with branch-first fallback chain:
- * 1. Branch-specific baseline (if branch provided)
- * 2. Default branch baseline (if defaultBranch provided)
- * 3. Any active baseline (legacy fallback)
+ * Get active baseline, most specific scope first.
+ *
+ * Two nested fallbacks, environment outside data cell:
+ *
+ *   (env, cell) → (env, no cell) → (no env, cell) → (no env, no cell)
+ *
+ * and within each, the original branch chain: branch → default branch. A final
+ * legacy fallback takes any active baseline for the browser, tried inside the
+ * environment before going unscoped.
+ *
+ * Environment is the OUTER loop deliberately. A UAT run must prefer a UAT
+ * baseline for a different cell over a PROD baseline for its own cell: the
+ * environment decides what the page is supposed to look like, while the cell
+ * only decides which data it was showing. Getting this order backwards would
+ * make every UAT run diff against PROD the moment a cell went unmatched.
  */
 export async function getActiveBaseline(
   testId: string,
@@ -247,77 +258,105 @@ export async function getActiveBaseline(
    *  policy work — 39 of 40 expanded runs compare against the one baseline the
    *  representative captured, instead of each demanding its own. */
   dataCell?: string | null,
+  /** B2: environment key of the current run ('uat', 'prod'). A run with no
+   *  environment, or an environment with no baseline of its own, falls back to
+   *  the unscoped baseline — so adopting environments never orphans the
+   *  approvals a repo already has. */
+  environmentKey?: string | null,
 ) {
   const stepConditions = stepLabel
     ? [eq(baselines.stepLabel, stepLabel)]
     : [isNull(baselines.stepLabel)];
 
-  // Cell-specific first, then the shared baseline. Ordering matters: querying
-  // both at once and taking the newest would let an unrelated cell's baseline
-  // win purely on timestamp.
-  const cellVariants: Array<ReturnType<typeof eq> | ReturnType<typeof isNull>> =
-    dataCell
-      ? [eq(baselines.dataCell, dataCell), isNull(baselines.dataCell)]
-      : [isNull(baselines.dataCell)];
+  type Cond = ReturnType<typeof eq> | ReturnType<typeof isNull>;
 
-  for (const cellCondition of cellVariants) {
-    // 1. Try branch-specific baseline
-    if (branch) {
-      const [branchBaseline] = await db
-        .select()
-        .from(baselines)
-        .where(
-          and(
-            eq(baselines.testId, testId),
-            eq(baselines.isActive, true),
-            eq(baselines.branch, branch),
-            eq(baselines.browser, browser),
-            cellCondition,
-            ...stepConditions,
-          ),
-        )
-        .orderBy(desc(baselines.createdAt));
-      if (branchBaseline) return branchBaseline;
-    }
+  // Ordering matters throughout: querying variants at once and taking the
+  // newest would let an unrelated environment's or cell's baseline win purely
+  // on timestamp.
+  const envVariants: Cond[] = environmentKey
+    ? [
+        eq(baselines.environmentKey, environmentKey),
+        isNull(baselines.environmentKey),
+      ]
+    : [isNull(baselines.environmentKey)];
 
-    // 2. Try default branch baseline
-    if (defaultBranch && defaultBranch !== branch) {
-      const [mainBaseline] = await db
-        .select()
-        .from(baselines)
-        .where(
-          and(
-            eq(baselines.testId, testId),
-            eq(baselines.isActive, true),
-            eq(baselines.branch, defaultBranch),
-            eq(baselines.browser, browser),
-            cellCondition,
-            ...stepConditions,
-          ),
-        )
-        .orderBy(desc(baselines.createdAt));
-      if (mainBaseline) return mainBaseline;
+  const cellVariants: Cond[] = dataCell
+    ? [eq(baselines.dataCell, dataCell), isNull(baselines.dataCell)]
+    : [isNull(baselines.dataCell)];
+
+  for (const envCondition of envVariants) {
+    for (const cellCondition of cellVariants) {
+      // 1. Try branch-specific baseline
+      if (branch) {
+        const [branchBaseline] = await db
+          .select()
+          .from(baselines)
+          .where(
+            and(
+              eq(baselines.testId, testId),
+              eq(baselines.isActive, true),
+              eq(baselines.branch, branch),
+              eq(baselines.browser, browser),
+              envCondition,
+              cellCondition,
+              ...stepConditions,
+            ),
+          )
+          .orderBy(desc(baselines.createdAt));
+        if (branchBaseline) return branchBaseline;
+      }
+
+      // 2. Try default branch baseline
+      if (defaultBranch && defaultBranch !== branch) {
+        const [mainBaseline] = await db
+          .select()
+          .from(baselines)
+          .where(
+            and(
+              eq(baselines.testId, testId),
+              eq(baselines.isActive, true),
+              eq(baselines.branch, defaultBranch),
+              eq(baselines.browser, browser),
+              envCondition,
+              cellCondition,
+              ...stepConditions,
+            ),
+          )
+          .orderBy(desc(baselines.createdAt));
+        if (mainBaseline) return mainBaseline;
+      }
     }
   }
 
-  // 3. Legacy fallback — any active baseline for this browser
-  const [fallback] = await db
-    .select()
-    .from(baselines)
-    .where(
-      and(
-        eq(baselines.testId, testId),
-        eq(baselines.isActive, true),
-        eq(baselines.browser, browser),
-        ...stepConditions,
-      ),
-    )
-    .orderBy(desc(baselines.createdAt));
-  return fallback;
+  // 3. Legacy fallback — any active baseline for this browser, still preferring
+  // the run's own environment before reaching across to an unscoped one.
+  for (const envCondition of envVariants) {
+    const [fallback] = await db
+      .select()
+      .from(baselines)
+      .where(
+        and(
+          eq(baselines.testId, testId),
+          eq(baselines.isActive, true),
+          eq(baselines.browser, browser),
+          envCondition,
+          ...stepConditions,
+        ),
+      )
+      .orderBy(desc(baselines.createdAt));
+    if (fallback) return fallback;
+  }
+  return undefined;
 }
 
 /**
- * Get baseline for a specific branch only (no fallback)
+ * Get baseline for a specific branch only (no BRANCH fallback).
+ *
+ * There is still an ENVIRONMENT fallback, and the two are not the same kind of
+ * thing: "no fallback" here has always meant "do not silently compare this
+ * branch against another one". Falling back from a UAT-scoped baseline to the
+ * repo's unscoped one is the opposite — it is what stops a repo that just
+ * adopted environments from seeing every one of its approvals disappear.
  */
 export async function getBranchBaseline(
   testId: string,
@@ -329,18 +368,36 @@ export async function getBranchBaseline(
    *  representative-cell policy hold — the other expanded runs compare against
    *  the one baseline the representative established. */
   dataCell?: string | null,
+  /** Environment of the current run. Same specific-beats-general rule as
+   *  `dataCell`, and the two compose — see the variant order below. */
+  environmentKey?: string | null,
 ) {
   const stepConditions = stepLabel
     ? [eq(baselines.stepLabel, stepLabel)]
     : [isNull(baselines.stepLabel)];
 
-  // Cell-specific first, then shared. Querying both at once and taking the
-  // newest would let an unrelated cell's baseline win purely on timestamp.
+  // Specific first, then shared, on BOTH axes. Querying every variant at once
+  // and taking the newest would let an unrelated cell's (or environment's)
+  // baseline win purely on timestamp.
   const cellVariants = dataCell
     ? [eq(baselines.dataCell, dataCell), isNull(baselines.dataCell)]
     : [isNull(baselines.dataCell)];
+  const envVariants = environmentKey
+    ? [
+        eq(baselines.environmentKey, environmentKey),
+        isNull(baselines.environmentKey),
+      ]
+    : [isNull(baselines.environmentKey)];
 
-  for (const cellCondition of cellVariants) {
+  // Environment is the outer loop: a baseline captured against THIS
+  // environment is the closer match, because a screenshot from another
+  // environment can differ for reasons that have nothing to do with the data
+  // row (different sandbox, different tenant branding).
+  const variants = envVariants.flatMap((envCondition) =>
+    cellVariants.map((cellCondition) => [envCondition, cellCondition] as const),
+  );
+
+  for (const [envCondition, cellCondition] of variants) {
     const [row] = await db
       .select()
       .from(baselines)
@@ -350,6 +407,7 @@ export async function getBranchBaseline(
           eq(baselines.isActive, true),
           eq(baselines.branch, branch),
           eq(baselines.browser, browser),
+          envCondition,
           cellCondition,
           ...stepConditions,
         ),
@@ -437,11 +495,21 @@ export async function getBaselinesByBranch(
     );
 }
 
+/**
+ * Carry-forward by content hash.
+ *
+ * Environment-scoped like the rest, but note what the fallback means here: an
+ * identical image already approved for the repo carries forward into an
+ * environment run. That is correct — the pixels are the same by definition, and
+ * refusing the match would force a re-approval of an image the user has already
+ * signed off on.
+ */
 export async function getBaselineByHash(
   testId: string,
   imageHash: string,
   stepLabel?: string | null,
   browser: string = "chromium",
+  environmentKey?: string | null,
 ) {
   const conditions = [
     eq(baselines.testId, testId),
@@ -449,6 +517,16 @@ export async function getBaselineByHash(
     eq(baselines.isActive, true),
     eq(baselines.browser, browser),
   ];
+  if (environmentKey) {
+    conditions.push(
+      or(
+        eq(baselines.environmentKey, environmentKey),
+        isNull(baselines.environmentKey),
+      )!,
+    );
+  } else {
+    conditions.push(isNull(baselines.environmentKey));
+  }
   if (stepLabel) {
     conditions.push(eq(baselines.stepLabel, stepLabel));
   } else {
@@ -507,6 +585,15 @@ export async function deactivateAllBaselinesForTest(testId: string) {
   return result.length;
 }
 
+/**
+ * Retire the baselines a new approval replaces.
+ *
+ * `environmentKey` is not optional in spirit even though it is in the type: a
+ * caller that omits it retires baselines across EVERY environment, which is
+ * exactly the bug the environment model exists to prevent — approving a change
+ * in UAT would silently drop PROD's approved baseline. Omit it only when the
+ * intent really is repo-wide (deleting a test, resetting a step).
+ */
 export async function deactivateBaselines(
   testId: string,
   stepLabel?: string | null,
@@ -517,6 +604,10 @@ export async function deactivateBaselines(
    *  shared baseline; a coordsKey restricts to that cell — so approving one
    *  cell's baseline cannot retire another cell's. */
   dataCell?: string | null,
+  /** Environment scoping, same `undefined` / `null` / value contract as
+   *  `dataCell`: approving one environment's baseline must not retire
+   *  another's. */
+  environmentKey?: string | null,
 ) {
   const conditions = [eq(baselines.testId, testId)];
   if (dataCell !== undefined) {
@@ -536,6 +627,13 @@ export async function deactivateBaselines(
   }
   if (browser) {
     conditions.push(eq(baselines.browser, browser));
+  }
+  if (environmentKey !== undefined) {
+    conditions.push(
+      environmentKey
+        ? eq(baselines.environmentKey, environmentKey)
+        : isNull(baselines.environmentKey),
+    );
   }
   await db
     .update(baselines)

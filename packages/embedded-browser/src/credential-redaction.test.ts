@@ -99,6 +99,21 @@ describe("defaultIsSecretKey", () => {
       expect(defaultIsSecretKey(k)).toBe(false);
     }
   });
+
+  /**
+   * The secret field keys the Vault and Salesforce connectors provision
+   * (`src/lib/connectors/definitions.ts`). Listed here as literals rather than
+   * imported: this package cannot depend on the app, and the hint list above is
+   * a deliberate second copy of the host-side one. If a connector gains a
+   * secret field whose key does not appear here, add it — a key this predicate
+   * does not recognise is encrypted at rest and printed in plaintext in run
+   * output, which is the failure the whole redaction pass exists to prevent.
+   */
+  it("recognises every secret a connector provisions", () => {
+    for (const k of ["password", "consumerSecret", "privateKey", "idpToken"]) {
+      expect(defaultIsSecretKey(k)).toBe(true);
+    }
+  });
 });
 
 describe("scrubError", () => {

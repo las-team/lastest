@@ -23,7 +23,7 @@ import {
   decryptCredentialFields,
   maskCredentialFields,
 } from "@/lib/crypto-fields";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, isNull } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 
 /** A credential row whose secret values have been replaced with "". */
@@ -45,6 +45,9 @@ export type RunCredentialSecretKeys = Record<string, string[]>;
 /**
  * All of a repo's credentials with secret values stripped. Safe to serialize
  * to a client component.
+ *
+ * Returns every environment's credentials — the list screen groups them. Use
+ * `getCredentialsForRun` for the run-time, environment-resolved view.
  */
 export async function listCredentials(
   repositoryId: string,
@@ -76,8 +79,18 @@ export async function getCredential(
  *
  * The ONLY plaintext read path. Call it at dispatch — never earlier, and never
  * onto a request-scoped object something else might serialize.
+ *
+ * Environment resolution (B2) happens here, per handle: the run's environment
+ * wins, and a handle that environment doesn't define falls back to the
+ * repo-wide (NULL-environment) credential. That is what lets one suite run
+ * against UAT and PROD with different logins and an IDENTICAL test body —
+ * `credentials.vault.password` is just the right password. No substitution,
+ * so no `codeHash` change and no invalidated baseline.
  */
-export async function getCredentialsForRun(repositoryId: string): Promise<{
+export async function getCredentialsForRun(
+  repositoryId: string,
+  environmentId?: string | null,
+): Promise<{
   credentials: RunCredentials;
   secretKeys: RunCredentialSecretKeys;
 }> {
@@ -85,9 +98,20 @@ export async function getCredentialsForRun(repositoryId: string): Promise<{
     .select()
     .from(repoCredentials)
     .where(eq(repoCredentials.repositoryId, repositoryId));
+
+  // Repo-wide first, then let the environment's own rows overwrite them.
+  // Ordering is the whole mechanism: a two-pass merge expresses "specific beats
+  // general" without a per-handle lookup.
+  const ordered = [
+    ...rows.filter((r) => r.environmentId === null),
+    ...(environmentId
+      ? rows.filter((r) => r.environmentId === environmentId)
+      : []),
+  ];
+
   const credentials: RunCredentials = {};
   const secretKeys: RunCredentialSecretKeys = {};
-  for (const row of rows) {
+  for (const row of ordered) {
     const entry: Record<string, string> = {};
     const secrets: string[] = [];
     for (const f of decryptCredentialFields(row.fields)) {
@@ -119,6 +143,8 @@ export async function getCredentialFieldsRaw(
 
 export async function createCredential(data: {
   repositoryId: string;
+  /** NULL/omitted = repo-wide, the pre-B2 behaviour and still the default. */
+  environmentId?: string | null;
   name: string;
   label: string;
   description?: string | null;
@@ -130,6 +156,7 @@ export async function createCredential(data: {
   await db.insert(repoCredentials).values({
     id,
     repositoryId: data.repositoryId,
+    environmentId: data.environmentId ?? null,
     name: data.name,
     label: data.label,
     description: data.description ?? null,
@@ -147,6 +174,7 @@ export async function updateCredential(
     name?: string;
     label?: string;
     description?: string | null;
+    environmentId?: string | null;
     fields?: CredentialField[];
   },
 ): Promise<void> {
@@ -154,6 +182,8 @@ export async function updateCredential(
     updatedAt: new Date(),
   };
   if (data.name !== undefined) patch.name = data.name;
+  if (data.environmentId !== undefined)
+    patch.environmentId = data.environmentId;
   if (data.label !== undefined) patch.label = data.label;
   if (data.description !== undefined) patch.description = data.description;
   // Only re-encrypt when the caller actually supplied fields, so a patch that
@@ -168,11 +198,19 @@ export async function deleteCredential(id: string): Promise<void> {
   await db.delete(repoCredentials).where(eq(repoCredentials.id, id));
 }
 
-/** True when `name` is already taken in the repo by a different row. */
+/**
+ * True when `name` is already taken in the same environment by a different row.
+ *
+ * Scoped to the environment, not the repo: `vault` must be free to mean the UAT
+ * login in UAT and the PROD login in PROD — that is the point of the model.
+ * Compared with `isNull` rather than `eq(..., null)` because SQL `= NULL` is
+ * never true and would silently pass every repo-wide collision.
+ */
 export async function credentialNameTaken(
   repositoryId: string,
   name: string,
   exceptId?: string,
+  environmentId?: string | null,
 ): Promise<boolean> {
   const rows = await db
     .select({ id: repoCredentials.id })
@@ -181,6 +219,9 @@ export async function credentialNameTaken(
       and(
         eq(repoCredentials.repositoryId, repositoryId),
         eq(repoCredentials.name, name),
+        environmentId
+          ? eq(repoCredentials.environmentId, environmentId)
+          : isNull(repoCredentials.environmentId),
       ),
     );
   return rows.some((r) => r.id !== exceptId);

@@ -15,7 +15,17 @@ import {
   lockedPolicyFor,
 } from "@/lib/segment/regulated";
 import { RegulatedModeToggle } from "@/components/settings/regulated-mode-toggle";
-import { Github, Check, X, Users, Bot, Mail, Terminal } from "lucide-react";
+import {
+  Github,
+  Check,
+  X,
+  Users,
+  Bot,
+  Mail,
+  Terminal,
+  Layers,
+  Plug,
+} from "lucide-react";
 
 // GitLab icon SVG component
 function GitLabIcon({ className }: { className?: string }) {
@@ -89,6 +99,9 @@ import { isStripeConfigured, getStripeClient } from "@/lib/billing/stripe";
 import { getCatalog, toUiCatalog } from "@/lib/billing/catalog";
 import { DeleteAccountDialog } from "@/components/settings/delete-account-dialog";
 import { DeleteRepoDialog } from "@/components/settings/delete-repo-dialog";
+import { EnvironmentList } from "@/components/settings/environment-list";
+import { ConnectorList } from "@/components/settings/connector-list";
+import { CONNECTOR_TYPES } from "@/lib/connectors/definitions";
 
 export default async function SettingsPage({
   searchParams,
@@ -155,6 +168,15 @@ export default async function SettingsPage({
   const googleSheetsDataSources = await listGoogleSheetsDataSources(
     selectedRepo?.id,
   );
+
+  // Environments and the SUT connectors bound to them (B2). Both are repo
+  // scoped, so they load only when a repo is selected.
+  const [environments, connectors] = selectedRepo
+    ? await Promise.all([
+        queries.listEnvironments(selectedRepo.id),
+        queries.listConnectors(selectedRepo.id),
+      ])
+    : [[], []];
 
   // Fetch admin-only data
   const isAdmin =
@@ -406,6 +428,53 @@ export default async function SettingsPage({
 
   const integrationsTab = (
     <>
+      {/* Environments, and the Vault / Salesforce orgs bound to them.
+          Placed above the git integrations, and NOT hidden by `regulated`
+          unlike GitHub/GitLab below: for the pharma segment this IS the
+          integration, and a repo there often has no git provider at all. */}
+      {selectedRepo && (
+        <Card id="environments">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Layers className="w-5 h-5" />
+              Environments
+            </CardTitle>
+            <CardDescription>
+              Production, UAT and prerelease deployments — each with its own
+              base URL, logins and baselines
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <EnvironmentList
+              repositoryId={selectedRepo.id}
+              environments={environments}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      {selectedRepo &&
+        CONNECTOR_TYPES.map((typeDef) => (
+          <Card key={typeDef.type} id={typeDef.anchor}>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Plug className="w-5 h-5" />
+                {typeDef.label}
+              </CardTitle>
+              <CardDescription>{typeDef.description}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ConnectorList
+                repositoryId={selectedRepo.id}
+                type={typeDef.type}
+                typeLabel={typeDef.label}
+                connectors={connectors.filter((c) => c.type === typeDef.type)}
+                environments={environments}
+              />
+            </CardContent>
+          </Card>
+        ))}
+
       {/* Scheduled Runs */}
       {selectedRepo && (
         <div id="schedules">

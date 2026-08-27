@@ -329,6 +329,10 @@ export const testRuns = pgTable("test_runs", {
   runnerId: text("runner_id"), // nullable - set when run via remote runner, null for local runs
   gitBranch: text("git_branch").notNull(),
   gitCommit: text("git_commit").notNull(),
+  // Environment (B2). Nullable — a run with no environment behaves exactly as
+  // it did before the model existed.
+  environmentId: text("environment_id"),
+  environmentKey: text("environment_key"),
   startedAt: timestamp("started_at"),
   completedAt: timestamp("completed_at"),
   status: text("status"), // 'passed', 'failed', 'running'
@@ -539,6 +543,10 @@ export const testResults = pgTable("test_results", {
   // depend on re-deriving which variables happened to be dimensions at the
   // time, since that set changes as the user enables and disables dimensions.
   dataCell: text("data_cell"),
+  // Environment this run executed against (B2), denormalized from the build so
+  // baseline lookup and attribution never need the join. NULL means unscoped,
+  // which is every pre-B2 row.
+  environmentKey: text("environment_key"),
   // Position of this run within its matrix expansion. Null for single-row runs.
   matrixIndex: integer("matrix_index"),
   matrixTotal: integer("matrix_total"),

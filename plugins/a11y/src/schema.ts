@@ -46,6 +46,10 @@ export const a11yBaselines = pgTable(
     teamId: text("team_id").notNull(),
     stepLabel: text("step_label"),
     branch: text("branch").notNull(),
+    // Environment scope (B2) — see `baselines.environmentKey` in core. Held as
+    // the environment KEY rather than an id for the same reason `test_id` is a
+    // plain column here: a plugin table carries no FK to a core table.
+    environmentKey: text("environment_key"),
     isActive: boolean("is_active").default(true),
     approvedFromComparisonId: text("approved_from_comparison_id"),
     approvedBy: text("approved_by"),

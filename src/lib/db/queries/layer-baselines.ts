@@ -35,112 +35,138 @@ import type {
   DomBaselinePayload,
   LayerBaselineKind,
 } from "../schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { v4 as uuid } from "uuid";
 
 interface CreateBaselineInput<T> {
   testId: string;
   stepLabel: string | null;
   branch: string;
+  /** B2: the environment this approval belongs to. NULL = every environment. */
+  environmentKey?: string | null;
   approvedFromComparisonId?: string | null;
   approvedBy?: string | null;
   payload: T;
 }
 
+/**
+ * The six layer-baseline tables share a shape, so they share their read.
+ *
+ * Environment fallback is all-or-nothing per table, not per row: if this
+ * environment has approved layer baselines, they are the complete answer;
+ * otherwise the unscoped set is. Merging the two would produce a set that was
+ * never approved as a whole — for the network and console layers especially,
+ * a half-UAT half-unscoped allowlist is a verdict nobody signed off on.
+ */
+async function listActiveLayerBaselines<R>(
+  columns: {
+    testId: AnyPgColumn;
+    branch: AnyPgColumn;
+    isActive: AnyPgColumn;
+    environmentKey: AnyPgColumn;
+  },
+  testId: string,
+  branch: string,
+  environmentKey: string | null | undefined,
+  run: (cond: ReturnType<typeof and>) => Promise<R[]>,
+): Promise<R[]> {
+  const base = [
+    eq(columns.testId, testId),
+    eq(columns.branch, branch),
+    eq(columns.isActive, true),
+  ];
+  if (environmentKey) {
+    const scoped = await run(
+      and(...base, eq(columns.environmentKey, environmentKey)),
+    );
+    if (scoped.length > 0) return scoped;
+  }
+  return run(and(...base, isNull(columns.environmentKey)));
+}
+
 export async function listActiveNetworkBaselines(
   testId: string,
   branch: string,
+  environmentKey?: string | null,
 ): Promise<NetworkBaseline[]> {
-  return db
-    .select()
-    .from(networkBaselines)
-    .where(
-      and(
-        eq(networkBaselines.testId, testId),
-        eq(networkBaselines.branch, branch),
-        eq(networkBaselines.isActive, true),
-      ),
-    );
+  return listActiveLayerBaselines(
+    networkBaselines,
+    testId,
+    branch,
+    environmentKey,
+    (cond) => db.select().from(networkBaselines).where(cond),
+  );
 }
 
 export async function listActiveConsoleBaselines(
   testId: string,
   branch: string,
+  environmentKey?: string | null,
 ): Promise<ConsoleBaseline[]> {
-  return db
-    .select()
-    .from(consoleBaselines)
-    .where(
-      and(
-        eq(consoleBaselines.testId, testId),
-        eq(consoleBaselines.branch, branch),
-        eq(consoleBaselines.isActive, true),
-      ),
-    );
+  return listActiveLayerBaselines(
+    consoleBaselines,
+    testId,
+    branch,
+    environmentKey,
+    (cond) => db.select().from(consoleBaselines).where(cond),
+  );
 }
 
 export async function listActivePerfBaselines(
   testId: string,
   branch: string,
+  environmentKey?: string | null,
 ): Promise<PerfBaseline[]> {
-  return db
-    .select()
-    .from(perfBaselines)
-    .where(
-      and(
-        eq(perfBaselines.testId, testId),
-        eq(perfBaselines.branch, branch),
-        eq(perfBaselines.isActive, true),
-      ),
-    );
+  return listActiveLayerBaselines(
+    perfBaselines,
+    testId,
+    branch,
+    environmentKey,
+    (cond) => db.select().from(perfBaselines).where(cond),
+  );
 }
 
 export async function listActiveVariableBaselines(
   testId: string,
   branch: string,
+  environmentKey?: string | null,
 ): Promise<VariableBaseline[]> {
-  return db
-    .select()
-    .from(variableBaselines)
-    .where(
-      and(
-        eq(variableBaselines.testId, testId),
-        eq(variableBaselines.branch, branch),
-        eq(variableBaselines.isActive, true),
-      ),
-    );
+  return listActiveLayerBaselines(
+    variableBaselines,
+    testId,
+    branch,
+    environmentKey,
+    (cond) => db.select().from(variableBaselines).where(cond),
+  );
 }
 
 export async function listActiveUrlTrajectoryBaselines(
   testId: string,
   branch: string,
+  environmentKey?: string | null,
 ): Promise<UrlTrajectoryBaseline[]> {
-  return db
-    .select()
-    .from(urlTrajectoryBaselines)
-    .where(
-      and(
-        eq(urlTrajectoryBaselines.testId, testId),
-        eq(urlTrajectoryBaselines.branch, branch),
-        eq(urlTrajectoryBaselines.isActive, true),
-      ),
-    );
+  return listActiveLayerBaselines(
+    urlTrajectoryBaselines,
+    testId,
+    branch,
+    environmentKey,
+    (cond) => db.select().from(urlTrajectoryBaselines).where(cond),
+  );
 }
 
 export async function listActiveDomBaselines(
   testId: string,
   branch: string,
+  environmentKey?: string | null,
 ): Promise<DomBaseline[]> {
-  return db
-    .select()
-    .from(domBaselines)
-    .where(
-      and(
-        eq(domBaselines.testId, testId),
-        eq(domBaselines.branch, branch),
-        eq(domBaselines.isActive, true),
-      ),
-    );
+  return listActiveLayerBaselines(
+    domBaselines,
+    testId,
+    branch,
+    environmentKey,
+    (cond) => db.select().from(domBaselines).where(cond),
+  );
 }
 
 export async function createNetworkBaseline(

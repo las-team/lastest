@@ -17,7 +17,10 @@ import {
 } from "@/lib/coverage/profilers";
 import { buildCoverageSpec, renderSpecMarkdown } from "@lastest/coverage-model";
 import { DEFAULT_COVERAGE_ENVIRONMENT } from "@/lib/db/schema";
-import type { CoverageCellStatus } from "@/lib/db/schema";
+import type { CoverageCellStatus, VaultConnectorConfig } from "@/lib/db/schema";
+import type { SutProfiler } from "@lastest/coverage-model";
+import { vaultBaseUrl } from "@/lib/connectors/vault-client";
+import { connectorFetch } from "@/lib/connectors/fetch";
 
 /** Full pass: profile sources, derive occurring cells, attribute historical
  *  runs, recompute weights. Safe to re-run — every step is idempotent.
@@ -228,13 +231,87 @@ export async function listCoverageCellsAction(
   return queries.getCoverageCells(repositoryId, opts);
 }
 
+type InlineConnection =
+  | {
+      kind: "vault";
+      baseUrl: string;
+      username: string;
+      password: string;
+      apiVersion?: string;
+    }
+  | {
+      kind: "rest";
+      urlTemplate: string;
+      headers?: Record<string, string>;
+      recordsPath?: string;
+      paging?: { limitParam: string; offsetParam: string; pageSize: number };
+    };
+
+function buildInlineProfiler(connection: InlineConnection): SutProfiler {
+  return connection.kind === "vault"
+    ? new VaultProfiler(connection)
+    : new RestProfiler(connection);
+}
+
+/**
+ * Turn a stored connector into a profiler.
+ *
+ * Only the Vault methods produce one: profiling means running VQL, and the
+ * Salesforce connectors here authenticate for a browser login or an OAuth token
+ * rather than for a query API. Refusing explicitly beats returning a profiler
+ * that fails at the first request with an unrelated error.
+ */
+async function resolveConnectorProfiler(
+  repositoryId: string,
+  connectorId: string,
+): Promise<{ profiler: SutProfiler; environmentKey?: string }> {
+  const resolved = await queries.getConnectorForConnection(connectorId);
+  if (!resolved) throw new Error("Connector not found");
+  const { connector, secrets } = resolved;
+  if (connector.repositoryId !== repositoryId) {
+    throw new Error("Forbidden: connector belongs to another repository");
+  }
+  if (connector.type !== "vault") {
+    throw new Error(
+      `Profiling needs a Veeva Vault connector — "${connector.label}" is a Salesforce connector.`,
+    );
+  }
+  if (connector.authMethod !== "vault-password") {
+    throw new Error(
+      "Profiling needs a Vault connector that authenticates with a user name and password.",
+    );
+  }
+
+  const config = connector.config as VaultConnectorConfig;
+  const environment = connector.environmentId
+    ? await queries.getEnvironment(connector.environmentId)
+    : undefined;
+
+  return {
+    profiler: new VaultProfiler({
+      baseUrl: vaultBaseUrl(config),
+      apiVersion: config.apiVersion,
+      username: secrets.username ?? "",
+      password: secrets.password ?? "",
+      fetchImpl: connectorFetch,
+    }),
+    environmentKey: environment?.key,
+  };
+}
+
 /**
  * P4: profile real record distributions from the system under test.
  *
- * Credentials are taken per-call and never persisted here — storing SUT
- * credentials is a decision for the (not yet built) environment model, and
- * quietly writing them to a settings row now would be the wrong default for
- * exactly the regulated customers this exists for.
+ * Two ways in. `connectorId` names a stored Vault/Salesforce connector — the
+ * normal path now that the environment model exists, and the only one the UI
+ * offers, since it means a consultant types the sandbox URL and password once
+ * rather than on every profiling call. The inline `connection` object remains
+ * for callers that hold credentials they do not want stored at all; it is still
+ * never persisted here.
+ *
+ * A connector also carries its environment, so profiled dimensions land under
+ * that environment's key instead of the `'default'` bucket — which is what the
+ * pre-placed `environment_key` column on every coverage row was waiting for.
  */
 export async function profileFromSutAction(
   repositoryId: string,
@@ -244,7 +321,9 @@ export async function profileFromSutAction(
     where?: string;
     limit?: number;
     environmentKey?: string;
-    connection:
+    /** A stored connector. Mutually exclusive with `connection`. */
+    connectorId?: string;
+    connection?:
       | {
           kind: "vault";
           baseUrl: string;
@@ -269,10 +348,18 @@ export async function profileFromSutAction(
   if (!input.objectType?.trim()) throw new Error("An object type is required");
   if (!input.fields?.length) throw new Error("At least one field is required");
 
-  const profiler =
-    input.connection.kind === "vault"
-      ? new VaultProfiler(input.connection)
-      : new RestProfiler(input.connection);
+  const resolved = input.connectorId
+    ? await resolveConnectorProfiler(repositoryId, input.connectorId)
+    : input.connection
+      ? {
+          profiler: buildInlineProfiler(input.connection),
+          environmentKey: undefined,
+        }
+      : null;
+  if (!resolved) {
+    throw new Error("A connector or an inline connection is required");
+  }
+  const { profiler } = resolved;
 
   const connection = await profiler.testConnection();
   if (!connection.ok) {
@@ -281,9 +368,13 @@ export async function profileFromSutAction(
     );
   }
 
+  // The caller may still pin an environment explicitly; otherwise the
+  // connector's own environment decides where these counts belong.
+  const environmentKey = input.environmentKey ?? resolved.environmentKey;
+
   const outcome = await profileFromSut({
     repositoryId,
-    environmentKey: input.environmentKey,
+    environmentKey,
     profiler,
     objectType: input.objectType.trim(),
     fields: input.fields,
@@ -292,9 +383,7 @@ export async function profileFromSutAction(
   });
 
   // Profiled counts change every weight, so re-score before reporting.
-  await recomputeWeights(repositoryId, {
-    environmentKey: input.environmentKey,
-  });
+  await recomputeWeights(repositoryId, { environmentKey });
   revalidatePath(`/coverage`);
   return outcome;
 }

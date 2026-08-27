@@ -19,6 +19,8 @@ import type {
   DesignSystemConfig,
 } from "@/lib/db/schema";
 import type { MaskedCredential } from "@/lib/db/queries/credentials";
+import type { ConnectorWithEnvironment } from "@/lib/db/queries/connectors";
+import type { Environment } from "@/lib/db/schema";
 import type { SetupStep } from "@/server/actions/setup-steps";
 import type { TeardownStep } from "@/server/actions/teardown-steps";
 
@@ -33,6 +35,8 @@ interface SetupPageClientProps {
   designSystem: DesignSystemConfig | null;
   designSystemEnabled: boolean;
   credentials: MaskedCredential[];
+  environments: Environment[];
+  connectors: ConnectorWithEnvironment[];
 }
 
 export function SetupPageClient({
@@ -46,6 +50,8 @@ export function SetupPageClient({
   designSystem,
   designSystemEnabled,
   credentials,
+  environments,
+  connectors,
 }: SetupPageClientProps) {
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -138,6 +144,8 @@ export function SetupPageClient({
                 <CredentialList
                   repositoryId={repository.id}
                   credentials={credentials}
+                  environments={environments}
+                  connectors={connectors}
                 />
               </TabsContent>
             </Tabs>

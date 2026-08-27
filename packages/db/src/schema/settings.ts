@@ -7,6 +7,8 @@
  * external data sources tests read from (Google Sheets, CSV, imported specs).
  */
 
+import { sql } from "drizzle-orm";
+
 import {
   pgTable,
   text,
@@ -679,6 +681,102 @@ export type StorageState = typeof storageStates.$inferSelect;
 export type NewStorageState = typeof storageStates.$inferInsert;
 
 // ============================================
+// Environments (PROD / UAT / prerelease — gap analysis B2)
+// ============================================
+
+/**
+ * A deployment of the system under test that a suite can run against.
+ *
+ * NOT to be confused with `environment_configs` above, which is the managed
+ * dev-server launcher (mode / startCommand / healthCheckUrl) and stays one row
+ * per repo. This table is the PROD / UAT / prerelease-26R2 object: a Veeva or
+ * Salesforce customer has environments, not branches, and running the same
+ * suite against two of them is the whole job.
+ *
+ * Every scoping column this introduces elsewhere (`builds.environmentId`,
+ * `baselines.environmentKey`, `repo_credentials.environmentId`) is NULLABLE,
+ * and every lookup falls back to the NULL row. That is the entire migration
+ * strategy: a repo that never opens this screen behaves exactly as before.
+ */
+export const environments = pgTable(
+  "environments",
+  {
+    id: text("id").primaryKey(),
+    repositoryId: text("repository_id")
+      .references(() => repositories.id, { onDelete: "cascade" })
+      .notNull(),
+    /** Stable handle used as `baselines.environmentKey`. `^[a-z][a-z0-9-]*$`,
+     *  validated in the action layer. Renaming one would orphan its baselines,
+     *  so the UI edits `label` and leaves `key` alone after creation. */
+    key: text("key").notNull(),
+    label: text("label").notNull(),
+    description: text("description"),
+    /** What the executor navigates to. Falls back to the repo's own base URL
+     *  when empty, so an environment can exist purely to scope credentials. */
+    baseUrl: text("base_url"),
+    /** The vendor release this environment is running — '26R2'. The thing a
+     *  validation lead actually tracks, and what makes a prerelease sandbox
+     *  legible next to PROD. */
+    releaseLabel: text("release_label"),
+    isDefault: boolean("is_default").default(false),
+    sortOrder: integer("sort_order").default(0),
+    /** Set by `recordEnvironmentRefresh`. A sandbox refresh replaces record
+     *  ids, not layouts — baselines survive it because nothing in their key
+     *  changes, and this timestamp is what lets Review explain a mass-change
+     *  as a refresh instead of a regression. */
+    refreshedAt: timestamp("refreshed_at"),
+    refreshNote: text("refresh_note"),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at").$defaultFn(() => new Date()),
+    updatedAt: timestamp("updated_at").$defaultFn(() => new Date()),
+  },
+  (table) => [
+    index("idx_environments_repo").on(table.repositoryId),
+    uniqueIndex("uq_environments_repo_key").on(table.repositoryId, table.key),
+  ],
+);
+
+export type Environment = typeof environments.$inferSelect;
+
+export type NewEnvironment = typeof environments.$inferInsert;
+
+/**
+ * Non-secret per-environment values a test reads as a variable.
+ *
+ * This exists for the ids a sandbox refresh invalidates. A test that hardcodes
+ * a Vault document id breaks on every refresh; the same test reading
+ * `{{env.docId}}` is re-pointed by editing one row. Secrets do NOT go here —
+ * they go to `repo_credentials`, which is encrypted and redacted.
+ */
+export const environmentVariables = pgTable(
+  "environment_variables",
+  {
+    id: text("id").primaryKey(),
+    environmentId: text("environment_id")
+      .references(() => environments.id, { onDelete: "cascade" })
+      .notNull(),
+    key: text("key").notNull(),
+    value: text("value").notNull().default(""),
+    description: text("description"),
+    createdAt: timestamp("created_at").$defaultFn(() => new Date()),
+    updatedAt: timestamp("updated_at").$defaultFn(() => new Date()),
+  },
+  (table) => [
+    index("idx_environment_variables_env").on(table.environmentId),
+    uniqueIndex("uq_environment_variables_env_key").on(
+      table.environmentId,
+      table.key,
+    ),
+  ],
+);
+
+export type EnvironmentVariable = typeof environmentVariables.$inferSelect;
+
+export type NewEnvironmentVariable = typeof environmentVariables.$inferInsert;
+
+// ============================================
 // Repo Credentials (logins used by setup scripts and tests)
 // ============================================
 
@@ -712,8 +810,11 @@ export interface CredentialField {
  * They are injected as a frozen `credentials` parameter on the test body instead
  * — see `docs/credentials-plan.md` §1.
  *
- * No `environmentId` yet: PROD vs UAT is the environment model (gap analysis
- * B2), which re-keys half a dozen tables at once.
+ * Scoped to an environment (B2). `environmentId` is NULLABLE and the run-time
+ * resolver falls back to the NULL row per handle, so `credentials.vault.password`
+ * is the UAT password on a UAT run and the PROD password on a PROD run without
+ * a single test body changing — no `codeHash` moves, no baseline is invalidated.
+ * A repo that never creates an environment keeps exactly one NULL-scoped set.
  */
 export const repoCredentials = pgTable(
   "repo_credentials",
@@ -722,8 +823,15 @@ export const repoCredentials = pgTable(
     repositoryId: text("repository_id")
       .references(() => repositories.id, { onDelete: "cascade" })
       .notNull(),
+    // NULL = "applies to every environment". Deleting an environment must not
+    // delete its logins silently, so this is `set null`, not a cascade — the
+    // credential reappears as repo-wide and is visible in the list.
+    environmentId: text("environment_id").references(() => environments.id, {
+      onDelete: "set null",
+    }),
     // The handle used in test code: `credentials.<name>.<fieldKey>`.
-    // Validated `^[a-z][A-Za-z0-9]*$` and unique per repo in the action layer.
+    // Validated `^[a-z][A-Za-z0-9]*$` and unique per (repo, environment) in the
+    // action layer.
     name: text("name").notNull(),
     label: text("label").notNull(),
     description: text("description"),
@@ -738,13 +846,137 @@ export const repoCredentials = pgTable(
   },
   (table) => [
     index("idx_repo_credentials_repo").on(table.repositoryId),
-    uniqueIndex("uq_repo_credentials_repo_name").on(
-      table.repositoryId,
-      table.name,
-    ),
+    index("idx_repo_credentials_env").on(table.environmentId),
+    // Two PARTIAL unique indexes rather than one on (repo, env, name).
+    // Postgres treats NULLs as distinct, so a plain three-column unique index
+    // would silently stop enforcing anything for repo-wide credentials — the
+    // only kind that exists today.
+    uniqueIndex("uq_repo_credentials_repo_name")
+      .on(table.repositoryId, table.name)
+      .where(sql`${table.environmentId} IS NULL`),
+    uniqueIndex("uq_repo_credentials_repo_env_name")
+      .on(table.repositoryId, table.environmentId, table.name)
+      .where(sql`${table.environmentId} IS NOT NULL`),
   ],
 );
 
 export type RepoCredential = typeof repoCredentials.$inferSelect;
 
 export type NewRepoCredential = typeof repoCredentials.$inferInsert;
+
+// ============================================
+// SUT connectors (Veeva Vault / Salesforce orgs)
+// ============================================
+
+export type SutConnectorType = "vault" | "salesforce";
+
+/**
+ * How a connector authenticates.
+ *
+ * `sf-ui-login` is username/password *in a browser*, not an OAuth flow:
+ * Salesforce disabled new Connected App creation in Spring '26, and External
+ * Client Apps do not support the username-password grant at all. API access is
+ * therefore client-credentials or JWT-bearer only, and the form login survives
+ * purely because that is what a regression test drives.
+ */
+export type SutConnectorAuthMethod =
+  | "vault-password"
+  | "vault-oauth"
+  | "sf-ui-login"
+  | "sf-client-credentials"
+  | "sf-jwt-bearer";
+
+export interface VaultConnectorConfig {
+  /** Host only, e.g. `my-vault.veevavault.com`. */
+  vaultDns: string;
+  /** Path segment, e.g. `v25.1` — Vault versions its API in the URL. */
+  apiVersion: string;
+  /** OAuth/OIDC profile configured Vault-side; used by the session exchange at
+   *  `login.veevavault.com/auth/oauth/session/{id}`. */
+  oauthProfileId?: string;
+  oauthClientId?: string;
+  /** Reported by the auth response. Informational — which Vault of the org. */
+  discoveredVaultId?: string;
+}
+
+export interface SalesforceConnectorConfig {
+  /** `https://login.salesforce.com`, `https://test.salesforce.com`, or a My
+   *  Domain URL. */
+  loginUrl: string;
+  apiVersion: string;
+  /** DERIVED from the token response, never typed by a user: Salesforce serves
+   *  API traffic from an instance host that differs from the login host. */
+  instanceUrl?: string;
+  /** The consumer key is the public half of the pair; the consumer secret is a
+   *  credential field, not config. */
+  consumerKey?: string;
+  /** JWT-bearer run-as user. */
+  jwtSubject?: string;
+}
+
+export type SutConnectorConfig =
+  | VaultConnectorConfig
+  | SalesforceConnectorConfig;
+
+/**
+ * One connected Veeva Vault or Salesforce org, scoped to an environment.
+ *
+ * N per type per repo, deliberately: a validation engagement has a PROD Vault,
+ * a UAT Vault and a prerelease sandbox, and the singleton-per-team shape the
+ * GitHub/GitLab integrations use cannot express that. The multi-row precedent
+ * is `ci_github_action_configs`.
+ *
+ * `config` holds NON-SECRET values only. Every secret this connector needs
+ * lives in the linked `repo_credentials` row, so there is exactly one
+ * encryption path, one masking path, one run-time injection path and one EB
+ * redaction path — all of which already exist.
+ */
+export const sutConnectors = pgTable(
+  "sut_connectors",
+  {
+    id: text("id").primaryKey(),
+    repositoryId: text("repository_id")
+      .references(() => repositories.id, { onDelete: "cascade" })
+      .notNull(),
+    environmentId: text("environment_id").references(() => environments.id, {
+      onDelete: "cascade",
+    }),
+    type: text("type").$type<SutConnectorType>().notNull(),
+    /** Shared with the linked credential, so a test reads
+     *  `credentials.<name>.username`. Validated `^[a-z][A-Za-z0-9]*$`. */
+    name: text("name").notNull(),
+    label: text("label").notNull(),
+    authMethod: text("auth_method").$type<SutConnectorAuthMethod>().notNull(),
+    config: jsonb("config").$type<SutConnectorConfig>().notNull(),
+    // `set null`, not cascade: deleting a credential must orphan the connector
+    // visibly rather than silently taking the org config with it.
+    credentialId: text("credential_id").references(() => repoCredentials.id, {
+      onDelete: "set null",
+    }),
+    lastVerifiedAt: timestamp("last_verified_at"),
+    lastVerifyError: text("last_verify_error"),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at").$defaultFn(() => new Date()),
+    updatedAt: timestamp("updated_at").$defaultFn(() => new Date()),
+  },
+  (table) => [
+    index("idx_sut_connectors_repo").on(table.repositoryId),
+    index("idx_sut_connectors_repo_type").on(table.repositoryId, table.type),
+    index("idx_sut_connectors_env").on(table.environmentId),
+    // Same NULL-distinctness problem as `repo_credentials`, same fix: the
+    // handle must be unique within its environment, and repo-wide connectors
+    // must not all collide into one enforceable row.
+    uniqueIndex("uq_sut_connectors_repo_name")
+      .on(table.repositoryId, table.name)
+      .where(sql`${table.environmentId} IS NULL`),
+    uniqueIndex("uq_sut_connectors_repo_env_name")
+      .on(table.repositoryId, table.environmentId, table.name)
+      .where(sql`${table.environmentId} IS NOT NULL`),
+  ],
+);
+
+export type SutConnector = typeof sutConnectors.$inferSelect;
+
+export type NewSutConnector = typeof sutConnectors.$inferInsert;
