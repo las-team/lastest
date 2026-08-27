@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSelectedRepository, getLastBuildByBranch } from "@/lib/db/queries";
 import { getCurrentSession } from "@/lib/auth";
-import { isVerifyPhaseEnabled } from "@/lib/verify/feature-flag";
 import { fetchRepoBranches } from "@/server/actions/repos";
 import { VerifyIndexClient } from "./verify-index-client";
 
@@ -9,10 +8,6 @@ export const dynamic = "force-dynamic";
 
 export default async function VerifyPage() {
   const session = await getCurrentSession();
-  if (!isVerifyPhaseEnabled(session?.team)) {
-    redirect("/run");
-  }
-
   const teamId = session?.team?.id;
   const userId = session?.user?.id;
   const selectedRepo = teamId

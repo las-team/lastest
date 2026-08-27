@@ -15,7 +15,24 @@ import {
   Bug,
   ListTree,
 } from "lucide-react";
-import type { FilterType } from "@/app/(app)/builds/[buildId]/build-detail-client";
+/**
+ * Which metric tile is active. Defined here since the build-detail page this
+ * type used to live on was retired into `/verify`
+ * (docs/architecture/retire-run-build-pages.md); the tile row itself is kept
+ * because it is a general dashboard component, not build-page furniture.
+ */
+export type FilterType =
+  | "all"
+  | "tests"
+  | "changed"
+  | "flaky"
+  | "failed"
+  | "passed"
+  | "errors"
+  | "todo"
+  | "ai-approve"
+  | "ai-review"
+  | "ai-flag";
 import type { VisualDiffWithTestStatus } from "@/lib/db/schema";
 import { cn } from "@/lib/utils";
 

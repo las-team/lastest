@@ -105,7 +105,7 @@ export function ValidateDiffDialog({
               )}
               {result.buildId && (
                 <a
-                  href={`/builds/${result.buildId}`}
+                  href={`/verify/${result.buildId}`}
                   className="text-xs underline text-primary"
                 >
                   Open build →

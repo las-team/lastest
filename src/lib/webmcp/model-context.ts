@@ -164,6 +164,9 @@ const sessionDispatch: WebMcpDispatch = async (tool, args) => {
   return shapeResult(response.result);
 };
 
+/** Tool name → the registration pass that last registered it. See below. */
+const TOOL_OWNERS = new Map<string, symbol>();
+
 /**
  * Register every tool whose route context is satisfied. Returns a disposer —
  * callers must invoke it on unmount. Unregistering matters: the March 2026 spec
@@ -174,11 +177,29 @@ const sessionDispatch: WebMcpDispatch = async (tool, args) => {
 export function registerWebMcpTools(
   tools: readonly WebMcpToolDef[],
   context: WebMcpContext,
-  options: { dispatch?: WebMcpDispatch } = {},
+  options: { dispatch?: WebMcpDispatch; signal?: AbortSignal } = {},
 ): () => void {
   const mc = getModelContext();
   if (!mc) return () => {};
+  // The caller gave up while we were awaiting the polyfill install — register
+  // nothing. Checked here rather than only in the caller's `.then` because a
+  // stale pass that registers first and disposes a microtask later collides
+  // with the fresh pass on every shared tool name (see `registerOne`).
+  if (options.signal?.aborted) return () => {};
   const dispatch = options.dispatch ?? sessionDispatch;
+
+  // Who currently owns each registered name.
+  //
+  // `unregisterTool` is keyed by name, so a *stale* pass's disposer would
+  // otherwise unregister the tools a newer pass had just registered under the
+  // same names. That is not hypothetical: the providers register
+  // asynchronously (the polyfill install is awaited), so when route context
+  // arrives the old pass's promise can resolve *after* the new pass has
+  // registered, and its `cancelled` disposer then strips every shared name —
+  // leaving a build page with only its build-scoped tools and none of the
+  // global or repo ones. Ownership is checked at disposal so a late disposer
+  // can only remove what it still owns.
+  const pass = Symbol("webmcp-registration");
 
   const registered: string[] = [];
   // The draft unregisters through an AbortSignal passed at registration;
@@ -188,7 +209,7 @@ export function registerWebMcpTools(
   for (const tool of tools) {
     if (!isToolAvailable(tool, context)) continue;
     try {
-      mc.registerTool(
+      const result = mc.registerTool(
         {
           name: tool.name,
           title: tool.title,
@@ -202,7 +223,15 @@ export function registerWebMcpTools(
         },
         { signal: abort.signal },
       );
+      // `registerTool` is async in the polyfill (and in the draft IDL), so its
+      // failures arrive as a rejected promise the `catch` below never sees —
+      // an unhandled rejection that surfaces as a full-page dev overlay
+      // ("InvalidStateError: Tool already registered"). Two of its rejections
+      // are entirely routine: a name another pass already owns, and the
+      // abort we ourselves fire on disposal.
+      void Promise.resolve(result).catch(() => {});
       registered.push(tool.name);
+      TOOL_OWNERS.set(tool.name, pass);
     } catch {
       // One bad descriptor must not take the rest of the surface down.
     }
@@ -211,6 +240,10 @@ export function registerWebMcpTools(
   return () => {
     abort.abort();
     for (const name of registered) {
+      // Someone else re-registered this name after us — theirs is the live
+      // tool, and unregistering it here would be the bug, not the cleanup.
+      if (TOOL_OWNERS.get(name) !== pass) continue;
+      TOOL_OWNERS.delete(name);
       try {
         mc.unregisterTool?.(name);
       } catch {
@@ -228,7 +261,7 @@ export function registerWebMcpTools(
 export async function registerWebMcpToolsWithPolyfill(
   tools: readonly WebMcpToolDef[],
   context: WebMcpContext,
-  options: { dispatch?: WebMcpDispatch } = {},
+  options: { dispatch?: WebMcpDispatch; signal?: AbortSignal } = {},
 ): Promise<() => void> {
   await ensureModelContext();
   return registerWebMcpTools(tools, context, options);

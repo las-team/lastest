@@ -85,7 +85,7 @@ const KIND_LABELS: Record<FleetAgentKind, string> = {
 
 const KIND_HREFS: Record<FleetAgentKind, string> = {
   qa: "/qa-agent",
-  ranger: "/run",
+  ranger: "/verify",
   play: "/tests",
   quickstart: "/",
   explorer: "/explorer",

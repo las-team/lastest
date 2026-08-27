@@ -115,7 +115,7 @@ export async function saveBranchBaseUrl(
   const urls = (repo.branchBaseUrls as Record<string, string>) ?? {};
   urls[branch] = baseUrl.replace(/\/+$/, "");
   await queries.updateRepository(repositoryId, { branchBaseUrls: urls });
-  revalidatePath("/run");
+  revalidatePath("/verify");
 }
 
 /**

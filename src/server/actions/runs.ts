@@ -394,7 +394,7 @@ async function runTestsAsync(
     }
   }
 
-  revalidatePath("/run");
+  revalidatePath("/verify");
   revalidatePath("/tests", "layout");
   revalidatePath("/");
 

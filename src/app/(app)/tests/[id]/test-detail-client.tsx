@@ -151,7 +151,7 @@ import {
 } from "@/components/embedded-browser/browser-viewer-client";
 import { getStreamUrlForRunner } from "@/server/actions/embedded-sessions";
 import { TestSpecEditor } from "@/components/tests/test-spec-editor";
-import { PublishShareDialog } from "@/app/(app)/builds/[buildId]/publish-share-dialog";
+import { PublishShareDialog } from "@/components/share/publish-share-dialog";
 import { diffLines as diffTextLines, diffStats } from "@/lib/diff/text-diff";
 import { InspectTabClient } from "./inspect/inspect-tab-client";
 import { track } from "@/lib/analytics/umami";

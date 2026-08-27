@@ -83,18 +83,6 @@ export const teams = pgTable("teams", {
   /** Leaderboard / seasons / Bug Blitz. Opt-in — new teams start with it off
    *  and enable it in Settings → Features. */
   gamificationEnabled: boolean("gamification_enabled").default(false),
-  /** Verify phase (v1.14+) — when true, /verify is the primary surface and
-   *  appears as the first sidebar entry. /run and /review are demoted. */
-  verifyPhaseEnabled: boolean("verify_phase_enabled").default(true),
-  /**
-   * WebMCP ("site tools"): register Lastest's tools with the browser's own AI
-   * agent — Chrome's `document.modelContext` origin trial, or the ChatGPT
-   * desktop / Codex built-in browser. Opt-in per team, and additionally gated
-   * per deployment by `WEBMCP_ENABLED=1`, because it lets an agent the operator
-   * did not configure act with the signed-in user's permissions.
-   * See docs/design/webmcp.md.
-   */
-  webMcpEnabled: boolean("web_mcp_enabled").default(false),
   /**
    * Regulated (pharma / life-sciences) segment profile — set by the Pharma
    * onboarding fork, and the single flag every restriction in

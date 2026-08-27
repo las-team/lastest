@@ -71,7 +71,7 @@ export async function getVisualDiffsWithTestStatus(buildId: string) {
       networkRequests: testResults.networkRequests,
       downloads: testResults.downloads,
       browser: visualDiffs.browser,
-      // Per-step progress fields (consumed by build-detail-client to render
+      // Per-step progress fields (consumed by the verify board to render
       // a per-step pass/fail strip and synthesize "not run" rows for steps
       // beyond lastReachedStep).
       lastReachedStep: testResults.lastReachedStep,

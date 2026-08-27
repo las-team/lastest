@@ -14,6 +14,7 @@ import { attributeBuildRuns } from "@/lib/coverage/sync";
 import { captureCoverageSnapshot } from "@/lib/coverage/trend";
 import { resolveBuildSetup } from "@/lib/setup/resolve-build-setup";
 import { requireTeamAccess, requireRepoAccess } from "@/lib/auth";
+import { fetchRepoBranches } from "@/server/actions/repos";
 import { requireBuildOwnership } from "@/lib/auth/ownership";
 import {
   generateDiff,
@@ -1328,7 +1329,7 @@ async function runBuildAsync(
     // Check if this build was cancelled while running
     const currentJob = await queries.getBackgroundJob(jobId);
     if (currentJob?.error === "Cancelled by user") {
-      revalidatePath("/builds");
+      revalidatePath("/verify");
       revalidatePath("/");
       if (targetRunner !== "auto") {
         processNextQueuedBuild(repositoryId, targetRunner);
@@ -1504,7 +1505,7 @@ async function runBuildAsync(
     const finalJob = await queries.getBackgroundJob(jobId);
     if (finalJob?.error === "Cancelled by user") {
       // cancelJob owns the statuses — mirror the post-setup early return.
-      revalidatePath("/builds");
+      revalidatePath("/verify");
       revalidatePath("/");
       if (targetRunner !== "auto") {
         processNextQueuedBuild(repositoryId, targetRunner);
@@ -1532,7 +1533,7 @@ async function runBuildAsync(
       console.warn(
         `[build] ${buildId} finalized as blocked — job terminated externally: ${abortErr}`,
       );
-      revalidatePath("/builds");
+      revalidatePath("/verify");
       revalidatePath("/");
       if (targetRunner !== "auto") {
         processNextQueuedBuild(repositoryId, targetRunner);
@@ -1866,7 +1867,7 @@ async function runBuildAsync(
   // unhandled rejection that can take the process down. Cache invalidation is
   // best-effort here; the build rows are already committed.
   try {
-    revalidatePath("/builds");
+    revalidatePath("/verify");
     revalidatePath("/");
   } catch {
     // No request scope — nothing to revalidate against.
@@ -2861,6 +2862,30 @@ export async function getBuildsByRepo(repositoryId: string, limit = 10) {
 }
 
 /**
+ * Everything the Verify header's build-history drawer needs, in one round trip:
+ * the last N builds plus each branch's head SHA (the graph's "ahead of the last
+ * build" markers).
+ *
+ * Called lazily when the drawer opens rather than fetched with the page. The
+ * `/run` dashboard this replaces blocked its first paint on 25 builds *and* a
+ * provider round trip for branches; history is a picker, not the destination,
+ * so nobody should wait on it to start triaging.
+ *
+ * `fetchRepoBranches` hits GitHub/GitLab and is the slow half — a provider
+ * outage degrades the drawer to a branch-head-less graph rather than failing it.
+ */
+export async function getBuildHistory(repositoryId: string, limit = 25) {
+  await requireRepoAccess(repositoryId);
+  const [builds, branches] = await Promise.all([
+    queries.getBuildsByRepo(repositoryId, limit),
+    fetchRepoBranches(repositoryId).catch(() => []),
+  ]);
+  const branchHeads: Record<string, string> = {};
+  for (const b of branches) branchHeads[b.name] = b.commit.sha;
+  return { builds, branchHeads };
+}
+
+/**
  * Get build by ID
  */
 export async function getBuild(buildId: string) {
@@ -3036,7 +3061,7 @@ async function sendBuildNotifications(data: {
 
   // Get base URL for links (default to localhost for now)
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
-  const buildUrl = `${baseUrl}/builds/${data.buildId}`;
+  const buildUrl = `${baseUrl}/verify/${data.buildId}`;
 
   // Send Slack notification
   if (
@@ -3256,7 +3281,7 @@ export async function saveComposeConfig(
     versionOverrides,
   });
   revalidatePath("/compose");
-  revalidatePath("/run");
+  revalidatePath("/verify");
 }
 
 /**

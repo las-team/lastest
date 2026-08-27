@@ -36,6 +36,6 @@ export async function generateShareCaptions(
 
   // Public share reads notes live (revalidate=0), but revalidate the in-app
   // build view so a "Generate captions" button reflects immediately.
-  revalidatePath(`/builds/${buildId}`);
+  revalidatePath(`/verify/${buildId}`);
   return { ok: true, count: result.count };
 }

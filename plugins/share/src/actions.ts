@@ -125,7 +125,7 @@ export async function publishBuildShare(
       });
   }
 
-  revalidatePath(`/builds/${buildId}`);
+  revalidatePath(`/verify/${buildId}`);
   return { shareId: share.id, slug: share.slug, url: shareUrl };
 }
 
@@ -162,7 +162,7 @@ export async function revokePublicShare(shareId: string): Promise<void> {
   await runtime.contextFor(sharePlugin, { repositoryId: share.repositoryId });
 
   await queries.revokePublicShareById(shareId);
-  revalidatePath(`/builds/${share.buildId}`);
+  revalidatePath(`/verify/${share.buildId}`);
   revalidatePath(`/r/${share.slug}`);
 }
 

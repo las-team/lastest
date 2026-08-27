@@ -7,7 +7,6 @@ import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
   FileCode,
-  Play,
   GitCompare,
   Settings,
   Layers,
@@ -15,6 +14,7 @@ import {
   TrendingDown,
   Trophy,
   ShieldCheck,
+  Sparkles,
   GitCommit,
   Wrench,
   Network,
@@ -80,8 +80,12 @@ const definitionNav = [
   { name: "Compose", href: "/compose", icon: Layers },
 ];
 
+// `/run` is gone — Verify is the single execution surface, and it leads this
+// group (see docs/architecture/retire-run-build-pages.md). Review keeps the
+// todo + pending-diff queue reachable now that `/run` no longer embeds it.
 const executionNav = [
-  { name: "Runs", href: "/run", icon: Play },
+  { name: "Verify", href: "/verify", icon: ShieldCheck },
+  { name: "Review", href: "/review", icon: Sparkles },
   { name: "Agents", href: "/agents", icon: Network },
   { name: "Compare", href: "/compare", icon: GitCompare },
   { name: "Impact", href: "/analytics/impact", icon: TrendingDown },
@@ -126,7 +130,6 @@ export function Sidebar({
   // Leaderboard group, which render outside `filteredDefinitionNav`.
   const gamificationEnabled =
     (team?.gamificationEnabled ?? false) && !regulated;
-  const verifyPhaseEnabled = team?.verifyPhaseEnabled ?? false;
   // Agents is a Pro-tier feature — surface a lock on the nav item so the
   // gated destination doesn't look identical to unlocked pages.
   const qaAgentLocked = team
@@ -144,22 +147,11 @@ export function Sidebar({
       : definitionNav.filter((item) => !EARLY_ADOPTER_ITEMS.has(item.name)),
   );
 
-  // Verify lives in the Execution section. When the flag is on it sits at
-  // the top of that group; legacy /run, /review etc remain accessible so
-  // reviewers can compare the new and old flows side-by-side.
-  const verifyEntry = {
-    name: "Verify",
-    href: "/verify",
-    icon: ShieldCheck,
-  } as const;
-  const filteredExecutionNav = hideForSegment(
+  const finalExecutionNav = hideForSegment(
     earlyAdopter
       ? executionNav
       : executionNav.filter((item) => !EARLY_ADOPTER_ITEMS.has(item.name)),
   );
-  const finalExecutionNav = verifyPhaseEnabled
-    ? [verifyEntry, ...filteredExecutionNav]
-    : filteredExecutionNav;
 
   return (
     <aside className={cn("w-64 border-r bg-muted/30 flex flex-col", className)}>
@@ -409,7 +401,6 @@ export function Sidebar({
           repositoryId={repositoryId}
           activeBranch={activeBranch}
           ebSessions={ebSessions}
-          verifyPhaseEnabled={verifyPhaseEnabled}
         />
       </div>
 

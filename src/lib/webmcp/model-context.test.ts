@@ -289,6 +289,69 @@ describe("consent handler", () => {
     expect(signals.at(-1)?.aborted).toBe(true);
     expect(registered.size).toBe(0);
   });
+
+  it("registers nothing once the caller's signal is aborted", () => {
+    // StrictMode's double-effect: the first pass is cancelled while it awaits
+    // the polyfill install, and must not register on the way back — its
+    // disposer runs a microtask *after* the second pass has claimed the same
+    // names, which is what "Tool already registered" was.
+    const { registered } = installModelContext();
+    const controller = new AbortController();
+    controller.abort();
+    const dispose = registerWebMcpTools(
+      [
+        {
+          name: "read",
+          title: "Read",
+          description: "d",
+          inputSchema: { type: "object", properties: {} },
+          scope: "global",
+          readOnly: true,
+          source: { tool: "lastest_status", bind: { action: "jobs" } },
+        },
+      ],
+      {},
+      { signal: controller.signal },
+    );
+    expect(registered.size).toBe(0);
+    dispose();
+  });
+
+  it("swallows an async registerTool rejection instead of leaving it unhandled", async () => {
+    // The polyfill's registerTool is async: a duplicate name rejects rather
+    // than throwing, and an unhandled rejection is a full-page dev overlay.
+    installModelContext();
+    const mc = (
+      document as unknown as { modelContext: { registerTool: unknown } }
+    ).modelContext;
+    mc.registerTool = () =>
+      Promise.reject(
+        new DOMException("Tool already registered: read", "InvalidStateError"),
+      );
+    const onUnhandled = vi.fn();
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const dispose = registerWebMcpTools(
+        [
+          {
+            name: "read",
+            title: "Read",
+            description: "d",
+            inputSchema: { type: "object", properties: {} },
+            scope: "global",
+            readOnly: true,
+            source: { tool: "lastest_status", bind: { action: "jobs" } },
+          },
+        ],
+        {},
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(onUnhandled).not.toHaveBeenCalled();
+      dispose();
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
 });
 
 describe("custom dispatch", () => {

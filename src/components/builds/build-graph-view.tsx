@@ -201,7 +201,7 @@ export function BuildGraphView({
 
   const handleNodeClick = useCallback(
     (buildId: string) => {
-      router.push(`/builds/${buildId}`);
+      router.push(`/verify/${buildId}`);
     },
     [router],
   );

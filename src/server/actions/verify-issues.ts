@@ -581,8 +581,8 @@ export async function confirmCase(
   // convention as approveDiffCore on the build-detail path).
 
   revalidatePath(`/verify/${step.buildId}`);
-  revalidatePath("/builds");
-  revalidatePath(`/builds/${step.buildId}`);
+  revalidatePath("/verify");
+  revalidatePath(`/verify/${step.buildId}`);
   return {
     ok: true,
     ticketChanged,

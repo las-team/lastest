@@ -32,7 +32,6 @@ interface SidebarQuickActionsProps {
   repositoryId?: string | null;
   activeBranch?: string;
   ebSessions?: EmbeddedSession[];
-  verifyPhaseEnabled?: boolean;
 }
 
 const HISTORY_KEY = "baseurl-history";
@@ -70,7 +69,6 @@ export function SidebarQuickActions({
   repositoryId,
   activeBranch,
   ebSessions: initialEbSessions = [],
-  verifyPhaseEnabled = false,
 }: SidebarQuickActionsProps) {
   const router = useRouter();
   const notifyJobStarted = useNotifyJobStarted();
@@ -284,11 +282,7 @@ export function SidebarQuickActions({
           "All browsers are busy — build queued and will start automatically",
         );
       } else {
-        router.push(
-          verifyPhaseEnabled
-            ? `/verify/${result.buildId}`
-            : `/builds/${result.buildId}`,
-        );
+        router.push(`/verify/${result.buildId}`);
       }
     } catch (error) {
       console.error("Failed to start build:", error);

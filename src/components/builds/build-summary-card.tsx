@@ -126,7 +126,7 @@ export function BuildSummaryCard({
 
   return (
     <Link
-      href={`/builds/${build.id}`}
+      href={`/verify/${build.id}`}
       className={cn(
         `block p-3 rounded-lg border ${config.borderColor} ${config.bgColor} hover:border-primary/30 hover:bg-primary/5 transition-colors`,
         isActiveBranch && "ring-2 ring-primary/50",

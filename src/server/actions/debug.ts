@@ -531,7 +531,6 @@ export async function saveDebugSessionCode(
 
   revalidatePath("/tests");
   revalidatePath(`/tests/${remoteSession.testId}`);
-  revalidatePath("/builds");
   revalidatePath("/verify");
   return { ok: true };
 }

@@ -169,7 +169,7 @@ export async function writeCompatibilityColumns(
  *
  * The retired per-diff pass wrote `aiAnalysisStatus: "failed"` when its LLM
  * call blew up, and the build screen still reads it (`failedAnalysisCount`,
- * `isAIFailed` in `build-detail-client.tsx`) to tell the user classification
+ * `isAIFailed` on the retired build page) to tell the user classification
  * did not happen. Without this the agent's failure path leaves the column
  * null, that affordance never renders again, and a failed triage is
  * indistinguishable from one that was never asked to run.
