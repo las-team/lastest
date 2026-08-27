@@ -119,7 +119,7 @@ export function Sidebar({
   const earlyAdopter = team?.earlyAdopterMode ?? false;
   const gamificationEnabled = team?.gamificationEnabled ?? false;
   const verifyPhaseEnabled = team?.verifyPhaseEnabled ?? false;
-  // QA Agent is a Pro-tier feature — surface a lock on the nav item so the
+  // Agents is a Pro-tier feature — surface a lock on the nav item so the
   // gated destination doesn't look identical to unlocked pages.
   const qaAgentLocked = team
     ? !hasQaAgentAccess(team.plan, billingEnabled)
@@ -291,7 +291,7 @@ export function Sidebar({
                             : "bg-primary/10 text-primary ring-primary/20",
                         )}
                         aria-label="Pro feature"
-                        title="The QA agent is available on the Pro plan"
+                        title="The Agents console is available on the Pro plan"
                       >
                         <Lock className="h-2.5 w-2.5" />
                         Pro
