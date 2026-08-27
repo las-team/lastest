@@ -26,6 +26,7 @@ import { toast } from "sonner";
 import { runVerifyBuild } from "@/server/actions/smart-run";
 import { BrowserViewer } from "@/components/embedded-browser/browser-viewer-client";
 import { BuildHistoryDrawer } from "./build-history-drawer";
+import { ReviewDrawer } from "./review-drawer";
 import { RunMenu } from "./run-menu";
 import { decideLayer } from "@/server/actions/layer-feedback";
 import { confirmCase, type ConfirmKind } from "@/server/actions/verify-issues";
@@ -1233,6 +1234,11 @@ function BoardFocusInner(props: BoardFocusClientProps) {
             repositoryId={props.repositoryId}
             currentBuildId={props.build.id}
             activeBranch={props.branch}
+            defaultBranch={props.defaultBranch}
+          />
+          <ReviewDrawer
+            repositoryId={props.repositoryId}
+            branch={props.branch}
             defaultBranch={props.defaultBranch}
           />
           <div style={{ position: "relative" }}>

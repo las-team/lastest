@@ -233,7 +233,13 @@ export function RunMenu({
           borderTopLeftRadius: 0,
           borderBottomLeftRadius: 0,
           borderLeft: "1px solid rgba(255,255,255,0.25)",
-          padding: "0 6px",
+          padding: 0,
+          // `.v-btn` carries `min-width: 132px` so action bars line up; a
+          // caret-only half of a split button is the one place that rule is
+          // wrong, and without the override it renders as wide as the Run
+          // button itself.
+          minWidth: 28,
+          width: 28,
         }}
       >
         <ChevronDown size={11} />

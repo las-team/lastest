@@ -40,6 +40,29 @@ export async function getReviewTodos({
   return [];
 }
 
+/**
+ * The review queue for one branch — todos plus the latest build's diffs.
+ *
+ * Fetched lazily by Verify's Review drawer, which is where the queue lives now
+ * that `/run` (which embedded it) is retired and `/review` is off the nav. Same
+ * three reads `/review` does on the server; doing them here keeps the drawer
+ * out of the triage page's first paint.
+ */
+export async function getReviewQueue(repositoryId: string, branch: string) {
+  await requireRepoAccess(repositoryId);
+  const [todos, latestBuild] = await Promise.all([
+    queries.getReviewTodosByBranch(repositoryId, branch),
+    queries.getLastBuildByBranch(repositoryId, branch),
+  ]);
+  return {
+    todos,
+    latestBuildId: latestBuild?.id ?? null,
+    diffs: latestBuild
+      ? await queries.getVisualDiffsWithTestStatus(latestBuild.id)
+      : [],
+  };
+}
+
 export async function resolveReviewTodo(todoId: string) {
   const session = await requireTeamAccess();
   const todo = await assertTodoOwnership(todoId, session.team.id);

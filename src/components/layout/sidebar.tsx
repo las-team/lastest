@@ -14,7 +14,6 @@ import {
   TrendingDown,
   Trophy,
   ShieldCheck,
-  Sparkles,
   GitCommit,
   Wrench,
   Network,
@@ -81,11 +80,11 @@ const definitionNav = [
 ];
 
 // `/run` is gone — Verify is the single execution surface, and it leads this
-// group (see docs/architecture/retire-run-build-pages.md). Review keeps the
-// todo + pending-diff queue reachable now that `/run` no longer embeds it.
+// group (see docs/architecture/retire-run-build-pages.md). `/review` is off the
+// nav too: the todo + pending-diff queue is something you consult while
+// triaging a build, so it lives in Verify's header as a drawer beside History.
 const executionNav = [
   { name: "Verify", href: "/verify", icon: ShieldCheck },
-  { name: "Review", href: "/review", icon: Sparkles },
   { name: "Agents", href: "/agents", icon: Network },
   { name: "Compare", href: "/compare", icon: GitCompare },
   { name: "Impact", href: "/analytics/impact", icon: TrendingDown },
