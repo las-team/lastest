@@ -273,6 +273,113 @@ function QaPrCoverageSection({
   );
 }
 
+/**
+ * Coverage matrix — business area × test group. Extracted so the QA console can
+ * render it as its own bento tile while the coverage-detail card keeps the same
+ * table for the by-group and journey sections around it.
+ */
+export function QaCoverageMatrix({
+  summary,
+  onRequestCoverage,
+  requestPending = false,
+}: {
+  summary: QaSummaryData;
+  onRequestCoverage?: (hint: CoverageRequestHint) => void;
+  requestPending?: boolean;
+}) {
+  if (!summary.matrix || Object.keys(summary.matrix).length === 0) return null;
+  return (
+    <div className="space-y-1">
+      <h4 className="text-sm font-medium">
+        Coverage matrix{" "}
+        <span className="text-xs font-normal text-muted-foreground">
+          — business area × test group (covered+generated / planned, ✓ passing
+          this run; a multi-group test counts in every column it covers)
+        </span>
+      </h4>
+      <div className="rounded-md border overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b bg-muted/40">
+              <th className="w-full text-left px-3 py-1.5 font-medium">
+                Business area
+              </th>
+              {QA_GROUPS.filter((g) =>
+                Object.values(summary.matrix!).some((row) => row[g.id]),
+              ).map((g) => (
+                <th
+                  key={g.id}
+                  className="w-14 text-center px-1.5 py-1.5 font-medium text-xs whitespace-nowrap"
+                  title={`${g.label} — ${g.description}`}
+                >
+                  {g.short}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {Object.entries(summary.matrix).map(([area, row]) => (
+              <tr key={area}>
+                <td className="px-3 py-1.5 font-medium whitespace-nowrap">
+                  {area}
+                </td>
+                {QA_GROUPS.filter((g) =>
+                  Object.values(summary.matrix!).some((r) => r[g.id]),
+                ).map((g) => {
+                  const cell = row[g.id];
+                  if (!cell || cell.planned === 0) {
+                    return (
+                      <td
+                        key={g.id}
+                        className="text-center px-2 py-1.5 text-muted-foreground/40"
+                      >
+                        —
+                      </td>
+                    );
+                  }
+                  const done = cell.covered + cell.generated;
+                  const complete = cell.covered + cell.passed === cell.planned;
+                  const hasGap = done < cell.planned;
+                  return (
+                    <td
+                      key={g.id}
+                      className={`text-center px-2 py-1.5 whitespace-nowrap ${
+                        complete ? "text-success" : hasGap ? "text-warning" : ""
+                      }`}
+                      title={`planned ${cell.planned} · covered ${cell.covered} · generated ${cell.generated} · passing ${cell.passed}`}
+                    >
+                      {done}/{cell.planned}
+                      {cell.passed > 0 && (
+                        <span className="text-xs text-success">
+                          {" "}
+                          {cell.passed}✓
+                        </span>
+                      )}
+                      {hasGap && onRequestCoverage && (
+                        <button
+                          type="button"
+                          className="ml-1 inline-flex align-[-2px] rounded border border-warning/40 text-warning hover:bg-warning/10 disabled:opacity-50"
+                          title={`Ask the agent to cover the ${area} × ${g.label} gap`}
+                          disabled={requestPending}
+                          onClick={() =>
+                            onRequestCoverage({ area, group: g.id })
+                          }
+                        >
+                          <Plus className="h-3 w-3" />
+                        </button>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export function QaSummaryPanel({
   summary,
   plan,
@@ -280,6 +387,7 @@ export function QaSummaryPanel({
   updatedAt,
   onRequestCoverage,
   requestPending = false,
+  showOverview = true,
 }: {
   summary: QaSummaryData;
   plan: QaTestPlan | undefined;
@@ -291,6 +399,9 @@ export function QaSummaryPanel({
    *  per-gap-cell CTAs render only when provided. */
   onRequestCoverage?: (hint: CoverageRequestHint) => void;
   requestPending?: boolean;
+  /** Headline counts + matrix. Off when the console already renders them as
+   *  their own bento tiles and this card is only the detail below them. */
+  showOverview?: boolean;
 }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
@@ -339,126 +450,44 @@ export function QaSummaryPanel({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-          {[
-            { label: "Planned", value: summary.planned },
-            { label: "Covered", value: summary.covered ?? 0 },
-            { label: "Generated", value: summary.generated },
-            { label: "Passing", value: summary.passed },
-            {
-              label: "Gaps",
-              value: Math.max(
-                0,
-                summary.planned - (summary.covered ?? 0) - summary.generated,
-              ),
-            },
-          ].map((stat) => (
-            <div key={stat.label} className="rounded-md border p-3 text-center">
-              <div className="text-2xl font-semibold">{stat.value}</div>
-              <div className="text-xs text-muted-foreground">{stat.label}</div>
-            </div>
-          ))}
-        </div>
+        {showOverview && (
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            {[
+              { label: "Planned", value: summary.planned },
+              { label: "Covered", value: summary.covered ?? 0 },
+              { label: "Generated", value: summary.generated },
+              { label: "Passing", value: summary.passed },
+              {
+                label: "Gaps",
+                value: Math.max(
+                  0,
+                  summary.planned - (summary.covered ?? 0) - summary.generated,
+                ),
+              },
+            ].map((stat) => (
+              <div
+                key={stat.label}
+                className="rounded-md border p-3 text-center"
+              >
+                <div className="text-2xl font-semibold">{stat.value}</div>
+                <div className="text-xs text-muted-foreground">
+                  {stat.label}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {summary.prCoverage && (
           <QaPrCoverageSection prCoverage={summary.prCoverage} />
         )}
 
-        {summary.matrix && Object.keys(summary.matrix).length > 0 && (
-          <div className="space-y-1">
-            <h4 className="text-sm font-medium">
-              Coverage matrix{" "}
-              <span className="text-xs font-normal text-muted-foreground">
-                — business area × test group (covered+generated / planned, ✓
-                passing this run; a multi-group test counts in every column it
-                covers)
-              </span>
-            </h4>
-            <div className="rounded-md border overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/40">
-                    <th className="w-full text-left px-3 py-1.5 font-medium">
-                      Business area
-                    </th>
-                    {QA_GROUPS.filter((g) =>
-                      Object.values(summary.matrix!).some((row) => row[g.id]),
-                    ).map((g) => (
-                      <th
-                        key={g.id}
-                        className="w-14 text-center px-1.5 py-1.5 font-medium text-xs whitespace-nowrap"
-                        title={`${g.label} — ${g.description}`}
-                      >
-                        {g.short}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {Object.entries(summary.matrix).map(([area, row]) => (
-                    <tr key={area}>
-                      <td className="px-3 py-1.5 font-medium whitespace-nowrap">
-                        {area}
-                      </td>
-                      {QA_GROUPS.filter((g) =>
-                        Object.values(summary.matrix!).some((r) => r[g.id]),
-                      ).map((g) => {
-                        const cell = row[g.id];
-                        if (!cell || cell.planned === 0) {
-                          return (
-                            <td
-                              key={g.id}
-                              className="text-center px-2 py-1.5 text-muted-foreground/40"
-                            >
-                              —
-                            </td>
-                          );
-                        }
-                        const done = cell.covered + cell.generated;
-                        const complete =
-                          cell.covered + cell.passed === cell.planned;
-                        const hasGap = done < cell.planned;
-                        return (
-                          <td
-                            key={g.id}
-                            className={`text-center px-2 py-1.5 whitespace-nowrap ${
-                              complete
-                                ? "text-success"
-                                : hasGap
-                                  ? "text-warning"
-                                  : ""
-                            }`}
-                            title={`planned ${cell.planned} · covered ${cell.covered} · generated ${cell.generated} · passing ${cell.passed}`}
-                          >
-                            {done}/{cell.planned}
-                            {cell.passed > 0 && (
-                              <span className="text-xs text-success">
-                                {" "}
-                                {cell.passed}✓
-                              </span>
-                            )}
-                            {hasGap && onRequestCoverage && (
-                              <button
-                                type="button"
-                                className="ml-1 inline-flex align-[-2px] rounded border border-warning/40 text-warning hover:bg-warning/10 disabled:opacity-50"
-                                title={`Ask the agent to cover the ${area} × ${g.label} gap`}
-                                disabled={requestPending}
-                                onClick={() =>
-                                  onRequestCoverage({ area, group: g.id })
-                                }
-                              >
-                                <Plus className="h-3 w-3" />
-                              </button>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+        {showOverview && (
+          <QaCoverageMatrix
+            summary={summary}
+            onRequestCoverage={onRequestCoverage}
+            requestPending={requestPending}
+          />
         )}
 
         {groupRows.length > 0 && (

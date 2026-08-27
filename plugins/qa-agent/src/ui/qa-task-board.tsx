@@ -144,6 +144,8 @@ function TaskCard({
   pending: boolean;
   onRetry: (id: string) => void;
   onDrop: (id: string) => void;
+  /** Grid placement when the console renders the board as a bento tile. */
+  className?: string;
 }) {
   const cancelled = task.status === "cancelled";
   return (
@@ -227,6 +229,7 @@ export function QaTaskBoard({
   onAdd,
   onRetry,
   onDrop,
+  className = "",
 }: {
   tasks: QaTask[];
   pending: boolean;
@@ -237,6 +240,8 @@ export function QaTaskBoard({
   ) => Promise<boolean>;
   onRetry: (id: string) => void;
   onDrop: (id: string) => void;
+  /** Grid placement when the console renders the board as a bento tile. */
+  className?: string;
 }) {
   const [draft, setDraft] = useState("");
 
@@ -247,7 +252,7 @@ export function QaTaskBoard({
   };
 
   return (
-    <Card>
+    <Card className={className}>
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
           <ListTodo className="h-4 w-4" />
@@ -288,7 +293,7 @@ export function QaTaskBoard({
           </div>
         )}
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {COLUMNS.map((col) => {
             const Icon = col.icon;
             const items = tasks.filter((t) => col.statuses.includes(t.status));

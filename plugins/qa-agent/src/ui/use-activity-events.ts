@@ -12,7 +12,7 @@ export interface QaFeedEvent {
   eventType: string;
   summary: string;
   sourceType: string;
-  createdAt: string | Date;
+  createdAt: string | Date | null;
 }
 
 const MAX_EVENTS = 500;

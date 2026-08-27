@@ -8,6 +8,7 @@ import {
   getAISettings,
   getDefaultSetupSteps,
   getStorageStates,
+  getRecentActivityEvents,
 } from "@/lib/db/queries";
 // The plugin's own tables (tasks, triggers) are read through its reads
 // module; this page's repo selection is the authorization, same as before.
@@ -84,6 +85,7 @@ export default async function QaAgentPage() {
     recentSessions,
     qaTasks,
     qaTriggerConfig,
+    recentActivity,
     ghAccount,
     envConfig,
     aiSettings,
@@ -96,6 +98,12 @@ export default async function QaAgentPage() {
     getQaAgentTrigger(selectedRepo.id)
       .then((t) => t ?? null)
       .catch(() => null),
+    teamId
+      ? getRecentActivityEvents(teamId, {
+          repositoryId: selectedRepo.id,
+          limit: 20,
+        }).catch(() => [])
+      : [],
     teamId ? getGithubAccountByTeam(teamId).catch(() => null) : null,
     getEnvironmentConfig(selectedRepo.id).catch(() => null),
     getAISettings(selectedRepo.id).catch(() => null),
@@ -147,7 +155,7 @@ export default async function QaAgentPage() {
 
   return (
     <div className="flex-1 p-6 overflow-auto">
-      <div className="max-w-5xl mx-auto space-y-6">
+      <div className="max-w-[1600px] mx-auto space-y-6">
         <header className="space-y-1">
           <AgentBreadcrumb current="QA agent" />
           <h1 className="text-2xl font-semibold flex items-center gap-2 pt-1">
@@ -179,6 +187,7 @@ export default async function QaAgentPage() {
           // thing placed). A component reference, not a render function, so
           // it can cross the RSC boundary.
           BrowserViewer={BrowserViewer}
+          initialActivity={[...recentActivity].reverse()}
         />
       </div>
     </div>

@@ -15,14 +15,27 @@ import type {
   QaAgentTriggerRow as QaAgentTrigger,
 } from "../schema";
 import type { QaSessionRow as AgentSession } from "../types";
+import type { QaFeedEvent } from "./use-activity-events";
 import { QA_GROUPS } from "../domain/plan";
 import { useQaAgent } from "./use-qa-agent";
 import { useQaTasks } from "./use-qa-tasks";
 import { useActivityEvents } from "./use-activity-events";
 import { QaAgentHeader } from "./qa-agent-header";
 import { PhaseTimeline } from "./qa-phase-timeline";
+import { QaPipelineStrip } from "./qa-pipeline-strip";
 import { QaPlanReview } from "./qa-plan-review";
-import { QaGeneratedTestsPanel, QaSummaryPanel } from "./qa-results-panel";
+import {
+  QaCoverageMatrix,
+  QaGeneratedTestsPanel,
+  QaSummaryPanel,
+} from "./qa-results-panel";
+import {
+  CoverageTile,
+  DoingNowTile,
+  LiveActivityTile,
+  UpNextTile,
+  WatchingTile,
+} from "./qa-bento-tiles";
 import type { CoverageRequestHint } from "./qa-results-panel";
 import { QaTaskBoard } from "./qa-task-board";
 import { QaRunHistory } from "./qa-run-history";
@@ -48,6 +61,7 @@ import {
   Bot,
   FileText,
   Github,
+  Grid3x3,
   Loader2,
   Lock,
   MonitorPlay,
@@ -502,6 +516,7 @@ export function QaAgentClient({
   initialTasks,
   initialTriggerConfig,
   BrowserViewer,
+  initialActivity,
 }: {
   repositoryId: string;
   repositoryName: string;
@@ -531,6 +546,9 @@ export function QaAgentClient({
     hideToolbar?: boolean;
     className?: string;
   }>;
+  /** Recent activity for this repo, newest last — seeds the live feed tile,
+   *  which otherwise starts empty because SSE only carries new events. */
+  initialActivity: QaFeedEvent[];
 }) {
   const {
     session,
@@ -664,6 +682,16 @@ export function QaAgentClient({
   );
 
   const neverRan = historySessions.length === 0;
+  // The strip draws the live run when there is one, the newest settled run
+  // otherwise, and the bare pipeline shape before the repo has ever run it.
+  const pipelineSession = liveSession ?? historySessions[0] ?? null;
+  const coverageSummary = coverageSource?.metadata.qaSummary ?? null;
+  const queuedCount = tasks.filter((t) => t.status === "queued").length;
+  // Server-seeded history plus everything the SSE feed has delivered since.
+  const feedEvents = useMemo(() => {
+    const seen = new Set(events.map((e) => e.id));
+    return [...initialActivity.filter((e) => !seen.has(e.id)), ...events];
+  }, [initialActivity, events]);
   const showSetup = !liveSession && (setupOpen || neverRan);
 
   return (
@@ -678,12 +706,59 @@ export function QaAgentClient({
         loading={loading}
         setupOpen={showSetup}
         canStartRun={!neverRan}
-        triggerSummary={describeTriggers(triggerState)}
         onToggleSetup={() => setSetupOpen((v) => !v)}
         onPause={pause}
         onResume={resume}
         onCancel={cancel}
       />
+
+      {/* Bento console: the pipeline reads first, then the matrix and the
+          live quadrants, then the queue and the feed. */}
+      <QaPipelineStrip session={pipelineSession} />
+
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-4">
+        {coverageSummary ? (
+          <Card className="gap-0 overflow-x-auto p-4 xl:col-span-2 xl:row-span-2">
+            <QaCoverageMatrix
+              summary={coverageSummary}
+              onRequestCoverage={handleRequestCoverage}
+              requestPending={taskPending}
+            />
+          </Card>
+        ) : (
+          <Card className="gap-0 p-4 xl:col-span-2 xl:row-span-2">
+            <div className="mb-2.5 flex items-center gap-1.5 font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+              <Grid3x3 className="h-3 w-3" />
+              Coverage matrix
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Business area × test group. The matrix appears once a run reaches
+              its summary phase.
+            </p>
+          </Card>
+        )}
+        <DoingNowTile session={liveSession} awaitingReview={awaitingReview} />
+        <CoverageTile
+          summary={coverageSummary}
+          updatedAt={coverageSource?.completedAt ?? coverageSource?.createdAt}
+        />
+        <UpNextTile trigger={triggerState} queuedCount={queuedCount} />
+        <WatchingTile
+          trigger={triggerState}
+          githubConnected={githubConnected}
+        />
+
+        <QaTaskBoard
+          className="xl:col-span-2"
+          tasks={tasks}
+          pending={taskPending}
+          error={taskError}
+          onAdd={addTask}
+          onRetry={retryTask}
+          onDrop={dropTask}
+        />
+        <LiveActivityTile events={feedEvents} className="xl:col-span-2" />
+      </div>
 
       {error && (
         <div className="flex items-start gap-1.5 text-sm text-destructive">
@@ -714,7 +789,7 @@ export function QaAgentClient({
       {/* Active run — collapses into history when it ends */}
       {liveSession && (
         <>
-          <PhaseTimeline session={liveSession} />
+          <PhaseTimeline session={liveSession} detailOnly />
           {/* Live browser while an agent holds an EB */}
           {(streamUrl || queuedForBrowser) && (
             <Card>
@@ -764,27 +839,19 @@ export function QaAgentClient({
         </>
       )}
 
-      {/* Persistent coverage dashboard — the agent's standing artifact */}
+      {/* Coverage detail — the headline counts and the matrix are bento tiles
+          above, so this card carries the branch, group and journey breakdowns */}
       {coverageSource?.metadata.qaSummary && (
         <QaSummaryPanel
           summary={coverageSource.metadata.qaSummary}
           plan={coverageSource.metadata.qaPlan}
           persistent
+          showOverview={false}
           updatedAt={coverageSource.completedAt ?? coverageSource.createdAt}
           onRequestCoverage={handleRequestCoverage}
           requestPending={taskPending}
         />
       )}
-
-      {/* Direction queue */}
-      <QaTaskBoard
-        tasks={tasks}
-        pending={taskPending}
-        error={taskError}
-        onAdd={addTask}
-        onRetry={retryTask}
-        onDrop={dropTask}
-      />
 
       {/* Automation triggers (cron + PR) */}
       <QaTriggerConfig
