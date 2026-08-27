@@ -302,7 +302,9 @@ export async function deleteRepository(id: string) {
     }
 
     // 7. builds — by testRunId. Cascades buildChangeMaps, buildDemoNotes,
-    //    stepLayerFeedback, and remaining stepComparisons.buildId.
+    //    stepLayerFeedback, remaining stepComparisons.buildId, and the whole
+    //    triage tree (triageRuns.buildId → triageGroups/triageCases, plus
+    //    triageCaseVerdicts.buildId), all of which are ON DELETE CASCADE.
     if (testRunIds.length) {
       await tx.delete(builds).where(inArray(builds.testRunId, testRunIds));
     }

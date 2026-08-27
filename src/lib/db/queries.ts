@@ -33,6 +33,7 @@ export * from "./queries/storage";
 export * from "./queries/step-comparisons";
 export * from "./queries/inspector";
 export * from "./queries/change-maps";
+export * from "./queries/triage";
 export * from "./queries/demo-notes";
 export * from "./queries/app-fixes";
 export * from "./queries/layer-baselines";

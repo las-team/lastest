@@ -106,6 +106,7 @@
     "@lastest/shared": "workspace:*",
     "@lastest/static-scout": "workspace:*",
     "@lastest/test-templates": "workspace:*",
+    "@lastest/triage-model": "workspace:*",
     "@lastest/ui": "workspace:*",
     "@lastest/url-canonical": "workspace:*",
     "@lastest/video-fallback": "workspace:*",

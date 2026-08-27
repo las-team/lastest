@@ -291,6 +291,10 @@ export const aiSettings = pgTable("ai_settings", {
   ),
   /** Model override for explorer loop calls (empty = same as test generation). */
   explorerModel: text("explorer_model"),
+  /** Triage agent — auto-run the build-scoped classifier at build completion.
+   *  Only settable by teams that pass the Pro gate; a downgraded team keeps
+   *  the row but the setting reads as off. */
+  triageAgentEnabled: boolean("triage_agent_enabled").default(false),
   createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 });
@@ -322,6 +326,7 @@ export const DEFAULT_AI_SETTINGS = {
   explorerMaxIterations: 8,
   explorerStyleRotation: "normal,curious,psycho",
   explorerModel: "",
+  triageAgentEnabled: false,
 };
 
 // AI Prompt Logging for debugging and auditing

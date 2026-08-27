@@ -45,6 +45,8 @@ export * from "./schema/runs";
 export * from "./schema/visual";
 // Per-repo settings, setup/teardown, storage states, external data sources.
 export * from "./schema/settings";
+// Triage agent: per-build root-cause clusters, cases and reviewer verdicts.
+export * from "./schema/triage";
 // Data-driven coverage: dimensions, occurring cells, cell<->run attribution,
 // coverage snapshots. Slated for extraction into `plugins/coverage`.
 export * from "./schema/coverage";

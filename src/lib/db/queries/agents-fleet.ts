@@ -25,6 +25,9 @@ export const FLEET_AGENT_KINDS: AgentSessionKind[] = [
   "ranger",
   "play",
   "quickstart",
+  // Triage runs are sessions like any other, so an idle Triage row appears on
+  // the roster even before a build has ever been triaged.
+  "triage",
 ];
 
 /**

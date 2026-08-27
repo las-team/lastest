@@ -10,7 +10,6 @@
 import { generateWithAI } from "@/lib/ai";
 import { aiConfigFromSettings, aiModelId } from "@/lib/ai/provider-config";
 import { parseAiJson } from "@/lib/ai/json-parse";
-import { triageTestFailure } from "@/lib/ai/failure-triage";
 import * as queries from "@/lib/db/queries";
 import type { AppFixSuggestion, AppFixSuggestionFile } from "@/lib/db/schema";
 
@@ -81,33 +80,22 @@ export async function suggestAppFix(opts: {
     };
   }
 
-  // Gate strictly on a *confirmed* real_regression. A stored classification is
-  // trusted; if none exists (or it's "unknown"), run triage on demand rather
-  // than assuming a regression — otherwise an unclassified flaky/environment
-  // failure would get a confident, misleading app-code fix.
-  let classification = failing.triage?.classification;
-  if (!classification || classification === "unknown") {
-    const triage = await triageTestFailure(repositoryId, {
-      testId,
-      testName: test.name,
-      errorMessage: failing.errorMessage,
-      consoleErrors: failing.consoleErrors,
-      durationMs: failing.durationMs,
-      recentHistory: history
-        .slice(0, 5)
-        .map((r) => ({ status: r.status, errorMessage: r.errorMessage })),
-      // E1: api tests have no console/DOM signals — let triage classify from
-      // the request/response assertion outcome instead of returning unknown.
-      apiResult: failing.apiResult ?? null,
-    }).catch(() => null);
-    classification = triage?.classification;
-  }
+  // Gate strictly on a *confirmed* real_regression, read from the
+  // classification the Triage agent persisted onto `test_results.triage`.
+  //
+  // This used to run its own on-demand LLM triage call. The Triage agent is now
+  // the single classifier (docs/architecture/triage-agent.md), so this path
+  // READS its verdict instead of producing a second, possibly-disagreeing one.
+  // No stored classification (agent gated off, or the build predates it) means
+  // we decline rather than assume — an unclassified flaky/environment failure
+  // must never get a confident, misleading app-code fix.
+  const classification = failing.triage?.classification;
   if (classification !== "real_regression") {
     return {
       status: "not_a_regression",
       summary: classification
         ? `Failure classified as ${classification} — an app-code fix is not applicable. Consider lastest_heal_test instead.`
-        : "Could not confirm this failure is a real regression (triage was inconclusive). App-fix is only offered for confirmed regressions — try lastest_heal_test.",
+        : "This failure has not been triaged, so it cannot be confirmed as a real regression. Run the Triage agent on its build (or enable it for this project) and try again — app-fix is only offered for confirmed regressions.",
     };
   }
 

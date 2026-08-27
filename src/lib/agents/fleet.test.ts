@@ -3,6 +3,7 @@ import type { AgentSession, AgentStepState } from "@/lib/db/schema";
 import {
   deriveState,
   escalationsFrom,
+  idleRow,
   rowFromExplorer,
   rowFromSession,
   sortRoster,
@@ -103,6 +104,53 @@ describe("rowFromSession", () => {
       }),
     );
     expect(row.progress).toBe(50);
+  });
+});
+
+describe("triage rows", () => {
+  const triage = (over: Partial<AgentSession> = {}) =>
+    session({
+      id: "tr1",
+      kind: "triage",
+      steps: [
+        step({ id: "triage_collect", label: "Collect", status: "completed" }),
+        step({
+          id: "triage_cluster",
+          label: "Cluster",
+          description: "Group cases by root cause",
+          status: "active",
+        }),
+        step({ id: "triage_assess", label: "Assess", status: "pending" }),
+        step({ id: "triage_publish", label: "Publish", status: "pending" }),
+      ],
+      ...over,
+    });
+
+  it("never reports holding a browser, even while working", () => {
+    // Triage reads artifacts a build already produced. Counting it against
+    // `browsersHeld` would overstate pool pressure on the console.
+    const row = rowFromSession(triage());
+    expect(row.state).toBe("working");
+    expect(row.holdsBrowser).toBe(false);
+    expect(summarise([row]).browsersHeld).toBe(0);
+  });
+
+  it("narrates and scores its four steps with no special-casing", () => {
+    const row = rowFromSession(triage());
+    expect(row.label).toBe("Triage agent");
+    expect(row.href).toBe("/triage-agent");
+    expect(row.narration).toBe("Cluster — Group cases by root cause");
+    expect(row.progress).toBe(25);
+  });
+
+  it("gets an idle row that holds nothing", () => {
+    expect(idleRow("triage")).toMatchObject({
+      kind: "triage",
+      label: "Triage agent",
+      state: "idle",
+      href: "/triage-agent",
+      holdsBrowser: false,
+    });
   });
 });
 

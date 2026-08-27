@@ -10,6 +10,7 @@ import {
   ListTodo,
   Network,
   Play,
+  Stethoscope,
   UserRound,
   XCircle,
 } from "lucide-react";
@@ -31,6 +32,7 @@ const KIND_ICONS: Record<FleetAgentKind, typeof Bot> = {
   play: Play,
   quickstart: Bot,
   explorer: Compass,
+  triage: Stethoscope,
 };
 
 const STATE_META: Record<

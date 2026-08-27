@@ -506,6 +506,7 @@ export async function getAISettings(repositoryId?: string | null) {
     explorerMaxIterations: DEFAULT_AI_SETTINGS.explorerMaxIterations,
     explorerStyleRotation: DEFAULT_AI_SETTINGS.explorerStyleRotation,
     explorerModel: DEFAULT_AI_SETTINGS.explorerModel,
+    triageAgentEnabled: DEFAULT_AI_SETTINGS.triageAgentEnabled,
     createdAt: null,
     updatedAt: null,
   };

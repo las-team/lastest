@@ -47,7 +47,6 @@ import {
   isRunnerBusy,
 } from "./jobs";
 import { emitJobEvent } from "@/lib/ws/job-events";
-import { triggerAIDiffAnalysis } from "@/lib/ai/trigger-diff-analysis";
 import { forkBaselinesForBranch } from "./baselines";
 import {
   STORAGE_DIRS,
@@ -1009,12 +1008,10 @@ async function runBuildAsync(
       if (diffResult.classification === "changed") changesDetected++;
       if (diffResult.classification === "flaky") flakyCount++;
 
-      // Fire-and-forget AI diff analysis for non-unchanged diffs
-      if (diffResult.classification !== "unchanged") {
-        triggerAIDiffAnalysis(diffResult.diffId, repositoryId, jobId).catch(
-          console.error,
-        );
-      }
+      // NOTE: there is no per-diff AI pass here any more. The Triage agent
+      // (fired once per build below, after the change map) is the single
+      // classifier and writes `visual_diffs.aiAnalysis` / `aiRecommendation`
+      // for every case it groups. See docs/architecture/triage-agent.md.
 
       // Gamification: flake penalty charged to the test's author.
       // Feature-flag-gated and daily-capped inside awardScore.
@@ -1045,8 +1042,8 @@ async function runBuildAsync(
 
     // DOM baseline bootstrap. The per-step DOM *diff* now lives in
     // processVisualDiff (current per-step snapshot vs that step's baseline
-    // snapshot). This block only keeps `tests.domSnapshot` populated, which AI
-    // failure-triage and the healer still read (vs the end-of-test
+    // snapshot). This block only keeps `tests.domSnapshot` populated, which
+    // the Triage agent and the healer still read (vs the end-of-test
     // result.domSnapshot). Gated by enableDomDiff.
     const testRecord2 = tests.find((t) => t.id === result.testId);
     if (domDiffEnabled && !testRecord2?.domSnapshot && result.domSnapshot) {
@@ -1686,16 +1683,6 @@ async function runBuildAsync(
       repositoryId,
     });
 
-    // Fire-and-forget AI failure triage for failed tests
-    if (failedCount > 0 && repositoryId) {
-      const repoId = repositoryId;
-      import("@/lib/ai/failure-triage")
-        .then(({ triageBuildFailures }) => {
-          triageBuildFailures(buildId, repoId).catch(console.error);
-        })
-        .catch(console.error);
-    }
-
     // Fire-and-forget Change Map computation for /verify (Verify phase, v1.14+).
     // Best-effort — if it fails, the verify screen falls back to live recompute.
     import("@/lib/change-map/compute")
@@ -1715,7 +1702,24 @@ async function runBuildAsync(
           console.error(`[rca] classify failed for build ${buildId}:`, e);
         });
       })
-      .catch(console.error);
+      .catch(console.error)
+      .finally(() => {
+        // Fire-and-forget Triage — the SINGLE classifier for this build,
+        // replacing the retired per-diff and per-failed-test AI passes. It
+        // runs LAST because it consumes the change map computed above, and it
+        // no-ops when the repo's team fails the gate (Pro plan + the
+        // triageAgentEnabled setting + in-product AI), so a build on any other
+        // plan behaves exactly as it did before the agent existed.
+        if ((failedCount > 0 || changesDetected > 0) && repositoryId) {
+          import("@/lib/triage/run")
+            .then(({ runTriage }) =>
+              runTriage(buildId).catch((e) => {
+                console.error(`[triage] run failed for build ${buildId}:`, e);
+              }),
+            )
+            .catch(console.error);
+        }
+      });
 
     // Fire-and-forget Lastest awards recompute. Updates the repo's tier and
     // category badges based on the latest build. Tier only downgrades on a

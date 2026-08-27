@@ -1,0 +1,23 @@
+/* Run Results — scoped colour tokens.
+ * Scoped under .triage-page so they don't leak into the rest of the app.
+ * globals.css defines --c-teal-text / --c-red-text / --c-amber-text for LIGHT
+ * surfaces only; on the dark theme those darkened variants fall under AA, so
+ * the dark override below lightens them. Fills (dots, bars, region strokes)
+ * keep the brand stops in both themes.
+ */
+
+.triage-page {
+  --tri-ok: var(--c-teal-text);
+  --tri-bad: var(--c-red-text);
+  --tri-warn: var(--c-amber-text);
+  --tri-ok-fill: var(--c-teal);
+  --tri-bad-fill: var(--c-red);
+  --tri-warn-fill: var(--c-amber);
+  --tri-connector: color-mix(in oklab, var(--foreground) 28%, transparent);
+}
+
+.dark .triage-page {
+  --tri-ok: #6fd7bd;
+  --tri-bad: #ff9089;
+  --tri-warn: #f2c179;
+}

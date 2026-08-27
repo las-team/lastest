@@ -79,6 +79,7 @@ export async function saveAISettings(data: {
   explorerMaxIterations?: number;
   explorerStyleRotation?: string | null;
   explorerModel?: string | null;
+  triageAgentEnabled?: boolean;
 }) {
   const session = data.repositoryId
     ? await requireRepoAccess(data.repositoryId)
