@@ -63,6 +63,7 @@ import { BanAiModeToggle } from "@/components/settings/ban-ai-mode-toggle";
 import { AiModeToggle } from "@/components/settings/ai-mode-toggle";
 import { GamificationToggle } from "@/components/settings/gamification-toggle";
 import { VerifyPhaseToggle } from "@/components/settings/verify-phase-toggle";
+import { WebMcpToggle } from "@/components/settings/webmcp-toggle";
 import { GamificationAdminCard } from "@/components/settings/gamification-admin-card";
 import {
   ConnectGithubButton,
@@ -306,6 +307,12 @@ export default async function SettingsPage({
           <VerifyPhaseToggle
             enabled={session?.team?.verifyPhaseEnabled ?? false}
           />
+          {isAdmin && (
+            <WebMcpToggle
+              enabled={session?.team?.webMcpEnabled ?? false}
+              availableOnThisDeployment={process.env.WEBMCP_ENABLED === "1"}
+            />
+          )}
         </CardContent>
       </Card>
 

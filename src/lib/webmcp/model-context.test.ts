@@ -18,6 +18,7 @@ import {
   registerWebMcpTools,
   shapeResult,
 } from "@/lib/webmcp/model-context";
+import { setWebMcpConsentHandler } from "@/lib/webmcp/consent";
 
 type Descriptor = {
   name: string;
@@ -40,11 +41,16 @@ function installGlobals() {
   });
 }
 
+const signals: AbortSignal[] = [];
+
 function installModelContext(withInteraction = true) {
   const registered = new Map<string, Descriptor>();
   const requestUserInteraction = vi.fn().mockResolvedValue(undefined);
   const mc = {
-    registerTool: (d: Descriptor) => registered.set(d.name, d),
+    registerTool: (d: Descriptor, options?: { signal?: AbortSignal }) => {
+      if (options?.signal) signals.push(options.signal);
+      registered.set(d.name, d);
+    },
     unregisterTool: (name: string) => registered.delete(name),
     ...(withInteraction ? { requestUserInteraction } : {}),
   };
@@ -54,6 +60,7 @@ function installModelContext(withInteraction = true) {
 
 beforeEach(() => {
   installGlobals();
+  signals.length = 0;
   confirmMock.mockReset();
   confirmMock.mockReturnValue(true);
   callBridge.mockReset();
@@ -226,5 +233,87 @@ describe("registerWebMcpTools", () => {
     await expect(registered.get("read")!.execute({})).rejects.toThrow(
       "Not signed in.",
     );
+  });
+});
+
+describe("consent handler", () => {
+  it("routes consent through the in-app dialog when one is mounted", async () => {
+    const { registered } = installModelContext(false);
+    const asked: string[] = [];
+    const dispose = setWebMcpConsentHandler(async (request) => {
+      asked.push(request.title);
+      return true;
+    });
+    registerWebMcpTools(
+      [
+        {
+          name: "run",
+          title: "Run tests",
+          description: "d",
+          inputSchema: { type: "object", properties: {} },
+          scope: "repo",
+          readOnly: false,
+          consent: true,
+          needs: ["repositoryId"],
+          source: { tool: "lastest_run_tests" },
+        },
+      ],
+      { repositoryId: "r1" },
+    );
+
+    await registered.get("run")!.execute({});
+    expect(asked).toEqual(["Run tests"]);
+    // The dialog answered, so the crude fallback must not have been reached.
+    expect(confirmMock).not.toHaveBeenCalled();
+    dispose();
+  });
+
+  it("aborts registration on dispose so tools cannot outlive the page", () => {
+    const { registered } = installModelContext();
+    const dispose = registerWebMcpTools(
+      [
+        {
+          name: "read",
+          title: "Read",
+          description: "d",
+          inputSchema: { type: "object", properties: {} },
+          scope: "global",
+          readOnly: true,
+          source: { tool: "lastest_status", bind: { action: "jobs" } },
+        },
+      ],
+      {},
+    );
+    expect(signals.at(-1)?.aborted).toBe(false);
+    dispose();
+    expect(signals.at(-1)?.aborted).toBe(true);
+    expect(registered.size).toBe(0);
+  });
+});
+
+describe("custom dispatch", () => {
+  it("lets the public share surface bypass the session bridge", async () => {
+    const { registered } = installModelContext();
+    const dispatch = vi.fn().mockResolvedValue({ site: "example.com" });
+    registerWebMcpTools(
+      [
+        {
+          name: "lastest_report_summary",
+          title: "Summary",
+          description: "d",
+          inputSchema: { type: "object", properties: {} },
+          scope: "global",
+          readOnly: true,
+          source: { tool: "report_summary" },
+        },
+      ],
+      {},
+      { dispatch },
+    );
+
+    await expect(
+      registered.get("lastest_report_summary")!.execute({}),
+    ).resolves.toEqual({ site: "example.com" });
+    expect(callBridge).not.toHaveBeenCalled();
   });
 });

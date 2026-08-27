@@ -82,7 +82,9 @@ export default async function AppLayout({
   // Opt-in per deployment; inert in browsers without `document.modelContext`.
   // See docs/design/webmcp.md.
   const webMcpEnabled =
-    process.env.WEBMCP_ENABLED === "1" && Boolean(session?.user);
+    process.env.WEBMCP_ENABLED === "1" &&
+    Boolean(session?.user) &&
+    (session?.team?.webMcpEnabled ?? false);
 
   return (
     <AiAvailabilityProvider aiEnabled={aiEnabled}>

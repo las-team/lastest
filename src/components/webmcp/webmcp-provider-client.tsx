@@ -22,7 +22,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { registerWebMcpTools } from "@/lib/webmcp/model-context";
+import { registerWebMcpToolsWithPolyfill } from "@/lib/webmcp/model-context";
+import { WebMcpConsentDialog } from "@/components/webmcp/webmcp-consent-dialog";
 import { WEBMCP_TOOLS } from "@/lib/webmcp/registry";
 import type { WebMcpContext } from "@/lib/webmcp/types";
 
@@ -88,16 +89,27 @@ export function WebMcpProvider({
   const { buildId, testId } = routeContext;
   useEffect(() => {
     if (!enabled) return;
-    return registerWebMcpTools(WEBMCP_TOOLS, {
+    // Async because a browser without WebMCP gets the polyfill installed first.
+    let dispose: (() => void) | null = null;
+    let cancelled = false;
+    void registerWebMcpToolsWithPolyfill(WEBMCP_TOOLS, {
       repositoryId: activeRepositoryId,
       buildId,
       testId,
+    }).then((disposer) => {
+      if (cancelled) disposer();
+      else dispose = disposer;
     });
+    return () => {
+      cancelled = true;
+      dispose?.();
+    };
   }, [enabled, activeRepositoryId, buildId, testId]);
 
   return (
     <WebMcpReactContext.Provider value={value}>
       {children}
+      {enabled && <WebMcpConsentDialog />}
     </WebMcpReactContext.Provider>
   );
 }

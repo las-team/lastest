@@ -1,6 +1,6 @@
 # Exposing Lastest over WebMCP
 
-Status: slices 1-4 implemented (2026-08-27). Slices 5-7 outstanding — see §10.
+Status: implemented (2026-08-27), slices 1-7.
 Scope: **make the Lastest web app itself agent-callable**, reusing the existing MCP tool surface.
 Explicitly **out of scope**: consuming/analyzing WebMCP tools on pages under test.
 
@@ -34,6 +34,13 @@ typed tools; the browser hands them to whatever agent the user is running, speak
 - Their stated motivation is ours in reverse: Codex could already browse, but driving a UI is slow.
   Tools make it fast and deterministic.
 - Docs: `learn.chatgpt.com/docs/webmcp` and `developer.chrome.com/docs/ai/webmcp`.
+- Spec drift worth knowing (checked against the W3C draft, 2026-08-27): the current IDL has
+  `registerTool` / `getTools` / `executeTool`, unregisters via an `AbortSignal` passed in
+  `registerTool` options rather than an `unregisterTool` method, and the `execute` callback takes
+  `(input, options)` with **no client/identity argument**. `requestUserInteraction()` appears in
+  Chrome's implementation and in a draft revision that at least one source says has since dropped it.
+  Our shim therefore does both (signal + `unregisterTool?.()`) and treats `requestUserInteraction` as
+  best-effort.
 - Confirmed API in OpenAI's own docs: feature-detect
   `typeof document.modelContext?.registerTool === "function"`; descriptor
   `{ name, description, inputSchema, annotations: { readOnlyHint }, execute }`; `execute` may return a
@@ -53,10 +60,26 @@ Shopify, Vercel, Render and Netlify; $35k cash plus Codex Micros / ChatGPT Pro. 
 winners 2026-09-23. Judged on WebMCP leverage, execution, potential impact, creativity.
 
 **Adding WebMCP to a site you already run is an explicitly eligible entry**, provided pre-existing work
-is distinguished from new work with dated commit history. Lastest qualifies, and the slice-1-to-3
-scope below is a week of work at most. Judge access needs a public live URL reachable from ChatGPT's
-in-app browser or Chrome with WebMCP enabled — which for us means a **demo/logged-out surface**, since
-our tools sit behind auth (see §7, slice 7).
+is distinguished from new work with dated commit history.
+
+**Login-free access is NOT required** (an earlier revision of this doc said it was). The rules ask for
+"a working live URL that judges can access using ChatGPT's in-app browser or Google Chrome with WebMCP
+enabled", and then: *"You may also authenticate your application if you wish. If so, you can add the
+credentials on the Submission Form"*, plus *"If Entrant's website is private, Entrant must include
+login credentials in its testing instructions."* So a judge account works. The public `/r/<slug>`
+surface (slice 7) is still worth having — it is zero-friction for a judge and it is the honest demo of
+the pitch — but it is not a gate.
+
+Other submission requirements that *are* hard: a public code repo with an open-source license, and a
+<3-minute public YouTube demo video with audio. The repo requirement is the one to check before
+committing to an entry — `las-team/lastest` is private today.
+
+**The page is never told who the user is.** The spec says agents "inherit user identity and
+authentication context from the browser"; there is no ChatGPT username, email, or account handle in
+any descriptor or handler argument, so "auto-register the visitor from their ChatGPT identity" is not
+something WebMCP can support. What actually happens is simpler: the ChatGPT desktop browser carries
+the user's own cookies, so a user who has signed into Lastest in that browser is already
+authenticated, and the tools act as them.
 
 ## 2. The shape that fits us
 
@@ -226,8 +249,22 @@ Shipped:
 Enable with `WEBMCP_ENABLED=1` (server-side env, not `NEXT_PUBLIC_*`, so it is not baked into the
 client bundle at build time). Off by default; inert without `document.modelContext` regardless.
 
-Not done yet: the `@mcp-b` polyfill path (slice 5's fallback beyond `window.confirm`), the settings
-toggle (slice 6), and the public `/r/<slug>` tool surface (slice 7).
+Slices 5-7, added after:
+
+- **Polyfill (5):** `@mcp-b/webmcp-polyfill`, dynamically imported by `ensureModelContext()` only when
+  no native `modelContext` exists, so it stays out of the main bundle. It conjures no agent — it makes
+  the page readable by extension-based clients.
+- **Consent (5):** `src/lib/webmcp/consent.ts` + `WebMcpConsentDialog` replace `window.confirm` with a
+  dialog naming the exact action. Dismissal resolves `false` — an ignored dialog is never consent.
+  `requestUserInteraction()` is still called first where it exists, but it is not the decision.
+- **Settings (6):** `teams.webMcpEnabled` (admin-only toggle in Settings → Features, server action
+  `toggleWebMcp`). The in-app surface now needs **both** `WEBMCP_ENABLED=1` on the deployment and the
+  team flag. The public share surface needs only the env flag — it exposes nothing a visitor could not
+  already read off the page.
+- **Public share tools (7):** `src/lib/webmcp/share-registry.ts` + `/api/webmcp/share/[slug]` —
+  `lastest_report_summary`, `lastest_list_visual_changes`, `lastest_list_failing_steps`. Read-only,
+  slug-scoped, `credentials: "omit"`, no session consulted; media comes back as `/share/<slug>/…` URLs.
+  `registerWebMcpTools` grew a `dispatch` option so this surface bypasses the session bridge.
 
 ## Sources
 
