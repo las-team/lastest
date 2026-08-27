@@ -638,7 +638,7 @@ function renderResources(input: ResourcesInput): string[] {
     );
   } else {
     lines.push(
-      `👉 [Open build in Lastest](${trimmed}/builds/${input.buildId})`,
+      `👉 [Open build in Lastest](${trimmed}/verify/${input.buildId})`,
     );
     if (input.scope === "verify") {
       lines.push(`👉 [Open verify board](${trimmed}/verify/${input.buildId})`);
@@ -771,7 +771,7 @@ export function buildVisualDiffBody(input: VisualDiffBodyInput): {
       stepsTotal: testResult?.totalSteps ?? null,
       reporterEmail,
       baseUrl,
-      buildUrl: `${trimmed}/builds/${build.id}`,
+      buildUrl: `${trimmed}/verify/${build.id}`,
     }),
   );
   if (evidence.length > 0)
@@ -921,7 +921,7 @@ export function buildVerifyCaseBody(input: VerifyCaseBodyInput): {
       stepsTotal: testResult?.totalSteps ?? null,
       reporterEmail,
       baseUrl,
-      buildUrl: `${trimmed}/builds/${build.id}`,
+      buildUrl: `${trimmed}/verify/${build.id}`,
     }),
   );
   if (evidence.length > 0)

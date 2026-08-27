@@ -21,7 +21,7 @@ export function RecentHistory({ builds }: RecentHistoryProps) {
         {builds.slice(0, 5).map((build) => (
           <Link
             key={build.id}
-            href={`/builds/${build.id}`}
+            href={`/verify/${build.id}`}
             className={`w-6 h-6 rounded ${statusColors[build.overallStatus]} hover:ring-2 hover:ring-offset-1 hover:ring-gray-400 transition-all`}
             title={`Build ${build.id.slice(0, 8)} - ${build.overallStatus.replace("_", " ")}`}
           />

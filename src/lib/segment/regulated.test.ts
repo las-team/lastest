@@ -132,15 +132,15 @@ describe("regulated segment profile", () => {
   });
 
   describe("hidden nav", () => {
-    it("hides the surfaces that read as a toy or produce non-deterministic runs", () => {
+    it("hides the surface that reads as a toy", () => {
       expect(REGULATED_HIDDEN_NAV.has("Leaderboard")).toBe(true);
-      expect(REGULATED_HIDDEN_NAV.has("Agents")).toBe(true);
     });
 
     it("keeps the surfaces the segment is actually here for", () => {
       // Verify is the review surface and Coverage is the PQ coverage matrix —
-      // hiding either would leave the profile with no product in it.
-      for (const kept of ["Verify", "Coverage", "Tests", "Runs", "Setup"]) {
+      // hiding either would leave the profile with no product in it. Agents
+      // authors tests (wanted); the AI-verdict ban lives in the locked policy.
+      for (const kept of ["Verify", "Coverage", "Tests", "Agents", "Setup"]) {
         expect(REGULATED_HIDDEN_NAV.has(kept), kept).toBe(false);
       }
     });

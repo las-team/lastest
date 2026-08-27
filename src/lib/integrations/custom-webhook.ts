@@ -86,7 +86,7 @@ export function getPayloadPreview(): CustomWebhookPayload {
     flakyCount: 0,
     gitBranch: "main",
     gitCommit: "abc123",
-    buildUrl: "https://example.com/builds/abc123-def456",
+    buildUrl: "https://example.com/verify/abc123-def456",
     timestamp: new Date().toISOString(),
   };
 }

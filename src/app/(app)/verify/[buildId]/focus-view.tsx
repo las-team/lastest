@@ -46,7 +46,9 @@ import {
   removeIgnoreRegionForDiff,
   getFocusRegionsForDiff,
   getIgnoreRegionsForDiff,
+  getStepLabelSuggestions,
 } from "@/server/actions/diffs";
+import { StepLabelEditor } from "@/components/builds/step-label-editor";
 import {
   DrawLayer,
   FocusRegionOverlay,
@@ -1481,20 +1483,11 @@ function StepDetailHeader({ activeCase }: { activeCase: CaseRow | null }) {
       <span className="mono" style={{ fontSize: 11, color: "var(--fg-3)" }}>
         {step.stepIndex != null ? `#${step.stepIndex + 1}` : "—"}
       </span>
-      <span
-        style={{
-          fontSize: 12,
-          fontWeight: 600,
-          color: "var(--fg-1)",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          maxWidth: 320,
-        }}
-        title={step.stepLabel ?? undefined}
-      >
-        {step.stepLabel ?? "Unlabeled step"}
-      </span>
+      <StepLabelChip
+        diffId={visual?.id ?? null}
+        testId={step.testId}
+        stepLabel={step.stepLabel}
+      />
       {timing?.stepType && (
         <span className="v-chip" style={{ fontSize: 9 }}>
           {timing.stepType}
@@ -7435,5 +7428,71 @@ function ComposeIssueCard({
         {submitting ? "Filing…" : "Create issue"}
       </button>
     </div>
+  );
+}
+
+/**
+ * The step label in the focus header, editable when the case has a visual diff
+ * behind it.
+ *
+ * Renaming a step is not cosmetic: `updateStepLabelAndRediff` re-runs the diff
+ * against the baseline that matches the new label, which is how a reviewer
+ * repairs a case whose baseline pairing drifted. That was only reachable from
+ * the retired `/builds/:id/diff/:diffId` page, so without this the whole
+ * repair path would have gone with it.
+ *
+ * Suggestions are fetched on first interaction rather than per selected case —
+ * the focus view walks through cases quickly, and most passes never rename.
+ */
+function StepLabelChip({
+  diffId,
+  testId,
+  stepLabel,
+}: {
+  diffId: string | null;
+  testId: string;
+  stepLabel: string | null;
+}) {
+  const [suggestions, setSuggestions] = useState<string[] | null>(null);
+  const label = (
+    <span
+      style={{
+        fontSize: 12,
+        fontWeight: 600,
+        color: "var(--fg-1)",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        maxWidth: 320,
+        cursor: diffId ? "pointer" : "default",
+      }}
+      title={
+        diffId
+          ? `${stepLabel ?? "Unlabeled step"} — click to rename and re-diff`
+          : (stepLabel ?? undefined)
+      }
+    >
+      {stepLabel ?? "Unlabeled step"}
+    </span>
+  );
+  if (!diffId) return label;
+  return (
+    <span
+      onPointerEnter={() => {
+        if (suggestions === null) {
+          void getStepLabelSuggestions(testId)
+            .then(setSuggestions)
+            .catch(() => setSuggestions([]));
+        }
+      }}
+      style={{ display: "inline-flex", minWidth: 0 }}
+    >
+      <StepLabelEditor
+        diffId={diffId}
+        currentStepLabel={stepLabel}
+        suggestions={suggestions ?? []}
+        trigger={label}
+      />
+    </span>
   );
 }

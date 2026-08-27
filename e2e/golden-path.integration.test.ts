@@ -184,11 +184,33 @@ describe("§4 golden path — one continuous browser journey", () => {
   it("step 1: registering lands on onboarding with the wizard's first question", async () => {
     await registerViaUi(s);
     expect(s.page.url()).toContain("/onboarding");
+
+    // The wizard's first question is now the segment fork, not the path fork —
+    // `feat(pharma): segment fork in onboarding + the regulated profile` put
+    // "Hi <name>, what are you testing?" in front of everything, and the two
+    // branches (`pharma` / `custom`) lead to different wizards entirely.
     await expect
       .poll(() => s.page.locator("h1").first().textContent(), {
         timeout: 30_000,
       })
-      .toMatch(/how do you want to build tests/i);
+      .toMatch(/what are you testing/i);
+    // Both branches must be offered — a fork with one visible answer is the
+    // failure mode this screen exists to avoid.
+    expect(
+      await s.page
+        .locator("h2", { hasText: /^Pharma & life sciences$/ })
+        .count(),
+    ).toBe(1);
+    expect(
+      await s.page.locator("h2", { hasText: /^Custom app testing$/ }).count(),
+    ).toBe(1);
+    // "Continue" stays disabled until one is chosen.
+    expect(
+      await s.page
+        .getByRole("button", { name: /^Continue$/ })
+        .first()
+        .isDisabled(),
+    ).toBe(true);
 
     teamId = await teamIdForEmail(s.email);
     expect(teamId).toBeTruthy();
@@ -502,17 +524,18 @@ describe("§4 golden path — one continuous browser journey", () => {
    */
   it("step 6a: approving the first build in the review UI creates baselines", async () => {
     const page = s.page;
-    await gotoSettled(page, `/builds/${baselineBuildId}`);
+    // `/verify/<id>` is the review UI now — `/builds/<id>` is a redirect stub
+    // (docs/architecture/retire-run-build-pages.md). The board's per-column
+    // "Verify all" is what replaced the build table's select-all + bulk
+    // approve, and it runs the same per-layer approval path, so this still
+    // exercises baseline promotion end to end.
+    await gotoSettled(page, `/verify/${baselineBuildId}`);
 
-    const selectAll = page.locator('[aria-label="Select all"]');
-    await selectAll.waitFor({ state: "visible", timeout: 60_000 });
-    await selectAll.click();
-
-    const bulkApprove = page
-      .getByRole("button", { name: /^Expected Change$/ })
-      .first();
-    await bulkApprove.waitFor({ state: "visible", timeout: 15_000 });
-    await bulkApprove.click();
+    // Cards arrive with the first /verify-status fetch, and the column action
+    // bar only renders once a column has cases in it.
+    const verifyAll = page.getByRole("button", { name: "Verify all" }).first();
+    await verifyAll.waitFor({ state: "visible", timeout: 120_000 });
+    await verifyAll.click();
 
     const { db } = await import("@/lib/db");
     const { baselines, tests, visualDiffs } = await import("@/lib/db/schema");
@@ -573,8 +596,13 @@ describe("§4 golden path — one continuous browser journey", () => {
     mark("6b: settings toggled");
 
     const { db } = await import("@/lib/db");
-    const { playwrightSettings, teams, visualDiffs, reviewTodos } =
-      await import("@/lib/db/schema");
+    const {
+      playwrightSettings,
+      teams,
+      visualDiffs,
+      reviewTodos,
+      stepComparisons,
+    } = await import("@/lib/db/schema");
     const { and, eq, gt } = await import("drizzle-orm");
 
     // Autosave is debounced (500ms) — assert it actually landed rather than
@@ -625,14 +653,47 @@ describe("§4 golden path — one continuous browser journey", () => {
       );
     expect(changed.length).toBeGreaterThanOrEqual(2);
 
-    // ── Approve one, through the rendered diff viewer ────────────────────
-    const approveId = changed[0]!.id;
-    await gotoSettled(page, `/builds/${diffBuildId}/diff/${approveId}`);
-    const approve = page
-      .getByRole("button", { name: /^Expected Change$/ })
-      .first();
-    await approve.waitFor({ state: "visible", timeout: 60_000 });
-    await approve.click();
+    // Both decisions now happen in Verify's focus view — the classic diff
+    // viewer was retired into it. A case is reached by deep link
+    // (`?mode=focus&step=<id>`), which is the same path the retired
+    // `/builds/:id/diff/:diffId` route redirects to, so this covers the
+    // redirect's destination as well as the decision itself.
+    const changedIds = new Set(changed.map((c) => c.id));
+    // The multi-layer scorer writes step_comparisons after the build settles,
+    // so wait for the cases before deep-linking at one.
+    const casesWithDiff = async () => {
+      const rows = await db
+        .select({
+          id: stepComparisons.id,
+          visualDiffId: stepComparisons.visualDiffId,
+        })
+        .from(stepComparisons)
+        .where(eq(stepComparisons.buildId, diffBuildId!));
+      return rows.filter(
+        (r): r is { id: string; visualDiffId: string } =>
+          !!r.visualDiffId && changedIds.has(r.visualDiffId),
+      );
+    };
+    await expect
+      .poll(async () => (await casesWithDiff()).length, {
+        timeout: 120_000,
+        interval: 2_000,
+      })
+      .toBeGreaterThanOrEqual(2);
+    const withDiff = await casesWithDiff();
+
+    // ── Approve one, through the focus view ─────────────────────────────
+    const approveStep = withDiff[0]!;
+    const approveId = approveStep.visualDiffId;
+    await gotoSettled(
+      page,
+      `/verify/${diffBuildId}?mode=focus&step=${approveStep.id}`,
+    );
+    const ok = page.getByRole("button", { name: /^OK$/ }).first();
+    await ok.waitFor({ state: "visible", timeout: 120_000 });
+    await ok.click();
+    // Approving the visual layer runs `approveDiffCore` — the diff itself has
+    // to flip, not just the board card, or the next build re-flags the change.
     await expect
       .poll(
         async () => {
@@ -647,38 +708,32 @@ describe("§4 golden path — one continuous browser journey", () => {
       .toBe("approved");
     mark("6b: approved");
 
-    // ── Reject another *with a comment* ──────────────────────────────────
-    const rejectId = changed[1]!.id;
-    const comment = "Golden path: CTA colour regression, needs a fix";
-    await gotoSettled(page, `/builds/${diffBuildId}/diff/${rejectId}`);
-    const todoBtn = page.getByRole("button", { name: /^Add to Todo$/ });
-    await todoBtn.waitFor({ state: "visible", timeout: 60_000 });
-    await todoBtn.click();
-    const todoInput = page.locator(
-      'input[placeholder="Describe what needs fixing..."]',
+    // ── Reject another — which is what files the review todo ─────────────
+    const rejectStep = withDiff[1]!;
+    await gotoSettled(
+      page,
+      `/verify/${diffBuildId}?mode=focus&step=${rejectStep.id}`,
     );
-    await todoInput.waitFor({ state: "visible", timeout: 15_000 });
-    await todoInput.fill(comment);
-    await page.getByRole("button", { name: /^Add$/ }).click();
+    const reject = page.getByRole("button", { name: /^Reject$/ }).first();
+    await reject.waitFor({ state: "visible", timeout: 120_000 });
+    await reject.click();
 
+    // `decideLayer('rejected')` writes a reviewTodo describing the layer and
+    // step — the same queue `/review` renders. This is the surviving form of
+    // the diff viewer's "Add to Todo".
     await expect
       .poll(
         async () => {
-          const [row] = await db
-            .select({ status: visualDiffs.status })
-            .from(visualDiffs)
-            .where(eq(visualDiffs.id, rejectId));
-          return row?.status;
+          const rows = await db
+            .select({ id: reviewTodos.id })
+            .from(reviewTodos)
+            .where(eq(reviewTodos.buildId, diffBuildId!));
+          return rows.length;
         },
         { timeout: 60_000, interval: 1_000 },
       )
-      .toBe("todo");
-    const todos = await db
-      .select({ description: reviewTodos.description })
-      .from(reviewTodos)
-      .where(eq(reviewTodos.diffId, rejectId));
-    expect(todos.map((t) => t.description)).toContain(comment);
-    mark("6b: rejected with comment");
+      .toBeGreaterThan(0);
+    mark("6b: rejected, todo filed");
   }, 1_200_000);
 
   /**

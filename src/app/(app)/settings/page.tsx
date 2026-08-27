@@ -52,18 +52,18 @@ import { CreateRunnerDialog } from "@/components/runners/create-runner-dialog";
 import { getRunners, getSystemRunners } from "@/server/actions/runners";
 import { listSystemEmbeddedSessions } from "@/server/actions/embedded-sessions";
 import { listApiTokens } from "@/server/actions/api-tokens";
+import { fetchRepoBranches } from "@/server/actions/repos";
 import { ApiTokensSection } from "@/components/api-tokens/api-tokens-section";
 import { GoogleSheetsSettingsCard } from "@lastest/plugin-data-sources/ui/google-sheets-card";
 import { listGoogleSheetsDataSources } from "@lastest/plugin-data-sources/reads";
 import { TestingTemplateSelector } from "@/components/settings/testing-template-selector";
 import { AutoApproveToggle } from "@/components/settings/auto-approve-toggle";
+import { ComparisonBaselineSelect } from "@/components/settings/comparison-baseline-select";
 import { EarlyAdopterToggle } from "@/components/settings/early-adopter-toggle";
 import { QuickstartEmailTemplateInput } from "@lastest/plugin-quickstart/ui/email-template-input";
 import { BanAiModeToggle } from "@/components/settings/ban-ai-mode-toggle";
 import { AiModeToggle } from "@/components/settings/ai-mode-toggle";
 import { GamificationToggle } from "@/components/settings/gamification-toggle";
-import { VerifyPhaseToggle } from "@/components/settings/verify-phase-toggle";
-import { WebMcpToggle } from "@/components/settings/webmcp-toggle";
 import { GamificationAdminCard } from "@/components/settings/gamification-admin-card";
 import {
   ConnectGithubButton,
@@ -123,9 +123,14 @@ export default async function SettingsPage({
     getRunners(),
     getSystemRunners(),
   ]);
-  const [apiTokens, systemEBSessions] = await Promise.all([
+  const [apiTokens, systemEBSessions, repoBranches] = await Promise.all([
     listApiTokens(),
     listSystemEmbeddedSessions(),
+    // Provider outage degrades the comparison-baseline picker to the default
+    // branch rather than failing the whole settings page.
+    selectedRepo
+      ? fetchRepoBranches(selectedRepo.id).catch(() => [])
+      : Promise.resolve([]),
   ]);
   const playwrightSettings = await queries.getPlaywrightSettings(
     selectedRepo?.id,
@@ -275,6 +280,14 @@ export default async function SettingsPage({
               }
             />
           )}
+          {selectedRepo && (
+            <ComparisonBaselineSelect
+              repositoryId={selectedRepo.id}
+              branches={repoBranches.map((b) => b.name)}
+              current={selectedRepo.comparisonBaselineBranch}
+              defaultBranch={selectedRepo.defaultBranch || "main"}
+            />
+          )}
         </CardContent>
       </Card>
 
@@ -304,15 +317,6 @@ export default async function SettingsPage({
             />
           )}
           <RegulatedModeToggle enabled={regulated} />
-          <VerifyPhaseToggle
-            enabled={session?.team?.verifyPhaseEnabled ?? false}
-          />
-          {isAdmin && (
-            <WebMcpToggle
-              enabled={session?.team?.webMcpEnabled ?? false}
-              availableOnThisDeployment={process.env.WEBMCP_ENABLED === "1"}
-            />
-          )}
         </CardContent>
       </Card>
 

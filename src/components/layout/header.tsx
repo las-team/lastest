@@ -23,7 +23,7 @@ export function Header({ title = "Dashboard" }: HeaderProps) {
     try {
       const { buildId } = await createAndRunBuild("manual");
       notifyJobStarted();
-      router.push(`/builds/${buildId}`);
+      router.push(`/verify/${buildId}`);
     } catch (error) {
       console.error("Failed to start build:", error);
     } finally {

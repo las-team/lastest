@@ -801,7 +801,7 @@ Test Name: ${context.testName}`);
       `\nCRITICAL: Do NOT invent or guess URLs. ONLY use routes from the list above.`,
     );
     parts.push(
-      `Route hints: /settings = configuration, /tests = test list, /tests/[id] = test detail, /builds/* = build results, /areas = functional areas, /run = run tests, /record = record tests, /review = review diffs, /compare = compare builds`,
+      `Route hints: /settings = configuration, /tests = test list, /tests/[id] = test detail, /verify/* = build results and triage, /areas = functional areas, /record = record tests, /review = review diffs, /compare = compare builds`,
     );
     parts.push(
       `Match the acceptance criterion's feature to the most relevant route above. If no route matches, use "/" (home page).`,

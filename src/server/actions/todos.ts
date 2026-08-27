@@ -65,7 +65,7 @@ export async function resolveReviewTodo(todoId: string) {
   }
 
   revalidatePath("/review");
-  revalidatePath("/builds");
+  revalidatePath("/verify");
 
   return { success: true };
 }
@@ -81,7 +81,7 @@ export async function reopenReviewTodo(todoId: string) {
   });
 
   revalidatePath("/review");
-  revalidatePath("/builds");
+  revalidatePath("/verify");
 
   return { success: true };
 }
@@ -105,7 +105,7 @@ export async function deleteReviewTodoAction(todoId: string) {
   }
 
   revalidatePath("/review");
-  revalidatePath("/builds");
+  revalidatePath("/verify");
 
   return { success: true };
 }

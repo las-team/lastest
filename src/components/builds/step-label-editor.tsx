@@ -14,15 +14,22 @@ import { updateStepLabelAndRediff } from "@/server/actions/diffs";
 
 interface StepLabelEditorProps {
   diffId: string;
-  testId: string;
   currentStepLabel: string | null;
+  /** Labels already used by this test. Fetched by the caller — in Verify's
+   *  focus header, lazily on first open, because most sessions never rename a
+   *  step and the query is per-test. */
   suggestions: string[];
+  /** Optional trigger override. The Verify focus header is a dense 40px strip
+   *  with its own type scale, so it supplies its own label element rather than
+   *  inheriting the build page's `› label` treatment. */
+  trigger?: React.ReactNode;
 }
 
 export function StepLabelEditor({
   diffId,
   currentStepLabel,
   suggestions,
+  trigger,
 }: StepLabelEditorProps) {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState(currentStepLabel ?? "");
@@ -71,19 +78,21 @@ export function StepLabelEditor({
       }}
     >
       <PopoverTrigger asChild>
-        <button className="inline-flex items-center gap-1 text-muted-foreground font-normal text-base group hover:text-foreground transition-colors">
-          &rsaquo;{" "}
-          {currentStepLabel ? (
-            <span>{currentStepLabel}</span>
-          ) : (
-            <span className="italic">(no step name)</span>
-          )}
-          {currentStepLabel ? (
-            <Pencil className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-          ) : (
-            <Plus className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-          )}
-        </button>
+        {trigger ?? (
+          <button className="inline-flex items-center gap-1 text-muted-foreground font-normal text-base group hover:text-foreground transition-colors">
+            &rsaquo;{" "}
+            {currentStepLabel ? (
+              <span>{currentStepLabel}</span>
+            ) : (
+              <span className="italic">(no step name)</span>
+            )}
+            {currentStepLabel ? (
+              <Pencil className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+            ) : (
+              <Plus className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+            )}
+          </button>
+        )}
       </PopoverTrigger>
       <PopoverContent className="w-72 p-3" align="start">
         <div className="space-y-2">

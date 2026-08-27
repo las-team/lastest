@@ -9,9 +9,6 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
 interface MobileBottomNavProps {
   sidebar: React.ReactNode;
-  /** Team flag — when the Verify phase is on, the triage board is the core
-   *  mobile job and earns a first-class tab next to Run/Review. */
-  verifyEnabled?: boolean;
 }
 
 interface Tab {
@@ -21,37 +18,30 @@ interface Tab {
   match: (p: string) => boolean;
 }
 
-const RUN_TAB: Tab = {
-  name: "Run",
-  href: "/run",
-  icon: Play,
-  match: (p) => p === "/run" || p.startsWith("/run/"),
-};
-
+// `/run` and `/builds/*` were retired into Verify, so the triage board is the
+// mobile execution tab — see docs/architecture/retire-run-build-pages.md.
 const VERIFY_TAB: Tab = {
   name: "Verify",
   href: "/verify",
   icon: ShieldCheck,
-  match: (p) => p === "/verify" || p.startsWith("/verify/"),
+  match: (p) =>
+    p === "/verify" ||
+    p.startsWith("/verify/") ||
+    p === "/run" ||
+    p.startsWith("/builds/"),
 };
 
 const REVIEW_TAB: Tab = {
   name: "Review",
   href: "/review",
   icon: Sparkles,
-  match: (p) =>
-    p === "/review" || p.startsWith("/review/") || p.startsWith("/builds/"),
+  match: (p) => p === "/review" || p.startsWith("/review/"),
 };
 
-export function MobileBottomNav({
-  sidebar,
-  verifyEnabled = false,
-}: MobileBottomNavProps) {
+export function MobileBottomNav({ sidebar }: MobileBottomNavProps) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
-  const tabs = verifyEnabled
-    ? [RUN_TAB, VERIFY_TAB, REVIEW_TAB]
-    : [RUN_TAB, REVIEW_TAB];
+  const tabs = [VERIFY_TAB, REVIEW_TAB];
 
   return (
     <>

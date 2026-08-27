@@ -110,7 +110,7 @@ export async function closeIssuesOnGreen(
             body:
               `✅ Re-run came back **safe_to_merge** — closing.\n\n` +
               `Verified green: ${testNames.map((n) => `\`${n}\``).join(", ")}\n\n` +
-              `👉 [Green build in Lastest](${baseUrl}/builds/${buildId})`,
+              `👉 [Green build in Lastest](${baseUrl}/verify/${buildId})`,
           }),
         },
       );

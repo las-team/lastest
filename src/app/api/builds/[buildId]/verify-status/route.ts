@@ -122,6 +122,10 @@ export async function GET(
       baselineSourceBranch: meta?.baselineSourceBranch ?? null,
       baselineExistsOn: meta?.baselineExistsOn ?? null,
       rca: meta?.rca ?? null,
+      // One boolean rather than the AI columns themselves: the board needs to
+      // know which pending cases the analysis called safe (for "Accept all
+      // safe"), and nothing downstream of it renders a recommendation.
+      aiSafe: d.aiRecommendation === "approve" && d.status === "pending",
     };
   });
 

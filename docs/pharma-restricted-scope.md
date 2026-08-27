@@ -128,8 +128,8 @@ documents; nobody sells the guarantee.
 
 ## 3. The restricted scope — a `regulated` profile
 
-One team flag, `regulatedMode`, sitting beside `earlyAdopterMode`,
-`gamificationEnabled` and `verifyPhaseEnabled` on `teams`
+One team flag, `regulatedMode`, sitting beside `earlyAdopterMode` and
+`gamificationEnabled` on `teams`
 ([identity.ts:62](../packages/db/src/schema/identity.ts#L62)). Everything below
 reads off it.
 

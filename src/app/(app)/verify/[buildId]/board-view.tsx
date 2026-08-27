@@ -139,8 +139,11 @@ interface BoardViewProps {
   cardsLoaded: boolean;
   onOpenCase: (stepId: string) => void;
   onDropCase: (stepId: string, target: CaseStatus) => void;
-  /** Column-level bulk action (Verify all / Report all). */
-  onColumnAction: (column: CaseStatus, action: "verify" | "report") => void;
+  /** Column-level bulk action (Verify all / Report all / Accept all safe). */
+  onColumnAction: (
+    column: CaseStatus,
+    action: "verify" | "report" | "accept_ai_safe",
+  ) => void;
   /** Open the GH issue picker dialog for a specific case. */
   onOpenIssuePicker: (stepId: string) => void;
   /** Repo-level 3-way check modes governing the chip tone (enforce →
@@ -834,8 +837,12 @@ interface KColProps {
   onOpenCase: (stepId: string) => void;
   onOpenIssuePicker: (stepId: string) => void;
   /** Column-level bulk action — Verify all on Unsorted/Broken/Missed,
-   *  Report all on Broken/Missed. Verified column has none (already done). */
-  onColumnAction: (column: CaseStatus, action: "verify" | "report") => void;
+   *  Report all on Broken/Missed, Accept all safe on Unsorted. The Verified
+   *  column has none (already done). */
+  onColumnAction: (
+    column: CaseStatus,
+    action: "verify" | "report" | "accept_ai_safe",
+  ) => void;
   /** Mobile only: tap-to-move replacement for drag-and-drop. When set, cards
    *  render a move row and dragging is disabled. */
   onMoveCase?: (stepId: string, target: CaseStatus) => void;
@@ -978,6 +985,7 @@ function KCol({
         <ColumnActions
           status={status}
           caseCount={cases.length}
+          aiSafeCount={cases.filter((c) => c.visual?.aiSafe).length}
           onAction={onColumnAction}
         />
       </div>
@@ -1059,14 +1067,26 @@ function KCol({
 interface ColumnActionsProps {
   status: CaseStatus;
   caseCount: number;
-  onAction: (column: CaseStatus, action: "verify" | "report") => void;
+  /** Cases in this column whose visual diff the AI analysis judged safe. */
+  aiSafeCount: number;
+  onAction: (
+    column: CaseStatus,
+    action: "verify" | "report" | "accept_ai_safe",
+  ) => void;
 }
 
 // Per-column bulk-action buttons. The Verified column has none (those are
 // already settled). Verify all: approve every case in the column. Report
 // all (Broken/Missed only): file the typed ticket — regression for Broken,
-// improvement for Missed.
-function ColumnActions({ status, caseCount, onAction }: ColumnActionsProps) {
+// improvement for Missed. Accept all safe (Unsorted only): Verify all
+// narrowed to the AI-judged-safe cases — an AI recommendation picks the
+// set, a human still presses the button, and the write path is identical.
+function ColumnActions({
+  status,
+  caseCount,
+  aiSafeCount,
+  onAction,
+}: ColumnActionsProps) {
   if (status === "done") return null;
   if (caseCount === 0) return null;
   const showReport = status === "regression" || status === "missed";
@@ -1081,6 +1101,17 @@ function ColumnActions({ status, caseCount, onAction }: ColumnActionsProps) {
         <CheckCircleIcon size={11} />
         Verify all
       </button>
+      {status === "unknown" && aiSafeCount > 0 && (
+        <button
+          type="button"
+          className="v-btn sm"
+          onClick={() => onAction(status, "accept_ai_safe")}
+          title={`Verify the ${aiSafeCount} case${aiSafeCount === 1 ? "" : "s"} the AI analysis judged safe`}
+        >
+          <Sparkles size={11} />
+          Accept all safe ({aiSafeCount})
+        </button>
+      )}
       {showReport && (
         <button
           type="button"

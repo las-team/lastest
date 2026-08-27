@@ -241,13 +241,15 @@ Shipped:
   `arguments.ts` (context/bind merging), `bridge-client.ts`, `model-context.ts` (feature detect,
   registration, consent, result shaping).
 - `src/components/webmcp/` — `WebMcpProvider` (mounted in `src/app/(app)/layout.tsx`, seeded with the
-  user's selected project) and `WebMcpRouteContext`; build pages (`/builds/[buildId]`,
-  `/verify/[buildId]`) and the tests screen contribute their ids.
+  user's selected project) and `WebMcpRouteContext`; the build page
+  (`/verify/[buildId]`) and the tests screen contribute their ids.
 - Tests: `registry.test.ts` (drift + safety guard against the live MCP surface), `arguments.test.ts`,
   `model-context.test.ts`, `src/app/api/mcp/session/route.test.ts` — 30 assertions.
 
-Enable with `WEBMCP_ENABLED=1` (server-side env, not `NEXT_PUBLIC_*`, so it is not baked into the
-client bundle at build time). Off by default; inert without `document.modelContext` regardless.
+**On by default.** `isWebMcpEnabled()` (`src/lib/webmcp/feature-flag.ts`) is the single gate: a
+server-side `WEBMCP_ENABLED=0` (or `false`/`off`) turns it off for the deployment, and nothing else
+does. Server env, not `NEXT_PUBLIC_*`, so it is not baked into the client bundle at build time; inert
+without `document.modelContext` regardless.
 
 Slices 5-7, added after:
 
@@ -257,10 +259,12 @@ Slices 5-7, added after:
 - **Consent (5):** `src/lib/webmcp/consent.ts` + `WebMcpConsentDialog` replace `window.confirm` with a
   dialog naming the exact action. Dismissal resolves `false` — an ignored dialog is never consent.
   `requestUserInteraction()` is still called first where it exists, but it is not the decision.
-- **Settings (6):** `teams.webMcpEnabled` (admin-only toggle in Settings → Features, server action
-  `toggleWebMcp`). The in-app surface now needs **both** `WEBMCP_ENABLED=1` on the deployment and the
-  team flag. The public share surface needs only the env flag — it exposes nothing a visitor could not
-  already read off the page.
+- **Settings (6), since removed:** this slice added `teams.webMcpEnabled` and an admin toggle in
+  Settings → Features. Both are gone, along with the `web_mcp_enabled` column and the `toggleWebMcp`
+  action. A tenant switch bought nothing on top of the three guards that actually hold — the surface
+  is inert without `document.modelContext`, every mutation waits on Lastest's own consent dialog, and
+  the tools can only act with the signed-in user's own permissions — while leaving the feature dark
+  for every team by default. `isWebMcpEnabled()` is now the whole story on both surfaces.
 - **Public share tools (7):** `src/lib/webmcp/share-registry.ts` + `/api/webmcp/share/[slug]` —
   `lastest_report_summary`, `lastest_list_visual_changes`, `lastest_list_failing_steps`. Read-only,
   slug-scoped, `credentials: "omit"`, no session consulted; media comes back as `/share/<slug>/…` URLs.

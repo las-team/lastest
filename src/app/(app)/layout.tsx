@@ -11,6 +11,7 @@ import { CelebrationListener } from "@/components/gamification/celebration-liste
 import { UmamiIdentifyClient } from "@/components/analytics/umami-identify-client";
 import { AiAvailabilityProvider } from "@/components/ai/ai-availability-context";
 import { WebMcpProvider } from "@/components/webmcp/webmcp-provider-client";
+import { isWebMcpEnabled } from "@/lib/webmcp/feature-flag";
 import { RunUsageBanner } from "@/components/layout/run-usage-banner-client";
 import { getCurrentSession } from "@/lib/auth";
 import * as queries from "@/lib/db/queries";
@@ -79,12 +80,9 @@ export default async function AppLayout({
 
   // WebMCP ("site tools"): register Lastest's tools with the browser's AI agent
   // — Chrome's origin trial, or the ChatGPT desktop / Codex built-in browser.
-  // Opt-in per deployment; inert in browsers without `document.modelContext`.
-  // See docs/design/webmcp.md.
-  const webMcpEnabled =
-    process.env.WEBMCP_ENABLED === "1" &&
-    Boolean(session?.user) &&
-    (session?.team?.webMcpEnabled ?? false);
+  // On unless the deployment opts out; inert in browsers without
+  // `document.modelContext`. See docs/design/webmcp.md.
+  const webMcpEnabled = isWebMcpEnabled() && Boolean(session?.user);
 
   return (
     <AiAvailabilityProvider aiEnabled={aiEnabled}>
@@ -117,10 +115,7 @@ export default async function AppLayout({
                   <main className="flex-1 overflow-auto relative pb-14 md:pb-0">
                     {children}
                   </main>
-                  <MobileBottomNav
-                    sidebar={sidebarEl}
-                    verifyEnabled={session?.team?.verifyPhaseEnabled ?? false}
-                  />
+                  <MobileBottomNav sidebar={sidebarEl} />
                 </div>
               </div>
               <BugReportWidget />

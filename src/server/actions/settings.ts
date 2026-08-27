@@ -149,7 +149,7 @@ export async function saveDiffSensitivitySettings(data: {
   );
 
   revalidatePath("/settings");
-  revalidatePath("/builds");
+  revalidatePath("/verify");
 
   return { success: true };
 }
@@ -166,7 +166,7 @@ export async function resetDiffSensitivitySettings(
   }
 
   revalidatePath("/settings");
-  revalidatePath("/builds");
+  revalidatePath("/verify");
 
   return { success: true };
 }

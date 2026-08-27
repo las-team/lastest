@@ -1437,7 +1437,7 @@ export async function executeQuickstart(
         { detail: { shareUrl: finalSession.metadata.shareUrl } },
       );
     }
-    revalidatePath("/run");
+    revalidatePath("/verify");
   } finally {
     cleanupQsController(sessionId);
   }

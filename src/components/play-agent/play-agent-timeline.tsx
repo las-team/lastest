@@ -750,8 +750,8 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
                     </Link>
                     {/* Run test dot — icon center aligned to curve at 62% height */}
                     <Link
-                      href="/run"
-                      onClick={() => pingElement('a[href="/run"]')}
+                      href="/verify"
+                      onClick={() => pingElement('a[href="/verify"]')}
                       className="group absolute flex flex-col items-center -translate-x-1/2"
                       style={{ left: "62%", top: "calc(62% - 10px)" }}
                     >
@@ -913,14 +913,14 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
                 </p>
                 <div className="ml-7 flex items-center gap-2">
                   <Link
-                    href="/run"
-                    onClick={() => pingElement('a[href="/run"]')}
+                    href="/verify"
+                    onClick={() => pingElement('a[href="/verify"]')}
                     className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
                   >
                     Go to Runs →
                   </Link>
                   <button
-                    onClick={() => pingElement('a[href="/run"]')}
+                    onClick={() => pingElement('a[href="/verify"]')}
                     className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
                   >
                     Show me
@@ -959,9 +959,9 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
                 {latestBuildId && (
                   <div className="space-y-1.5">
                     <Link
-                      href={`/builds/${latestBuildId}`}
+                      href={`/verify/${latestBuildId}`}
                       onClick={() => {
-                        pingElement('a[href="/run"]');
+                        pingElement('a[href="/verify"]');
                         pingElement('a[href="/review"]');
                       }}
                       className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
@@ -971,7 +971,7 @@ export function PlayAgentTimeline({ repositoryId }: PlayAgentTimelineProps) {
                     </Link>
                     <div className="flex items-center gap-3">
                       <button
-                        onClick={() => pingElement('a[href="/run"]')}
+                        onClick={() => pingElement('a[href="/verify"]')}
                         className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
                       >
                         Show Runs

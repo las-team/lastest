@@ -24,8 +24,8 @@ import type {
 async function recomputeBuildStatus(buildId: string): Promise<void> {
   const newStatus = await queries.computeBuildStatus(buildId);
   await queries.updateBuild(buildId, { overallStatus: newStatus });
-  revalidatePath("/builds");
-  revalidatePath(`/builds/${buildId}`);
+  revalidatePath("/verify");
+  revalidatePath(`/verify/${buildId}`);
 }
 
 /**

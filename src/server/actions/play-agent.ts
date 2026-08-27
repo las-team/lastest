@@ -2900,7 +2900,7 @@ async function executeFromStep(
       }
     }
 
-    revalidatePath("/run");
+    revalidatePath("/verify");
   } finally {
     cleanupController(sessionId);
   }
@@ -3051,7 +3051,7 @@ export async function pausePlayAgent(
     status: "paused",
   });
 
-  revalidatePath("/run");
+  revalidatePath("/verify");
   return { success: true };
 }
 
@@ -3088,7 +3088,7 @@ export async function cancelPlayAgent(
     completedAt: new Date(),
   });
 
-  revalidatePath("/run");
+  revalidatePath("/verify");
   return { success: true };
 }
 

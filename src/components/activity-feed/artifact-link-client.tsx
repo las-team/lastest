@@ -10,7 +10,7 @@ const ARTIFACT_CONFIG: Record<
   { icon: typeof FileCode; route: (id: string) => string; label: string }
 > = {
   test: { icon: FileCode, route: (id) => `/tests?testId=${id}`, label: "Test" },
-  build: { icon: Play, route: (id) => `/builds/${id}`, label: "Build" },
+  build: { icon: Play, route: (id) => `/verify/${id}`, label: "Build" },
   area: {
     icon: FolderTree,
     route: (id) => `/areas?areaId=${id}`,

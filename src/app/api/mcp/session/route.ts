@@ -59,7 +59,21 @@ function isSameOrigin(req: NextRequest): boolean {
   // it); anything else is not a page of ours.
   if (origin) {
     try {
-      if (new URL(origin).origin !== new URL(req.url).origin) return false;
+      // Compare against the host the *browser* addressed, not `req.url`'s.
+      // `scripts/front-proxy.js` owns the public port in every deployment and
+      // forwards to Next on 127.0.0.1:3001, so `req.url` here is the upstream
+      // address and never equals the page's origin — comparing the two 403s
+      // every WebMCP tool call everywhere. The proxy sets `x-forwarded-host`
+      // (and `src/proxy.ts` already trusts it for the same reason), so that is
+      // the value to check; `req.url` remains the fallback for a direct hit.
+      const forwardedHost = req.headers.get("x-forwarded-host");
+      const forwardedProto =
+        req.headers.get("x-forwarded-proto") ??
+        new URL(req.url).protocol.replace(":", "");
+      const expected = forwardedHost
+        ? new URL(`${forwardedProto}://${forwardedHost}`).origin
+        : new URL(req.url).origin;
+      if (new URL(origin).origin !== expected) return false;
     } catch {
       return false;
     }

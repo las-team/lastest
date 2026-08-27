@@ -232,7 +232,7 @@ export async function selectRepo(repositoryId: string | null) {
 
   revalidatePath("/");
   revalidatePath("/tests");
-  revalidatePath("/run");
+  revalidatePath("/verify");
 }
 
 export async function createLocalRepo(
@@ -334,8 +334,6 @@ export async function updateRepoSelectedBranch(
   if (!repo || repo.teamId !== session.team.id) return;
   await queries.updateRepository(repositoryId, { selectedBranch: branch });
   revalidatePath("/");
-  revalidatePath("/run");
-  revalidatePath("/builds");
   revalidatePath("/verify");
 }
 
@@ -374,7 +372,7 @@ export async function updateComparisonRunSettings(
       ? { comparisonBaselineBranch: baselineBranch }
       : {}),
   });
-  revalidatePath("/run");
+  revalidatePath("/verify");
 }
 
 // Branch interface that works for both providers
@@ -521,8 +519,6 @@ export async function deleteRepo(
   revalidatePath("/");
   revalidatePath("/settings");
   revalidatePath("/tests");
-  revalidatePath("/builds");
-  revalidatePath("/run");
   revalidatePath("/verify");
 
   return { success: true, fullName: repo.fullName };

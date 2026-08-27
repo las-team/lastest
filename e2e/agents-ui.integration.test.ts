@@ -156,6 +156,41 @@ async function seeEnabled(
   );
 }
 
+/**
+ * The nine phases `src/lib/qa-agent/phases.ts` is the single source of truth
+ * for. Hard-coded rather than imported so that a rename shows up here as a
+ * failing UI assertion instead of silently agreeing with itself.
+ */
+const QA_PHASE_LABELS = [
+  "Preflight",
+  "Login",
+  "Discover",
+  "Plan",
+  "Review",
+  "Generate",
+  "Execute",
+  "Heal",
+  "Summary",
+];
+
+/**
+ * One bento tile, located by its eyebrow.
+ *
+ * The tiles carry no `data-testid` and no heading role — the eyebrow is a
+ * `font-mono` div inside a `[data-slot="card"]` (`qa-bento-tiles.tsx`), and
+ * `uppercase` there is CSS, so the DOM text is title-case.
+ */
+function tile(page: Page, eyebrow: string): Locator {
+  // Anchored: `hasText` is a substring match, so a bare "Coverage" also picks
+  // up the "Coverage matrix" card — and, being `.first()`, silently returned
+  // the wrong tile rather than failing.
+  const exact = new RegExp(`^\\s*${eyebrow}\\s*$`, "i");
+  return page
+    .locator('[data-slot="card"]')
+    .filter({ has: page.locator("div.font-mono", { hasText: exact }) })
+    .first();
+}
+
 interface CanvasProbe {
   present: boolean;
   width: number;
@@ -557,7 +592,54 @@ describe("§4 step 11 — QA Agent session: crawl → tasks → execution → re
 
     // Billing is disabled in this environment, so §2.9's gate must resolve to
     // "access granted" — the upgrade screen appearing here is a real failure.
-    expect(await page.getByText(/requires the .* plan/i).count()).toBe(0);
+    //
+    // Keyed on `QaAgentUpgradeGate`'s own h2 rather than on the old
+    // /requires the .* plan/ probe: that string is never rendered anywhere (it
+    // is the message `assertQaAgentAccess` *throws*, feature-access.ts), so the
+    // assertion passed on the upgrade screen too. The h1 is no help either —
+    // both the gate and the real page render "QA Agent".
+    expect(
+      await page
+        .getByRole("heading", { name: /Unlock the QA Agent with/i })
+        .count(),
+    ).toBe(0);
+
+    // The breadcrumb the console drills through: Agents › QA agent.
+    expect(
+      await page
+        .locator('nav[aria-label="Breadcrumb"] a[href="/agents"]')
+        .count(),
+    ).toBeGreaterThan(0);
+
+    // ── the idle console, before anything has run ─────────────────────────
+    // The bento rewrite (`feat(qa-agent): rebuild the QA agent console on the
+    // new bento direction`) made the pipeline strip and the four tiles
+    // unconditional — they draw a shape for a repo that has never run. Assert
+    // that idle shape *now*, so that the live assertions below cannot be
+    // satisfied by the same static markup.
+    const strip = page
+      .locator("div.flex.items-stretch.overflow-x-auto")
+      .first();
+    await seeVisible(strip, 30_000);
+    for (const phase of QA_PHASE_LABELS) {
+      expect(
+        await strip
+          .locator("span", { hasText: new RegExp(`^${phase}$`) })
+          .count(),
+        `pipeline node "${phase}"`,
+      ).toBeGreaterThan(0);
+    }
+    const doingNow = tile(page, "Doing now");
+    await seeVisible(doingNow, 30_000);
+    expect(await doingNow.innerText()).toMatch(/Nothing running\./);
+    expect(await tile(page, "Coverage").innerText()).toMatch(/No plan yet/);
+    // "Direct the agent" — the task queue the bento pairs with "Up next".
+    await seeVisible(page.getByText("Direct the agent"), 30_000);
+    // A repo with no prior session has no "New run" button; the setup card is
+    // open instead.
+    expect(await page.getByRole("button", { name: /^New run$/ }).count()).toBe(
+      0,
+    );
 
     // A repo that has never run lands straight on the setup card.
     const urlInput = page.locator("input#qa-url");
@@ -594,18 +676,44 @@ describe("§4 step 11 — QA Agent session: crawl → tasks → execution → re
     await seeEnabled(startBtn, '"Start QA agent"', 30_000);
     await startBtn.click();
 
-    // The setup card collapses into the live phase timeline. Same page-dump
-    // reasoning as the explorer start above.
+    // The setup card collapses and the console switches to its live shape.
+    //
+    // NOT "Preflight and Discover appear somewhere on the page": since the
+    // bento rewrite the pipeline strip renders all nine labels unconditionally
+    // (`skeletonSteps()`), so that probe returned true on the first poll even
+    // if `startQaAgent` had silently failed — and it matched the upgrade
+    // gate's aria-hidden preview too. These four are only reachable with a
+    // live session: the header's state word, its progress bar, the Cancel
+    // control, and a spinning node in the strip.
     await withPageDump(page, () =>
       until(
-        "the QA phase timeline to appear",
+        "the QA console to enter its live state",
         async () => {
-          const text = await bodyText(page);
-          return /Preflight/.test(text) && /Discover/.test(text);
+          const header = page
+            .locator('[data-slot="card"]')
+            .filter({ hasText: "QA agent" })
+            .first();
+          if (!(await header.count())) return false;
+          const text = await header.innerText();
+          if (!/\b(Working|Waiting for you|Paused)\b/.test(text)) return false;
+          return (
+            (await header.locator('[data-slot="progress"]').count()) > 0 &&
+            (await page.getByRole("button", { name: /^Cancel$/ }).count()) > 0
+          );
         },
         120_000,
         1_000,
       ),
+    );
+
+    // The "Doing now" tile is the bento's live half — it must leave its idle
+    // copy and name the phase the header is reporting.
+    await until(
+      "the Doing now tile to leave Idle",
+      async () =>
+        !/Nothing running\./.test(await tile(page, "Doing now").innerText()),
+      120_000,
+      1_000,
     );
 
     // ── crawl ─────────────────────────────────────────────────────────────
@@ -629,16 +737,40 @@ describe("§4 step 11 — QA Agent session: crawl → tasks → execution → re
     // `QaPlanReview` renders once `qa_plan` completes (read-only after
     // auto-approve), and `Approve N tests` is its own button text — the
     // concrete "tasks" artifact between crawl and execution.
+    //
+    // Scoped to the panel's own controls rather than a body-text regex: the
+    // old `/journeys?/i` alternative matched the setup card's "Business
+    // journeys" coverage-group label and the summary's "Journey traceability",
+    // both of which can be on screen long before a plan exists.
     await until(
       "the generated plan to render (crawl → tasks)",
-      async () => {
-        const text = await bodyText(page);
-        return /Approve \d+ test|Test plan|plan item|journeys?/i.test(text);
-      },
+      async () =>
+        (await page
+          .getByRole("button", { name: /^Approve \d+ test/ })
+          .count()) > 0 ||
+        (await page.getByText("Test plan", { exact: true }).count()) > 0,
       900_000,
       3_000,
     );
     console.log("[step 11] plan rendered");
+
+    // The strip's Plan node carries the count as its own detail line
+    // (`phaseDetail` → "N items"), which is the per-phase payload the rewrite
+    // added and nothing else on the page duplicates.
+    const planNode = page
+      .locator(
+        'div[title="Design a risk-prioritized test plan from real discovery data"]',
+      )
+      .first();
+    if (await planNode.count()) {
+      await until(
+        "the Plan node's item count",
+        async () => /\d+ items?/.test(await planNode.innerText()),
+        300_000,
+        2_000,
+      );
+      console.log(`[step 11] plan node detail: ${await planNode.innerText()}`);
+    }
 
     // ── execution ─────────────────────────────────────────────────────────
     // Terminal state per the UI's own words. `QaRunHistory`'s `headline()` is
@@ -646,10 +778,29 @@ describe("§4 step 11 — QA Agent session: crawl → tasks → execution → re
     // "N planned · … · N passing" / "Completed" / "Cancelled" / "Failed at
     // <phase>" once it stops. Matching on that beats scanning for the word
     // "completed" anywhere on a page that also lists phase names.
+    //
+    // Scoped to the `Runs` card since the rewrite: the Coverage tile now
+    // renders "N / M planned · …" from *any* prior summary, and the Live
+    // activity tile replays server-authored strings like "Specification
+    // refreshed: 12 planned, …", so a page-wide /\d+ planned/ can be satisfied
+    // without this session ever finishing.
+    // `/^Runs$/` does not work here: the CardTitle holds the word plus an
+    // inline description span ("— every run collapses to a headline…"), so an
+    // anchored match finds nothing and the probe below then waits out its full
+    // 25-minute budget on a card that was on screen the whole time.
+    const runsCard = page
+      .locator('[data-slot="card"]')
+      .filter({
+        has: page.locator('[data-slot="card-title"]', {
+          hasText: /^\s*Runs\b/,
+        }),
+      })
+      .first();
     const terminal = await until(
       "the QA session to reach a terminal state in the UI",
       async () => {
-        const text = await bodyText(page);
+        if (!(await runsCard.count())) return null;
+        const text = await runsCard.innerText();
         if (/\bRunning\b/.test(text)) return null;
         if (/\d+ planned/.test(text) || /\bCompleted\b/.test(text)) {
           return "completed";
@@ -665,21 +816,59 @@ describe("§4 step 11 — QA Agent session: crawl → tasks → execution → re
     expect(["completed", "failed", "cancelled"]).toContain(terminal);
 
     // ── report ────────────────────────────────────────────────────────────
-    // `QaSummaryPanel` is the persistent coverage dashboard: Planned /
-    // Covered / Generated / Passing / Gaps stat tiles. On a `failed` run it may be
-    // absent — in that case the UI must still name the failed phase rather
-    // than stalling silently.
+    // The standing artifact moved in the bento rewrite. `QaSummaryPanel` is
+    // now rendered with `showOverview={false}`, so the old Planned / Covered /
+    // Generated / Passing / Gaps stat tiles no longer exist anywhere on this
+    // page — asserting them was a guaranteed failure against the new UI. The
+    // same numbers now live in the `Coverage` bento tile's own sentence
+    // ("7 / 12 planned · 2 existing · 5 generated · 5 passing · 0 gaps"), and
+    // the panel keeps its `Coverage dashboard` title plus the `By group` and
+    // `Journey traceability` sections.
     const finalText = await bodyText(page);
     if (terminal === "completed") {
-      // `QaSummaryPanel`'s stat tiles — the standing coverage artifact.
-      // Labels are verbatim from `qa-results-panel.tsx`; the fourth tile reads
-      // "Passing", not "Passed".
-      for (const tile of ["Planned", "Covered", "Generated", "Passing"]) {
-        expect(finalText.includes(tile), `summary tile "${tile}"`).toBe(true);
-      }
-      const headline = /(\d+) planned/.exec(finalText);
+      const coverage = await tile(page, "Coverage").innerText();
+      expect(coverage, "Coverage tile still says there is no plan").not.toMatch(
+        /No plan yet/,
+      );
+      expect(coverage).toMatch(
+        /\d+ \/ \d+ planned · \d+ existing · \d+ generated · \d+ passing · \d+ gap/,
+      );
+      expect(coverage).toMatch(/\d+%/);
+
+      // `QaSummaryPanel` itself — the dashboard the tile summarises.
+      await seeVisible(page.getByText("Coverage dashboard"), 60_000);
+      expect(finalText).toMatch(/By group/);
+
+      // The matrix moved into its own bento card, and the card *swaps
+      // component* once a summary exists: the eyebrow-and-placeholder tile is
+      // replaced by `QaCoverageMatrix`, which has no `font-mono` eyebrow at
+      // all — so this is asserted on the placeholder copy disappearing rather
+      // than through `tile()`, which can no longer find that card.
+      // Re-read rather than reusing `finalText`: that snapshot was taken the
+      // moment the run went terminal, and the summary-driven swap lands a
+      // render or two later.
+      await until(
+        "the coverage-matrix placeholder to be replaced",
+        async () =>
+          !/The matrix appears once a run reaches its summary phase/.test(
+            await bodyText(page),
+          ),
+        60_000,
+        1_000,
+      );
+      // `QaCoverageMatrix` renders nothing when the summary carries no matrix
+      // (a legitimate outcome for a one-page target), so its heading is
+      // reported rather than required.
+      const matrixHeading = await page
+        .getByRole("heading", { name: /^Coverage matrix/ })
+        .count();
       console.log(
-        `[step 11] report rendered — run-history headline planned=${headline?.[1] ?? "?"}`,
+        `[step 11] coverage matrix table rendered: ${matrixHeading > 0}`,
+      );
+
+      const headline = /(\d+) planned/.exec(coverage);
+      console.log(
+        `[step 11] report rendered — coverage tile planned=${headline?.[1] ?? "?"}`,
       );
     } else {
       // A failed run is acceptable evidence only if the UI names the phase it
@@ -690,8 +879,62 @@ describe("§4 step 11 — QA Agent session: crawl → tasks → execution → re
       );
     }
 
-    // Run history always gets the session, terminal state regardless.
-    expect(/Runs|history|manual/i.test(finalText)).toBe(true);
+    // Run history always gets the session, terminal state regardless. Scoped
+    // to the card: the `Watching` tile now renders the words "manual runs", so
+    // a page-wide /Runs|history|manual/i passed even with the card missing.
+    expect(await runsCard.count()).toBeGreaterThan(0);
+    expect(await runsCard.innerText()).toMatch(
+      /manual|full|spec refresh|fill gaps/,
+    );
+
+    // ── the console after the run, on a cold load ─────────────────────────
+    // The bento's Live activity tile is seeded server-side from the last 20
+    // activity events (`/qa-agent/page.tsx` passes `initialActivity`) rather
+    // than waiting for the SSE stream — that is the specific thing the rewrite
+    // changed, and only a fresh navigation can prove it, because a page that
+    // has been open all run has been fed by SSE anyway.
+    await page.goto(`${BASE_URL}/qa-agent`, { waitUntil: "domcontentloaded" });
+    await seeVisible(page.getByRole("heading", { name: "QA Agent", level: 1 }));
+    const activity = tile(page, "Live activity");
+    await seeVisible(activity, 30_000);
+    expect(
+      await activity.innerText(),
+      "Live activity tile is empty on a cold load after a run",
+    ).not.toMatch(/No agent activity on this repo yet/);
+
+    // The strip persists the settled run (`pipelineSession = liveSession ??
+    // historySessions[0]`), so its per-phase detail lines — the payload counts
+    // the rewrite added — survive the reload.
+    const settledStrip = page
+      .locator("div.flex.items-stretch.overflow-x-auto")
+      .first();
+    await seeVisible(settledStrip, 30_000);
+    const stripText = await settledStrip.innerText();
+    expect(stripText).toMatch(/\d+ (routes|pages|items|specs|passing|healed)/);
+    console.log(
+      `[step 11] settled pipeline strip: ${stripText.replace(/\n+/g, " | ")}`,
+    );
+
+    // A completed session means the header now offers a fresh start, which the
+    // never-ran repo did not have.
+    await seeVisible(page.getByRole("button", { name: /^New run$/ }), 30_000);
+
+    // ── the direction queue and its tile ──────────────────────────────────
+    // Rendered, not exercised: `addQaTask` fires `dispatchNextQaTask`, which
+    // starts a *whole new QA session* on this repo the moment a task lands.
+    // That would outlive the test, hold an EB other suites are queueing for,
+    // and race the team teardown in `afterAll`. So this asserts the board and
+    // the tile it feeds are both present and consistent with an empty queue —
+    // the dispatch path itself belongs to a suite that owns the cleanup.
+    await seeVisible(page.getByText("Direct the agent"), 30_000);
+    await seeVisible(
+      page.getByRole("button", { name: /^Queue task$/ }),
+      30_000,
+    );
+    const upNext = await tile(page, "Up next").innerText();
+    expect(upNext).toMatch(/Nothing scheduled|queued|due now|in \d+/);
+    // "Watching" always names the triggers this repo answers to.
+    expect(await tile(page, "Watching").innerText()).toMatch(/manual runs/);
 
     // EB released.
     const freed = await until(
