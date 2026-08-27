@@ -9,8 +9,8 @@ import { expandTestsForMatrix } from "@/lib/execution/matrix-expand";
 import {
   computePlanBudget,
   buildCoverageDirective,
+  DEFAULT_HARD_CAP,
 } from "@lastest/coverage-model";
-import { MAX_PLAN_ITEMS } from "@/lib/qa-agent/plan";
 import { buildVqlGroupQuery, parseVaultGroups } from "./profilers/vault";
 import { groupRecords, extractRecords } from "./profilers/rest";
 import { extractChurnedObjectTypes } from "./index";
@@ -413,7 +413,7 @@ const mkStop = (over: Partial<StopDecision>): StopDecision =>
 describe("computePlanBudget", () => {
   it("falls back to the fixed cap when no coverage model exists", () => {
     const b = computePlanBudget({ stop: null });
-    expect(b.maxItems).toBe(MAX_PLAN_ITEMS);
+    expect(b.maxItems).toBe(DEFAULT_HARD_CAP);
     expect(b.coverageDriven).toBe(false);
     expect(b.rationale).toMatch(/No coverage model/);
   });
@@ -443,7 +443,7 @@ describe("computePlanBudget", () => {
     });
     expect(b.coverageDriven).toBe(true);
     expect(b.maxItems).toBeGreaterThan(0);
-    expect(b.maxItems).toBeLessThanOrEqual(MAX_PLAN_ITEMS);
+    expect(b.maxItems).toBeLessThanOrEqual(DEFAULT_HARD_CAP);
     expect(b.rationale).toMatch(/combination\(s\) still uncovered/);
   });
 
@@ -465,7 +465,7 @@ describe("computePlanBudget", () => {
         })),
       }),
     });
-    expect(b.maxItems).toBeLessThanOrEqual(MAX_PLAN_ITEMS);
+    expect(b.maxItems).toBeLessThanOrEqual(DEFAULT_HARD_CAP);
   });
 });
 

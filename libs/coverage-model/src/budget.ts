@@ -29,7 +29,7 @@ import type { StopCell, StopDecision } from "./stop";
  * free of an import into the QA agent — see the `coverage` entry in
  * `tools/architecture/boundaries.mjs`.
  */
-const DEFAULT_HARD_CAP = 20;
+export const DEFAULT_HARD_CAP = 20;
 
 export interface PlanBudget {
   /** Effective cap on plan items for this run. */

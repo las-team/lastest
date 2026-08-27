@@ -43,3 +43,43 @@ export async function ensureCoverageFresh(
     return null;
   }
 }
+
+/**
+ * The excluded cells of a repository's coverage ledger, shaped as `StopCell`s
+ * for `buildCoverageDirective`'s "do NOT plan these" section.
+ *
+ * Excluded cells are deliberately absent from `stop.queue`, so they have to be
+ * read back from the ledger — sourcing them from the queue yielded an always
+ * empty list and that section never rendered. The read routes through here for
+ * the same reason `ensureCoverageFresh` does: the QA agent is a feature, and a
+ * feature reaching into `src/lib/db/queries/coverage.ts` is the
+ * feature -> feature edge the boundary rules forbid.
+ */
+export async function readExcludedCoverageCells(
+  repositoryId: string,
+): Promise<import("@lastest/coverage-model").StopCell[]> {
+  try {
+    const { getCoverageCells } = await import("@/lib/db/queries/coverage");
+    const cells = await getCoverageCells(repositoryId);
+    return cells
+      .filter((c) => c.status === "excluded")
+      .map((c) => ({
+        objectType: c.objectType,
+        coordsKey: c.coordsKey,
+        coords: c.coords,
+        observedCount: c.observedCount,
+        weight: c.weight,
+        covered: false,
+        excluded: true,
+        excludedReason: c.excludedReason ?? undefined,
+      }));
+  } catch (error) {
+    // Same fail-open contract as ensureCoverageFresh: a missing ledger must
+    // never block a QA run, it just means no exclusion section in the prompt.
+    console.error(
+      `[coverage-reads] excluded-cell read failed for repo ${repositoryId}:`,
+      error,
+    );
+    return [];
+  }
+}

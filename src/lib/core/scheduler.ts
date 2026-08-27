@@ -184,7 +184,11 @@ async function processStaleCoverageModels() {
 
   try {
     const { ensureFreshCoverage } = await import("@/lib/coverage/sync");
-    const targets = await queries.getReposWithEnabledCoverageDimensions();
+    // Dynamic for the same reason as the line above: this keeps the coverage
+    // model and its query layer out of the scheduler's static import graph.
+    const { getReposWithEnabledCoverageDimensions } =
+      await import("@/lib/db/queries/coverage");
+    const targets = await getReposWithEnabledCoverageDimensions();
 
     for (const target of targets) {
       try {

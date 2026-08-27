@@ -74,7 +74,7 @@ export const DEFAULT_COVERAGE_WEIGHT_POLICY: CoverageWeightPolicy = {
 };
 
 /** The QA agent's stopping rule. Replaces the hardcoded MAX_PLAN_ITEMS cap
- *  (see src/lib/qa-agent/plan.ts) from P2 onward; P1 only measures against it. */
+ *  (see plugins/qa-agent/src/domain/plan.ts) from P2 onward; P1 only measures against it. */
 export interface CoverageStopPolicy {
   /** t in t-way combinatorial coverage. 2 = pairwise (the default). */
   strength: number;

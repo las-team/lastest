@@ -86,7 +86,6 @@ import {
   buildStopSummary,
   computePlanBudget,
 } from "@lastest/coverage-model";
-import { ensureCoverageFresh } from "@/lib/core/coverage-reads";
 import {
   buildTaskPlanFromTriage,
   buildTaskTriageSystemPrompt,
@@ -2088,7 +2087,7 @@ async function runQaPlan(
   // the case where nobody has opened the Coverage page since the data moved,
   // and planning against yesterday's cell set produces a queue of gaps that no
   // longer exist. A failed re-sync degrades to the stale model, never to none.
-  const coverageState = await ensureCoverageFresh(repositoryId);
+  const coverageState = await host.ensureCoverageFresh(repositoryId);
   if (coverageState?.stale) {
     console.warn(
       `[qa-agent] planning against a stale coverage model for repo ${repositoryId}`,
@@ -2104,23 +2103,7 @@ async function runQaPlan(
   // read back from the ledger — sourcing them from the queue yielded an always
   // empty list and the "do NOT plan these" section never rendered.
   const excludedCells = coverageState
-    ? await queries
-        .getCoverageCells(repositoryId)
-        .then((cells) =>
-          cells
-            .filter((c) => c.status === "excluded")
-            .map((c) => ({
-              objectType: c.objectType,
-              coordsKey: c.coordsKey,
-              coords: c.coords,
-              observedCount: c.observedCount,
-              weight: c.weight,
-              covered: false,
-              excluded: true,
-              excludedReason: c.excludedReason ?? undefined,
-            })),
-        )
-        .catch(() => [])
+    ? await host.readExcludedCoverageCells(repositoryId)
     : [];
   const coverageDirective = coverageState
     ? buildCoverageDirective({
