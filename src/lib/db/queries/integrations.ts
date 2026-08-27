@@ -253,9 +253,11 @@ export async function upsertComposeConfig(
 // encrypt on write, decrypt on read at this query layer so every consumer (and
 // mergeMetadata's read-merge-rewrite cycle) works with plaintext. The email is
 // left plaintext (low-sensitivity identifier shown in the QuickStart UI).
-function decryptAgentSessionRow<T extends { metadata: AgentSessionMetadata }>(
-  row: T,
-): T {
+// Exported for `./agents-fleet.ts`, which runs its own cross-kind selects and
+// must apply the same decrypt-on-read as every reader in this module.
+export function decryptAgentSessionRow<
+  T extends { metadata: AgentSessionMetadata },
+>(row: T): T {
   return { ...row, metadata: decryptSessionMetadata(row.metadata) };
 }
 

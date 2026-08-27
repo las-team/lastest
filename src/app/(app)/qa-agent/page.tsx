@@ -19,6 +19,7 @@ import type { AgentSession } from "@/lib/db/schema";
 import type { QaSessionRow } from "@lastest/plugin-qa-agent/types";
 import { getEnvironmentConfig } from "@/server/actions/environment";
 import { QaAgentClient } from "@lastest/plugin-qa-agent/ui/qa-agent-client";
+import { AgentBreadcrumb } from "@/components/agents/agent-breadcrumb";
 import { QaAgentUpgradeGate } from "@lastest/plugin-qa-agent/ui/qa-agent-upgrade-gate";
 import { BrowserViewer } from "@/components/embedded-browser/browser-viewer-client";
 import {
@@ -148,7 +149,8 @@ export default async function QaAgentPage() {
     <div className="flex-1 p-6 overflow-auto">
       <div className="max-w-5xl mx-auto space-y-6">
         <header className="space-y-1">
-          <h1 className="text-2xl font-semibold flex items-center gap-2">
+          <AgentBreadcrumb current="QA agent" />
+          <h1 className="text-2xl font-semibold flex items-center gap-2 pt-1">
             <Bot className="h-6 w-6" />
             QA Agent
           </h1>
