@@ -53,6 +53,10 @@ k8s
 # rm -rf's these anyway; keeping them out shrinks the COPY . . context tarball)
 packages/vscode-extension
 packages/runner
+# ...but the monolithic Dockerfile still needs runner's manifest: the deps stage
+# COPYs it as a workspace member and the builder reads `version` out of it for
+# build-info.json's runnerVersion. Only the manifest — never runner's source.
+!packages/runner/package.json
 
 # Large local artifacts
 storage
