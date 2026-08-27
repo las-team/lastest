@@ -1,6 +1,6 @@
 import type { GitlabPipelineMode, GitlabPipelineTriggerEvent } from "../schema";
 
-const RUNNER_VERSION = "0.4.2";
+const RUNNER_VERSION = "0.5.2";
 
 export interface CiYamlConfig {
   mode: GitlabPipelineMode;

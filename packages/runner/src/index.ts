@@ -307,16 +307,21 @@ export async function main() {
             failedCount: number;
             changesDetected: number;
             flakyCount: number;
+            /** Test-level progress. Absent on servers older than 0.5.2. */
+            completedTests?: number;
             completedAt: string | null;
             elapsedMs: number | null;
             diffs: DiffEntry[];
           };
 
+          // `changesDetected` and `flakyCount` are counted per visual diff
+          // (one per screenshot step), while `passedCount`/`failedCount` are
+          // per test result. Summing all four mixes the two units and reports
+          // more "tests complete" than the build contains — a 39-test build
+          // printed "66/39". Test-level progress is passed + failed; prefer the
+          // server's own `completedTests` when it sends one.
           const completed =
-            status.passedCount +
-            status.failedCount +
-            status.changesDetected +
-            status.flakyCount;
+            status.completedTests ?? status.passedCount + status.failedCount;
           if (completed > lastCompleted) {
             console.log(
               `  Progress: ${completed}/${status.totalTests} tests complete`,
