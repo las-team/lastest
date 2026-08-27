@@ -17,6 +17,7 @@ import { isVerifyPhaseEnabled } from "@/lib/verify/feature-flag";
 import { isInteractivePlaybackEnabled } from "@/lib/playback/feature-flag";
 import { fetchRepoBranches } from "@/server/actions/repos";
 import { BoardFocusClient } from "./board-focus-client";
+import { WebMcpRouteContext } from "@/components/webmcp/webmcp-route-context-client";
 
 export const dynamic = "force-dynamic";
 
@@ -81,29 +82,33 @@ export default async function VerifyBuildPage({
   ]);
 
   return (
-    <BoardFocusClient
-      build={build}
-      branch={testRun?.gitBranch ?? null}
-      changeMap={changeMap}
-      stepComparisons={[]}
-      areas={areas.map((a) => ({ id: a.id, name: a.name }))}
-      tests={tests.map((t) => ({
-        id: t.id,
-        name: t.name,
-        functionalAreaId: t.functionalAreaId,
-      }))}
-      layerFeedback={[]}
-      visualDiffs={[]}
-      testResults={[]}
-      repositoryId={repo?.id ?? null}
-      branches={branches.map((b) => b.name)}
-      defaultBranch={repo?.defaultBranch ?? null}
-      a11yTrend={a11yTrend}
-      a11yViolations={a11yViolations}
-      designSystemTrend={designSystemTrend}
-      designSystemViolations={designSystemViolations}
-      repoDesignSystem={pwSettings?.designSystem ?? null}
-      interactivePlayback={isInteractivePlaybackEnabled(session?.team)}
-    />
+    <>
+      {/* Scopes the build-level WebMCP tools to this build. */}
+      <WebMcpRouteContext buildId={buildId} />
+      <BoardFocusClient
+        build={build}
+        branch={testRun?.gitBranch ?? null}
+        changeMap={changeMap}
+        stepComparisons={[]}
+        areas={areas.map((a) => ({ id: a.id, name: a.name }))}
+        tests={tests.map((t) => ({
+          id: t.id,
+          name: t.name,
+          functionalAreaId: t.functionalAreaId,
+        }))}
+        layerFeedback={[]}
+        visualDiffs={[]}
+        testResults={[]}
+        repositoryId={repo?.id ?? null}
+        branches={branches.map((b) => b.name)}
+        defaultBranch={repo?.defaultBranch ?? null}
+        a11yTrend={a11yTrend}
+        a11yViolations={a11yViolations}
+        designSystemTrend={designSystemTrend}
+        designSystemViolations={designSystemViolations}
+        repoDesignSystem={pwSettings?.designSystem ?? null}
+        interactivePlayback={isInteractivePlaybackEnabled(session?.team)}
+      />
+    </>
   );
 }

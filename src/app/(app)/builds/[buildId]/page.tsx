@@ -15,6 +15,7 @@ import * as queries from "@/lib/db/queries";
 import { isVerifyPhaseEnabled } from "@/lib/verify/feature-flag";
 import Link from "next/link";
 import { ShieldCheck, ArrowRight } from "lucide-react";
+import { WebMcpRouteContext } from "@/components/webmcp/webmcp-route-context-client";
 
 interface PageProps {
   params: Promise<{ buildId: string }>;
@@ -115,6 +116,8 @@ export default async function BuildPage({ params }: PageProps) {
 
   return (
     <div className="flex-1 p-6 overflow-auto">
+      {/* Scopes the build-level WebMCP tools to this build. */}
+      <WebMcpRouteContext buildId={buildId} />
       <div className="max-w-6xl mx-auto space-y-6">
         {verifyPhaseEnabled && (
           <Link

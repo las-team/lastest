@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AreaTree, type TreeSelection } from "@/components/areas/area-tree";
+import { useWebMcpRouteContext } from "@/components/webmcp/webmcp-provider-client";
 import { AreaTestCasesPanel } from "@/components/areas/area-specs-panel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -231,6 +232,11 @@ export function DefinitionPageClient({
     null,
   );
   const prevTreeSelectionRef = useRef(treeSelection);
+
+  // Let a browser AI agent act on whichever test is selected here (WebMCP).
+  useWebMcpRouteContext({
+    testId: treeSelection?.type === "test" ? treeSelection.id : undefined,
+  });
   const [selectedAreaIds, setSelectedAreaIds] = useState<Set<string>>(
     new Set(),
   );
