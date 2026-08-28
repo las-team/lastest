@@ -2689,7 +2689,7 @@ export function createServer(client: LastestClient): McpServer {
         // structured tool response rather than a raw thrown Error so the
         // agent can see the recovery hint.
         const message = err instanceof Error ? err.message : String(err);
-        const match = message.match(/Lastest API error (\d+): (.*)$/s);
+        const match = message.match(/Lastest API error (\d+): ([\s\S]*)$/);
         const httpStatus = match ? Number(match[1]) : null;
         let parsedBody: {
           error?: string;
@@ -2929,7 +2929,7 @@ export function createServer(client: LastestClient): McpServer {
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        const match = message.match(/Lastest API error (\d+): (.*)$/s);
+        const match = message.match(/Lastest API error (\d+): ([\s\S]*)$/);
         let parsedBody: Record<string, unknown> = {};
         if (match) {
           try {
