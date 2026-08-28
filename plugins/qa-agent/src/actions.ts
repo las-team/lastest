@@ -157,8 +157,8 @@ import { qaAgentWiring } from "./wiring";
  *   `host.ts` for the full port and each group's honest future.
  */
 
-/** The pipeline shape lives in `@/lib/qa-agent/phases` so the screen can draw
- *  it before a session exists. */
+/** The pipeline shape lives in `./phases` so the screen can draw it before a
+ *  session exists. */
 const QA_STEP_DEFINITIONS = QA_PHASES;
 
 const EB_CLAIM_TIMEOUT_MS = 5 * 60 * 1000;
