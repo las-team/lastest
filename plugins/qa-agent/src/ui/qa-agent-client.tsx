@@ -651,10 +651,12 @@ export function QaAgentClient({
     for (let i = events.length - 1; i >= 0; i--) {
       const e = events[i];
       if (e.sourceType === "qa_agent") continue;
-      if (
-        new Date(e.createdAt as unknown as string).getTime() <
-        nowTick - EXTERNAL_ACTIVITY_WINDOW_MS
-      ) {
+      // `createdAt` is `string | Date | null` on the wire. An event with no
+      // timestamp cannot be placed in the window at all, so skip it rather
+      // than let `new Date(null)` read as epoch 0 and close the whole scan.
+      if (!e.createdAt) continue;
+      const at = new Date(e.createdAt).getTime();
+      if (Number.isNaN(at) || at < nowTick - EXTERNAL_ACTIVITY_WINDOW_MS) {
         return null;
       }
       return {

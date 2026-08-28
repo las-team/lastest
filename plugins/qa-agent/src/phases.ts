@@ -7,11 +7,16 @@ import type { QaStepId } from "./types";
  * new session's `steps` from this list, and the QA agent screen renders the
  * pipeline strip from it (so the strip has a shape to draw before the repo has
  * ever run the agent).
+ *
+ * `readonly`, and that is load-bearing rather than stylistic: one of those two
+ * consumers is a client component, and an in-place `.sort()` or `.reverse()`
+ * there would silently reshape what every new session gets seeded with. The
+ * single-source-of-truth claim is structural this way instead of conventional.
  */
-export const QA_PHASES: Array<{
-  id: QaStepId;
-  label: string;
-  description: string;
+export const QA_PHASES: ReadonlyArray<{
+  readonly id: QaStepId;
+  readonly label: string;
+  readonly description: string;
 }> = [
   {
     id: "qa_setup",
