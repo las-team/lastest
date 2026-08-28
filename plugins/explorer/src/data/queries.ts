@@ -188,6 +188,33 @@ export async function getActiveSession(
   return row ? decryptSession(ctx, row) : undefined;
 }
 
+/**
+ * The repo's live run for the Agents console — `active` **or** `paused`.
+ *
+ * Distinct from `getActiveSession`, which is what the Explorer page drives and
+ * must stay `active`-only: resuming, stepping and cancelling all act on a run
+ * that is actually running. The roster has the opposite need — a paused run is
+ * still a roster row, and showing it as "idle" is exactly the under-report the
+ * console exists to prevent.
+ */
+export async function getLiveSession(
+  ctx: Ctx,
+  repositoryId: string,
+): Promise<ExplorerSession | undefined> {
+  const [row] = await ctx.db
+    .select()
+    .from(explorerSessions)
+    .where(
+      and(
+        eq(explorerSessions.repositoryId, repositoryId),
+        inArray(explorerSessions.status, ["active", "paused"]),
+      ),
+    )
+    .orderBy(desc(explorerSessions.createdAt))
+    .limit(1);
+  return row ? decryptSession(ctx, row) : undefined;
+}
+
 export async function getLatestSession(
   ctx: Ctx,
   repositoryId: string,

@@ -4,6 +4,9 @@ import {
   readLiveExplorerSession,
   type ExplorerFleetSession,
 } from "@lastest/plugin-explorer";
+import { getLogger } from "@/lib/logger";
+
+const log = getLogger("ExplorerReads");
 
 /**
  * Reverse read into the `explorer` plugin's own sessions, for the Agents
@@ -34,7 +37,11 @@ export async function getLiveExplorerSession(
 ): Promise<ExplorerFleetSession | null> {
   try {
     return await readLiveExplorerSession(repositoryId);
-  } catch {
+  } catch (err) {
+    log.warn(
+      { err, repositoryId },
+      "explorer fleet read failed; roster will show the Explorer as idle",
+    );
     return null;
   }
 }
