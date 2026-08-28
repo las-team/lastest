@@ -19,7 +19,8 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@lastest/mcp-server": ["./packages/mcp-server/src/index.ts"]
     }
   },
   "include": [
