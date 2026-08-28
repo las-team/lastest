@@ -43,6 +43,7 @@ import {
 import {
   createCredentialScrubber,
   freezeCredentials,
+  scrubNetworkRequests,
   scrubDomSnapshot,
 } from "./credential-redaction.js";
 import {
@@ -575,7 +576,12 @@ export class EmbeddedTestExecutor {
     // Credentials are decrypted by the host at dispatch and live only for this
     // run. The scrubber masks their secret values in everything that leaves
     // here — log lines, error messages, DOM captures. See credential-redaction.ts.
-    const credScrub = createCredentialScrubber(command.credentials);
+    // Scrub on the keys the user DECLARED secret, not on a re-guess from the
+    // key name: `CredentialField.secret` is what decided encryption at rest,
+    // and `passphrase` / `clientAssertion` match no keyword hint.
+    const credScrub = createCredentialScrubber(command.credentials, {
+      secretKeys: command.credentialSecretKeys,
+    });
     const credentials = freezeCredentials(command.credentials);
 
     const logFn = (level: LogEntry["level"], message: string) => {
@@ -3056,7 +3062,9 @@ export class EmbeddedTestExecutor {
         texts: texts.length > 0 ? texts : undefined,
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
         networkRequests:
-          allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
+          allNetworkRequests.length > 0
+            ? scrubNetworkRequests(allNetworkRequests, credScrub)
+            : undefined,
         softErrors: softErrors.length > 0 ? softErrors : undefined,
         assertionResults:
           assertionResults.length > 0 ? assertionResults : undefined,
@@ -3111,7 +3119,9 @@ export class EmbeddedTestExecutor {
           texts: texts.length > 0 ? texts : undefined,
           consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
           networkRequests:
-            allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
+            allNetworkRequests.length > 0
+              ? scrubNetworkRequests(allNetworkRequests, credScrub)
+              : undefined,
           softErrors: softErrors.length > 0 ? softErrors : undefined,
           assertionResults:
             assertionResults.length > 0 ? assertionResults : undefined,
@@ -3204,7 +3214,9 @@ export class EmbeddedTestExecutor {
           texts: texts.length > 0 ? texts : undefined,
           consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
           networkRequests:
-            allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
+            allNetworkRequests.length > 0
+              ? scrubNetworkRequests(allNetworkRequests, credScrub)
+              : undefined,
           softErrors: softErrors.length > 0 ? softErrors : undefined,
           assertionResults:
             assertionResults.length > 0 ? assertionResults : undefined,
@@ -3281,7 +3293,12 @@ export class EmbeddedTestExecutor {
     // Setup is the login flow more often than not, so it is the payload's
     // primary user — and the place credential plaintext most wants to reach
     // a log line.
-    const credScrub = createCredentialScrubber(command.credentials);
+    // Scrub on the keys the user DECLARED secret, not on a re-guess from the
+    // key name: `CredentialField.secret` is what decided encryption at rest,
+    // and `passphrase` / `clientAssertion` match no keyword hint.
+    const credScrub = createCredentialScrubber(command.credentials, {
+      secretKeys: command.credentialSecretKeys,
+    });
     const credentials = freezeCredentials(command.credentials);
 
     const logFn = (level: LogEntry["level"], message: string) => {

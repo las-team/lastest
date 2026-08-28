@@ -393,6 +393,9 @@ export async function executeSetupCode(
    *  script's `credentials` parameter — a setup script is usually the login
    *  itself, so this is the parameter it most needs. */
   credentials?: Record<string, Record<string, string>>,
+  /** Which keys of each credential the user declared secret. Authoritative for
+   *  scrubbing — see `createCredentialScrubber`. */
+  credentialSecretKeys?: Record<string, string[]>,
 ): Promise<Record<string, unknown>> {
   const processedCode = stripTypeAnnotations(code);
 
@@ -415,7 +418,9 @@ export async function executeSetupCode(
 
     // Mask credential plaintext in anything this script prints — a script
     // that logs what it filled is the common leak.
-    const credScrub = createCredentialScrubber(credentials);
+    const credScrub = createCredentialScrubber(credentials, {
+      secretKeys: credentialSecretKeys,
+    });
     const frozenCredentials = freezeCredentials(credentials);
 
     const stepLogger = {

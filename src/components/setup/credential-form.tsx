@@ -278,6 +278,16 @@ export function CredentialForm({
               Secret values are write-only: once saved they are never returned
               to the browser. To change one, type a new value.
             </p>
+            {/* The masking rule stated where the value is set, rather than left
+                implicit inside the EB. A field marked Secret is masked at any
+                length; a field left Plain is only masked if its key reads as a
+                secret and the value is at least four characters. */}
+            <p className="text-xs text-muted-foreground">
+              Fields marked <span className="font-medium">Secret</span> are
+              masked out of run logs, errors, page captures and network
+              recordings — at any length, including short PINs. Fields left{" "}
+              <span className="font-medium">Plain</span> appear in the clear.
+            </p>
           </div>
         </div>
 

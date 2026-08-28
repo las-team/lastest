@@ -13,7 +13,10 @@
  * the smallest fix if it lands wrong.
  */
 import { getCredentialsForRun, markCredentialsUsed } from "@/lib/db/queries";
-import type { RunCredentials } from "@/lib/db/queries/credentials";
+import type {
+  RunCredentials,
+  RunCredentialSecretKeys,
+} from "@/lib/db/queries/credentials";
 import { getLogger } from "@/lib/logger";
 
 const log = getLogger("Credentials");
@@ -29,48 +32,84 @@ const log = getLogger("Credentials");
  * audit trail (that is P1).
  */
 const STAMP_INTERVAL_MS = 60_000;
+/** Cap on retained repo keys. Nothing older than STAMP_INTERVAL_MS is useful,
+ *  so entries are also swept on write — without either, this is a map that only
+ *  ever grows for the lifetime of a long-lived process. */
+const STAMP_CACHE_MAX = 512;
 const lastStampedAt = new Map<string, number>();
 
 function shouldStamp(repositoryId: string): boolean {
   const now = Date.now();
   const prev = lastStampedAt.get(repositoryId);
   if (prev !== undefined && now - prev < STAMP_INTERVAL_MS) return false;
+  // Evict everything already past its interval — those entries can only answer
+  // "yes, stamp" anyway, so keeping them buys nothing.
+  if (lastStampedAt.size >= STAMP_CACHE_MAX) {
+    for (const [repo, at] of lastStampedAt) {
+      if (now - at >= STAMP_INTERVAL_MS) lastStampedAt.delete(repo);
+    }
+    // Still full (every entry fresh): drop the oldest insertions. Map iterates
+    // in insertion order, so this is the least recently stamped.
+    if (lastStampedAt.size >= STAMP_CACHE_MAX) {
+      for (const repo of lastStampedAt.keys()) {
+        lastStampedAt.delete(repo);
+        if (lastStampedAt.size < STAMP_CACHE_MAX) break;
+      }
+    }
+  }
   lastStampedAt.set(repositoryId, now);
   return true;
 }
 
+export class CredentialResolutionError extends Error {
+  constructor(cause: unknown) {
+    super(
+      "Credentials could not be decrypted for this run. Check ENCRYPTION_KEY and the repo's credential rows.",
+    );
+    this.name = "CredentialResolutionError";
+    this.cause = cause;
+  }
+}
+
 /**
- * Every credential the repo holds, decrypted and keyed by handle.
+ * Every credential the repo holds, decrypted and keyed by handle, plus the
+ * declared secret keys the EB scrubs on.
  *
- * Returns `undefined` (not `{}`) when there is nothing to send, so the field
- * stays off the wire entirely. Never throws: a missing `ENCRYPTION_KEY` or a
- * corrupt row must not take down a build that has no credential in it — the
- * test fails on its own terms instead, with `credentials.x` undefined.
+ * Returns `undefined` (not `{}`) when the repo holds no credentials, so the
+ * field stays off the wire entirely — that is the ordinary "nothing to send"
+ * case and it is not an error.
+ *
+ * A repo that *does* hold credentials and cannot decrypt them throws. Returning
+ * `undefined` there produced a run that failed deep inside the test body on
+ * `credentials.x is undefined`, with the only explanation in a server-side
+ * `log.warn` the user never sees — a confusing green-path failure is a worse
+ * trade than a run that says why it stopped.
  */
 export async function resolveRunCredentials(
   repositoryId: string | null | undefined,
-): Promise<RunCredentials | undefined> {
+): Promise<
+  | { credentials: RunCredentials; secretKeys: RunCredentialSecretKeys }
+  | undefined
+> {
   if (!repositoryId) return undefined;
+  let resolved: Awaited<ReturnType<typeof getCredentialsForRun>>;
   try {
-    const creds = await getCredentialsForRun(repositoryId);
-    const names = Object.keys(creds);
-    if (names.length === 0) return undefined;
-    // Fire-and-forget: `lastUsedAt` is a convenience column, and a write
-    // failure here must never fail a run.
-    if (shouldStamp(repositoryId)) {
-      void markCredentialsUsed(repositoryId, names).catch((err) => {
-        log.warn(
-          { err, repositoryId },
-          "failed to stamp credential lastUsedAt",
-        );
-      });
-    }
-    return creds;
+    resolved = await getCredentialsForRun(repositoryId);
   } catch (err) {
     log.warn(
       { err, repositoryId },
-      "could not resolve credentials for run — dispatching without them",
+      "could not resolve credentials for run — failing the run",
     );
-    return undefined;
+    throw new CredentialResolutionError(err);
   }
+  const names = Object.keys(resolved.credentials);
+  if (names.length === 0) return undefined;
+  // Fire-and-forget: `lastUsedAt` is a convenience column, and a write
+  // failure here must never fail a run.
+  if (shouldStamp(repositoryId)) {
+    void markCredentialsUsed(repositoryId, names).catch((err) => {
+      log.warn({ err, repositoryId }, "failed to stamp credential lastUsedAt");
+    });
+  }
+  return resolved;
 }

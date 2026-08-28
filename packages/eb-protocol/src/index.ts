@@ -643,6 +643,23 @@ export interface ServerConfig {
  */
 export type RunCredentialsPayload = Record<string, Record<string, string>>;
 
+/**
+ * Which keys of each credential the user declared secret, keyed by the same
+ * handle as `RunCredentialsPayload`.
+ *
+ * `CredentialField.secret` is authoritative — it is what decides encryption at
+ * rest — but the credentials payload flattens to `{name: {key: value}}` on the
+ * wire, which drops it. Without this the EB re-guesses secrecy from the key
+ * name, so a field the user explicitly marked secret and named `passphrase`,
+ * `vaultCode` or `clientAssertion` is encrypted in the database and printed in
+ * the clear in logs and captures. Carried alongside rather than inside
+ * `credentials` because the test body reads that object directly.
+ *
+ * Optional: an older host that does not send it leaves the EB on its keyword
+ * fallback, which is a narrower guarantee but not a regression.
+ */
+export type RunCredentialSecretKeys = Record<string, string[]>;
+
 export interface RunTestCommandPayload {
   testId: string;
   testRunId: string;
@@ -755,6 +772,10 @@ export interface RunTestCommandPayload {
    *  parameter of the test body and scrubbed out of logs, errors and DOM
    *  captures — never persisted. See `RunCredentialsPayload`. */
   credentials?: RunCredentialsPayload;
+  /** Which keys of each credential are secret, as declared by the user.
+   *  See `RunCredentialSecretKeys` — the EB scrubs on this rather than
+   *  re-guessing secrecy from the key name. */
+  credentialSecretKeys?: RunCredentialSecretKeys;
 }
 
 export interface RunTestCommand extends BaseMessage {
@@ -785,6 +806,10 @@ export interface RunSetupCommandPayload {
   /** Repo credentials, decrypted at dispatch. A login wall is exactly what a
    *  setup script exists to get past, so this is the payload's primary user. */
   credentials?: RunCredentialsPayload;
+  /** Which keys of each credential are secret, as declared by the user.
+   *  See `RunCredentialSecretKeys` — the EB scrubs on this rather than
+   *  re-guessing secrecy from the key name. */
+  credentialSecretKeys?: RunCredentialSecretKeys;
 }
 
 export interface RunSetupCommand extends BaseMessage {
@@ -1140,6 +1165,10 @@ export interface StartDebugCommandPayload {
   /** Repo credentials, decrypted at dispatch — the step debugger runs the same
    *  body as a real run and must resolve `credentials.*` the same way. */
   credentials?: RunCredentialsPayload;
+  /** Which keys of each credential are secret, as declared by the user.
+   *  See `RunCredentialSecretKeys` — the EB scrubs on this rather than
+   *  re-guessing secrecy from the key name. */
+  credentialSecretKeys?: RunCredentialSecretKeys;
 }
 
 export interface StartDebugCommand extends BaseMessage {

@@ -19,7 +19,14 @@
 
 export const CREDENTIAL_MASK = "••••";
 
-/** Values short enough that masking them would scrub ordinary prose. */
+/**
+ * Values short enough that masking them would scrub ordinary prose.
+ *
+ * Applies ONLY to keyword-guessed secrets. A field the user explicitly marked
+ * secret is masked at any length — otherwise a 3-character PIN, which the hint
+ * list names, would never be masked, and the rule would be invisible at the
+ * point where a user sets one.
+ */
 const MIN_SCRUBBABLE_LENGTH = 4;
 
 /**
@@ -35,6 +42,18 @@ export interface CredentialScrubber {
 
 const NOOP: CredentialScrubber = { scrub: (t) => t, active: false };
 
+export interface CredentialScrubberOptions {
+  /**
+   * Which keys are secret, per credential name, as declared by the user when
+   * the credential was created. Authoritative when present — see the note in
+   * `createCredentialScrubber`. Absent for older hosts, which fall back to the
+   * keyword guess below.
+   */
+  secretKeys?: Record<string, string[]>;
+  /** Fallback used only when `secretKeys` has no entry for a credential. */
+  isSecretKey?: (key: string) => boolean;
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -49,15 +68,31 @@ function escapeRegExp(value: string): string {
  */
 export function createCredentialScrubber(
   credentials: Record<string, Record<string, string>> | undefined,
-  isSecretKey: (key: string) => boolean = defaultIsSecretKey,
+  options: CredentialScrubberOptions | ((key: string) => boolean) = {},
 ): CredentialScrubber {
   if (!credentials) return NOOP;
 
+  const opts: CredentialScrubberOptions =
+    typeof options === "function" ? { isSecretKey: options } : options;
+  const isSecretKey = opts.isSecretKey ?? defaultIsSecretKey;
+  const declared = opts.secretKeys;
+
   const values = new Set<string>();
-  for (const entry of Object.values(credentials)) {
+  for (const [name, entry] of Object.entries(credentials)) {
     if (!entry) continue;
+    // The field's own `secret` flag when the host sent it. It is authoritative
+    // — it is what decided encryption at rest — and the keyword guess below
+    // cannot reproduce it: `passphrase`, `vaultCode` and `clientAssertion` all
+    // match no hint, so a field the user deliberately marked secret would be
+    // encrypted in the database and printed in the clear here.
+    const declaredForEntry = declared?.[name];
     for (const [key, value] of Object.entries(entry)) {
-      if (typeof value !== "string") continue;
+      if (typeof value !== "string" || value.length === 0) continue;
+      if (declaredForEntry) {
+        // Declared list present: it is the whole answer, at any length.
+        if (declaredForEntry.includes(key)) values.add(value);
+        continue;
+      }
       if (value.length < MIN_SCRUBBABLE_LENGTH) continue;
       if (!isSecretKey(key)) continue;
       values.add(value);
@@ -166,4 +201,52 @@ export function freezeCredentials(
     out[name] = Object.freeze({ ...entry });
   }
   return Object.freeze(out);
+}
+
+/**
+ * Scrub every text-bearing field of a captured network request.
+ *
+ * The single most certain place a plaintext credential ends up: `postData` on
+ * a form submit, the JSON body of an API login, and the bearer token that
+ * comes back in `responseHeaders`. All of it is persisted for the `network`
+ * check layer, so scrubbing the logs and leaving this alone would undo most of
+ * the point.
+ *
+ * Header *values* are scrubbed, not header names — a masked name would break
+ * the network diff's keying for no gain.
+ */
+export function scrubNetworkRequests<
+  T extends {
+    url: string;
+    errorText?: string;
+    requestHeaders?: Record<string, string>;
+    responseHeaders?: Record<string, string>;
+    postData?: string;
+    responseBody?: string;
+  },
+>(requests: T[], scrubber: CredentialScrubber): T[] {
+  if (!scrubber.active) return requests;
+  const headers = (h: Record<string, string> | undefined) => {
+    if (!h) return h;
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(h)) {
+      out[k] = typeof v === "string" ? scrubber.scrub(v) : v;
+    }
+    return out;
+  };
+  return requests.map((r) => ({
+    ...r,
+    // A credential submitted as a query parameter is in the URL itself.
+    url: scrubber.scrub(r.url),
+    errorText:
+      r.errorText === undefined ? r.errorText : scrubber.scrub(r.errorText),
+    requestHeaders: headers(r.requestHeaders),
+    responseHeaders: headers(r.responseHeaders),
+    postData:
+      r.postData === undefined ? r.postData : scrubber.scrub(r.postData),
+    responseBody:
+      r.responseBody === undefined
+        ? r.responseBody
+        : scrubber.scrub(r.responseBody),
+  }));
 }

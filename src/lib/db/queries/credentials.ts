@@ -33,6 +33,16 @@ export type MaskedCredential = RepoCredential;
 export type RunCredentials = Record<string, Record<string, string>>;
 
 /**
+ * Which keys of each credential the user declared secret.
+ *
+ * Travels beside `RunCredentials` rather than inside it, because the test body
+ * reads that object directly. The EB scrubs on this list — `CredentialField.secret`
+ * is what decided encryption at rest, and re-deriving secrecy from the key
+ * name in the EB gets `passphrase` and `clientAssertion` wrong.
+ */
+export type RunCredentialSecretKeys = Record<string, string[]>;
+
+/**
  * All of a repo's credentials with secret values stripped. Safe to serialize
  * to a client component.
  */
@@ -67,22 +77,28 @@ export async function getCredential(
  * The ONLY plaintext read path. Call it at dispatch — never earlier, and never
  * onto a request-scoped object something else might serialize.
  */
-export async function getCredentialsForRun(
-  repositoryId: string,
-): Promise<RunCredentials> {
+export async function getCredentialsForRun(repositoryId: string): Promise<{
+  credentials: RunCredentials;
+  secretKeys: RunCredentialSecretKeys;
+}> {
   const rows = await db
     .select()
     .from(repoCredentials)
     .where(eq(repoCredentials.repositoryId, repositoryId));
-  const out: RunCredentials = {};
+  const credentials: RunCredentials = {};
+  const secretKeys: RunCredentialSecretKeys = {};
   for (const row of rows) {
     const entry: Record<string, string> = {};
+    const secrets: string[] = [];
     for (const f of decryptCredentialFields(row.fields)) {
       entry[f.key] = f.value;
+      // The declared flag, carried through rather than re-derived downstream.
+      if (f.secret) secrets.push(f.key);
     }
-    out[row.name] = entry;
+    credentials[row.name] = entry;
+    secretKeys[row.name] = secrets;
   }
-  return out;
+  return { credentials, secretKeys };
 }
 
 /**

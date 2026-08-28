@@ -139,7 +139,8 @@ describe("repo_credentials", () => {
 
     // The one plaintext read path, keyed by handle for injection.
     expect(await getCredentialsForRun(repositoryId)).toEqual({
-      vaultAdmin: { username: USERNAME, password: PASSWORD },
+      credentials: { vaultAdmin: { username: USERNAME, password: PASSWORD } },
+      secretKeys: { vaultAdmin: ["password"] },
     });
 
     await deleteCredential(id);
@@ -169,9 +170,27 @@ describe("repo_credentials", () => {
       ],
     });
 
-    const run = await getCredentialsForRun(repositoryId);
+    const run = (await getCredentialsForRun(repositoryId)).credentials;
     expect(run.vaultAdmin.password).toBe(PASSWORD);
     expect(run.vaultAdmin.username).toBe("new-user@acme.com");
+
+    await deleteCredential(id);
+  });
+
+  it("reports which keys were declared secret, for the EB's scrubber", async () => {
+    // The flag is what decided encryption at rest; the run payload flattens to
+    // {name: {key: value}} and drops it, so it travels alongside. Without it
+    // the EB re-guesses secrecy from the key name and gets `passphrase` wrong.
+    const { id } = await createCredential({
+      repositoryId,
+      name: "vaultAdmin",
+      label: "Vault sandbox admin",
+      fields: fields(),
+    });
+
+    const { secretKeys } = await getCredentialsForRun(repositoryId);
+    expect(secretKeys.vaultAdmin).toContain("password");
+    expect(secretKeys.vaultAdmin).not.toContain("username");
 
     await deleteCredential(id);
   });
@@ -185,7 +204,7 @@ describe("repo_credentials", () => {
     });
 
     await updateCredential(id, { fields: fields("rotated-hunter3") });
-    const run = await getCredentialsForRun(repositoryId);
+    const run = (await getCredentialsForRun(repositoryId)).credentials;
     expect(run.vaultAdmin.password).toBe("rotated-hunter3");
 
     const [row] = await db
@@ -206,7 +225,7 @@ describe("repo_credentials", () => {
     });
 
     await updateCredential(id, { label: "Renamed only" });
-    const run = await getCredentialsForRun(repositoryId);
+    const run = (await getCredentialsForRun(repositoryId)).credentials;
     expect(run.vaultAdmin.password).toBe(PASSWORD);
 
     await deleteCredential(id);
@@ -273,9 +292,10 @@ describe("repo_credentials", () => {
 
     await markCredentialsUsed(repositoryId, ["vaultAdmin"]);
     expect((await getCredential(id))!.lastUsedAt).toBeInstanceOf(Date);
-    expect((await getCredentialsForRun(repositoryId)).vaultAdmin.password).toBe(
-      PASSWORD,
-    );
+    expect(
+      (await getCredentialsForRun(repositoryId)).credentials.vaultAdmin
+        .password,
+    ).toBe(PASSWORD);
 
     await deleteCredential(id);
   });

@@ -147,7 +147,9 @@ export async function startDebugSession(
       : undefined;
 
   // Decrypt-at-dispatch, shared by the setup run and the debug session itself.
-  const credentials = await resolveRunCredentials(repoId);
+  const resolvedCredentials = await resolveRunCredentials(repoId);
+  const credentials = resolvedCredentials?.credentials;
+  const credentialSecretKeys = resolvedCredentials?.secretKeys;
 
   // Run setup on the remote runner if needed (get storageState for auth)
   let storageState: string | undefined;
@@ -167,7 +169,7 @@ export async function startDebugSession(
         // headed: keep screencast attached to the setup page so the user can
         // watch setup (login flow, OAuth redirects) live in the debug stream.
         true,
-        credentials,
+        resolvedCredentials,
       );
       // Prefer the serialized JSON snapshot over the `persistent:<id>` marker —
       // debug-executor creates its own BrowserContext and can't reach the
@@ -207,6 +209,7 @@ export async function startDebugSession(
       pointerGestures: settings?.pointerGestures ?? undefined,
       cursorFPS: settings?.cursorFPS ?? undefined,
       credentials,
+      credentialSecretKeys,
     },
   } as unknown as Message);
 

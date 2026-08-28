@@ -4,6 +4,7 @@ import {
   freezeCredentials,
   scrubDomSnapshot,
   scrubError,
+  scrubNetworkRequests,
   defaultIsSecretKey,
   CREDENTIAL_MASK,
 } from "./credential-redaction.js";
@@ -181,5 +182,102 @@ describe("freezeCredentials", () => {
     const frozen = freezeCredentials(undefined);
     expect(frozen).toEqual({});
     expect(Object.isFrozen(frozen)).toBe(true);
+  });
+});
+
+describe("declared secret keys", () => {
+  // The field's own `secret` flag is what decided encryption at rest. Before
+  // it was carried on the wire, the EB re-guessed from the key name — so a
+  // field the user marked secret and named `passphrase` was encrypted in the
+  // database and printed in the clear here.
+  const CREDS_ODD_NAMES = {
+    vault: {
+      username: "svc-qa@acme.com",
+      passphrase: "correct-horse-battery",
+      clientAssertion: "eyJhbGciOiJSUzI1NiJ9.payload.sig",
+    },
+  };
+
+  it("masks a declared secret whose key matches no keyword hint", () => {
+    expect(defaultIsSecretKey("passphrase")).toBe(false);
+    expect(defaultIsSecretKey("clientAssertion")).toBe(false);
+
+    const s = createCredentialScrubber(CREDS_ODD_NAMES, {
+      secretKeys: { vault: ["passphrase", "clientAssertion"] },
+    });
+    const line = s.scrub(
+      "sent correct-horse-battery and eyJhbGciOiJSUzI1NiJ9.payload.sig",
+    );
+    expect(line).not.toContain("correct-horse-battery");
+    expect(line).not.toContain("eyJhbGciOiJSUzI1NiJ9");
+  });
+
+  it("leaves a declared non-secret in the clear", () => {
+    // Masking the username would turn every log line mentioning the account
+    // into dots and make failures unreadable.
+    const s = createCredentialScrubber(CREDS_ODD_NAMES, {
+      secretKeys: { vault: ["passphrase", "clientAssertion"] },
+    });
+    expect(s.scrub("logged in as svc-qa@acme.com")).toContain(
+      "svc-qa@acme.com",
+    );
+  });
+
+  it("masks a declared secret shorter than the keyword-guess floor", () => {
+    // `pin` is in the hint list, but a 3-character PIN never reached the
+    // keyword path because of the length floor. A declared secret has no floor.
+    const s = createCredentialScrubber(
+      { kiosk: { pin: "042" } },
+      { secretKeys: { kiosk: ["pin"] } },
+    );
+    expect(s.scrub("entered 042")).toBe(`entered ${CREDENTIAL_MASK}`);
+  });
+
+  it("falls back to the keyword guess for a credential with no declared list", () => {
+    // An older host sends no secretKeys at all; the guarantee narrows but does
+    // not regress.
+    const s = createCredentialScrubber(CREDS, {});
+    expect(s.scrub("pw hunter2-correct-horse")).toContain(CREDENTIAL_MASK);
+  });
+});
+
+describe("scrubNetworkRequests", () => {
+  const scrubber = createCredentialScrubber(CREDS);
+
+  it("masks the credential everywhere a request can carry it", () => {
+    const [out] = scrubNetworkRequests(
+      [
+        {
+          url: "https://app.test/login?p=hunter2-correct-horse",
+          postData: "username=svc-qa%40acme.com&password=hunter2-correct-horse",
+          responseBody: '{"token":"hunter2-correct-horse"}',
+          requestHeaders: { authorization: "Basic hunter2-correct-horse" },
+          responseHeaders: { "set-cookie": "s=hunter2-correct-horse" },
+          errorText: "failed sending hunter2-correct-horse",
+        },
+      ],
+      scrubber,
+    );
+    expect(JSON.stringify(out)).not.toContain("hunter2-correct-horse");
+    // Header NAMES survive — masking them would break the network diff's keying.
+    expect(out.requestHeaders).toHaveProperty("authorization");
+    expect(out.responseHeaders).toHaveProperty("set-cookie");
+  });
+
+  it("leaves undefined fields undefined rather than masking them into strings", () => {
+    const [out] = scrubNetworkRequests(
+      [{ url: "https://app.test/x" }],
+      scrubber,
+    );
+    expect(out.postData).toBeUndefined();
+    expect(out.responseBody).toBeUndefined();
+    expect(out.requestHeaders).toBeUndefined();
+  });
+
+  it("returns the array untouched when inert", () => {
+    const list = [{ url: "https://app.test/x" }];
+    expect(
+      scrubNetworkRequests(list, createCredentialScrubber(undefined)),
+    ).toBe(list);
   });
 });
