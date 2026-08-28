@@ -2114,6 +2114,55 @@ async function runQaPlan(
       })
     : null;
 
+  // An actual stop has to be able to stop. The planner rejects an empty plan
+  // (`isQaTestPlan` requires items.length > 0) and would retry until it got
+  // one, so a shouldStop budget could only ever be honoured BEFORE the model
+  // is asked — otherwise the run always produced at least one item and the
+  // stopping rule was decorative.
+  if (planBudget.shouldStop) {
+    const stopSummary = buildStopSummary({
+      budget: planBudget,
+      stop: coverageState?.stop ?? null,
+      plannedItems: 0,
+    });
+    substeps[0] = {
+      ...substeps[0],
+      status: "done",
+      durationMs: Date.now() - started,
+      outputSummary: stopSummary,
+    };
+    await updateSubsteps(sessionId, "qa_plan", substeps);
+    await setStepCompleted(sessionId, "qa_plan", {
+      journeys: 0,
+      items: 0,
+      stopped: true,
+      stopExplanation: planBudget.stopExplanation ?? null,
+    });
+    emitActivity(
+      teamId,
+      repositoryId,
+      sessionId,
+      "step:complete",
+      stopSummary,
+      { stepId: "qa_plan", agentType: "planner" },
+    );
+    await host.updateSession(sessionId, {
+      status: "completed",
+      completedAt: new Date(),
+    });
+    emitActivity(
+      teamId,
+      repositoryId,
+      sessionId,
+      "session:complete",
+      `No new tests warranted — ${stopSummary}`,
+    );
+    console.log(`[qa-agent] ${stopSummary}`);
+    // Halts the pipeline WITHOUT failing it: the run reached a correct
+    // terminal state, it just has nothing to generate.
+    return false;
+  }
+
   const callPlanner = async (extraFeedback?: string): Promise<string> => {
     const timeoutSignal = AbortSignal.timeout(PLANNER_TIMEOUT_MS);
     const result = await ctx.ai.generate(

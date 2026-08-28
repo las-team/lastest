@@ -42,10 +42,12 @@ import type { CoverageDimension } from "@/lib/db/schema";
 import type { CoverageSpec, SpecCell } from "@lastest/coverage-model";
 import type { CoverageMetrics, StopReason } from "@lastest/coverage-model";
 import {
-  syncCoverageAction,
+  startCoverageSyncAction,
+  getCoverageSyncStatusAction,
   setCoverageDimensionEnabledAction,
   setCoverageCellStatusAction,
   getCoverageSpecAction,
+  type CoverageSyncSummary,
 } from "@/server/actions/coverage";
 import { uploadCsvSource } from "@lastest/plugin-data-sources/actions";
 import {
@@ -188,18 +190,52 @@ export function CoverageClient({
 
   const refresh = () => startTransition(() => router.refresh());
 
+  /**
+   * Run a sync as a background job and poll it.
+   *
+   * A sync re-reads every data source and re-scores every cell. Awaiting that
+   * inside the click handler held the request (and the user) for the whole
+   * pass; now the action returns a job id straight away and this polls it.
+   * Resolves once the job reaches a terminal state so callers that must
+   * re-render afterwards still can.
+   */
+  const runSyncJob = async (): Promise<CoverageSyncSummary | null> => {
+    const { jobId } = await startCoverageSyncAction(repositoryId, {
+      environmentKey,
+    });
+    // ~10 minutes at 2s. A sync that outlives this is still running server
+    // side; the poller giving up does not cancel it.
+    for (let i = 0; i < 300; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const status = await getCoverageSyncStatusAction(jobId);
+      if (!status.isComplete) continue;
+      if (status.error) throw new Error(status.error);
+      if (status.rejected && status.rejected.length > 0) {
+        toast.info(
+          `${status.rejected.length} column(s) rejected as non-dimensions — see Data → Dimensions.`,
+        );
+      }
+      return status.summary ?? null;
+    }
+    throw new Error(
+      "Coverage sync is taking longer than expected — it is still running; reload to see the result.",
+    );
+  };
+
   const runSync = async () => {
     setBusy("sync");
+    toast.info("Coverage sync started — profiling data sources…");
     try {
-      const r = await syncCoverageAction(repositoryId, { environmentKey });
-      toast.success(
-        `Profiled ${r.dimensionsProposed} dimension(s), ${r.cellsUpserted} cell(s), ${r.attributionsRecorded} run attribution(s)` +
-          (r.cellsPruned > 0 ? `, pruned ${r.cellsPruned} stale` : ""),
-      );
-      if (r.dimensionsRejected.length > 0) {
-        toast.info(
-          `${r.dimensionsRejected.length} column(s) rejected as non-dimensions — see Data → Dimensions.`,
+      const summary = await runSyncJob();
+      if (summary) {
+        toast.success(
+          `Profiled ${summary.dimensionsProposed} dimension(s), ${summary.cellsUpserted} cell(s), ${summary.attributionsRecorded} run attribution(s)` +
+            (summary.cellsPruned > 0
+              ? `, pruned ${summary.cellsPruned} stale`
+              : ""),
         );
+      } else {
+        toast.success("Coverage sync finished");
       }
       refresh();
     } catch (e) {
@@ -215,7 +251,7 @@ export function CoverageClient({
       await setCoverageDimensionEnabledAction(repositoryId, id, enabled);
       // Enabling changes the field set, so cells must be re-derived — doing it
       // here keeps the grid from showing a stale generation.
-      await syncCoverageAction(repositoryId, { environmentKey });
+      await runSyncJob();
       refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed");
@@ -286,7 +322,7 @@ export function CoverageClient({
       const res = await uploadCsvSource(repositoryId, alias, bytes, file.name);
       if (!res?.success) throw new Error(res?.error ?? "Upload failed");
       toast.success("Uploaded — profiling columns…");
-      await syncCoverageAction(repositoryId, { environmentKey });
+      await runSyncJob();
       refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Upload failed");

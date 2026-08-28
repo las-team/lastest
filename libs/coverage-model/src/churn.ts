@@ -24,11 +24,21 @@ export function extractChurnedObjectTypes(
   const haystack = releaseNotes.toLowerCase();
   return knownObjectTypes.filter((t) => {
     const needle = t.toLowerCase();
-    // Word-ish boundary so `call__v` does not match inside `recall__vx`.
-    const idx = haystack.indexOf(needle);
-    if (idx === -1) return false;
-    const before = haystack[idx - 1] ?? " ";
-    const after = haystack[idx + needle.length] ?? " ";
-    return !/[a-z0-9_]/.test(before) && !/[a-z0-9_]/.test(after);
+    if (!needle) return false;
+    // EVERY occurrence, not just the first: checking only `indexOf` meant a
+    // note reading "recall__vx ... call__v" tested the embedded occurrence,
+    // found an identifier character beside it, and reported `call__v`
+    // untouched — the standalone mention two words later never got looked at.
+    for (
+      let idx = haystack.indexOf(needle);
+      idx !== -1;
+      idx = haystack.indexOf(needle, idx + 1)
+    ) {
+      const before = haystack[idx - 1] ?? " ";
+      const after = haystack[idx + needle.length] ?? " ";
+      // Word-ish boundary so `call__v` does not match inside `recall__vx`.
+      if (!/[a-z0-9_]/.test(before) && !/[a-z0-9_]/.test(after)) return true;
+    }
+    return false;
   });
 }

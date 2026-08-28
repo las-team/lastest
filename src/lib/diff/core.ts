@@ -59,11 +59,17 @@ export async function approveDiffCore(diffId: string, approvedBy?: string) {
 
   // Branch-scoped approval: only deactivate/create baselines for THIS branch + browser
   // Main baselines are only updated via PR merge promotion or direct main builds
+  // P2: a diff produced by a matrix run belongs to ONE data cell, so approving
+  // it establishes that cell's baseline and retires only that cell's previous
+  // one. Without the scoping, approving cell A's screenshot deactivated cell
+  // B's baseline and the next build reported B as a new test.
+  const dataCell = testResult?.dataCell ?? null;
   await queries.deactivateBaselines(
     diff.testId,
     diff.stepLabel,
     branch,
     browser,
+    dataCell,
   );
   // Per-step DOM snapshot for the approved step rides onto the new baseline so
   // later runs compute an aligned per-step DOM diff against it. Matched on the
@@ -80,6 +86,7 @@ export async function approveDiffCore(diffId: string, approvedBy?: string) {
     browser,
     approvedFromDiffId: diffId,
     domSnapshot: approvedDomSnapshot,
+    dataCell,
   });
 
   // Update build status

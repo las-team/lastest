@@ -20,7 +20,13 @@ import { DEFAULT_COVERAGE_ENVIRONMENT } from "@/lib/db/schema";
 import type { CoverageCellStatus } from "@/lib/db/schema";
 
 /** Full pass: profile sources, derive occurring cells, attribute historical
- *  runs, recompute weights. Safe to re-run — every step is idempotent. */
+ *  runs, recompute weights. Safe to re-run — every step is idempotent.
+ *
+ *  Synchronous, and therefore for callers that genuinely need the result
+ *  in-band (the API's `fresh=1`, tests). Anything driven by a click should use
+ *  `startCoverageSyncAction`: a sync re-reads every data source and re-scores
+ *  every cell, which is minutes on a large repo, and awaiting that in a server
+ *  action holds the user's request open for all of it. */
 export async function syncCoverageAction(
   repositoryId: string,
   opts: SyncOptions = {},
@@ -29,6 +35,93 @@ export async function syncCoverageAction(
   const result = await syncCoverage(repositoryId, opts);
   revalidatePath(`/coverage`);
   return result;
+}
+
+/** What a finished sync job reports back, mirrored onto the job row so the
+ *  poller can render the same toast the synchronous action used to return. */
+export interface CoverageSyncSummary {
+  dimensionsProposed: number;
+  dimensionsRejected: number;
+  cellsUpserted: number;
+  cellsPruned: number;
+  attributionsRecorded: number;
+}
+
+/**
+ * Start a coverage sync as a background job and return immediately.
+ *
+ * The UI polls `getCoverageSyncStatusAction`. Same work, same idempotence —
+ * the only difference is who waits for it.
+ */
+export async function startCoverageSyncAction(
+  repositoryId: string,
+  opts: SyncOptions = {},
+): Promise<{ jobId: string }> {
+  await requireRepoAccess(repositoryId);
+  const { createJob, completeJob, failJob } =
+    await import("@/server/actions/jobs");
+  const jobId = await createJob(
+    "coverage_sync",
+    "Coverage sync: profiling data sources",
+    1,
+    repositoryId,
+    { environmentKey: opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT },
+  );
+
+  // Fire-and-forget: the action returns as soon as the row exists.
+  void (async () => {
+    try {
+      const result = await syncCoverage(repositoryId, opts);
+      const summary: CoverageSyncSummary = {
+        dimensionsProposed: result.dimensionsProposed,
+        dimensionsRejected: result.dimensionsRejected.length,
+        cellsUpserted: result.cellsUpserted,
+        cellsPruned: result.cellsPruned,
+        attributionsRecorded: result.attributionsRecorded,
+      };
+      await queries.updateBackgroundJob(jobId, {
+        metadata: {
+          environmentKey: result.environmentKey,
+          summary,
+          rejected: result.dimensionsRejected,
+        },
+      });
+      await completeJob(jobId);
+      revalidatePath(`/coverage`);
+    } catch (err) {
+      await failJob(
+        jobId,
+        err instanceof Error ? err.message : "Coverage sync failed",
+      ).catch(() => {});
+    }
+  })();
+
+  return { jobId };
+}
+
+/** Poll target for `startCoverageSyncAction`. */
+export async function getCoverageSyncStatusAction(jobId: string): Promise<{
+  status: string;
+  isComplete: boolean;
+  error?: string;
+  summary?: CoverageSyncSummary;
+  rejected?: Array<{ objectType: string; field: string; reason: string }>;
+}> {
+  const { requireBackgroundJobOwnership } =
+    await import("@/lib/auth/ownership");
+  await requireBackgroundJobOwnership(jobId);
+  const job = await queries.getBackgroundJob(jobId);
+  const meta = (job?.metadata ?? {}) as {
+    summary?: CoverageSyncSummary;
+    rejected?: Array<{ objectType: string; field: string; reason: string }>;
+  };
+  return {
+    status: job?.status ?? "unknown",
+    isComplete: job?.status === "completed" || job?.status === "failed",
+    error: job?.error ?? undefined,
+    summary: meta.summary,
+    rejected: meta.rejected,
+  };
 }
 
 /** Profile only — proposes dimensions without deriving cells. Lets the user
@@ -115,7 +208,15 @@ export async function setCoverageDimensionEnabledAction(
   enabled: boolean,
 ) {
   await requireRepoAccess(repositoryId);
-  await queries.setCoverageDimensionEnabled(dimensionId, enabled);
+  // The id is client-supplied; the access check above authorizes the REPO. The
+  // query matches on both, so a dimension belonging to another team is a
+  // no-match rather than a silent cross-tenant write.
+  const ok = await queries.setCoverageDimensionEnabled(
+    repositoryId,
+    dimensionId,
+    enabled,
+  );
+  if (!ok) throw new Error("Dimension not found for this repository");
   revalidatePath(`/coverage`);
 }
 
@@ -210,6 +311,13 @@ export async function setCoverageCellStatusAction(
   if (status === "excluded" && !excludedReason?.trim()) {
     throw new Error("An exclusion reason is required");
   }
-  await queries.setCoverageCellStatus(cellId, status, excludedReason?.trim());
+  // Repo-scoped for the same reason as the dimension toggle above.
+  const ok = await queries.setCoverageCellStatus(
+    repositoryId,
+    cellId,
+    status,
+    excludedReason?.trim(),
+  );
+  if (!ok) throw new Error("Cell not found for this repository");
   revalidatePath(`/coverage`);
 }

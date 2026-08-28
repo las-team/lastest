@@ -267,8 +267,14 @@ export function sanitizeQaPlan(
    *  coverage says would be desirable. */
   opts: { maxItems?: number } = {},
 ): QaTestPlan {
+  // Floored at 0, not 1. A measured budget of zero means "coverage targets are
+  // met, plan nothing", and clamping it up to one item made that decision
+  // unrepresentable — the sanitizer handed back a plan the caller had already
+  // decided not to make. Callers that must stop short-circuit before reaching
+  // the planner at all (see runQaPlan); this keeps the sanitizer from
+  // re-introducing an item if they don't.
   const itemCap = Math.max(
-    1,
+    0,
     Math.min(opts.maxItems ?? MAX_PLAN_ITEMS, MAX_PLAN_ITEMS),
   );
   const allowed = new Set(groups);

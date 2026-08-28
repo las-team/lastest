@@ -268,6 +268,79 @@ describe("expandMatrix", () => {
     expect(r.runs.every((x) => !x.capturesVisual)).toBe(true);
   });
 
+  it("never materializes an unbounded cartesian product", () => {
+    // Two 5,000-row sources are 25M combinations. Before the materialization
+    // ceiling this allocated all of them inside the web process before maxRuns
+    // was applied — a multi-second freeze at best, an OOM at worst.
+    const big = (alias: string, col: string) =>
+      csvSource(
+        alias,
+        [col],
+        Array.from({ length: 5000 }, (_, i) => [`${col}${i}`]),
+      );
+    const started = Date.now();
+    const r = expandMatrix({
+      variables: [
+        matrixVar({
+          id: "a",
+          name: "left",
+          sourceAlias: "l",
+          sourceColumn: "l",
+        }),
+        matrixVar({
+          id: "b",
+          name: "right",
+          sourceAlias: "r",
+          sourceColumn: "r",
+        }),
+      ],
+      gsheetSources: [],
+      csvSources: [big("l", "l"), big("r", "r")],
+      policy: { selection: "all", strength: 2, visual: "none", maxRuns: 50 },
+    });
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(r.runs).toHaveLength(50);
+    expect(r.candidateCount).toBe(25_000_000);
+    expect(r.truncated).toBe(true);
+    expect(r.explanation).toMatch(/never enumerated/);
+  });
+
+  it("still pairwise-reduces a large candidate set in bounded time", () => {
+    const big = (alias: string, col: string, n: number) =>
+      csvSource(
+        alias,
+        [col],
+        Array.from({ length: n }, (_, i) => [`${col}${i % 20}-${i}`]),
+      );
+    const started = Date.now();
+    const r = expandMatrix({
+      variables: [
+        matrixVar({
+          id: "a",
+          name: "left",
+          sourceAlias: "l",
+          sourceColumn: "l",
+        }),
+        matrixVar({
+          id: "b",
+          name: "right",
+          sourceAlias: "r",
+          sourceColumn: "r",
+        }),
+      ],
+      gsheetSources: [],
+      csvSources: [big("l", "l", 400), big("r", "r", 400)],
+      policy: {
+        selection: "pairwise",
+        strength: 2,
+        visual: "none",
+        maxRuns: 50,
+      },
+    });
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(r.runs.length).toBeLessThanOrEqual(50);
+  });
+
   it("reports truncation rather than silently clipping", () => {
     const r = expandMatrix({
       variables: [matrixVar({})],
@@ -377,6 +450,27 @@ describe("expandTestsForMatrix", () => {
     expect(out.tests).toHaveLength(0);
     expect(out.failures).toHaveLength(1);
     expect(out.failures[0].testId).toBe("t1");
+  });
+
+  it("rewrites a single-run expansion too", () => {
+    // The count is unchanged here (1 test in, 1 test out) — which is exactly
+    // the case the executor used to treat as "nothing expanded" and discard,
+    // running the ORIGINAL test with an unpinned matrix variable and no cell.
+    const t = mkTest({
+      variables: [matrixVar({ rowFilter: "country IN (FR)" })],
+      matrixPolicy: {
+        selection: "all",
+        strength: 2,
+        visual: "representative",
+        maxRuns: 50,
+      },
+    });
+    const out = expandTestsForMatrix([t], [], [calls]);
+    expect(out.tests).toHaveLength(1);
+    expect(out.tests[0]).not.toBe(t);
+    expect(out.tests[0].variables![0].sourceRowMode).toBe("fixed");
+    expect(out.tests[0].variables![0].sourceRow).toBe(1);
+    expect(out.tests[0].matrixRun?.dataCell).toContain("FR");
   });
 
   it("does not mutate the original test", () => {
@@ -675,6 +769,16 @@ describe("extractChurnedObjectTypes", () => {
     expect(
       extractChurnedObjectTypes("changes to recall__vx only", ["call__v"]),
     ).toEqual([]);
+  });
+
+  it("finds a standalone mention that follows an embedded one", () => {
+    // Only the FIRST occurrence used to be checked: the embedded one failed the
+    // boundary test and the real mention behind it was never looked at.
+    expect(
+      extractChurnedObjectTypes("recall__vx deprecated; call__v updated", [
+        "call__v",
+      ]),
+    ).toEqual(["call__v"]);
   });
 
   it("returns nothing for notes naming no known type", () => {

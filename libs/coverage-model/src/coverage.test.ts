@@ -40,6 +40,18 @@ describe("coordsKey", () => {
     expect(parseCoordsKey(coordsKey(coords))).toEqual(coords);
   });
 
+  it("round-trips values containing backslashes and escape lookalikes", () => {
+    // The unescape used to run `\p -> |` before `\\ -> \`, so an escaped
+    // backslash followed by `p` decoded as a separator and corrupted the value.
+    const coords = {
+      path: "C:\\p",
+      other: "a\\e",
+      mixed: "x\\|y=z",
+      trailing: "back\\\\slash",
+    };
+    expect(parseCoordsKey(coordsKey(coords))).toEqual(coords);
+  });
+
   it("projects onto a field subset, dropping absent fields", () => {
     expect(projectCoords({ a: "1", b: "2" }, ["a", "c"])).toEqual({ a: "1" });
   });

@@ -19,6 +19,7 @@ import {
   type CoverageCellStatus,
   type CoverageDimension,
   type CoverageSnapshot,
+  type CoverageSnapshotSource,
   type NewCoverageCell,
   type NewCoverageDimension,
   type NewCoverageSnapshot,
@@ -88,18 +89,49 @@ export async function upsertCoverageDimension(
     });
 }
 
+/**
+ * Enable/disable one dimension.
+ *
+ * Scoped by `repositoryId` as well as by id. The caller authorizes a
+ * repository, so an update keyed on the id ALONE trusts a client-supplied
+ * primary key across that boundary — anyone with access to any repo could
+ * toggle any other tenant's dimension by guessing (or leaking) its uuid. There
+ * is no RLS behind these tables; the WHERE clause is the enforcement.
+ * Returns false when nothing matched, i.e. the row is not this repo's.
+ */
 export async function setCoverageDimensionEnabled(
+  repositoryId: string,
   id: string,
   enabled: boolean,
-): Promise<void> {
-  await db
+): Promise<boolean> {
+  const updated = await db
     .update(coverageDimensions)
     .set({ enabled, updatedAt: new Date() })
-    .where(eq(coverageDimensions.id, id));
+    .where(
+      and(
+        eq(coverageDimensions.id, id),
+        eq(coverageDimensions.repositoryId, repositoryId),
+      ),
+    )
+    .returning({ id: coverageDimensions.id });
+  return updated.length > 0;
 }
 
-export async function deleteCoverageDimension(id: string): Promise<void> {
-  await db.delete(coverageDimensions).where(eq(coverageDimensions.id, id));
+/** Repo-scoped for the same reason as `setCoverageDimensionEnabled`. */
+export async function deleteCoverageDimension(
+  repositoryId: string,
+  id: string,
+): Promise<boolean> {
+  const deleted = await db
+    .delete(coverageDimensions)
+    .where(
+      and(
+        eq(coverageDimensions.id, id),
+        eq(coverageDimensions.repositoryId, repositoryId),
+      ),
+    )
+    .returning({ id: coverageDimensions.id });
+  return deleted.length > 0;
 }
 
 /** Every (repo, environment) pair with at least one confirmed dimension —
@@ -198,19 +230,29 @@ export async function updateCoverageCellWeights(
   }
 }
 
+/** Repo-scoped: the caller authorizes a repository, never a bare cell id.
+ *  See `setCoverageDimensionEnabled`. Returns false when nothing matched. */
 export async function setCoverageCellStatus(
+  repositoryId: string,
   id: string,
   status: CoverageCellStatus,
   excludedReason?: string,
-): Promise<void> {
-  await db
+): Promise<boolean> {
+  const updated = await db
     .update(coverageCells)
     .set({
       status,
       excludedReason: status === "excluded" ? (excludedReason ?? null) : null,
       updatedAt: new Date(),
     })
-    .where(eq(coverageCells.id, id));
+    .where(
+      and(
+        eq(coverageCells.id, id),
+        eq(coverageCells.repositoryId, repositoryId),
+      ),
+    )
+    .returning({ id: coverageCells.id });
+  return updated.length > 0;
 }
 
 /**
@@ -365,6 +407,12 @@ export async function getDataCellResults(testRunId: string): Promise<
   return rows;
 }
 
+/** How many (cell, run) attributions the page-attribution pass reads.
+ *  A ceiling on a reporting read, not a correctness boundary: the pass keeps
+ *  only the newest sighting of each cell on each page, and the rows arrive
+ *  newest-first, so a cut tail can only omit older evidence. */
+export const DEFAULT_TRAJECTORY_ATTRIBUTION_LIMIT = 5000;
+
 /**
  * Every recorded cell↔run pairing that also carries a URL trajectory.
  *
@@ -392,7 +440,12 @@ export async function getCoverageCellRunTrajectories(
     urlTrajectory: UrlTrajectoryStep[] | null;
   }>
 > {
-  return db
+  // Two queries, not one join, and deliberately so. A trajectory is a jsonb
+  // document per RUN, but attribution rows are (cell x run): the single-join
+  // version shipped the same document back once per cell the run touched, so a
+  // run covering 30 cells transferred and parsed its trajectory 30 times. The
+  // pairs are narrow; the documents are fetched once each.
+  const pairs = await db
     .select({
       cellId: coverageCells.id,
       coordsKey: coverageCells.coordsKey,
@@ -401,11 +454,10 @@ export async function getCoverageCellRunTrajectories(
       observedCount: coverageCells.observedCount,
       verdict: coverageCellRuns.verdict,
       ranAt: coverageCellRuns.ranAt,
-      urlTrajectory: testResults.urlTrajectory,
+      testResultId: coverageCellRuns.testResultId,
     })
     .from(coverageCellRuns)
     .innerJoin(coverageCells, eq(coverageCellRuns.cellId, coverageCells.id))
-    .innerJoin(testResults, eq(coverageCellRuns.testResultId, testResults.id))
     .where(
       and(
         eq(coverageCells.repositoryId, repositoryId),
@@ -413,11 +465,40 @@ export async function getCoverageCellRunTrajectories(
           coverageCells.environmentKey,
           opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT,
         ),
-        isNotNull(testResults.urlTrajectory),
       ),
     )
     .orderBy(desc(coverageCellRuns.ranAt))
-    .limit(opts.limit ?? 20000);
+    .limit(opts.limit ?? DEFAULT_TRAJECTORY_ATTRIBUTION_LIMIT);
+
+  const resultIds = [...new Set(pairs.map((p) => p.testResultId))];
+  const trajectories = new Map<string, UrlTrajectoryStep[]>();
+  const CHUNK = 500;
+  for (let i = 0; i < resultIds.length; i += CHUNK) {
+    const rows = await db
+      .select({
+        id: testResults.id,
+        urlTrajectory: testResults.urlTrajectory,
+      })
+      .from(testResults)
+      .where(
+        and(
+          inArray(testResults.id, resultIds.slice(i, i + CHUNK)),
+          isNotNull(testResults.urlTrajectory),
+        ),
+      );
+    for (const r of rows) {
+      if (r.urlTrajectory) trajectories.set(r.id, r.urlTrajectory);
+    }
+  }
+
+  // Runs with no recorded trajectory can be attributed to no page, exactly as
+  // the inner join used to drop them.
+  return pairs
+    .filter((p) => trajectories.has(p.testResultId))
+    .map(({ testResultId, ...p }) => ({
+      ...p,
+      urlTrajectory: trajectories.get(testResultId) ?? null,
+    }));
 }
 
 /** Record cell↔run attribution. Idempotent per (cell, testResult). */
@@ -579,19 +660,32 @@ export async function getCoverageTrend(
   return rows.reverse();
 }
 
+/**
+ * The most recent snapshot, optionally restricted to how it was produced.
+ *
+ * `source` matters for freshness: a build writes a snapshot on every run, and
+ * a build snapshot measures today's cell set — it does NOT re-profile the data
+ * sources. Treating one as "the model was synced then" meant any repo building
+ * more often than the staleness window never re-profiled at all, so a new CSV
+ * column or a changed value domain stayed invisible indefinitely. Callers
+ * asking "when was this model last DERIVED" must pass `source: "sync"`.
+ */
 export async function getLatestCoverageSnapshot(
   repositoryId: string,
   environmentKey: string = DEFAULT_COVERAGE_ENVIRONMENT,
+  opts: { source?: CoverageSnapshotSource } = {},
 ): Promise<CoverageSnapshot | null> {
+  const conditions = [
+    eq(coverageSnapshots.repositoryId, repositoryId),
+    eq(coverageSnapshots.environmentKey, environmentKey),
+  ];
+  if (opts.source) {
+    conditions.push(eq(coverageSnapshots.source, opts.source));
+  }
   const [row] = await db
     .select()
     .from(coverageSnapshots)
-    .where(
-      and(
-        eq(coverageSnapshots.repositoryId, repositoryId),
-        eq(coverageSnapshots.environmentKey, environmentKey),
-      ),
-    )
+    .where(and(...conditions))
     .orderBy(desc(coverageSnapshots.capturedAt))
     .limit(1);
   return row ?? null;

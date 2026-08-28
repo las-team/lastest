@@ -811,9 +811,12 @@ export async function GET(
 
         const [trend, latestSnapshot] = await Promise.all([
           queries.getCoverageTrend(id, { environmentKey, limit: trendLimit }),
+          // `source: "sync"` — the field is named lastSyncedAt, and a build
+          // snapshot is not a sync (it never re-profiles the sources).
           queries.getLatestCoverageSnapshot(
             id,
             environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT,
+            { source: "sync" },
           ),
         ]);
         const lastSyncedAt = state.lastSyncedAt ?? latestSnapshot?.capturedAt;

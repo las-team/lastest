@@ -65,10 +65,45 @@ function pathsInTrajectory(
   return [...out];
 }
 
+/**
+ * Short-lived process-local memo of the attribution pass.
+ *
+ * The Coverage screen is `force-dynamic` and every mutation on it calls
+ * `router.refresh()`, so switching tabs or excluding one cell re-ran the whole
+ * attribution scan. The pass is a read model over data that only changes when
+ * a build or a sync writes attributions, so both of those invalidate it
+ * explicitly; the TTL is the backstop for writes from another process.
+ */
+const ATTRIBUTION_TTL_MS = 60_000;
+const attributionCache = new Map<
+  string,
+  { at: number; value: PageCoverageMap }
+>();
+
+const cacheKey = (repositoryId: string, environmentKey?: string) =>
+  `${repositoryId}::${environmentKey ?? ""}`;
+
+/** Drop the memo for a repo. Called wherever attributions are written. */
+export function invalidatePageCoverageAttribution(repositoryId: string): void {
+  for (const key of attributionCache.keys()) {
+    if (key.startsWith(`${repositoryId}::`)) attributionCache.delete(key);
+  }
+}
+
 export async function buildPageCoverageAttribution(
   repositoryId: string,
   opts: { environmentKey?: string; limit?: number } = {},
 ): Promise<PageCoverageMap> {
+  // Only the default read is memoized — a caller passing its own `limit` is
+  // asking a different question and must not be served another one's answer.
+  const memoKey =
+    opts.limit === undefined
+      ? cacheKey(repositoryId, opts.environmentKey)
+      : null;
+  if (memoKey) {
+    const hit = attributionCache.get(memoKey);
+    if (hit && Date.now() - hit.at < ATTRIBUTION_TTL_MS) return hit.value;
+  }
   const rows = await getCoverageCellRunTrajectories(repositoryId, opts);
 
   // path -> cellId -> the best-known facts about that cell on that page.
@@ -145,5 +180,6 @@ export async function buildPageCoverageAttribution(
       lastRunAt: lastRunAt ? lastRunAt.toISOString() : null,
     };
   }
+  if (memoKey) attributionCache.set(memoKey, { at: Date.now(), value: out });
   return out;
 }

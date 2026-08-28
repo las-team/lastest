@@ -56,6 +56,11 @@ export interface TestRunResult {
   dataCell?: string;
   matrixIndex?: number;
   matrixTotal?: number;
+  /** False when the test's `matrixPolicy.visual` excludes THIS expanded run
+   *  from the visual layer. The build path then records no visual diff and
+   *  establishes no baseline for it — which is the whole point of the
+   *  representative-cell policy: one PNG baseline per slice, not one per cell. */
+  matrixCapturesVisual?: boolean;
   logs?: Array<{ timestamp: number; level: string; message: string }>;
   // ── Multi-layer comparison capture (v1.13) ─────────────────────────────
   urlTrajectory?: UrlTrajectoryStep[];

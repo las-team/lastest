@@ -814,8 +814,34 @@ async function runBuildAsync(
   // loop so a multi-browser build doesn't duplicate api test_results.
   const apiTestsForBuild = tests.filter((t) => t.testType === "api");
   const browserTestsForBuild = tests.filter((t) => t.testType !== "api");
-  const totalTestsAcrossBrowsers =
+  // Pre-expansion estimate. A matrix test is one row in `tests` but N runs at
+  // dispatch, so this is a FLOOR, not the truth — `learnDispatchTotal` below
+  // raises it the moment the executor reports how many runs it actually
+  // produced. Left un-raised, a 4-cell matrix reported "12 of 3" and the
+  // completion sanity check downstream read the build as having lost results.
+  let totalTestsAcrossBrowsers =
     browserTestsForBuild.length * browsers.length + apiTestsForBuild.length;
+  // Per-phase dispatch totals, learned from the executor's own progress
+  // reports (which are post-expansion).
+  let apiDispatchTotal = apiTestsForBuild.length;
+  let browserDispatchTotalPerBrowser = browserTestsForBuild.length;
+  let dispatchPhase: "api" | "browser" =
+    apiTestsForBuild.length > 0 ? "api" : "browser";
+  const learnDispatchTotal = async (reportedTotal: number) => {
+    if (!Number.isFinite(reportedTotal) || reportedTotal <= 0) return;
+    if (dispatchPhase === "api") {
+      if (reportedTotal <= apiDispatchTotal) return;
+      apiDispatchTotal = reportedTotal;
+    } else {
+      if (reportedTotal <= browserDispatchTotalPerBrowser) return;
+      browserDispatchTotalPerBrowser = reportedTotal;
+    }
+    const next =
+      browserDispatchTotalPerBrowser * browsers.length + apiDispatchTotal;
+    if (next === totalTestsAcrossBrowsers) return;
+    totalTestsAcrossBrowsers = next;
+    await queries.updateBuild(buildId, { totalTests: next });
+  };
 
   // Store browsers on the build record
   await queries.updateBuild(buildId, {
@@ -861,6 +887,7 @@ async function runBuildAsync(
     dataCell?: string;
     matrixIndex?: number;
     matrixTotal?: number;
+    matrixCapturesVisual?: boolean;
     logs?: Array<{ timestamp: number; level: string; message: string }>;
     urlTrajectory?: import("@/lib/db/schema").UrlTrajectoryStep[];
     webVitals?: import("@/lib/db/schema").WebVitalsSample[];
@@ -939,26 +966,45 @@ async function runBuildAsync(
     // against that step's baseline snapshot inside processVisualDiff.
     const domDiffEnabled = playwrightSettings?.enableDomDiff ?? false;
 
+    // P2 visual policy. `matrixPolicy.visual` decides which expanded runs take
+    // part in the visual layer; 'representative' (the default) means one run
+    // per slice does. The flag was computed at expansion and then read by
+    // nothing, so a 40-cell matrix still produced 40 pending diffs and
+    // demanded 40 baselines — the exact cost the policy exists to avoid. The
+    // non-visual runs still report their cheap layers (console/network/dom/
+    // url/a11y) through the step-comparison block below.
+    const skipVisualLayer =
+      !!result.dataCell && result.matrixCapturesVisual === false;
+    if (skipVisualLayer) {
+      console.log(
+        `[build] matrix run ${result.matrixIndex}/${result.matrixTotal} of test ${result.testId} ` +
+          `does not capture the visual layer (cell ${result.dataCell}) — skipping ${screenshots.length} diff(s)`,
+      );
+    }
+
     // Generate visual diffs for all screenshots concurrently
-    const diffResults = await Promise.all(
-      screenshots.map((screenshot) =>
-        processVisualDiff(
-          buildId,
-          testResult.id,
-          result.testId,
-          screenshot.path,
-          branch,
-          repositoryId,
-          screenshot.label,
-          result.stabilityMetadata?.isStable === false,
-          currentBrowserType,
-          testDiffOverrides,
-          forceAutoApprove,
-          screenshot.domSnapshot,
-          domDiffEnabled,
-        ),
-      ),
-    );
+    const diffResults = skipVisualLayer
+      ? []
+      : await Promise.all(
+          screenshots.map((screenshot) =>
+            processVisualDiff(
+              buildId,
+              testResult.id,
+              result.testId,
+              screenshot.path,
+              branch,
+              repositoryId,
+              screenshot.label,
+              result.stabilityMetadata?.isStable === false,
+              currentBrowserType,
+              testDiffOverrides,
+              forceAutoApprove,
+              screenshot.domSnapshot,
+              domDiffEnabled,
+              result.dataCell ?? null,
+            ),
+          ),
+        );
     for (const diffResult of diffResults) {
       if (diffResult.classification === "changed") changesDetected++;
       if (diffResult.classification === "flaky") flakyCount++;
@@ -1146,6 +1192,9 @@ async function runBuildAsync(
     activeCount?: number;
     activeTests?: string[];
   }) => {
+    // The executor's `total` is post-matrix-expansion, so it is the only
+    // honest denominator this side has.
+    await learnDispatchTotal(progress.total);
     await updateJobActivity(jobId, progress.activeCount, progress.activeTests);
   };
 
@@ -1205,6 +1254,8 @@ async function runBuildAsync(
         onResult,
       );
     }
+
+    dispatchPhase = "browser";
 
     // Run tests for each browser in the browsers list
     for (const browserType of browsers) {
@@ -1978,6 +2029,10 @@ async function processVisualDiff(
   // one is created. Absent → no DOM overlay for this step.
   currentDomSnapshot?: import("@/lib/db/schema").DomSnapshotData,
   domDiffEnabled?: boolean,
+  /** P2: the data cell this run exercised, when it came from a matrix
+   *  expansion. Baseline resolution prefers a baseline captured for the same
+   *  cell and falls back to the shared one. */
+  dataCell?: string | null,
 ): Promise<{
   hasChanges: boolean;
   diffId: string;
@@ -2148,6 +2203,7 @@ async function processVisualDiff(
     stepLabel,
     branch,
     browser,
+    dataCell,
   );
   let baselineSourceBranch: string | undefined;
   let baselineExistsOn: { branch: string; createdAt: string } | undefined;
@@ -2157,6 +2213,7 @@ async function processVisualDiff(
       stepLabel,
       defaultBranch,
       browser,
+      dataCell,
     );
     if (fallback) {
       baseline = fallback;
@@ -2298,6 +2355,7 @@ async function processVisualDiff(
       stepLabel,
       defaultBranch,
       browser,
+      dataCell,
     );
     if (!mainBaseline) {
       return {

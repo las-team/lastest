@@ -19,6 +19,15 @@ import { tableToRecords } from "./cells";
 import { selectRowIndices } from "./row-filter";
 import { tupleKeys } from "./weight";
 
+/**
+ * Hard ceiling on how many row combinations expansion will MATERIALIZE.
+ *
+ * Not a policy knob: it is a memory bound on a pure function that runs inside
+ * the web process. `policy.maxRuns` (default 50) is what a user tunes; this is
+ * the wall that stops a data source that grew from taking the process with it.
+ */
+export const MAX_MATRIX_CANDIDATES = 5000;
+
 export interface MatrixRun {
   /** Row index to pin each matrix variable to, keyed by TestVariable.id. */
   rowPicks: Record<string, number>;
@@ -93,6 +102,12 @@ export function matrixVariables(
 export function pairwiseReduce<T extends { coords: Record<string, string> }>(
   candidates: T[],
   strength: number,
+  /** Stop once this many rows have been chosen. The caller clips to
+   *  `policy.maxRuns` anyway, so continuing past it only burns time: the greedy
+   *  scan is O(chosen x candidates) and a large candidate set with a large
+   *  covering set is exactly where that becomes seconds of blocked event loop.
+   *  Pass `maxRuns + 1` so the caller can still tell that it clipped. */
+  limit = Number.POSITIVE_INFINITY,
 ): T[] {
   if (candidates.length <= 1) return [...candidates];
 
@@ -113,7 +128,7 @@ export function pairwiseReduce<T extends { coords: Record<string, string> }>(
   const covered = new Set<string>();
   const used = new Set<number>();
 
-  while (covered.size < needed.size) {
+  while (covered.size < needed.size && chosen.length < limit) {
     let bestIdx = -1;
     let bestGain = 0;
     for (let i = 0; i < candidates.length; i++) {
@@ -204,8 +219,16 @@ export function expandMatrix(opts: {
       continue;
     }
 
+    // Bounded here too: one axis is one source's selected rows, and a source
+    // that grew to six figures would otherwise allocate an object per row
+    // before the cross-product cap below ever applies.
+    if (indices.length > MAX_MATRIX_CANDIDATES) {
+      errors.push(
+        `Data source "${alias}" selected ${indices.length} rows; only the first ${MAX_MATRIX_CANDIDATES} are considered`,
+      );
+    }
     axes.push(
-      indices.map((rowIndex) => {
+      indices.slice(0, MAX_MATRIX_CANDIDATES).map((rowIndex) => {
         const rowPicks: Record<string, number> = {};
         const coords: Record<string, string> = {};
         for (const v of group) {
@@ -227,29 +250,53 @@ export function expandMatrix(opts: {
     };
   }
 
-  // Cross product across sources.
-  let combined = axes[0];
+  // Cross product across sources, MATERIALIZATION-BOUNDED.
+  //
+  // The product is combinatorial in the sources' row counts: two 5,000-row
+  // sources are 25 million objects. Building that array before applying
+  // `maxRuns` froze (or OOM-killed) whichever process called expansion — and
+  // in the build path that is the web process, so one misconfigured test took
+  // the whole app down. The full size is still REPORTED, arithmetically, so
+  // the explanation stays honest about what was skipped; only the array is
+  // capped.
+  const fullProduct = axes.reduce((n, axis) => n * axis.length, 1);
+  const candidateCount = fullProduct;
+  const materializeCap = Math.max(
+    policy.maxRuns,
+    Math.min(MAX_MATRIX_CANDIDATES, fullProduct),
+  );
+  let combined = axes[0].slice(0, materializeCap);
   for (let i = 1; i < axes.length; i++) {
     const next: typeof combined = [];
-    for (const a of combined) {
+    outer: for (const a of combined) {
       for (const b of axes[i]) {
         next.push({
           rowPicks: { ...a.rowPicks, ...b.rowPicks },
           coords: { ...a.coords, ...b.coords },
         });
+        if (next.length >= materializeCap) break outer;
       }
     }
     combined = next;
   }
+  const candidatesElided = fullProduct - combined.length;
+  if (candidatesElided > 0) {
+    errors.push(
+      `${fullProduct} row combination(s) exceed the ${MAX_MATRIX_CANDIDATES} candidate ceiling; ` +
+        `only the first ${combined.length} were considered — narrow the row filter to choose which`,
+    );
+  }
 
-  const candidateCount = combined.length;
   const selected =
     policy.selection === "pairwise"
-      ? pairwiseReduce(combined, policy.strength)
+      ? pairwiseReduce(combined, policy.strength, policy.maxRuns + 1)
       : combined;
 
-  const truncated = selected.length > policy.maxRuns;
-  const capped = truncated ? selected.slice(0, policy.maxRuns) : selected;
+  const truncated = selected.length > policy.maxRuns || candidatesElided > 0;
+  const capped =
+    selected.length > policy.maxRuns
+      ? selected.slice(0, policy.maxRuns)
+      : selected;
 
   const runs: MatrixRun[] = capped.map((c, index) => ({
     rowPicks: c.rowPicks,
@@ -266,10 +313,15 @@ export function expandMatrix(opts: {
 
   const parts = [
     `${candidateCount} row combination(s) selected`,
-    policy.selection === "pairwise" && selected.length < candidateCount
+    candidatesElided > 0
+      ? `${candidatesElided} combination(s) beyond the ${MAX_MATRIX_CANDIDATES} candidate ceiling were never enumerated`
+      : null,
+    policy.selection === "pairwise" && selected.length < combined.length
       ? `reduced to ${selected.length} by ${policy.strength}-way covering`
       : null,
-    truncated ? `truncated to ${policy.maxRuns} by maxRuns` : null,
+    capped.length < selected.length
+      ? `truncated to ${policy.maxRuns} by maxRuns`
+      : null,
     policy.visual === "representative"
       ? `visual layer captured on 1 representative run`
       : policy.visual === "none"

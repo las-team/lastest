@@ -324,25 +324,40 @@ export async function getBranchBaseline(
   stepLabel: string | null | undefined,
   branch: string,
   browser: string = "chromium",
+  /** P2: data cell of the current run. A baseline captured for THIS cell wins;
+   *  otherwise the shared (NULL-cell) baseline is used, which is what lets the
+   *  representative-cell policy hold — the other expanded runs compare against
+   *  the one baseline the representative established. */
+  dataCell?: string | null,
 ) {
   const stepConditions = stepLabel
     ? [eq(baselines.stepLabel, stepLabel)]
     : [isNull(baselines.stepLabel)];
 
-  const [row] = await db
-    .select()
-    .from(baselines)
-    .where(
-      and(
-        eq(baselines.testId, testId),
-        eq(baselines.isActive, true),
-        eq(baselines.branch, branch),
-        eq(baselines.browser, browser),
-        ...stepConditions,
-      ),
-    )
-    .orderBy(desc(baselines.createdAt));
-  return row;
+  // Cell-specific first, then shared. Querying both at once and taking the
+  // newest would let an unrelated cell's baseline win purely on timestamp.
+  const cellVariants = dataCell
+    ? [eq(baselines.dataCell, dataCell), isNull(baselines.dataCell)]
+    : [isNull(baselines.dataCell)];
+
+  for (const cellCondition of cellVariants) {
+    const [row] = await db
+      .select()
+      .from(baselines)
+      .where(
+        and(
+          eq(baselines.testId, testId),
+          eq(baselines.isActive, true),
+          eq(baselines.branch, branch),
+          eq(baselines.browser, browser),
+          cellCondition,
+          ...stepConditions,
+        ),
+      )
+      .orderBy(desc(baselines.createdAt));
+    if (row) return row;
+  }
+  return undefined;
 }
 
 /**
@@ -356,10 +371,20 @@ export async function getAnyActiveBaseline(
   testId: string,
   stepLabel: string | null | undefined,
   browser: string = "chromium",
+  /** Restrict to one data cell. Omitted → any cell, which is what the
+   *  "a baseline exists on <branch>" hint wants. */
+  dataCell?: string | null,
 ) {
   const stepConditions = stepLabel
     ? [eq(baselines.stepLabel, stepLabel)]
     : [isNull(baselines.stepLabel)];
+  if (dataCell !== undefined) {
+    stepConditions.push(
+      dataCell === null
+        ? isNull(baselines.dataCell)
+        : eq(baselines.dataCell, dataCell),
+    );
+  }
   const [row] = await db
     .select()
     .from(baselines)
@@ -487,8 +512,20 @@ export async function deactivateBaselines(
   stepLabel?: string | null,
   branch?: string,
   browser?: string,
+  /** P2 cell scoping. `undefined` (the default) keeps the historical
+   *  behaviour of deactivating regardless of cell. `null` restricts to the
+   *  shared baseline; a coordsKey restricts to that cell — so approving one
+   *  cell's baseline cannot retire another cell's. */
+  dataCell?: string | null,
 ) {
   const conditions = [eq(baselines.testId, testId)];
+  if (dataCell !== undefined) {
+    conditions.push(
+      dataCell === null
+        ? isNull(baselines.dataCell)
+        : eq(baselines.dataCell, dataCell),
+    );
+  }
   if (stepLabel) {
     conditions.push(eq(baselines.stepLabel, stepLabel));
   } else {

@@ -15,6 +15,8 @@ import {
   DEFAULT_COVERAGE_ENVIRONMENT,
   DEFAULT_COVERAGE_STOP_POLICY,
   DEFAULT_COVERAGE_WEIGHT_POLICY,
+  type CoverageCell,
+  type CoverageDimension,
   type CoverageStopPolicy,
   type CoverageWeightBreakdown,
   type CoverageWeightPolicy,
@@ -26,6 +28,7 @@ import {
   sheetDataSourceTablesForRepo,
 } from "@/lib/core/data-sources-reads";
 import { backfillCoverageSnapshots, captureCoverageSnapshot } from "./trend";
+import { invalidatePageCoverageAttribution } from "./page-attribution";
 import {
   coordsKey,
   deriveCells,
@@ -60,6 +63,18 @@ export interface SyncOptions {
   churn?: Record<string, number>;
   /** Cap on historical runs scanned for profiling/attribution. */
   runLimit?: number;
+  /**
+   * Runs generated SO FAR IN THE CALLING SESSION, weighed against
+   * `stopPolicy.maxRuns` (the QA agent's per-session generation budget).
+   *
+   * Only a caller that owns a session can know this, so it is passed in and
+   * defaults to 0. It must never be back-filled from the ledger: a lifetime
+   * count of cells that have ever run is not a session budget, and using one
+   * made every repo past `maxRuns` covered cells report `budget_exhausted`
+   * permanently — the agent then refused to plan anything, forever, on exactly
+   * the repos with the most coverage history.
+   */
+  runsSoFar?: number;
 }
 
 /** How many rows each data source's numbers actually rest on. Reported so a
@@ -474,6 +489,9 @@ export async function syncCoverage(
     await deriveAndPersistCells(repositoryId, opts);
   const attribution = await attributeRuns(repositoryId, opts);
   await recomputeWeights(repositoryId, opts);
+  // A sync re-derives the cell set, so page attribution built on the previous
+  // one is stale by definition.
+  invalidatePageCoverageAttribution(repositoryId);
 
   const [cells, dimensions] = await Promise.all([
     queries.getCoverageCells(repositoryId, { environmentKey }),
@@ -504,7 +522,7 @@ export async function syncCoverage(
   });
   const stop = evaluateStop(stopCells, {
     policy: stopPolicy,
-    runsSoFar: cells.filter((c) => c.runCount > 0).length,
+    runsSoFar: opts.runsSoFar ?? 0,
   });
 
   // Snapshot the result, and reconstruct any pre-snapshot history the
@@ -582,8 +600,13 @@ export async function ensureFreshCoverage(
 }> {
   const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
   const maxAgeMs = opts.maxAgeMs ?? coverageMaxAgeMs();
+  // Only a SYNC snapshot marks the model as derived. Builds write a snapshot
+  // per run against the existing cell set; counting those as freshness kept
+  // resetting this clock, so an actively-building repo never re-profiled its
+  // data sources and planning ran forever against the cell space of whenever a
+  // human last opened the Coverage page.
   const latest = await queries
-    .getLatestCoverageSnapshot(repositoryId, environmentKey)
+    .getLatestCoverageSnapshot(repositoryId, environmentKey, { source: "sync" })
     .catch(() => null);
   const lastSyncedAt = latest?.capturedAt ?? null;
   const age = lastSyncedAt ? Date.now() - lastSyncedAt.getTime() : Infinity;
@@ -676,35 +699,43 @@ export async function attributeBuildRuns(
   if (attributions.length > 0) {
     await queries.recordCoverageCellRuns(attributions);
     await queries.refreshCoverageCellStats(repositoryId, environmentKey);
+    // New attributions change which cells sit on which page.
+    invalidatePageCoverageAttribution(repositoryId);
   }
   return { attributed: attributions.length, unmatchedCells: [...unmatched] };
 }
 
-/** Read-only report — no profiling, no writes. */
-export async function getCoverageReport(
-  repositoryId: string,
-  opts: SyncOptions = {},
-): Promise<{ report: CoverageReport; stop: StopDecision }> {
-  const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
+/**
+ * Build the report + stop decision from rows ALREADY read.
+ *
+ * Separated from `getCoverageReport` so a caller that needs the cells and
+ * dimensions for its own rendering does not have to fetch them twice. Pure
+ * apart from the policy merge.
+ */
+export function coverageReportFrom(opts: {
+  repositoryId: string;
+  environmentKey: string;
+  cells: CoverageCell[];
+  dimensions: CoverageDimension[];
+  stopPolicy?: CoverageStopPolicy;
+  /** Runs generated so far in the CALLING session — see SyncOptions.runsSoFar.
+   *  A report is not a session, so this defaults to 0. */
+  runsSoFar?: number;
+}): { report: CoverageReport; stop: StopDecision } {
   const stopPolicy = {
     ...DEFAULT_COVERAGE_STOP_POLICY,
     ...(opts.stopPolicy ?? {}),
   };
-  const [cells, dimensions] = await Promise.all([
-    queries.getCoverageCells(repositoryId, { environmentKey }),
-    queries.getCoverageDimensions(repositoryId, environmentKey),
-  ]);
-
   return {
     report: buildCoverageReport({
-      repositoryId,
-      environmentKey,
-      cells,
-      dimensions,
+      repositoryId: opts.repositoryId,
+      environmentKey: opts.environmentKey,
+      cells: opts.cells,
+      dimensions: opts.dimensions,
       strength: stopPolicy.strength,
     }),
     stop: evaluateStop(
-      cells.map((c) => ({
+      opts.cells.map((c) => ({
         objectType: c.objectType,
         coordsKey: c.coordsKey,
         coords: c.coords,
@@ -714,10 +745,27 @@ export async function getCoverageReport(
         excluded: c.status === "excluded",
         excludedReason: c.excludedReason ?? undefined,
       })),
-      {
-        policy: stopPolicy,
-        runsSoFar: cells.filter((c) => c.runCount > 0).length,
-      },
+      { policy: stopPolicy, runsSoFar: opts.runsSoFar ?? 0 },
     ),
   };
+}
+
+/** Read-only report — no profiling, no writes. */
+export async function getCoverageReport(
+  repositoryId: string,
+  opts: SyncOptions = {},
+): Promise<{ report: CoverageReport; stop: StopDecision }> {
+  const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
+  const [cells, dimensions] = await Promise.all([
+    queries.getCoverageCells(repositoryId, { environmentKey }),
+    queries.getCoverageDimensions(repositoryId, environmentKey),
+  ]);
+  return coverageReportFrom({
+    repositoryId,
+    environmentKey,
+    cells,
+    dimensions,
+    stopPolicy: opts.stopPolicy,
+    runsSoFar: opts.runsSoFar,
+  });
 }

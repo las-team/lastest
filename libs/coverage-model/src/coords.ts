@@ -13,8 +13,19 @@ function escapePart(part: string): string {
   return part.replace(/\\/g, "\\\\").replace(/\|/g, "\\p").replace(/=/g, "\\e");
 }
 
+/**
+ * Inverse of `escapePart`, in ONE left-to-right pass.
+ *
+ * Sequential `.replace()` calls cannot do this. Decoding the separator escapes
+ * first makes the literal value `a\p` (encoded as `a` + backslash + backslash
+ * + `p`) decode to `a` + backslash + `|`: the escaped backslash's own trailing
+ * `p` is re-read as a separator escape. A single regex consumes each backslash
+ * together with the character it escapes, so that can never happen.
+ */
 function unescapePart(part: string): string {
-  return part.replace(/\\p/g, "|").replace(/\\e/g, "=").replace(/\\\\/g, "\\");
+  return part.replace(/\\([\\pe])/g, (_m, c: string) =>
+    c === "p" ? "|" : c === "e" ? "=" : "\\",
+  );
 }
 
 /** Field-sorted `field=value|field=value`. Empty coords → empty string. */

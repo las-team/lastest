@@ -12,7 +12,7 @@ import {
   csvDataSourceTablesForRepo,
   sheetDataSourceTablesForRepo,
 } from "@/lib/core/data-sources-reads";
-import { getCoverageReport } from "@/lib/coverage/sync";
+import { coverageReportFrom } from "@/lib/coverage/sync";
 import { buildPageCoverageAttribution } from "@/lib/coverage/page-attribution";
 import { buildCoverageSpec } from "@lastest/coverage-model";
 import { describeSources } from "@/lib/coverage/source-rows";
@@ -75,23 +75,26 @@ export default async function CoveragePage() {
   await getPluginRuntime();
 
   const env = DEFAULT_COVERAGE_ENVIRONMENT;
-  const [
-    { report, stop },
+  // Cells and dimensions are read ONCE and the report is derived from them.
+  // `getCoverageReport` reads both itself, so calling it alongside the two
+  // reads meant two full scans of each table on every render of a
+  // force-dynamic page — the largest tables in this feature, fetched twice for
+  // nothing.
+  const [cells, dimensions, csvSources, sheetSources, snapshots, pageCoverage] =
+    await Promise.all([
+      getCoverageCells(selectedRepo.id, { environmentKey: env }),
+      getCoverageDimensions(selectedRepo.id, env),
+      csvDataSourceTablesForRepo(selectedRepo.id),
+      sheetDataSourceTablesForRepo(selectedRepo.id),
+      getCoverageTrend(selectedRepo.id, { environmentKey: env, limit: 60 }),
+      buildPageCoverageAttribution(selectedRepo.id, { environmentKey: env }),
+    ]);
+  const { report, stop } = coverageReportFrom({
+    repositoryId: selectedRepo.id,
+    environmentKey: env,
     cells,
     dimensions,
-    csvSources,
-    sheetSources,
-    snapshots,
-    pageCoverage,
-  ] = await Promise.all([
-    getCoverageReport(selectedRepo.id, { environmentKey: env }),
-    getCoverageCells(selectedRepo.id, { environmentKey: env }),
-    getCoverageDimensions(selectedRepo.id, env),
-    csvDataSourceTablesForRepo(selectedRepo.id),
-    sheetDataSourceTablesForRepo(selectedRepo.id),
-    getCoverageTrend(selectedRepo.id, { environmentKey: env, limit: 60 }),
-    buildPageCoverageAttribution(selectedRepo.id, { environmentKey: env }),
-  ]);
+  });
 
   // Resolved the same way profiling resolves them, so the disclosed sample
   // size is the one the numbers were actually computed from.
