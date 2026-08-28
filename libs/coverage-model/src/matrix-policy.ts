@@ -38,3 +38,31 @@ export const DEFAULT_MATRIX_POLICY: MatrixPolicy = {
   visual: "representative",
   maxRuns: 50,
 };
+
+/**
+ * Which cell a baseline WRITE (approve / auto-approve) should be scoped to.
+ *
+ * Reads and writes deliberately differ. A read prefers the run's own cell and
+ * falls back to the shared (NULL-cell) baseline; that is what lets 39 of 40
+ * runs compare against one baseline. But a WRITE must match the policy that
+ * decided who captures visuals:
+ *
+ * - 'all': every cell owns its visual layer, so the baseline belongs to the
+ *   run's cell. Writing the shared row instead would make the last cell to
+ *   finish the baseline for every other cell, and the next build would report
+ *   every other cell as "changed".
+ * - 'representative' / 'none': exactly one run (or none) captures visuals, so
+ *   its baseline IS the shared one. Writing it cell-scoped would strand it:
+ *   invisible to a future representative picked from a reordered row set,
+ *   which would then report "new test" forever.
+ *
+ * `null` in, `null` out — a non-matrix run always writes the shared row.
+ */
+export function baselineWriteCell(
+  dataCell: string | null | undefined,
+  policy: MatrixPolicy | null | undefined,
+): string | null {
+  if (!dataCell) return null;
+  const visual = policy?.visual ?? DEFAULT_MATRIX_POLICY.visual;
+  return visual === "all" ? dataCell : null;
+}

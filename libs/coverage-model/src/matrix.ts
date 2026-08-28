@@ -265,25 +265,55 @@ export function expandMatrix(opts: {
     policy.maxRuns,
     Math.min(MAX_MATRIX_CANDIDATES, fullProduct),
   );
-  let combined = axes[0].slice(0, materializeCap);
-  for (let i = 1; i < axes.length; i++) {
-    const next: typeof combined = [];
-    outer: for (const a of combined) {
-      for (const b of axes[i]) {
-        next.push({
-          rowPicks: { ...a.rowPicks, ...b.rowPicks },
-          coords: { ...a.coords, ...b.coords },
-        });
-        if (next.length >= materializeCap) break outer;
-      }
+
+  // Sample the cross product SPREAD OUT, not by position. Taking "the first
+  // cap" combinations enumerates axis0[0] × axis1[0..cap) — the first source
+  // never varies, so pairwise covering has nothing to pair on that axis. A
+  // plain even stride has the transposed problem: any stride that shares a
+  // factor with an axis size pins that axis (stride 5000 over two 5000-row
+  // axes samples axis1[0] forever). So walk the mixed-radix index space
+  // [0, fullProduct) multiplicatively with a step COPRIME to the product —
+  // j*step mod N visits sampleCount distinct indices and cannot resonate with
+  // any axis size — and decode each index into one row pick per axis. The
+  // golden-ratio starting point makes the visit sequence low-discrepancy.
+  // Within the cap the product is enumerated exactly, in nested-loop order.
+  const sampleCount = Math.min(materializeCap, fullProduct);
+  const sampleIndex = (() => {
+    if (sampleCount === fullProduct) return (j: number) => j;
+    const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+    let step = Math.max(1, Math.round(fullProduct * 0.618033988749895));
+    while (gcd(step, fullProduct) !== 1) step++;
+    // Products big enough to overflow double-precision multiplication get the
+    // exact BigInt walk; everything else stays on the fast path.
+    if (fullProduct > Number.MAX_SAFE_INTEGER / sampleCount) {
+      const bigStep = BigInt(step);
+      const bigN = BigInt(fullProduct);
+      return (j: number) => Number((BigInt(j) * bigStep) % bigN);
     }
-    combined = next;
+    return (j: number) => (j * step) % fullProduct;
+  })();
+  const combined: Array<{
+    rowPicks: Record<string, number>;
+    coords: Record<string, string>;
+  }> = [];
+  for (let j = 0; j < sampleCount; j++) {
+    let k = sampleIndex(j);
+    const rowPicks: Record<string, number> = {};
+    const coords: Record<string, string> = {};
+    for (let i = axes.length - 1; i >= 0; i--) {
+      const axis = axes[i];
+      const cell = axis[k % axis.length];
+      k = Math.floor(k / axis.length);
+      Object.assign(rowPicks, cell.rowPicks);
+      Object.assign(coords, cell.coords);
+    }
+    combined.push({ rowPicks, coords });
   }
   const candidatesElided = fullProduct - combined.length;
   if (candidatesElided > 0) {
     errors.push(
       `${fullProduct} row combination(s) exceed the ${MAX_MATRIX_CANDIDATES} candidate ceiling; ` +
-        `only the first ${combined.length} were considered — narrow the row filter to choose which`,
+        `${combined.length} were sampled evenly across the full product — narrow the row filter to choose exactly which`,
     );
   }
 

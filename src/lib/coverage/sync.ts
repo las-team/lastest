@@ -577,6 +577,28 @@ export function coverageMaxAgeMs(): number {
 }
 
 /**
+ * Has the model gone longer than the max age without a SYNC-sourced snapshot?
+ *
+ * One snapshot-row read — the cheap gate for callers (the scheduler tick) that
+ * only need to DECIDE whether to sync, not to see the report.
+ * `ensureFreshCoverage` computes a full report even when fresh, which is the
+ * right shape for planning paths that consume it and pure waste for a
+ * once-a-minute staleness poll.
+ */
+export async function coverageIsStale(
+  repositoryId: string,
+  environmentKey: string = DEFAULT_COVERAGE_ENVIRONMENT,
+  maxAgeMs: number = coverageMaxAgeMs(),
+): Promise<boolean> {
+  const latest = await queries
+    .getLatestCoverageSnapshot(repositoryId, environmentKey, { source: "sync" })
+    .catch(() => null);
+  const lastSyncedAt = latest?.capturedAt ?? null;
+  const age = lastSyncedAt ? Date.now() - lastSyncedAt.getTime() : Infinity;
+  return age > maxAgeMs;
+}
+
+/**
  * Re-derive the model if it has gone stale, then report.
  *
  * The failure this closes: `syncCoverage` only ever ran from the Coverage

@@ -86,7 +86,15 @@ export interface CoverageStopPolicy {
   marginalWeightEpsilon: number;
   /** Escalate to (strength + 1)-way for cells at or above this weight. */
   highRiskWeight: number;
-  /** Hard ceiling on generated runs — a backstop, not the primary rule. */
+  /** Hard ceiling on generated runs — a backstop, not the primary rule.
+   *
+   *  INERT on today's plan-time path: it compares against
+   *  `evaluateStop`'s `runsSoFar`, which every current caller leaves at its
+   *  0 default because planning happens exactly once per session, before any
+   *  run exists. `budget_exhausted` can therefore only fire for a future
+   *  caller that re-evaluates mid-session and passes its actual run count —
+   *  until one does, tuning this knob changes nothing. (Not to be confused
+   *  with `MatrixPolicy.maxRuns`, which does cap expansion today.) */
   maxRuns: number;
   /** Skip auto-detected dimensions with more distinct values than this;
    *  free-text fields otherwise produce thousands of useless "values". */

@@ -183,22 +183,36 @@ async function processStaleCoverageModels() {
   coverageProcessing = true;
 
   try {
-    const { ensureFreshCoverage } = await import("@/lib/coverage/sync");
     // Dynamic for the same reason as the line above: this keeps the coverage
     // model and its query layer out of the scheduler's static import graph.
+    const { coverageIsStale } = await import("@/lib/coverage/sync");
+    const { startCoverageSyncJob } = await import("@/lib/coverage/sync-job");
     const { getReposWithEnabledCoverageDimensions } =
       await import("@/lib/db/queries/coverage");
     const targets = await getReposWithEnabledCoverageDimensions();
 
     for (const target of targets) {
       try {
-        const result = await ensureFreshCoverage(target.repositoryId, {
-          environmentKey: target.environmentKey,
-        });
-        if (result.synced) {
+        // Cheap gate first: one snapshot-row read per repo. The tick used to
+        // call `ensureFreshCoverage`, which on the FRESH path still computed a
+        // full coverage report the scheduler then discarded — every repo, every
+        // tick — and on the stale path ran the whole sync (synchronous CSV
+        // parse, per-cell UPDATE loop) inline in the web process, sequentially
+        // across every tenant's repos. Stale repos are now handed to the
+        // `coverage_sync` background job instead, which also dedupes against a
+        // sync the user just started from the Coverage page.
+        if (
+          !(await coverageIsStale(target.repositoryId, target.environmentKey))
+        ) {
+          continue;
+        }
+        const { jobId, deduped } = await startCoverageSyncJob(
+          target.repositoryId,
+          { environmentKey: target.environmentKey },
+        );
+        if (!deduped) {
           console.log(
-            `[scheduler] Re-synced coverage for repo ${target.repositoryId} ` +
-              `(${Math.round(result.report.totals.cellCoverage * 100)}% of ${result.report.totals.cells} cells)`,
+            `[scheduler] Enqueued coverage re-sync job ${jobId} for repo ${target.repositoryId}`,
           );
         }
       } catch (error) {

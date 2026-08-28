@@ -6,96 +6,42 @@ import { requireRepoAccess } from "@/lib/auth";
 import {
   getCoverageReport,
   profileDimensions,
-  recomputeWeights,
-  syncCoverage,
   type SyncOptions,
 } from "@/lib/coverage/sync";
-import {
-  profileFromSut,
-  RestProfiler,
-  VaultProfiler,
-} from "@/lib/coverage/profilers";
 import { buildCoverageSpec, renderSpecMarkdown } from "@lastest/coverage-model";
 import { DEFAULT_COVERAGE_ENVIRONMENT } from "@/lib/db/schema";
+import type { CoverageSyncSummary } from "@/lib/coverage/sync-job";
+
+// Type-only re-export (erased at compile time, so the "async exports only"
+// rule for server-action modules is unaffected) — the coverage client imports
+// the summary shape from here alongside the actions that produce it.
+export type { CoverageSyncSummary };
 import type { CoverageCellStatus } from "@/lib/db/schema";
 
-/** Full pass: profile sources, derive occurring cells, attribute historical
- *  runs, recompute weights. Safe to re-run — every step is idempotent.
- *
- *  Synchronous, and therefore for callers that genuinely need the result
- *  in-band (the API's `fresh=1`, tests). Anything driven by a click should use
- *  `startCoverageSyncAction`: a sync re-reads every data source and re-scores
- *  every cell, which is minutes on a large repo, and awaiting that in a server
- *  action holds the user's request open for all of it. */
-export async function syncCoverageAction(
-  repositoryId: string,
-  opts: SyncOptions = {},
-) {
-  await requireRepoAccess(repositoryId);
-  const result = await syncCoverage(repositoryId, opts);
-  revalidatePath(`/coverage`);
-  return result;
-}
-
-/** What a finished sync job reports back, mirrored onto the job row so the
- *  poller can render the same toast the synchronous action used to return. */
-export interface CoverageSyncSummary {
-  dimensionsProposed: number;
-  dimensionsRejected: number;
-  cellsUpserted: number;
-  cellsPruned: number;
-  attributionsRecorded: number;
-}
+// There is deliberately NO synchronous sync action here. One existed
+// (`syncCoverageAction`) with no UI caller — the API's `fresh=1` and the
+// tests call `syncCoverage` / `ensureFreshCoverage` from the library directly
+// — which left it reachable only as a raw RPC: an authenticated user looping
+// it held one request open per minutes-long sync (synchronous CSV parse, one
+// UPDATE per cell) inside the shared web process. Anything click-driven goes
+// through `startCoverageSyncAction` below, which is deduped and detached.
 
 /**
  * Start a coverage sync as a background job and return immediately.
  *
  * The UI polls `getCoverageSyncStatusAction`. Same work, same idempotence —
- * the only difference is who waits for it.
+ * the only difference is who waits for it. Deduped per repo inside
+ * `startCoverageSyncJob`: a second click (or a coinciding scheduler tick)
+ * joins the in-flight job instead of racing a duplicate sync through
+ * reconcile/prune.
  */
 export async function startCoverageSyncAction(
   repositoryId: string,
   opts: SyncOptions = {},
 ): Promise<{ jobId: string }> {
   await requireRepoAccess(repositoryId);
-  const { createJob, completeJob, failJob } =
-    await import("@/server/actions/jobs");
-  const jobId = await createJob(
-    "coverage_sync",
-    "Coverage sync: profiling data sources",
-    1,
-    repositoryId,
-    { environmentKey: opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT },
-  );
-
-  // Fire-and-forget: the action returns as soon as the row exists.
-  void (async () => {
-    try {
-      const result = await syncCoverage(repositoryId, opts);
-      const summary: CoverageSyncSummary = {
-        dimensionsProposed: result.dimensionsProposed,
-        dimensionsRejected: result.dimensionsRejected.length,
-        cellsUpserted: result.cellsUpserted,
-        cellsPruned: result.cellsPruned,
-        attributionsRecorded: result.attributionsRecorded,
-      };
-      await queries.updateBackgroundJob(jobId, {
-        metadata: {
-          environmentKey: result.environmentKey,
-          summary,
-          rejected: result.dimensionsRejected,
-        },
-      });
-      await completeJob(jobId);
-      revalidatePath(`/coverage`);
-    } catch (err) {
-      await failJob(
-        jobId,
-        err instanceof Error ? err.message : "Coverage sync failed",
-      ).catch(() => {});
-    }
-  })();
-
+  const { startCoverageSyncJob } = await import("@/lib/coverage/sync-job");
+  const { jobId } = await startCoverageSyncJob(repositoryId, opts);
   return { jobId };
 }
 
@@ -228,76 +174,14 @@ export async function listCoverageCellsAction(
   return queries.getCoverageCells(repositoryId, opts);
 }
 
-/**
- * P4: profile real record distributions from the system under test.
- *
- * Credentials are taken per-call and never persisted here — storing SUT
- * credentials is a decision for the (not yet built) environment model, and
- * quietly writing them to a settings row now would be the wrong default for
- * exactly the regulated customers this exists for.
- */
-export async function profileFromSutAction(
-  repositoryId: string,
-  input: {
-    objectType: string;
-    fields: string[];
-    where?: string;
-    limit?: number;
-    environmentKey?: string;
-    connection:
-      | {
-          kind: "vault";
-          baseUrl: string;
-          username: string;
-          password: string;
-          apiVersion?: string;
-        }
-      | {
-          kind: "rest";
-          urlTemplate: string;
-          headers?: Record<string, string>;
-          recordsPath?: string;
-          paging?: {
-            limitParam: string;
-            offsetParam: string;
-            pageSize: number;
-          };
-        };
-  },
-) {
-  await requireRepoAccess(repositoryId);
-  if (!input.objectType?.trim()) throw new Error("An object type is required");
-  if (!input.fields?.length) throw new Error("At least one field is required");
-
-  const profiler =
-    input.connection.kind === "vault"
-      ? new VaultProfiler(input.connection)
-      : new RestProfiler(input.connection);
-
-  const connection = await profiler.testConnection();
-  if (!connection.ok) {
-    throw new Error(
-      `Could not connect to ${profiler.label}: ${connection.error}`,
-    );
-  }
-
-  const outcome = await profileFromSut({
-    repositoryId,
-    environmentKey: input.environmentKey,
-    profiler,
-    objectType: input.objectType.trim(),
-    fields: input.fields,
-    where: input.where,
-    limit: input.limit,
-  });
-
-  // Profiled counts change every weight, so re-score before reporting.
-  await recomputeWeights(repositoryId, {
-    environmentKey: input.environmentKey,
-  });
-  revalidatePath(`/coverage`);
-  return outcome;
-}
+// P4's profile-from-SUT flow (`profileFromSut` + the Vault/REST profilers in
+// `@/lib/coverage/profilers`) intentionally has NO server action wrapper. The
+// one that existed (`profileFromSutAction`) had no UI caller, took a
+// user-supplied base URL, and drove outbound HTTP with the profilers' default
+// raw `fetch` — no SSRF guard, live as an RPC for any signed-in user. When the
+// UI grows a profiling flow it should reach the profilers through the SUT
+// connectors (PR #126), whose `connectorFetch` re-validates every hop, and run
+// as a background job rather than inside a held-open request.
 
 /** Excluding a cell requires a reason — that reason is the artifact that lets
  *  the QA agent justify what it deliberately did not test. */
