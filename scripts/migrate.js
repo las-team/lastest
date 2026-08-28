@@ -14,6 +14,10 @@
  * Only steps whose skip cannot make push destructive (preCreate, nullOrphans,
  * bumpPoolDefaults, ensureUniqueIndexes) stay warn-and-continue.
  *
+ * dropRetiredColumns() is FATAL for the same reason renameCarriedConstraints()
+ * is: a release that both adds and drops a column on one table hands push an
+ * add/drop pair it resolves as a rename PROMPT, hanging the deploy.
+ *
  * renameCarriedConstraints() is FATAL for a different reason: skipping it does
  * not destroy anything, it HANGS the deploy on an unanswerable drizzle-kit
  * prompt until the Job's activeDeadlineSeconds kills the pod.
@@ -68,6 +72,55 @@ async function preCreate() {
     // Safe to skip against push --force: these tables are in the schema, so a
     // missed pre-create only leaves push to CREATE them itself — never a DROP.
     console.log("[migrate] Pre-create skipped:", e.message);
+  } finally {
+    if (sql) await sql.end();
+  }
+}
+
+/**
+ * Columns retired from the schema, dropped explicitly before push runs.
+ *
+ * `drizzle-kit push` cannot tell a DROP from a RENAME. When one release both
+ * adds a column and removes another on the SAME table, push sees an add/drop
+ * pair and asks — a prompt nothing can answer, so the deploy hangs until the
+ * Job's deadline kills it (see the header). Applying the DROPs here first
+ * leaves push with an add-only diff, which it applies without asking.
+ *
+ * The rule for adding an entry: a column removed from `packages/db/src/schema`
+ * goes here in the SAME release, not the next one. `IF EXISTS` makes it a
+ * no-op on a database that already dropped it, so re-running is free and an
+ * entry is safe to leave in place across releases.
+ *
+ * These are genuinely destructive — that is what a schema removal means — and
+ * they are FATAL on unexpected errors below for the same reason the rename
+ * steps are: a skipped drop hands push the prompt this exists to prevent.
+ */
+const RETIRED_COLUMNS = [
+  // Retired with the /run and /builds pages (PR #123). `regulated_mode` is
+  // added to the same table by the pharma onboarding change lower in the
+  // stack, which is exactly the add+drop pair described above.
+  { table: "teams", column: "verify_phase_enabled" },
+  { table: "teams", column: "web_mcp_enabled" },
+];
+
+async function dropRetiredColumns() {
+  if (!process.env.DATABASE_URL) return;
+  if (RETIRED_COLUMNS.length === 0) return;
+  let sql;
+  try {
+    sql = require("postgres")(process.env.DATABASE_URL);
+    for (const { table, column } of RETIRED_COLUMNS) {
+      await sql.unsafe(
+        `ALTER TABLE IF EXISTS "${table}" DROP COLUMN IF EXISTS "${column}"`,
+      );
+      console.log(`[migrate] dropped retired column ${table}.${column}`);
+    }
+  } catch (e) {
+    // FATAL. A skipped drop is not a lost row — it is the add+drop pair that
+    // hangs push on an unanswerable rename prompt, which is worse than a
+    // failed deploy because it reports nothing but a deadline.
+    console.error("[migrate] retired-column drop FAILED:", e.message);
+    throw e;
   } finally {
     if (sql) await sql.end();
   }
@@ -1376,6 +1429,9 @@ async function renameCarriedConstraints() {
 
 async function main() {
   await preCreate();
+  // Before every rename step and before push: see RETIRED_COLUMNS for why an
+  // add+drop pair on one table has to be split.
+  await dropRetiredColumns();
   await migrateExplorerTables();
   await migrateA11yBaselineOwnership();
   await migrateGamificationTables();

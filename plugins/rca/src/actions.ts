@@ -30,6 +30,5 @@ export async function recomputeBuildRca(buildId: string): Promise<number> {
   const count = await classifyBuildDiffs(host, buildId);
 
   revalidatePath(`/verify/${buildId}`);
-  revalidatePath(`/verify/${buildId}`);
   return count;
 }

@@ -693,7 +693,6 @@ export async function submitDiffAsIssue(diffId: string): Promise<{
   revalidatePath("/verify");
   if (diff.buildId) {
     revalidatePath(`/verify/${diff.buildId}`);
-    revalidatePath(`/verify/${diff.buildId}`);
   }
 
   return { success: true, issueUrl: result.issueUrl };
@@ -1017,7 +1016,6 @@ async function recalculateDiff(
 
   revalidatePath("/verify");
   if (diff.buildId) {
-    revalidatePath(`/verify/${diff.buildId}`);
     revalidatePath(`/verify/${diff.buildId}`);
   }
 }
