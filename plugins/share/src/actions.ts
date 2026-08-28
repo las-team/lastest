@@ -58,7 +58,7 @@ export async function publishBuildShare(
   // validated GxP system, so hiding the button that mints one is not a
   // control — this is. See `docs/pharma-restricted-scope.md` §3.3.
   const ownerFlags = await host.getOwnerTeamFlags(info.repositoryId);
-  if (ownerFlags?.regulatedMode) {
+  if (ownerFlags && !ownerFlags.sharingPermitted) {
     throw new Error(
       "Public share links are disabled for this team. Regulated mode is on, and a public link would serve run screenshots to anyone holding the URL.",
     );

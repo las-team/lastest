@@ -8,6 +8,7 @@ import {
 } from "@/lib/security/outbound-url";
 import type { AIProvider, AgentSdkPermissionMode } from "@/lib/db/schema";
 import { checkAiConfigReadiness } from "@/lib/ai/availability";
+import { isLockedSettingAllowed } from "@/lib/segment/regulated";
 import { revalidatePath } from "next/cache";
 import { exec } from "child_process";
 import { promisify } from "util";
@@ -79,9 +80,27 @@ export async function saveAISettings(data: {
   explorerStyleRotation?: string | null;
   explorerModel?: string | null;
 }) {
-  if (data.repositoryId) await requireRepoAccess(data.repositoryId);
-  else await requireTeamAccess();
+  const session = data.repositoryId
+    ? await requireRepoAccess(data.repositoryId)
+    : await requireTeamAccess();
   const { repositoryId, ...settingsData } = data;
+
+  // REGULATED_LOCKED_POLICY.aiDiffing: a probabilistic verdict cannot be
+  // evidence. The AI settings card renders the switch disabled for this
+  // segment; refusing here is what makes it a lock rather than a hidden
+  // control, since the form posts the whole settings object.
+  if (
+    settingsData.aiDiffingEnabled !== undefined &&
+    !isLockedSettingAllowed(
+      "aiDiffing",
+      settingsData.aiDiffingEnabled,
+      session.team,
+    )
+  ) {
+    throw new Error(
+      "AI diffing is locked off for this team. Regulated mode does not accept a probabilistic verdict as evidence.",
+    );
+  }
 
   // Don't overwrite real keys with masked placeholders
   if (isMaskedValue(settingsData.openrouterApiKey))

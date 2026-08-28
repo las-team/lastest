@@ -17,10 +17,17 @@ export function RegulatedModeToggle({ enabled }: RegulatedModeToggleProps) {
     startTransition(async () => {
       setOptimisticEnabled(checked);
       try {
-        await toggleRegulatedMode(checked);
+        const res = await toggleRegulatedMode(checked);
         toast.success(
           checked
-            ? "Regulated mode on — public share links are now refused."
+            ? // Say what actually happened to the links that already exist:
+              // the action revokes them, and the old copy ("are now refused")
+              // read as "they are gone" without being true of them.
+              res.revokedShares > 0
+              ? `Regulated mode on — ${res.revokedShares} live share link${
+                  res.revokedShares === 1 ? "" : "s"
+                } revoked, and new ones are refused.`
+              : "Regulated mode on — public share links are refused."
             : "Regulated mode off",
         );
       } catch {

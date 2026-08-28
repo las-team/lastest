@@ -9,7 +9,11 @@ import { Badge } from "@/components/ui/badge";
 import * as queries from "@/lib/db/queries";
 import * as gamification from "@lastest/plugin-gamification/reads";
 import { getCurrentSession } from "@/lib/auth";
-import { isRegulatedTeam } from "@/lib/segment/regulated";
+import {
+  isRegulatedTeam,
+  isSettingHidden,
+  lockedPolicyFor,
+} from "@/lib/segment/regulated";
 import { RegulatedModeToggle } from "@/components/settings/regulated-mode-toggle";
 import { Github, Check, X, Users, Bot, Mail, Terminal } from "lucide-react";
 
@@ -213,6 +217,15 @@ export default async function SettingsPage({
   // Regulated (pharma) profile — see `src/lib/segment/regulated.ts` §3.3 for
   // why each of these cards goes away for this segment.
   const regulated = isRegulatedTeam(session?.team);
+  // Every card that disappears for this segment goes through
+  // REGULATED_HIDDEN_SETTINGS, so adding an id to that set is the whole change
+  // — the page must not re-decide it with a bare `!regulated &&`.
+  const hidden = (id: string) => isSettingHidden(id, session?.team);
+  // Settings the profile forces rather than defaults. Rendered as
+  // visible-but-disabled: a customer who can see auto-approval is off trusts it
+  // more than one who cannot find the switch. The server actions enforce the
+  // same table — see `isLockedSettingAllowed`.
+  const locked = lockedPolicyFor(session?.team);
   const banAiMode = session?.team?.banAiMode ?? false;
   const builtInAiEnabled = session?.team?.builtInAiEnabled ?? false;
 
@@ -254,6 +267,11 @@ export default async function SettingsPage({
               repositoryId={selectedRepo.id}
               enabled={selectedRepo.autoApproveDefaultBranch ?? false}
               defaultBranch={selectedRepo.defaultBranch || "main"}
+              lockedReason={
+                locked?.autoApprove === false
+                  ? "Locked off by regulated mode — an approval must be an attributable human act."
+                  : undefined
+              }
             />
           )}
         </CardContent>
@@ -266,23 +284,23 @@ export default async function SettingsPage({
           <CardDescription>Toggle experimental features</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {!regulated && (
-            <>
-              <EarlyAdopterToggle
-                enabled={session?.team?.earlyAdopterMode ?? false}
-              />
-              {earlyAdopterMode && (
-                <QuickstartEmailTemplateInput
-                  initial={
-                    session?.team?.quickstartEmailTemplate ??
-                    "viktor+{slug}{stamp}@lastest.cloud"
-                  }
-                />
-              )}
-              <GamificationToggle
-                enabled={session?.team?.gamificationEnabled ?? false}
-              />
-            </>
+          {!hidden("features-early-adopter") && (
+            <EarlyAdopterToggle
+              enabled={session?.team?.earlyAdopterMode ?? false}
+            />
+          )}
+          {earlyAdopterMode && !hidden("features-quickstart-email") && (
+            <QuickstartEmailTemplateInput
+              initial={
+                session?.team?.quickstartEmailTemplate ??
+                "viktor+{slug}{stamp}@lastest.cloud"
+              }
+            />
+          )}
+          {!hidden("features-gamification") && (
+            <GamificationToggle
+              enabled={session?.team?.gamificationEnabled ?? false}
+            />
           )}
           <RegulatedModeToggle enabled={regulated} />
           <VerifyPhaseToggle
@@ -292,7 +310,7 @@ export default async function SettingsPage({
       </Card>
 
       {/* Gamification admin controls (admin-only) */}
-      {isAdmin && !regulated && (
+      {isAdmin && !hidden("gamification-admin") && (
         <GamificationAdminCard
           enabled={session?.team?.gamificationEnabled ?? false}
           activeSeasonName={activeGamificationSeason?.name ?? null}
@@ -385,7 +403,7 @@ export default async function SettingsPage({
       )}
 
       {/* GitHub Integration */}
-      {!regulated && (
+      {!hidden("github") && (
         <Card id="github">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -432,7 +450,7 @@ export default async function SettingsPage({
       )}
 
       {/* GitLab Integration */}
-      {!regulated && (
+      {!hidden("gitlab") && (
         <Card id="gitlab">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -510,7 +528,7 @@ export default async function SettingsPage({
           props because the plugin may not import app components — the OAuth
           connect flow is core's (it holds the credential) and DiagramThumbnail
           is built on next/image. Recipe §6. */}
-      {!regulated && (
+      {!hidden("github-actions") && (
         <div id="github-actions">
           <GithubActionsCard
             configs={githubActionConfigs}
@@ -531,7 +549,7 @@ export default async function SettingsPage({
         </div>
       )}
 
-      {!regulated && (
+      {!hidden("gitlab-pipelines") && (
         <div id="gitlab-pipelines">
           <GitlabPipelinesCard
             configs={gitlabPipelineConfigs}
@@ -621,7 +639,14 @@ export default async function SettingsPage({
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <AiModeToggle enabled={builtInAiEnabled} />
+              <AiModeToggle
+                enabled={builtInAiEnabled}
+                lockedReason={
+                  locked?.builtInAi === false
+                    ? "Locked off by regulated mode — AI stays outside the evidence path, driven from your own agent over MCP."
+                    : undefined
+                }
+              />
               {builtInAiEnabled && !byokConfigured && (
                 <p className="text-xs text-amber-600 dark:text-amber-500">
                   Built-in AI is on, but no AI provider is configured. Set one
@@ -678,6 +703,11 @@ export default async function SettingsPage({
                 repositoryId={selectedRepo?.id}
                 claudeCliAvailable={!hostClaudeCliUnavailable()}
                 agentSdkAvailable={agentSdkReadiness().runnable}
+                aiDiffingLockedReason={
+                  locked?.aiDiffing === false
+                    ? "Locked off by regulated mode — a probabilistic verdict cannot be evidence."
+                    : undefined
+                }
               />
             </div>
           </AiAdvancedSettings>
@@ -751,7 +781,7 @@ export default async function SettingsPage({
       {/* Billing — plan + checkout + cancel (admin-only) */}
       {/* Enterprise procurement is not a Stripe portal — the regulated profile
           bills by invoice, so the self-serve plan picker goes away. */}
-      {isAdmin && teamBilling && !regulated && (
+      {isAdmin && teamBilling && !hidden("billing") && (
         <div id="billing" className="space-y-2">
           {params.checkout === "success" && (
             <div className="rounded-md border border-green-500/40 bg-green-500/5 p-4 text-sm">

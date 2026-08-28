@@ -30,7 +30,9 @@ export function isRegulatedTeam(
 }
 
 /**
- * Check-layer modes seeded for a repo created under the regulated profile.
+ * Check-layer modes applied to every repo created while the team is on the
+ * regulated profile — the pharma onboarding fork AND `createLocalRepo` from
+ * `/tests`, which is the same decision reached by a different route.
  *
  * These are *defaults*, not locks — the cogwheel dialog still lets a
  * validation lead change them, and a profile that silently overrode a
@@ -83,11 +85,23 @@ export const REGULATED_CHECK_MODES: Readonly<Record<string, CheckMode>> = {
  * Rendered as visible-but-disabled controls rather than hidden ones: a
  * customer who can *see* that auto-approval is off trusts it more than one who
  * simply cannot find the switch.
+ *
+ * Applied through `lockedPolicyFor()` (the disabled controls) and
+ * `isLockedSettingAllowed()` (the server-side refusal in
+ * `updateAutoApproveDefaultBranch`, `updateBuiltInAiEnabled` and
+ * `saveAISettings`). Both halves are required: a disabled switch is not a lock
+ * on its own, since the action is still POST-able.
  */
 export const REGULATED_LOCKED_POLICY = {
   /** An approval is an attributable human act. */
   autoApprove: false,
-  /** A case must not silently settle itself into the execution record. */
+  /** A case must not silently settle itself into the execution record.
+   *
+   *  No product setting carries this yet — the Verify surface has no
+   *  confirm-on-green switch to lock. It is stated here so the profile is
+   *  complete and the day that switch ships it is already refused; unlike the
+   *  other three entries, nothing enforces it today because there is nothing
+   *  to enforce it against. */
   confirmOnGreen: false,
   /** A probabilistic verdict cannot be evidence. */
   aiDiffing: false,
@@ -115,6 +129,10 @@ export const REGULATED_HIDDEN_NAV: ReadonlySet<string> = new Set([
 /**
  * Settings cards hidden under the regulated profile, keyed by the `id` on the
  * `<Card>` (or the component name where the card has no id).
+ *
+ * Consulted through `isSettingHidden()` — `settings/page.tsx` must not
+ * hardcode `!regulated &&` around each card, or this set becomes documentation
+ * that looks like a mechanism and adding an id to it does nothing.
  */
 export const REGULATED_HIDDEN_SETTINGS: ReadonlySet<string> = new Set([
   // Reads as a hobbyist toy to a validation lead, and produces no pipeline.
@@ -132,6 +150,52 @@ export const REGULATED_HIDDEN_SETTINGS: ReadonlySet<string> = new Set([
   // Enterprise procurement is not a Stripe portal.
   "billing",
 ]);
+
+/**
+ * Whether a settings card is hidden for this team.
+ *
+ * The one way `REGULATED_HIDDEN_SETTINGS` is applied, so adding an id to that
+ * set is the whole change.
+ */
+export function isSettingHidden(
+  id: string,
+  team: RegulatedTeamLike | null | undefined,
+): boolean {
+  return isRegulatedTeam(team) && REGULATED_HIDDEN_SETTINGS.has(id);
+}
+
+/**
+ * The locked settings for a team, or `null` when nothing is forced.
+ *
+ * `REGULATED_LOCKED_POLICY` is a policy table, not a mechanism: this is what
+ * gives it a caller. Two consumers, and both are required for the guarantee to
+ * hold — the settings UI renders the affected switches as visible-but-disabled
+ * (so a customer can *see* auto-approval is off), and the server actions that
+ * write these fields refuse a value that contradicts the policy. UI alone is
+ * not a control; a POST would still flip the flag.
+ */
+export function lockedPolicyFor(
+  team: RegulatedTeamLike | null | undefined,
+): typeof REGULATED_LOCKED_POLICY | null {
+  return isRegulatedTeam(team) ? REGULATED_LOCKED_POLICY : null;
+}
+
+/**
+ * Whether a locked setting may be set to `value` for this team.
+ *
+ * Server-side half of `lockedPolicyFor`. Returns false only when the team is
+ * regulated AND the requested value contradicts the policy — turning a locked
+ * setting further *off* is always allowed.
+ */
+export function isLockedSettingAllowed(
+  key: keyof typeof REGULATED_LOCKED_POLICY,
+  value: boolean,
+  team: RegulatedTeamLike | null | undefined,
+): boolean {
+  const policy = lockedPolicyFor(team);
+  if (!policy) return true;
+  return value === policy[key];
+}
 
 /**
  * Public, unauthenticated share links (`/r/<slug>`) under the regulated

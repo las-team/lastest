@@ -247,14 +247,22 @@ export interface ShareHost {
    *  page has no session, so it reads the OWNER's flags, not the anonymous
    *  visitor's.
    *
-   *  `regulatedMode` is the one flag here that is a *control* rather than a
-   *  presentation hint: a team on the regulated (pharma) profile may not mint
-   *  public share links at all, because an anonymous URL serving screenshots
-   *  of a validated system is a data-protection problem. `publishBuildShare`
-   *  refuses on it. */
-  getOwnerTeamFlags(
-    repositoryId: string | null,
-  ): Promise<{ earlyAdopterMode: boolean; regulatedMode: boolean } | null>;
+   *  `sharingPermitted` is the one field here that is a *control* rather than
+   *  a presentation hint: a team on the regulated (pharma) profile may not
+   *  mint public share links at all, because an anonymous URL serving
+   *  screenshots of a validated system is a data-protection problem. The
+   *  decision is core's — `isSharingPermitted()` in
+   *  `src/lib/segment/regulated.ts` — and arrives already made, so this plugin
+   *  does not re-implement the predicate from `regulatedMode`.
+   *
+   *  Two callers, and both are needed: `publishBuildShare` refuses to mint,
+   *  and the public page refuses to *serve*. Minting is not the only way a
+   *  link exists — a team that flips regulated mode already has live ones. */
+  getOwnerTeamFlags(repositoryId: string | null): Promise<{
+    earlyAdopterMode: boolean;
+    regulatedMode: boolean;
+    sharingPermitted: boolean;
+  } | null>;
 
   /** Platform-wide "test runs completed" count for the social-proof strip.
    *  Deliberately not scoped to this share — see the query's own comment in

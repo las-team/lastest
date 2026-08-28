@@ -3,6 +3,7 @@ import "server-only";
 import {
   getPublicShareBySlug,
   listPublicSharesForRepositories,
+  revokePublicSharesForTeam,
 } from "@lastest/plugin-share";
 
 /**
@@ -57,4 +58,21 @@ export async function listLatestPublicSharesForRepositories(
   Array<{ repositoryId: string | null; slug: string; createdAt: Date | null }>
 > {
   return listPublicSharesForRepositories(repositoryIds);
+}
+
+/**
+ * Revoke every live `/r/<slug>` a team holds.
+ *
+ * The one write in this file, and it crosses here for the same reason the
+ * reads do: `share_public_shares` is the share plugin's table, and
+ * `src/lib/core/` is the only place in `src/` that may reach a plugin.
+ *
+ * Called by `toggleRegulatedMode`. Turning the regulated profile on refuses to
+ * mint new links, but the ones already minted are the actual exposure — an
+ * anonymous URL serving screenshots of a validated system — and the switch's
+ * toast tells the user they are gone. Returns the count so the caller can say
+ * how many.
+ */
+export async function revokeTeamPublicShares(teamId: string): Promise<number> {
+  return revokePublicSharesForTeam(teamId);
 }

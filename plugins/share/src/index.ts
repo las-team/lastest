@@ -85,6 +85,7 @@ export {
   listPublicSharesForRepositories,
   listIndexablePublicShares,
   revokePublicShareById,
+  revokePublicSharesForTeam,
 } from "./data/queries";
 
 export { generateShareSlug, isValidShareSlug, buildShareUrl } from "./slug";
