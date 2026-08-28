@@ -1,5 +1,9 @@
 import { orm } from "./data/db";
-import { getQaTaskRow, getQaTasksByRepoRows } from "./data/tasks";
+import {
+  getQaConsoleQueueRows,
+  getQaTaskRow,
+  getQaTasksByRepoRows,
+} from "./data/tasks";
 import { getQaAgentTriggerRow } from "./data/triggers";
 import type { QaAgentTask, QaAgentTriggerRow } from "./schema";
 import { qaAgentWiring } from "./wiring";
@@ -22,6 +26,16 @@ export async function getQaTasksByRepo(
   opts: { terminalLimit?: number } = {},
 ): Promise<QaAgentTask[]> {
   return getQaTasksByRepoRows(orm(qaAgentWiring().data), repositoryId, opts);
+}
+
+/**
+ * The Agents console's slice of the queue — `needs_input` tasks and the queued
+ * count, without pulling the whole board. See `getQaConsoleQueueRows`.
+ */
+export async function getQaConsoleQueue(
+  repositoryId: string,
+): Promise<{ needsInput: QaAgentTask[]; queuedCount: number }> {
+  return getQaConsoleQueueRows(orm(qaAgentWiring().data), repositoryId);
 }
 
 /** One task by id (the v1 API's post-create echo). */

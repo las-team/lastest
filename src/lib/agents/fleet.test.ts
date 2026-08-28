@@ -191,6 +191,27 @@ describe("escalationsFrom", () => {
     expect(out.find((e) => e.id === "task:t1")?.holdsBrowser).toBe(false);
   });
 
+  it("sorts an escalation with no timestamp last, not first", () => {
+    const rows = [
+      rowFromSession(
+        session({
+          id: "s-blocked",
+          createdAt: new Date("2026-08-27T11:00:00Z"),
+          steps: [step({ status: "waiting_user" })],
+        }),
+      ),
+    ];
+    const undated = task({ id: "t-undated", createdAt: null, updatedAt: null });
+    const out = escalationsFrom(rows, [task(), undated]);
+    // Oldest-first among the dated ones; the undated one brings up the rear
+    // rather than pinning to the top as "waiting since 1970".
+    expect(out.map((e) => e.id)).toEqual([
+      "task:t1",
+      "s-blocked",
+      "task:t-undated",
+    ]);
+  });
+
   it("prefers the agent's reply over the task title as the question", () => {
     const out = escalationsFrom([], [task({ agentReply: "Need fresh codes" })]);
     expect(out[0].question).toBe("Need fresh codes");

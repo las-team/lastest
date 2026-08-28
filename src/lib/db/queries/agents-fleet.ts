@@ -1,7 +1,7 @@
 import { db } from "../index";
 import { agentSessions } from "../schema";
 import type { AgentSession, AgentSessionKind } from "../schema";
-import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { decryptAgentSessionRow } from "./integrations";
 
 /**
@@ -56,8 +56,16 @@ export async function listLiveAgentSessions(
 }
 
 /**
- * The most recent settled session per kind, for the console's "Settled today"
- * strip. One query, capped — the console only ever renders a handful.
+ * The most recently settled sessions on a repo, any kind, for the console's
+ * "Settled today" strip. One query, capped — the console only ever renders a
+ * handful.
+ *
+ * NOT partitioned per kind: a repo that settled eight QA sessions and no
+ * Ranger runs gets eight QA rows, which is what "most recent" means and what
+ * the strip renders. Ordering is `completed_at DESC NULLS LAST` — a settled
+ * row can carry a null `completedAt` (a cancel that never stamped it), and
+ * Postgres sorts nulls FIRST under a bare `DESC`, which would float exactly
+ * the least informative rows to the top of a "recent" list.
  */
 export async function listRecentSettledAgentSessions(
   repositoryId: string,
@@ -73,7 +81,10 @@ export async function listRecentSettledAgentSessions(
         inArray(agentSessions.status, ["completed", "failed", "cancelled"]),
       ),
     )
-    .orderBy(desc(agentSessions.completedAt), desc(agentSessions.createdAt))
+    .orderBy(
+      sql`${agentSessions.completedAt} DESC NULLS LAST`,
+      desc(agentSessions.createdAt),
+    )
     .limit(limit);
   return rows.map(decryptAgentSessionRow);
 }
