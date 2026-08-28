@@ -8,6 +8,13 @@ export default defineConfig({
       // `server-only` is a build-time guard with no Node entry point — stub it
       // so server modules that use it stay importable under test.
       "server-only": path.resolve(__dirname, "./test-stubs/server-only.ts"),
+      // Published package whose `main` points at `dist/` (built by `pnpm
+      // build`, gitignored). Resolve it to source under test so a fresh
+      // checkout can run `pnpm test` without building the package first.
+      "@lastest/mcp-server": path.resolve(
+        __dirname,
+        "./packages/mcp-server/src/index.ts",
+      ),
     },
   },
   test: {
