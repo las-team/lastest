@@ -10,6 +10,7 @@ import type {
 } from "@/lib/db/schema";
 import type { CheckMode } from "@/lib/verify/check-modes";
 import { revalidatePath } from "next/cache";
+import { isLockedSettingAllowed } from "@/lib/segment/regulated";
 
 export async function getPlaywrightSettings(repositoryId?: string | null) {
   await requireTeamAccess();
@@ -279,6 +280,14 @@ export async function updateBanAiMode(enabled: boolean) {
 // AI mode: MCP (default, false) ↔ built-in AI (true)
 export async function updateBuiltInAiEnabled(enabled: boolean) {
   const session = await requireTeamAccess();
+  // REGULATED_LOCKED_POLICY.builtInAi: under the regulated profile AI runs in
+  // the consultant's own agent over MCP, outside the evidence path — never
+  // server-side against the tenant's data.
+  if (!isLockedSettingAllowed("builtInAi", enabled, session.team)) {
+    throw new Error(
+      "Built-in AI is locked off for this team. Regulated mode keeps AI outside the evidence path — use MCP from your own agent.",
+    );
+  }
   await queries.updateTeam(session.team.id, { builtInAiEnabled: enabled });
   revalidatePath("/settings");
   revalidatePath("/");

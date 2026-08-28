@@ -15,6 +15,7 @@ import { getRepoAward as awardsGetRepoAward } from "@lastest/plugin-awards/reads
 import type { Build } from "@/lib/db/schema";
 import * as queries from "@/lib/db/queries";
 import { sendDiscordShareNotification } from "@/lib/integrations/discord";
+import { isSharingPermitted } from "@/lib/segment/regulated";
 
 /**
  * The app's fill for `ShareHost`. See `plugins/share/src/host.ts` for why
@@ -297,15 +298,22 @@ export const appShareHost: ShareHost = {
     };
   },
 
-  async getOwnerTeamFlags(
-    repositoryId: string | null,
-  ): Promise<{ earlyAdopterMode: boolean; regulatedMode: boolean } | null> {
+  async getOwnerTeamFlags(repositoryId: string | null): Promise<{
+    earlyAdopterMode: boolean;
+    regulatedMode: boolean;
+    sharingPermitted: boolean;
+  } | null> {
     if (!repositoryId) return null;
     const row = await queries.getRepositoryOwnerTeamFlags(repositoryId);
     return row
       ? {
           earlyAdopterMode: row.earlyAdopterMode ?? false,
           regulatedMode: row.regulatedMode ?? false,
+          // The decision, not the flag it is derived from. `isSharingPermitted`
+          // is the segment module's intended control point, and this is its
+          // production caller — the plugin used to re-derive it from
+          // `regulatedMode`, which left the real predicate tested but unused.
+          sharingPermitted: isSharingPermitted(row),
         }
       : null;
   },

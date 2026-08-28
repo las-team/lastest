@@ -4,8 +4,12 @@ import {
   REGULATED_HIDDEN_NAV,
   REGULATED_LOCKED_POLICY,
   isOnboardingSegment,
+  isLockedSettingAllowed,
   isRegulatedTeam,
+  isSettingHidden,
   isSharingPermitted,
+  lockedPolicyFor,
+  REGULATED_HIDDEN_SETTINGS,
 } from "@/lib/segment/regulated";
 import { CHECK_LAYERS } from "@/lib/verify/check-layers";
 
@@ -53,6 +57,54 @@ describe("regulated segment profile", () => {
       expect(REGULATED_LOCKED_POLICY.confirmOnGreen).toBe(false);
       expect(REGULATED_LOCKED_POLICY.aiDiffing).toBe(false);
       expect(REGULATED_LOCKED_POLICY.builtInAi).toBe(false);
+    });
+  });
+
+  describe("lockedPolicyFor / isLockedSettingAllowed", () => {
+    const regulated = { regulatedMode: true };
+    const plain = { regulatedMode: false };
+
+    it("forces nothing on a team that is not regulated", () => {
+      expect(lockedPolicyFor(plain)).toBeNull();
+      expect(lockedPolicyFor(null)).toBeNull();
+      expect(isLockedSettingAllowed("autoApprove", true, plain)).toBe(true);
+      expect(isLockedSettingAllowed("builtInAi", true, null)).toBe(true);
+    });
+
+    it("refuses to turn a locked setting back on for a regulated team", () => {
+      // This is the half that makes the policy a control rather than a table:
+      // the settings UI disables the switch, but the action is still POSTable.
+      expect(isLockedSettingAllowed("autoApprove", true, regulated)).toBe(
+        false,
+      );
+      expect(isLockedSettingAllowed("aiDiffing", true, regulated)).toBe(false);
+      expect(isLockedSettingAllowed("builtInAi", true, regulated)).toBe(false);
+    });
+
+    it("still allows setting a locked setting to its forced value", () => {
+      expect(isLockedSettingAllowed("autoApprove", false, regulated)).toBe(
+        true,
+      );
+      expect(isLockedSettingAllowed("aiDiffing", false, regulated)).toBe(true);
+    });
+  });
+
+  describe("isSettingHidden", () => {
+    it("hides nothing for a team that is not regulated", () => {
+      for (const id of REGULATED_HIDDEN_SETTINGS) {
+        expect(isSettingHidden(id, { regulatedMode: false })).toBe(false);
+      }
+    });
+
+    it("hides exactly the ids in the set for a regulated team", () => {
+      const team = { regulatedMode: true };
+      for (const id of REGULATED_HIDDEN_SETTINGS) {
+        expect(isSettingHidden(id, team), id).toBe(true);
+      }
+      // The settings page must go through this, so an id NOT in the set stays
+      // visible — otherwise the set is documentation, not a mechanism.
+      expect(isSettingHidden("repository", team)).toBe(false);
+      expect(isSettingHidden("features", team)).toBe(false);
     });
   });
 

@@ -32,6 +32,7 @@ export async function setOnboardingPath(path: OnboardingPath) {
  */
 export async function startPharmaOnboarding(projectName?: string) {
   const session = await requireCapability("repos:manage");
+  const previousPath = session.user.onboardingPath ?? null;
 
   // Flip the team into the regulated profile *before* creating the repo, so a
   // failure between the two leaves a restricted team with no project rather
@@ -39,10 +40,24 @@ export async function startPharmaOnboarding(projectName?: string) {
   await queries.updateTeam(session.team.id, { regulatedMode: true });
   await queries.updateUser(session.user.id, { onboardingPath: "manual" });
 
-  const repo = await createLocalRepo(
-    projectName?.trim() || "Vault + Salesforce",
-  );
-  const seededTestId = await seedPharmaSuite(repo.id);
+  let repo: Awaited<ReturnType<typeof createLocalRepo>>;
+  let seededTestId: string | null;
+  try {
+    repo = await createLocalRepo(projectName?.trim() || "Vault + Salesforce");
+    seededTestId = await seedPharmaSuite(repo.id);
+  } catch (err) {
+    // Compensation. `regulatedMode` deliberately stays ON — the ordering above
+    // exists so a half-finished fork never leaves an unrestricted team holding
+    // a Vault suite, and the settings toggle is the way back out of it. What
+    // must roll back is `onboardingPath`: rewritten to "manual" it drops the
+    // user outside the fork with no route back into it, having never reached
+    // the project the fork exists to create.
+    await queries
+      .updateUser(session.user.id, { onboardingPath: previousPath })
+      .catch(() => {});
+    revalidatePath("/onboarding");
+    throw err;
+  }
 
   revalidatePath("/");
   revalidatePath("/tests");
