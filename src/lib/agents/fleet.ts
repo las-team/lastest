@@ -3,6 +3,9 @@ import type {
   AgentSessionKind,
   AgentStepState,
 } from "@/lib/db/schema";
+// Type-only, so this module stays pure and importable from a client component:
+// `explorer-reads` is `server-only`, and the import is erased at compile time.
+import type { ExplorerFleetSession } from "@/lib/core/explorer-reads";
 
 /**
  * The slice of a QA-agent task this module needs.
@@ -192,17 +195,12 @@ export function idleRow(kind: FleetAgentKind): FleetRow {
  * Kept here beside `rowFromSession` rather than in the read port so both
  * sources land on one shape and one set of rules — the console must not care
  * which table a row came from.
+ *
+ * Takes `ExplorerFleetSession` itself rather than an inline structural copy of
+ * it: two hand-maintained shapes that must stay byte-identical would let a
+ * field added to the projection be silently dropped here.
  */
-export function rowFromExplorer(session: {
-  id: string;
-  status: "active" | "paused";
-  stepLabel: string | null;
-  stepDetail: string | null;
-  progress: number;
-  awaitingUser: boolean;
-  startedAt: Date | null;
-  targetUrl: string | null;
-}): FleetRow {
+export function rowFromExplorer(session: ExplorerFleetSession): FleetRow {
   const state: FleetState =
     session.status === "paused"
       ? "paused"
