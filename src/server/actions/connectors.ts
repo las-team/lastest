@@ -22,6 +22,8 @@
 
 import { revalidatePath } from "next/cache";
 import * as queries from "@/lib/db/queries";
+import { getLogger } from "@/lib/logger";
+import { assertHttpScheme } from "@/lib/security/url-validation";
 import { requireRepoCapability } from "@/lib/auth/capabilities";
 import type {
   CredentialField,
@@ -35,7 +37,10 @@ import {
   normalizeConnectorConfig,
 } from "@/lib/connectors/definitions";
 import { verifyConnectorConnection } from "@/lib/connectors/verify";
+import { assertEnvironmentInRepo } from "@/lib/connectors/environment-scope";
 import type { ConnectorWithEnvironment } from "@/lib/db/queries/connectors";
+
+const log = getLogger("Connectors");
 
 /** Shared with the credential handle: `credentials.<name>.<field>`. */
 const NAME_RE = /^[a-z][A-Za-z0-9]*$/;
@@ -114,7 +119,12 @@ export async function createConnector(
 ): Promise<{ id: string }> {
   const session = await requireRepoCapability(repositoryId, "repos:settings");
   validate(input);
-  const environmentId = input.environmentId ?? null;
+  // Re-derive the environment's own repo before trusting the id — the
+  // authorized thing is `repositoryId`, and this is a different raw id.
+  const environmentId = await assertEnvironmentInRepo(
+    input.environmentId ?? null,
+    repositoryId,
+  );
 
   // The handle has to be free in BOTH tables — it is one name used by two rows,
   // and a collision in either would break the pairing.
@@ -174,7 +184,17 @@ export async function createConnector(
   } catch (err) {
     // Compensate: a credential with no connector would show up in Setup with no
     // explanation and no way to reach its own form.
-    await queries.deleteCredential(credential.id).catch(() => {});
+    //
+    // Logged, never swallowed. If the compensating delete also fails, the
+    // orphan this module's header says must never exist now DOES exist, with a
+    // live password in it — and the operator's only chance of learning that is
+    // this line.
+    await queries.deleteCredential(credential.id).catch((cleanupErr) => {
+      log.error(
+        { err: cleanupErr, credentialId: credential.id, repositoryId },
+        "connector insert failed AND its credential could not be removed — an orphaned credential with live secrets remains",
+      );
+    });
     throw err;
   }
 }
@@ -185,10 +205,12 @@ export async function updateConnector(
 ): Promise<{ success: true }> {
   const existing = await guardConnector(id);
   validate(input);
-  const environmentId =
+  const environmentId = await assertEnvironmentInRepo(
     input.environmentId === undefined
       ? existing.environmentId
-      : input.environmentId;
+      : input.environmentId,
+    existing.repositoryId,
+  );
 
   if (
     await queries.connectorNameTaken(
@@ -266,10 +288,20 @@ export async function updateConnector(
  */
 export async function deleteConnector(id: string): Promise<{ success: true }> {
   const connector = await guardConnector(id);
-  await queries.deleteConnector(id);
+
+  // Credential FIRST, and its failure is fatal to the whole delete.
+  //
+  // The reverse order (connector, then a best-effort credential delete) leaves
+  // precisely the orphan the module header says must never exist — a `vault`
+  // credential holding a live password, with nothing in the UI explaining it,
+  // while the org reads as disconnected. Deleting the secret first makes the
+  // CONNECTOR the compensable half: a failure after this point leaves a
+  // connector whose credential is gone, which the update path already handles
+  // (it recreates the credential) and which holds no secret.
   if (connector.credentialId) {
-    await queries.deleteCredential(connector.credentialId).catch(() => {});
+    await queries.deleteCredential(connector.credentialId);
   }
+  await queries.deleteConnector(id);
   refresh();
   return { success: true };
 }
@@ -298,12 +330,36 @@ export async function verifyConnector(id: string): Promise<VerifyOutcome> {
   );
 
   if (result.ok && result.configPatch) {
-    await queries.updateConnector(id, {
-      config: {
-        ...(connector.config as unknown as Record<string, unknown>),
-        ...result.configPatch,
-      } as unknown as SutConnectorConfig,
-    });
+    // The key set is safe — `configPatch` is built from named fields, never
+    // spread from the response — but the VALUES are attacker-influenced:
+    // `instanceUrl` comes back from the token exchange and becomes the target
+    // of every later call. `safeOutboundFetch` re-checks it at call time, so
+    // this is defence in depth; the point is to keep the guarantee LOCAL, so a
+    // future caller that reaches for `config.instanceUrl` without going
+    // through connectorFetch does not inherit a `javascript:` or a metadata
+    // address from the database.
+    const patch: Record<string, string> = {};
+    for (const [key, value] of Object.entries(result.configPatch)) {
+      if (key.toLowerCase().endsWith("url")) {
+        const schemeErr = assertHttpScheme(value);
+        if (schemeErr) {
+          log.warn(
+            { connectorId: id, key, schemeErr },
+            "connector verify returned a URL that is not http(s) — not persisting it",
+          );
+          continue;
+        }
+      }
+      patch[key] = value;
+    }
+    if (Object.keys(patch).length > 0) {
+      await queries.updateConnector(id, {
+        config: {
+          ...(connector.config as unknown as Record<string, unknown>),
+          ...patch,
+        } as unknown as SutConnectorConfig,
+      });
+    }
   }
   await queries.markConnectorVerified(id, {
     ok: result.ok,

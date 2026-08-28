@@ -26,6 +26,7 @@
 import { revalidatePath } from "next/cache";
 import * as queries from "@/lib/db/queries";
 import { requireRepoCapability } from "@/lib/auth/capabilities";
+import { assertEnvironmentInRepo } from "@/lib/connectors/environment-scope";
 import type { CredentialField } from "@/lib/db/schema";
 import type { MaskedCredential } from "@/lib/db/queries/credentials";
 import { ENV_HANDLE } from "@/lib/execution/run-credentials";
@@ -118,12 +119,18 @@ export async function createCredential(
 ): Promise<{ id: string }> {
   const session = await requireRepoCapability(repositoryId, "repos:settings");
   validate(input);
+  // Re-derive the environment's own repo before the name probe uses it as a
+  // scope — the authorized thing is `repositoryId`, not this id.
+  const environmentId = await assertEnvironmentInRepo(
+    input.environmentId ?? null,
+    repositoryId,
+  );
   if (
     await queries.credentialNameTaken(
       repositoryId,
       input.name,
       undefined,
-      input.environmentId ?? null,
+      environmentId,
     )
   ) {
     throw new Error(
@@ -132,7 +139,7 @@ export async function createCredential(
   }
   const result = await queries.createCredential({
     repositoryId,
-    environmentId: input.environmentId ?? null,
+    environmentId,
     name: input.name,
     label: input.label.trim(),
     description: input.description ?? null,
@@ -152,10 +159,12 @@ export async function updateCredential(
   // An omitted environmentId means "leave the scope alone", matching how the
   // rest of this input behaves — only an explicit null moves a credential back
   // to repo-wide.
-  const environmentId =
+  const environmentId = await assertEnvironmentInRepo(
     input.environmentId === undefined
       ? existing.environmentId
-      : input.environmentId;
+      : input.environmentId,
+    existing.repositoryId,
+  );
   if (
     await queries.credentialNameTaken(
       existing.repositoryId,
