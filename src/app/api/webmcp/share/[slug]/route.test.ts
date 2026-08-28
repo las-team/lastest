@@ -8,6 +8,7 @@ import { NextRequest } from "next/server";
 
 const getPublicShareBySlug = vi.fn();
 const getBuildRenderContext = vi.fn();
+const getOwnerTeamFlags = vi.fn();
 
 vi.mock("@lastest/plugin-share", async () => {
   const actual = await vi.importActual<Record<string, unknown>>(
@@ -22,10 +23,12 @@ vi.mock("@lastest/plugin-share", async () => {
 vi.mock("@/lib/core/share-host", () => ({
   appShareHost: {
     getBuildRenderContext: (target: unknown) => getBuildRenderContext(target),
+    getOwnerTeamFlags: (repositoryId: unknown) =>
+      getOwnerTeamFlags(repositoryId),
   },
 }));
 
-import { POST } from "./route";
+import { POST, __resetShareContextCache } from "./route";
 
 // 22 chars — `isValidShareSlug`'s format.
 const SLUG = "Abcd1234efgh5678ijkl90";
@@ -108,6 +111,14 @@ const RENDERED = {
 beforeEach(() => {
   getPublicShareBySlug.mockReset().mockResolvedValue(SHARE);
   getBuildRenderContext.mockReset().mockResolvedValue(RENDERED);
+  // Default: the owning team permits public sharing. The regulated case sets
+  // it false explicitly.
+  getOwnerTeamFlags.mockReset().mockResolvedValue({
+    earlyAdopterMode: false,
+    regulatedMode: false,
+    sharingPermitted: true,
+  });
+  __resetShareContextCache();
 });
 
 describe("POST /api/webmcp/share/[slug]", () => {
@@ -152,6 +163,39 @@ describe("POST /api/webmcp/share/[slug]", () => {
       before: `/share/${SLUG}/storage/a.png`,
       after: `/share/${SLUG}/storage/b.png`,
     });
+  });
+
+  it("404s a share whose owning team no longer permits sharing", async () => {
+    // A team that flips regulated mode can no longer mint links, but the ones
+    // already out there must not gain a structured extraction endpoint over
+    // the same data. Refused before the expensive render context.
+    getOwnerTeamFlags.mockResolvedValue({
+      earlyAdopterMode: false,
+      regulatedMode: true,
+      sharingPermitted: false,
+    });
+    expect((await call("report_summary")).status).toBe(404);
+    expect(getBuildRenderContext).not.toHaveBeenCalled();
+  });
+
+  it("fetches the render context once across repeated calls on a slug", async () => {
+    // A share's contents do not change, and the caller is anonymous and can
+    // loop. The revoke check is upstream of this and stays uncached.
+    await call("report_summary");
+    await call("visual_changes");
+    await call("failing_steps");
+    expect(getBuildRenderContext).toHaveBeenCalledTimes(1);
+    expect(getPublicShareBySlug).toHaveBeenCalledTimes(3);
+  });
+
+  it("429s a slug that is hammered, without touching the database", async () => {
+    const hot = "Zzzz1234efgh5678ijkl90";
+    let last = await call("report_summary", hot);
+    for (let i = 0; i < 80 && last.status !== 429; i++) {
+      last = await call("report_summary", hot);
+    }
+    expect(last.status).toBe(429);
+    expect(last.headers.get("retry-after")).toBeTruthy();
   });
 
   it("reports failing tests with their red steps", async () => {
