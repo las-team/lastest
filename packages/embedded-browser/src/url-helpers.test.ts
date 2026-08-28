@@ -60,3 +60,42 @@ describe("ensureUrlHelpers", () => {
     expect(added).toContain("urlMatch");
   });
 });
+
+describe("ensureUrlHelpers — source-text hazards", () => {
+  it("does not treat a mention inside a comment as a declaration", () => {
+    // `declares()` matches source text, so a body that merely mentions
+    // `const buildUrl` in a comment used to suppress the injection and
+    // reintroduce the exact "is not defined" failure this function fixes.
+    const { added } = ensureUrlHelpers(
+      `// the wrapper normally emits const buildUrl = ...\nreturn buildUrl(baseUrl, '/x');`,
+    );
+    expect(added).toEqual(["buildUrl", "urlMatch"]);
+  });
+
+  it("does not treat a mention inside a string literal as a declaration", () => {
+    const { added } = ensureUrlHelpers(
+      `await page.fill('#code', "const urlMatch = 1");\nreturn urlMatch(baseUrl, '/x');`,
+    );
+    expect(added).toContain("urlMatch");
+  });
+
+  it("still respects a real declaration", () => {
+    const { added, body } = ensureUrlHelpers(
+      `const buildUrl = (b, p) => b + p;\nreturn buildUrl(baseUrl, '/x');`,
+    );
+    expect(added).toEqual(["urlMatch"]);
+    // Not redeclared — a second `const buildUrl` would be a SyntaxError.
+    expect(body.match(/const buildUrl/g)).toHaveLength(1);
+  });
+
+  it("preserves the original line numbering", async () => {
+    // Anything mapping a runtime stack frame back to the stored test source
+    // (step attribution, the failure excerpt on the run detail) is off by the
+    // number of lines prepended. So prepend zero.
+    const original = `return urlMatch(baseUrl, '/verify');`;
+    const { body } = ensureUrlHelpers(original);
+    expect(body.split("\n")).toHaveLength(original.split("\n").length);
+    // …and it still evaluates.
+    expect((await run(body)) as RegExp).toBeInstanceOf(RegExp);
+  });
+});

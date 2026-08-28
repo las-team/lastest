@@ -254,6 +254,12 @@ export interface BuildSummary {
    * `passedCount + failedCount`; every count adjustment (flaky retry, step-
    * criteria override) moves a result between those two, so the sum stays
    * equal to the number of tests that have finished.
+   *
+   * The invariant that makes this usable as CI progress — the runner polls
+   * until `completedTests === totalTests` — is that EVERY terminal status is
+   * tallied into exactly one of the two. It is enforced at the tally site in
+   * `runBuildAsync`, which counts an unclassified status as failed and logs
+   * it, rather than left to whoever adds the next status to remember.
    */
   completedTests: number;
   elapsedMs: number | null;
@@ -960,9 +966,22 @@ async function runBuildAsync(
       await queries.stampFirstBuild(versionId, buildId, branch, gitCommit);
     }
 
-    if (result.status === "passed") passedCount++;
-    else if (result.status === "failed" || result.status === "setup_failed")
+    // Every terminal result lands in exactly one of the two counters, because
+    // `completedTests` is derived as their sum and the CI runner loops until it
+    // equals `totalTests`. A status tallied into neither stalls progress one
+    // short forever and the poll runs to its timeout instead of finishing —
+    // which is why the fallback is `failedCount` rather than nothing: a result
+    // nobody classified is not a pass, and "not counted" is not an option.
+    if (result.status === "passed") {
+      passedCount++;
+    } else {
+      if (result.status !== "failed" && result.status !== "setup_failed") {
+        console.warn(
+          `[Build ${buildId}] test ${result.testId} finished with unclassified status "${result.status}" — counting it as failed so build progress can complete`,
+        );
+      }
       failedCount++;
+    }
 
     // Build screenshots list: prefer captured screenshots, fall back to single screenshotPath
     const screenshots: import("@/lib/db/schema").CapturedScreenshot[] =

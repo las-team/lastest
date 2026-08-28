@@ -437,12 +437,22 @@ export function ensureUrlHelpers(body: string): {
   added: string[];
 } {
   const added: string[] = [];
+  // Comments and string literals blanked before the declaration test. `declares`
+  // matches on source text, so a body that merely *mentions* `const buildUrl`
+  // inside a comment or a quoted string would otherwise suppress the injection
+  // and reintroduce the exact `is not defined` failure this function fixes.
+  const code = body
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/\/\/[^\n]*/g, " ")
+    .replace(/`(?:\\.|[^`\\])*`/g, "``")
+    .replace(/'(?:\\.|[^'\\\n])*'/g, "''")
+    .replace(/"(?:\\.|[^"\\\n])*"/g, '""');
   // Word-boundary match on a declaration, not a mere mention: a body that only
   // *calls* urlMatch(...) still needs the definition prepended.
   const declares = (name: string) =>
     new RegExp(
       `(?:^|[;{}\\n])\\s*(?:const|let|var|function|async\\s+function)\\s+${name}\\b`,
-    ).test(body);
+    ).test(code);
 
   const needsBuildUrl = !declares("buildUrl");
   const needsUrlMatch = !declares("urlMatch");
@@ -464,7 +474,12 @@ export function ensureUrlHelpers(body: string): {
       String.raw`const urlMatch = (base, path) => new RegExp("^" + buildUrl(base, path).replace(/[.*+?()|[{}^\]\\$]/g, "\\$&"));`,
     );
   }
-  return { body: lines.join("\n") + "\n" + body, added };
+  // Joined onto ONE line and prepended without a newline, so every line of the
+  // original body keeps its original line number. Anything mapping a runtime
+  // stack frame back to the stored test source (step attribution, the failure
+  // excerpt in the run detail) would otherwise be off by one or two for
+  // exactly the bodies that needed this repair.
+  return { body: lines.join(" ") + " " + body, added };
 }
 
 export class EmbeddedTestExecutor {
@@ -1792,9 +1807,22 @@ export class EmbeddedTestExecutor {
       // author's decision and is left alone. Note a trailing `.catch(() => {})`
       // does NOT make the call safe: it swallows the rejection but still waits
       // the full timeout first, so those are rewritten too.
+      //
+      // The rewrite deliberately does NOT swallow the rejection. It used to
+      // append `.catch(() => {})`, which ran *before* the assertion
+      // instrumentation below — so "Verify no pending network requests"
+      // recorded `passed` unconditionally: on an app that never reaches idle,
+      // on a page that 500s, on anything. The check still appeared in the
+      // results and no longer checked anything.
+      //
+      // Letting the timeout reject is soft, not fatal, on both paths: an
+      // instrumented line is caught by `__assertion` and recorded `failed`
+      // (which is the honest verdict), and an un-instrumented one is caught by
+      // the soft-error wrapper further down. Bounding the wait is what fixes
+      // the runaway timeout; reporting the bound as a pass was never part of it.
       body = body.replace(
-        /page\.waitForLoadState\(\s*(['"`])networkidle\1\s*\)/g,
-        "page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {})",
+        /page\.waitForLoadState\(\s*(['"`])networkidle\1\s*\)(\s*\.catch\(\s*\(\s*\)\s*=>\s*\{\s*\}\s*\))?/g,
+        "page.waitForLoadState('networkidle', { timeout: 3000 })",
       );
 
       // Instrument assertions BEFORE step instrumentation and soft-wrapping.
