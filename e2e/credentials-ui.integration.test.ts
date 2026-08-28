@@ -186,7 +186,13 @@ describe("§4 step 16 — per-repo credentials: create, encrypt, edit, delete", 
     // The run-time contract: the executor's single decrypting read hands the
     // test body a live `credentials.<handle>` object.
     const forRun = await queries.getCredentialsForRun(repoId);
-    expect(forRun[HANDLE]).toEqual({ username: USERNAME, password: SECRET });
+    expect(forRun.credentials[HANDLE]).toEqual({
+      username: USERNAME,
+      password: SECRET,
+    });
+    // The declared `secret` flag travels alongside — it is what the EB scrubs
+    // on, instead of re-guessing secrecy from the key name.
+    expect(forRun.secretKeys[HANDLE]).toEqual(["password"]);
   });
 
   it("the secret never comes back to the browser", async () => {
@@ -244,7 +250,7 @@ describe("§4 step 16 — per-repo credentials: create, encrypt, edit, delete", 
     const pwAfter = after.fields.find((f) => f.key === "password")!;
     expect(pwAfter.value).toBe(pwBefore.value);
     const forRun = await queries.getCredentialsForRun(repoId);
-    expect(forRun[HANDLE].password).toBe(SECRET);
+    expect(forRun.credentials[HANDLE].password).toBe(SECRET);
   });
 
   it("deleting it through the confirm dialog removes the row", async () => {
