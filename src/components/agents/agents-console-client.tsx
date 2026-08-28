@@ -238,11 +238,17 @@ export function AgentsConsole({
               </span>
               <span className="text-muted-foreground">at rest</span>
             </span>
-            <span className="text-muted-foreground">
+            {/* Derived from run state, not read back from the EB pool — see
+                `FleetSummary.browsersHeld`. Labelled as an estimate so the
+                number is not mistaken for live pool capacity. */}
+            <span
+              className="text-muted-foreground"
+              title="Estimated from what each agent is doing — not read from the browser pool."
+            >
               <span className="font-semibold text-foreground">
-                {summary.browsersHeld}
+                ~{summary.browsersHeld}
               </span>{" "}
-              browser{summary.browsersHeld === 1 ? "" : "s"} held
+              browser{summary.browsersHeld === 1 ? "" : "s"} held (est.)
             </span>
             {minutePct !== null && runUsage && (
               <span className="flex items-center gap-2 text-muted-foreground">

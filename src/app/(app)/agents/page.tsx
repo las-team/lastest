@@ -8,7 +8,7 @@ import {
   listLiveAgentSessions,
   listRecentSettledAgentSessions,
 } from "@/lib/db/queries";
-import { getQaTasksByRepo } from "@lastest/plugin-qa-agent/reads";
+import { getQaConsoleQueue } from "@lastest/plugin-qa-agent/reads";
 import {
   escalationsFrom,
   idleRow,
@@ -48,10 +48,16 @@ export default async function AgentsPage() {
   // The console is the gated surface now, not just `/qa-agent`. Gate before
   // anything else so teams below the required plan always land on the upgrade
   // screen — including before a repo is selected, matching `/qa-agent`.
-  if (team && !hasQaAgentAccess(team.plan, isBillingEnabled())) {
+  //
+  // A request that resolves no team is gated too, on the free plan. Making the
+  // check conditional on `team` would let it through and leave the "select a
+  // repository" branch below as the only thing stopping it, which is a
+  // coincidence of `getSelectedRepository(undefined, undefined)` returning
+  // null rather than an access decision.
+  if (!hasQaAgentAccess(team?.plan ?? "free", isBillingEnabled())) {
     return (
       <QaAgentUpgradeGate
-        currentPlanName={planConfig(team.plan).name}
+        currentPlanName={planConfig(team?.plan ?? "free").name}
         requiredPlanName={qaAgentMinPlanName()}
         title="Agents"
         icon={Network}
@@ -85,10 +91,16 @@ export default async function AgentsPage() {
     );
   }
 
-  const [liveSessions, settled, tasks, runUsage] = await Promise.all([
+  const [liveSessions, settled, queue, runUsage] = await Promise.all([
     listLiveAgentSessions(selectedRepo.id).catch(() => []),
     listRecentSettledAgentSessions(selectedRepo.id).catch(() => []),
-    getQaTasksByRepo(selectedRepo.id).catch(() => []),
+    // Only the two things the console renders — the escalations and the queued
+    // count — rather than every task on the repo. This page is
+    // `force-dynamic`, so the query runs on every navigation.
+    getQaConsoleQueue(selectedRepo.id).catch(() => ({
+      needsInput: [],
+      queuedCount: 0,
+    })),
     teamId ? getTeamRunUsage(teamId).catch(() => null) : Promise.resolve(null),
   ]);
 
@@ -108,14 +120,14 @@ export default async function AgentsPage() {
       repositoryName={selectedRepo.fullName ?? selectedRepo.name}
       rows={rows}
       summary={summarise(rows)}
-      escalations={escalationsFrom(rows, tasks)}
+      escalations={escalationsFrom(rows, queue.needsInput)}
       settled={settled.map((s) => ({
         id: s.id,
         kind: s.kind,
         status: s.status,
         completedAt: s.completedAt ?? s.createdAt ?? null,
       }))}
-      queuedCount={tasks.filter((t) => t.status === "queued").length}
+      queuedCount={queue.queuedCount}
       runUsage={
         runUsage
           ? {

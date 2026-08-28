@@ -55,7 +55,16 @@ export interface FleetRow {
   startedAt: Date | null;
   /** Only set when `state === "blocked"` — what the agent is waiting for. */
   blockedOn: string | null;
-  /** True while the agent is holding an embedded browser. */
+  /**
+   * Whether this agent is *expected* to be holding an embedded browser.
+   *
+   * Inferred from the run's own state (`working` or `blocked`), NOT read back
+   * from the EB pool — core has no pool handle on a page render, and the pool
+   * service is a separate process. It is therefore an estimate: an agent whose
+   * browser already crashed still reports true, and a run between claims
+   * reports true before it holds anything. The console labels the derived
+   * count as an estimate rather than as pool capacity.
+   */
   holdsBrowser: boolean;
 }
 
@@ -182,7 +191,12 @@ export interface FleetSummary {
   blocked: number;
   paused: number;
   idle: number;
-  /** Browsers currently held by this repo's agents. */
+  /**
+   * Estimated browsers held by this repo's agents — the count of rows whose
+   * `holdsBrowser` is inferred true. See the field's note: this is derived
+   * from run state, not read from the EB pool, so it is an upper bound on
+   * capacity actually in use.
+   */
   browsersHeld: number;
 }
 
@@ -263,7 +277,16 @@ export function escalationsFrom(
       holdsBrowser: false,
     }));
 
-  return [...fromSessions, ...fromTasks].sort(
-    (a, b) => (a.since?.getTime() ?? 0) - (b.since?.getTime() ?? 0),
-  );
+  // Oldest first — the thing that has been waiting longest is the thing to
+  // answer next. An escalation with no timestamp sorts LAST rather than
+  // pinning to the top forever: `?? 0` would make "unknown" read as "waiting
+  // since 1970".
+  return [...fromSessions, ...fromTasks].sort((a, b) => {
+    const at = a.since?.getTime();
+    const bt = b.since?.getTime();
+    if (at === undefined || Number.isNaN(at))
+      return bt === undefined || Number.isNaN(bt) ? 0 : 1;
+    if (bt === undefined || Number.isNaN(bt)) return -1;
+    return at - bt;
+  });
 }
