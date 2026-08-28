@@ -25,6 +25,11 @@ export async function verifyBearerToken(
     const user = await queries.getUserById(grant.u);
     if (!user) return null;
     const team = user.teamId ? await queries.getTeam(user.teamId) : null;
+    // A label, not a key: no `sessions` row exists for an OAuth MCP caller by
+    // design (the grant is minted per request and never persisted). Verified
+    // that nothing treats `SessionData.sessionId` as a lookup handle — the only
+    // readers are log fields — and the `mcp-oauth:` prefix keeps it obviously
+    // non-UUID if one ever appears.
     return { user, sessionId: `mcp-oauth:${grant.c}`, team: team ?? null };
   }
 

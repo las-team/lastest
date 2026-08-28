@@ -16,8 +16,11 @@ import type { ToolAccessLevel } from "./policy.js";
  * about that gap — none of them re-encode the product judgement itself.
  */
 
-/** The tool list an access level actually gets, read off a live server. */
-async function toolsAt(level: ToolAccessLevel) {
+/** Run `fn` against a live client wired to a server at `level`. */
+async function withClientAt<T>(
+  level: ToolAccessLevel,
+  fn: (client: Client) => Promise<T>,
+): Promise<T> {
   const server = createServer(
     new LastestClient({ baseUrl: "http://localhost:0", apiKey: "test" }),
     { accessLevel: level },
@@ -30,11 +33,18 @@ async function toolsAt(level: ToolAccessLevel) {
     client.connect(clientTransport),
   ]);
   try {
-    const { tools } = await client.listTools();
-    return tools;
+    return await fn(client);
   } finally {
     await Promise.allSettled([client.close(), server.close()]);
   }
+}
+
+/** The tool list an access level actually gets, read off a live server. */
+async function toolsAt(level: ToolAccessLevel) {
+  return withClientAt(
+    level,
+    async (client) => (await client.listTools()).tools,
+  );
 }
 
 /** The `action` enum a tool advertises, if it has one. */
@@ -127,6 +137,43 @@ describe("tool policy", () => {
         for (const a of destructive) expect(advertised).not.toContain(a);
       }
     }
+  });
+
+  it("a read caller cannot CALL a write tool, not merely fail to see it", async () => {
+    // The mapping tests above assert what each level is *shown*. This asserts
+    // the property the security review actually cares about: that a read-level
+    // connection cannot reach a write tool end-to-end. A tool that is not
+    // registered has no handler, so the call is rejected by the server itself.
+    await withClientAt("read", async (client) => {
+      const approve = await client.callTool({
+        name: "lastest_decide_diff",
+        arguments: { action: "approve", diffId: "d1" },
+      });
+      expect(approve.isError).toBe(true);
+      expect(JSON.stringify(approve.content)).toContain("not found");
+
+      // A `full`-only tool is equally out of reach.
+      const publish = await client.callTool({
+        name: "lastest_publish_share",
+        arguments: { buildId: "b1" },
+      });
+      expect(publish.isError).toBe(true);
+    });
+  });
+
+  it("a read caller cannot invoke a write ACTION on a tool it can see", async () => {
+    // `lastest_repo` is visible at read, but `create`/`update` are write. The
+    // narrowed enum keeps them off the advertised schema; this exercises the
+    // handler backstop for a caller that sends one anyway.
+    await withClientAt("read", async (client) => {
+      const res = await client.callTool({
+        name: "lastest_repo",
+        arguments: { action: "update", repositoryId: "r1", name: "x" },
+      });
+      // Either the schema rejects it or the backstop throws — both surface as
+      // an error result rather than as a repo that got updated.
+      expect(res.isError).toBe(true);
+    });
   });
 
   it("fails closed for a tool with no rule", () => {

@@ -25,7 +25,11 @@
 import type { ToolAccessLevel } from "@lastest/mcp-server";
 import { auth } from "@/lib/auth/auth";
 import { verifyBearerToken } from "@/lib/auth/api-key";
-import { accessLevelForScopes } from "@/lib/mcp/tool-policy";
+import {
+  accessLevelForScopes,
+  MCP_READ_SCOPE,
+  MCP_WRITE_SCOPE,
+} from "@/lib/mcp/tool-policy";
 import { mintLoopbackGrant } from "@/lib/mcp/loopback-grant";
 
 export interface McpCaller {
@@ -111,11 +115,22 @@ export async function authenticateMcpRequest(
           "This instance is not configured for OAuth MCP access (ENCRYPTION_KEY is unset).",
       };
     }
+    // A token carrying no Lastest scope is refused rather than defaulted to
+    // read. `insufficient_scope` is the RFC 6750 error for exactly this, and
+    // naming the scopes lets the client re-run consent asking for one.
+    const accessLevel = accessLevelForScopes(oauth.scopes);
+    if (!accessLevel) {
+      return {
+        ok: false,
+        status: 403,
+        detail: `This token carries no Lastest scope. Request ${MCP_READ_SCOPE} or ${MCP_WRITE_SCOPE}.`,
+      };
+    }
     return {
       ok: true,
       caller: {
         loopbackToken,
-        accessLevel: accessLevelForScopes(oauth.scopes),
+        accessLevel,
         userId: oauth.userId,
         client: oauth.clientId ?? "unknown",
       },

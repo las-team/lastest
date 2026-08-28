@@ -8,10 +8,17 @@
  *
  * The rule is short on purpose:
  *
- *   API key            → full   (the user's own credential, created by hand in
- *                                Settings → Runners & API Access)
- *   OAuth + write scope → write
- *   OAuth, anything else → read
+ *   API key                    → full   (the user's own credential, created by
+ *                                        hand in Settings → Runners & API Access)
+ *   OAuth + `lastest:write`    → write
+ *   OAuth + `lastest:read`     → read
+ *   OAuth with neither         → refused
+ *
+ * The last line matters. Returning `read` by default meant a client that asked
+ * for `openid profile` — or one whose scope string failed to parse, since
+ * `parseScopes` maps every falsy input to `[]` — got every build, test, diff
+ * and coverage row the user can see, off a consent screen the user reads as
+ * "sign in with Lastest". Data access now requires a scope that names it.
  *
  * There is no scope that grants `full`. Deleting a test, revoking a share and
  * publishing data to a public URL stay behind the user's own key, so no amount
@@ -45,9 +52,19 @@ export function parseScopes(
   return list.map((s) => s.trim()).filter(Boolean);
 }
 
-/** The tool surface an OAuth token with these scopes may see. */
+/**
+ * The tool surface an OAuth token with these scopes may see, or `null` when it
+ * carries no Lastest scope at all and must be refused.
+ *
+ * `null` rather than a default level: "sign in with Lastest" and "read
+ * everything in Lastest" are different consents, and only the second is
+ * something a user can be said to have granted here.
+ */
 export function accessLevelForScopes(
   scopes: string | string[] | null | undefined,
-): ToolAccessLevel {
-  return parseScopes(scopes).includes(MCP_WRITE_SCOPE) ? "write" : "read";
+): ToolAccessLevel | null {
+  const list = parseScopes(scopes);
+  if (list.includes(MCP_WRITE_SCOPE)) return "write";
+  if (list.includes(MCP_READ_SCOPE)) return "read";
+  return null;
 }
