@@ -347,8 +347,18 @@ deploy_npm() {
   runner_version=$(node -p "require('$runner_dir/package.json').version")
 
   # Refuse to republish. npm rejects it regardless; failing here says why.
-  if npm view "@lastest/runner@$runner_version" version >/dev/null 2>&1; then
+  #
+  # A non-zero exit from `npm view` is ambiguous: "this version is not
+  # published" and "the registry was unreachable" look identical, and treating
+  # the second as the first fails the guard OPEN. So distinguish them on the
+  # output: E404 means genuinely unpublished; anything else means we could not
+  # find out, and a guard that cannot answer must not wave the publish through.
+  local view_out view_rc
+  view_out=$(npm view "@lastest/runner@$runner_version" version 2>&1) && view_rc=0 || view_rc=$?
+  if [ "$view_rc" -eq 0 ]; then
     err "@lastest/runner@$runner_version is already published - bump packages/runner/package.json first"
+  elif ! printf '%s' "$view_out" | grep -q 'E404'; then
+    err "could not check whether @lastest/runner@$runner_version is published (npm view failed): $view_out"
   fi
 
   # The CI workflow generators pin an exact runner version. Shipping one they
@@ -359,7 +369,11 @@ deploy_npm() {
     "$ROOT_DIR/plugins/ci/src/domain/ci-yaml.ts" 2>/dev/null \
     | sed 's/.*"\(.*\)"/\1/' | sort -u)
   if [ -n "$pinned" ] && [ "$pinned" != "$runner_version" ]; then
-    err "plugins/ci pins $(echo $pinned) but packages/runner is $runner_version - sync them first"
+    # Quoted, and newlines folded to a comma: when the two RUNNER_VERSION
+    # constants disagree `sort -u` yields two lines, and that is exactly the
+    # moment the message has to be readable rather than mangled by word
+    # splitting.
+    err "plugins/ci pins $(printf '%s' "$pinned" | paste -sd, -) but packages/runner is $runner_version - sync them first"
   fi
 
   # npm requires a second factor to publish. A web-login session token is not
