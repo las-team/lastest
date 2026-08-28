@@ -26,7 +26,17 @@ const log = getLogger("Triage");
 
 export interface TriageActionResult {
   ok: boolean;
+  /** Why the action failed. Only ever set together with `ok: false`. */
   error?: string;
+  /**
+   * The verdict was recorded, but something it triggers afterwards was not —
+   * a GitHub issue that never got filed, a baseline that never got approved.
+   *
+   * Deliberately a distinct field rather than `error` on an `ok: true` result:
+   * every caller writes `if (!res.ok)`, so reusing `error` made a half-applied
+   * decision read as a clean success. See `applyVerdictSideEffects`.
+   */
+  sideEffectError?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -70,7 +80,9 @@ function revalidateBuild(buildId: string): void {
  *   false_positive / snoozed → nothing
  *
  * Best-effort: the verdict is already persisted by the time this runs, so a
- * failure here is reported but never rolls the decision back.
+ * failure here is reported but never rolls the decision back. It is reported
+ * on `sideEffectError`, never on `error` — `ok: true` with `error` set reads
+ * as success to every caller doing `if (!res.ok)`.
  */
 async function applyVerdictSideEffects(
   verdict: TriageVerdict,
@@ -103,6 +115,15 @@ async function applyVerdictSideEffects(
 // Actions
 // ---------------------------------------------------------------------------
 
+/**
+ * Run the classifier over a build.
+ *
+ * `force` defaults to FALSE — an existing triage run is reused. The classifier
+ * is AI-backed, so a re-run is real spend, and a default the option cannot
+ * express (`force: false` worked, omitting it did not) is a trap. The two UI
+ * entry points ask for a re-run explicitly, because that is what their button
+ * means; nothing else should pay for one by accident.
+ */
 export async function runTriageForBuild(
   buildId: string,
   opts?: { force?: boolean },
@@ -113,7 +134,7 @@ export async function runTriageForBuild(
     if (!gate.allowed) return { ok: false, error: gate.reason };
 
     const result = await runTriage(buildId, {
-      force: opts?.force ?? true,
+      force: opts?.force ?? false,
       skipGate: true,
     });
     revalidateBuild(buildId);
@@ -140,7 +161,15 @@ export async function recordTriageVerdict(input: {
   snoozeDays?: number;
 }): Promise<TriageActionResult> {
   try {
-    const { userId } = await authorizeBuild(input.buildId);
+    const { repositoryId, userId } = await authorizeBuild(input.buildId);
+
+    // The build is authorized, so the blast radius is already inside the
+    // tenant — but a verdict row is keyed by `testId`, and an id that belongs
+    // to no test on this repo just accumulates rows no case will ever match.
+    const test = await queries.getTest(input.testId);
+    if (!test || test.repositoryId !== repositoryId) {
+      return { ok: false, error: "That test does not belong to this project" };
+    }
 
     // Locate the case row so the verdict's side effects know which step
     // comparison / visual diff to act on.
@@ -177,7 +206,7 @@ export async function recordTriageVerdict(input: {
     );
 
     revalidateBuild(input.buildId);
-    return { ok: true, error: sideEffectError };
+    return { ok: true, sideEffectError };
   } catch (err) {
     return {
       ok: false,
@@ -244,7 +273,7 @@ export async function recordTriageGroupVerdict(input: {
     }
 
     revalidateBuild(group.buildId);
-    return { ok: true, decided: cases.length, error: sideEffectError };
+    return { ok: true, decided: cases.length, sideEffectError };
   } catch (err) {
     return {
       ok: false,

@@ -204,9 +204,9 @@ export function TriageRunClient({ screen }: { screen: TriageScreenVM }) {
         if (!res.ok) {
           setVerdicts((v) => ({ ...v, [key]: previous }));
           toast.error(res.error ?? "Could not record that verdict.");
-        } else if (res.error) {
+        } else if (res.sideEffectError) {
           // The verdict landed but a side effect (issue, baseline) did not.
-          toast.warning(res.error);
+          toast.warning(res.sideEffectError);
         }
       } catch (err) {
         setVerdicts((v) => ({ ...v, [key]: previous }));
@@ -246,6 +246,9 @@ export function TriageRunClient({ screen }: { screen: TriageScreenVM }) {
           toast.success(
             `${res.decided} ${res.decided === 1 ? "case" : "cases"} resolved.`,
           );
+          // The cluster's verdicts landed; a follow-up (issue, baseline) may
+          // not have. Surfaced separately so it never reads as a failure.
+          if (res.sideEffectError) toast.warning(res.sideEffectError);
         }
       } catch (err) {
         setVerdicts((v) => ({ ...v, ...previous }));
