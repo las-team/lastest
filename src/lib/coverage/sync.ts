@@ -683,12 +683,34 @@ export async function coverageIsStale(
   environmentKey: string = DEFAULT_COVERAGE_ENVIRONMENT,
   maxAgeMs: number = coverageMaxAgeMs(),
 ): Promise<boolean> {
+  const { stale } = await coverageStaleness(
+    repositoryId,
+    environmentKey,
+    maxAgeMs,
+  );
+  return stale;
+}
+
+/**
+ * The same one-row read as `coverageIsStale`, but reporting HOW stale.
+ *
+ * A caller that can only start a few syncs per tick has to choose between the
+ * stale repos, and the only fair basis for that choice is age — starting from
+ * the head of a repo list means the tail starves whenever the backlog is
+ * longer than the per-tick budget. `ageMs` is `Infinity` for a model that has
+ * never been sync-derived, which sorts it first, where it belongs.
+ */
+export async function coverageStaleness(
+  repositoryId: string,
+  environmentKey: string = DEFAULT_COVERAGE_ENVIRONMENT,
+  maxAgeMs: number = coverageMaxAgeMs(),
+): Promise<{ stale: boolean; ageMs: number; lastSyncedAt: Date | null }> {
   const latest = await queries
     .getLatestCoverageSnapshot(repositoryId, environmentKey, { source: "sync" })
     .catch(() => null);
   const lastSyncedAt = latest?.capturedAt ?? null;
-  const age = lastSyncedAt ? Date.now() - lastSyncedAt.getTime() : Infinity;
-  return age > maxAgeMs;
+  const ageMs = lastSyncedAt ? Date.now() - lastSyncedAt.getTime() : Infinity;
+  return { stale: ageMs > maxAgeMs, ageMs, lastSyncedAt };
 }
 
 /**

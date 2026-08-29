@@ -40,6 +40,70 @@ export interface CoverageSyncSummary {
 const HEARTBEAT_INTERVAL_MS = 15_000;
 
 /**
+ * Global ceiling on coverage syncs in flight at once, across ALL teams.
+ *
+ * Default 2, env-tunable like `BACKGROUND_JOBS_TEAM_CAP`. Read per call rather
+ * than captured at module load so a deployment can change it without a
+ * rebuild, and so tests can set it.
+ */
+export function coverageSyncMaxConcurrent(): number {
+  const raw = Number(process.env.COVERAGE_SYNC_MAX_CONCURRENT);
+  return Number.isFinite(raw) && raw > 0 ? raw : 2;
+}
+
+/**
+ * How many NEW coverage syncs a fan-out caller may start right now.
+ *
+ * Deliberately consulted by the SCHEDULER ONLY, never by `startCoverageSyncJob`
+ * itself. The two callers are not alike: the scheduler fans one tick out over
+ * every tenant's stale repos at once (on the first tick after a deploy, or when
+ * the 360-minute horizon expires for many repos together, that is one detached
+ * sync per repo — synchronous CSV parse and per-cell UPDATE loop — landing in
+ * the serving process simultaneously), whereas a human clicking Sync on the
+ * Coverage page is one repo, deduped per repo, and already bounded per team by
+ * `refuseTeamJobFlood`. Applying this ceiling to the user path would mean one
+ * tenant's scheduled backlog silently refusing another tenant's click, which is
+ * a worse failure than a scheduled sync waiting 60 seconds for the next tick.
+ */
+export async function coverageSyncStartBudget(): Promise<{
+  budget: number;
+  active: number;
+  ceiling: number;
+}> {
+  const ceiling = coverageSyncMaxConcurrent();
+  const active = await queries.countActiveBackgroundJobsByType("coverage_sync");
+  return { budget: Math.max(0, ceiling - active), active, ceiling };
+}
+
+export interface CoverageSyncCandidate {
+  repositoryId: string;
+  environmentKey: string;
+  /** Age of the last sync-derived snapshot; `Infinity` when never synced. */
+  ageMs: number;
+}
+
+/**
+ * Choose which stale repos this tick starts, and which wait for the next one.
+ *
+ * Stalest first, so the choice does not depend on the order
+ * `getReposWithEnabledCoverageDimensions()` happens to return — taking the head
+ * of that list every tick starves its tail forever once the backlog outgrows
+ * the budget. With a 60-second tick and a 360-minute horizon, a couple of repos
+ * per tick drains any realistic backlog long before the deferred ones age into
+ * anything worse than they already are.
+ *
+ * Pure, so the ordering and the ceiling are testable without a scheduler.
+ */
+export function planCoverageSyncTick<T extends CoverageSyncCandidate>(
+  candidates: T[],
+  budget: number,
+): { start: T[]; deferred: T[] } {
+  const ordered = [...candidates].sort((a, b) => b.ageMs - a.ageMs);
+  const take = Math.max(0, budget);
+  return { start: ordered.slice(0, take), deferred: ordered.slice(take) };
+}
+
+/**
  * Start a coverage sync for a repo, or join the one already in flight.
  *
  * Returns as soon as the job row exists; the caller polls the job. When an

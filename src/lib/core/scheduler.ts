@@ -174,43 +174,75 @@ let coverageProcessing = false;
  * moved. Repos with no enabled dimension have no model and are skipped
  * entirely — profiling proposals are not a model.
  *
- * One repo at a time, and only when stale, because a sync re-reads every data
- * source and re-scores every cell; a fleet of repos syncing on the same tick
- * is a self-inflicted load spike.
+ * A tick starts at most `coverageSyncStartBudget()` syncs, stalest repo first,
+ * and leaves the rest to later ticks. A sync re-reads every data source and
+ * re-scores every cell, and spawning one is now detached — so without a
+ * ceiling a single tick would fire one per stale repo across every tenant at
+ * once (the first tick after a deploy, or the moment a shared staleness
+ * horizon expires), which is a self-inflicted load spike in the process that
+ * is also serving requests. The per-team job cap does not bound that: it is
+ * per team, and this fan-out crosses all of them.
+ *
+ * Exported only so the fan-out ceiling is testable; nothing outside the tick
+ * above calls it.
  */
-async function processStaleCoverageModels() {
+export async function processStaleCoverageModels() {
   if (coverageProcessing) return;
   coverageProcessing = true;
 
   try {
     // Dynamic for the same reason as the line above: this keeps the coverage
     // model and its query layer out of the scheduler's static import graph.
-    const { coverageIsStale } = await import("@/lib/coverage/sync");
-    const { startCoverageSyncJob } = await import("@/lib/coverage/sync-job");
+    const { coverageStaleness } = await import("@/lib/coverage/sync");
+    const {
+      startCoverageSyncJob,
+      coverageSyncStartBudget,
+      planCoverageSyncTick,
+    } = await import("@/lib/coverage/sync-job");
     const { getReposWithEnabledCoverageDimensions } =
       await import("@/lib/db/queries/coverage");
     const targets = await getReposWithEnabledCoverageDimensions();
 
+    // Cheap gate first: one snapshot-row read per repo. The tick used to call
+    // `ensureFreshCoverage`, which on the FRESH path still computed a full
+    // coverage report the scheduler then discarded — every repo, every tick —
+    // and on the stale path ran the whole sync (synchronous CSV parse, per-cell
+    // UPDATE loop) inline in the web process. Stale repos are handed to the
+    // `coverage_sync` background job instead, which also dedupes against a sync
+    // the user just started from the Coverage page.
+    const stale: Array<{
+      repositoryId: string;
+      environmentKey: string;
+      ageMs: number;
+    }> = [];
     for (const target of targets) {
       try {
-        // Cheap gate first: one snapshot-row read per repo. The tick used to
-        // call `ensureFreshCoverage`, which on the FRESH path still computed a
-        // full coverage report the scheduler then discarded — every repo, every
-        // tick — and on the stale path ran the whole sync (synchronous CSV
-        // parse, per-cell UPDATE loop) inline in the web process, sequentially
-        // across every tenant's repos. Stale repos are now handed to the
-        // `coverage_sync` background job instead, which also dedupes against a
-        // sync the user just started from the Coverage page.
-        if (
-          !(await coverageIsStale(target.repositoryId, target.environmentKey))
-        ) {
-          continue;
-        }
+        const { stale: isStale, ageMs } = await coverageStaleness(
+          target.repositoryId,
+          target.environmentKey,
+        );
+        if (isStale) stale.push({ ...target, ageMs });
+      } catch (error) {
+        console.error(
+          `[scheduler] Coverage staleness check failed for repo ${target.repositoryId}:`,
+          error,
+        );
+      }
+    }
+    if (stale.length === 0) return;
+
+    const { budget, active, ceiling } = await coverageSyncStartBudget();
+    const { start, deferred } = planCoverageSyncTick(stale, budget);
+
+    let started = 0;
+    for (const target of start) {
+      try {
         const { jobId, deduped } = await startCoverageSyncJob(
           target.repositoryId,
           { environmentKey: target.environmentKey },
         );
         if (!deduped) {
+          started += 1;
           console.log(
             `[scheduler] Enqueued coverage re-sync job ${jobId} for repo ${target.repositoryId}`,
           );
@@ -221,6 +253,16 @@ async function processStaleCoverageModels() {
           error,
         );
       }
+    }
+
+    if (deferred.length > 0) {
+      // Say it out loud — a backlog that drains silently one repo per minute
+      // looks exactly like a scheduler that has stopped working.
+      console.log(
+        `[scheduler] Deferred coverage re-sync for ${deferred.length} repo(s) to a later tick ` +
+          `(started ${started}, ${active} already in flight, ceiling ${ceiling}); ` +
+          `stalest deferred: ${deferred[0].repositoryId}`,
+      );
     }
   } finally {
     coverageProcessing = false;
