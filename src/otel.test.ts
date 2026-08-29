@@ -11,14 +11,25 @@
 import { ROOT_CONTEXT, SpanKind, TraceFlags, trace } from "@opentelemetry/api";
 import type { Attributes, Context } from "@opentelemetry/api";
 import { SamplingDecision } from "@opentelemetry/sdk-trace-node";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { buildSampler as buildAppSampler } from "@/otel";
-import { buildSampler as buildPoolSampler } from "@lastest/pool-service/otel";
+import {
+  batchConfigFromEnv as appBatchConfig,
+  buildSampler as buildAppSampler,
+} from "@/otel";
+import {
+  batchConfigFromEnv as poolBatchConfig,
+  buildSampler as buildPoolSampler,
+} from "@lastest/pool-service/otel";
 
 const IMPLS = [
   ["app", buildAppSampler],
   ["pool-service", buildPoolSampler],
+] as const;
+
+const BATCH_IMPLS = [
+  ["app", appBatchConfig],
+  ["pool-service", poolBatchConfig],
 ] as const;
 
 const TRACE_ID = "0af7651916cd43dd8448eb211c80319c";
@@ -93,10 +104,65 @@ describe.each(IMPLS)("%s tracing sampler", (_name, buildSampler) => {
     });
   });
 
-  describe("parent-based propagation", () => {
+  describe("default (ratio 1): tail sampling, head records everything", () => {
+    it("records under an UNSAMPLED remote parent", () => {
+      // The regression this guards. Traefik head-samples and forwards
+      // `traceparent` with the sampled flag clear; a ParentBased sampler drops
+      // that (its unset `remoteParentNotSampled` branch defaults to AlwaysOff),
+      // and a trace dropped at the head can never be recovered by a tail
+      // sampler in the collector. Traefik's sampleRate must not be a ceiling.
+      expect(
+        sample(
+          { "url.path": "/api/builds" },
+          { ratio: 1, ctx: parentContext(false, true) },
+        ),
+      ).toBe(RECORDED);
+    });
+
+    it("records under an unsampled LOCAL parent", () => {
+      expect(
+        sample(
+          { "url.path": "/api/builds" },
+          { ratio: 1, ctx: parentContext(false, false) },
+        ),
+      ).toBe(RECORDED);
+    });
+
+    it("still records under a sampled remote parent", () => {
+      expect(
+        sample(
+          { "url.path": "/api/builds" },
+          { ratio: 1, ctx: parentContext(true, true) },
+        ),
+      ).toBe(RECORDED);
+    });
+
+    it("still excludes health paths regardless of parent state", () => {
+      // Path exclusion is the one thing that must survive always-on: there is
+      // no point shipping kubelet probes to the collector for a policy to drop.
+      for (const ctx of [
+        ROOT_CONTEXT,
+        parentContext(true, true),
+        parentContext(false, true),
+        // The orphan-root case: Next's own per-request spans inherit the local
+        // parent, so the exclusion has to hold there too.
+        parentContext(true, false),
+      ]) {
+        expect(sample({ "url.path": "/api/health" }, { ratio: 1, ctx })).toBe(
+          DROPPED,
+        );
+        expect(sample({ "next.route": "/api/health" }, { ratio: 1, ctx })).toBe(
+          DROPPED,
+        );
+      }
+    });
+  });
+
+  describe("ratio < 1: explicit head-sampling opt-out", () => {
     it("honours a sampled remote parent even when the local ratio is 0", () => {
-      // This is the Traefik case: the ingress already decided to trace, so
-      // re-rolling here would produce a trace with a hole in the middle.
+      // With head sampling deliberately on, the ingress' decision is the one
+      // that counts — re-rolling here would punch a hole in the middle of a
+      // trace that Traefik already chose to keep.
       expect(
         sample(
           { "url.path": "/api/builds" },
@@ -105,42 +171,69 @@ describe.each(IMPLS)("%s tracing sampler", (_name, buildSampler) => {
       ).toBe(RECORDED);
     });
 
-    it("honours an unsampled remote parent even when the local ratio is 1", () => {
+    it("honours an unsampled remote parent", () => {
       expect(
         sample(
           { "url.path": "/api/builds" },
-          { ratio: 1, ctx: parentContext(false, true) },
+          { ratio: 0.5, ctx: parentContext(false, true) },
         ),
       ).toBe(DROPPED);
+    });
+
+    it("drops root spans at ratio 0", () => {
+      expect(sample({ "url.path": "/api/builds" }, { ratio: 0 })).toBe(DROPPED);
     });
 
     it("still excludes health paths under a sampled remote parent", () => {
       expect(
         sample(
           { "url.path": "/api/health" },
-          { ratio: 1, ctx: parentContext(true, true) },
-        ),
-      ).toBe(DROPPED);
-    });
-
-    it("still excludes health paths under a sampled local parent", () => {
-      // The orphan-root case: Next's own per-request spans inherit the local
-      // parent, so the exclusion has to hold here too.
-      expect(
-        sample(
-          { "next.route": "/api/health" },
-          { ratio: 1, ctx: parentContext(true, false) },
+          { ratio: 0.5, ctx: parentContext(true, true) },
         ),
       ).toBe(DROPPED);
     });
   });
+});
 
-  describe("ratio", () => {
-    it("drops everything at ratio 0 and keeps everything at ratio 1", () => {
-      expect(sample({ "url.path": "/api/builds" }, { ratio: 0 })).toBe(DROPPED);
-      expect(sample({ "url.path": "/api/builds" }, { ratio: 1 })).toBe(
-        RECORDED,
-      );
+describe.each(BATCH_IMPLS)("%s batch export config", (_name, batchConfig) => {
+  const BSP_VARS = [
+    "OTEL_BSP_MAX_QUEUE_SIZE",
+    "OTEL_BSP_MAX_EXPORT_BATCH_SIZE",
+    "OTEL_BSP_SCHEDULE_DELAY",
+    "OTEL_BSP_EXPORT_TIMEOUT",
+  ];
+
+  afterEach(() => {
+    for (const v of BSP_VARS) delete process.env[v];
+  });
+
+  it("defaults the queue well above the SDK's stock 2048", () => {
+    // Always-on head sampling multiplies span volume by 1/oldRatio. The
+    // BatchSpanProcessor drops silently past maxQueueSize, so the stock
+    // default would quietly lose the error traces tail sampling exists for.
+    const cfg = batchConfig();
+    expect(cfg.maxQueueSize).toBeGreaterThan(2048);
+    expect(cfg.maxExportBatchSize).toBeLessThanOrEqual(cfg.maxQueueSize);
+  });
+
+  it("honours the standard OTEL_BSP_* overrides", () => {
+    process.env.OTEL_BSP_MAX_QUEUE_SIZE = "100";
+    process.env.OTEL_BSP_MAX_EXPORT_BATCH_SIZE = "10";
+    process.env.OTEL_BSP_SCHEDULE_DELAY = "250";
+    process.env.OTEL_BSP_EXPORT_TIMEOUT = "1500";
+    expect(batchConfig()).toEqual({
+      maxQueueSize: 100,
+      maxExportBatchSize: 10,
+      scheduledDelayMillis: 250,
+      exportTimeoutMillis: 1500,
     });
+  });
+
+  it("ignores junk and non-positive values rather than disabling batching", () => {
+    process.env.OTEL_BSP_MAX_QUEUE_SIZE = "not-a-number";
+    process.env.OTEL_BSP_SCHEDULE_DELAY = "0";
+    const cfg = batchConfig();
+    expect(cfg.maxQueueSize).toBeGreaterThan(2048);
+    expect(cfg.scheduledDelayMillis).toBeGreaterThan(0);
   });
 });

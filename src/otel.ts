@@ -15,10 +15,14 @@
  *   OTEL_SERVICE_NAME            service.name (default: lastest-app)
  *   OTEL_EXCLUDE_PATHS           comma-separated path prefixes never traced
  *                                (default: /api/health)
- *   OTEL_TRACES_SAMPLER_ARG      head-sampling ratio 0..1 for ROOT spans only
- *                                (default: 1). Requests arriving with a
- *                                traceparent honour the caller's decision
- *                                instead — see ParentBasedSampler below.
+ *   OTEL_TRACES_SAMPLER_ARG      head-sampling ratio 0..1 (default: 1 =
+ *                                record everything and let the collector's
+ *                                tail sampler decide). Below 1 this re-enables
+ *                                parent-based head sampling — see buildSampler.
+ *   OTEL_BSP_MAX_QUEUE_SIZE      batch export tuning; see batchConfigFromEnv.
+ *   OTEL_BSP_MAX_EXPORT_BATCH_SIZE
+ *   OTEL_BSP_SCHEDULE_DELAY
+ *   OTEL_BSP_EXPORT_TIMEOUT
  *   OTEL_DIAG_LOG_LEVEL          none|error|warn|info|debug|verbose|all
  *                                (default: error) — OTel's own internal logs
  */
@@ -31,6 +35,7 @@ import { resourceFromAttributes } from "@opentelemetry/resources";
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import {
   AlwaysOnSampler,
+  BatchSpanProcessor,
   ParentBasedSampler,
   SamplingDecision,
   TraceIdRatioBasedSampler,
@@ -122,14 +127,28 @@ class ExcludePathSampler implements Sampler {
 }
 
 export function buildSampler(excluded: string[], ratio: number): Sampler {
-  // ParentBased is what makes this app a well-behaved participant in a trace
-  // that started at Traefik: when a request arrives with a sampled
-  // `traceparent` we keep it, and when it arrives unsampled we drop it, rather
-  // than re-rolling the dice and producing half-populated traces.
+  // Head sampling is OFF by default (ratio 1), because the collector runs a
+  // tail sampler: it can only apply a policy like "keep every trace that
+  // errored or exceeded a latency budget" to traces it actually received, so
+  // whatever the head drops is unrecoverable. Recording everything and letting
+  // the collector decide is the whole point of tail sampling.
   //
-  // Consequence worth knowing: Traefik's own sampleRate becomes the effective
-  // ceiling for everything entering through the ingress. OTEL_TRACES_SAMPLER_ARG
-  // only governs traces that START here (cron loops, boot work, direct calls).
+  // Deliberately NOT ParentBased here. ParentBased would honour the sampled
+  // flag on Traefik's inbound `traceparent`, and its unset `remoteParentNotSampled`
+  // branch defaults to AlwaysOff — so Traefik's own sampleRate would silently
+  // become a hard ceiling on everything entering through the ingress, and the
+  // tail sampler would only ever choose from the fraction Traefik had already
+  // picked at random. Set Traefik's sampleRate to 1.0 to match, or its spans
+  // (not ours) go missing from the trace.
+  if (ratio >= 1) {
+    return new ExcludePathSampler(new AlwaysOnSampler(), excluded);
+  }
+
+  // Explicit opt-out: OTEL_TRACES_SAMPLER_ARG < 1 turns head sampling back on
+  // for deployments with no tail-sampling collector (self-hosted, or a plain
+  // OTLP backend that ingests everything it is sent). Here ParentBased IS the
+  // right shape — it keeps a trace that started at the ingress intact instead
+  // of re-rolling the dice and punching a hole in the middle of it.
   return new ParentBasedSampler({
     root: new ExcludePathSampler(new TraceIdRatioBasedSampler(ratio), excluded),
     // Exclusion also applies under a sampled parent, so a probe that somehow
@@ -166,6 +185,34 @@ const DIAG_LEVELS: Record<string, DiagLogLevel> = {
   verbose: DiagLogLevel.VERBOSE,
   all: DiagLogLevel.ALL,
 };
+
+/**
+ * Batch export tuning.
+ *
+ * Batching itself is not new — `NodeSDK` already wrapped the exporter in a
+ * `BatchSpanProcessor` built from the OTEL_BSP_* env vars. It is spelled out
+ * here because the sampler above now records every request instead of the
+ * sampled fraction, and the SDK's stock `maxQueueSize` of 2048 is sized for
+ * the latter. Overflow is not loud — `BatchSpanProcessor` drops the excess and
+ * only reports it through `diag` — so under a burst you would lose exactly the
+ * error traces the tail sampler exists to keep, with nothing in the app log to
+ * say so. Raise OTEL_DIAG_LOG_LEVEL to `warn` to see the drop counter.
+ *
+ * Every value stays overridable through its standard env var, so this only
+ * moves the defaults.
+ */
+export function batchConfigFromEnv() {
+  const num = (name: string, fallback: number): number => {
+    const n = Number.parseInt(process.env[name] ?? "", 10);
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+  };
+  return {
+    maxQueueSize: num("OTEL_BSP_MAX_QUEUE_SIZE", 8192),
+    maxExportBatchSize: num("OTEL_BSP_MAX_EXPORT_BATCH_SIZE", 1024),
+    scheduledDelayMillis: num("OTEL_BSP_SCHEDULE_DELAY", 5000),
+    exportTimeoutMillis: num("OTEL_BSP_EXPORT_TIMEOUT", 30000),
+  };
+}
 
 let sdk: NodeSDK | undefined;
 
@@ -205,8 +252,12 @@ export function startOtel(): boolean {
 
   sdk = new NodeSDK({
     // `OTLPTraceExporter` appends `/v1/traces` to OTEL_EXPORTER_OTLP_ENDPOINT
-    // itself, so the env var stays a bare base URL.
-    traceExporter: new OTLPTraceExporter(),
+    // itself, so the env var stays a bare base URL. Passing `spanProcessors`
+    // rather than `traceExporter` opts out of the SDK building the batch
+    // processor itself — see batchConfigFromEnv above for why.
+    spanProcessors: [
+      new BatchSpanProcessor(new OTLPTraceExporter(), batchConfigFromEnv()),
+    ],
     resource: resourceFromAttributes({
       [ATTR_SERVICE_NAME]: serviceName,
       [ATTR_SERVICE_VERSION]: process.env.NEXT_PUBLIC_GIT_HASH ?? "unknown",
@@ -249,7 +300,8 @@ export function startOtel(): boolean {
 
   console.log(
     `[OTel] tracing enabled — service=${serviceName} endpoint=${endpoint} ` +
-      `sampleRatio=${ratio} exclude=${excluded.join(",")}`,
+      `headSampling=${ratio >= 1 ? "off (tail)" : ratio} ` +
+      `exclude=${excluded.join(",")}`,
   );
   return true;
 }
