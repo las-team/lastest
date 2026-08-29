@@ -749,19 +749,55 @@ export async function getSnapshottedBuildIds(
 }
 
 /**
- * Does the ledger hold a build with attributions but no snapshot?
+ * How many of the most-recent attributed builds a backfill actually writes.
+ *
+ * Owned here rather than in `backfillCoverageSnapshots` so that the write
+ * window and the probe gating it read the same number. They must agree: a
+ * probe that asks about a wider window than the backfill ever writes reports
+ * a gap forever on any repo holding more builds than the window — which is
+ * exactly the large repo the gate was added to spare.
+ */
+export const DEFAULT_BACKFILL_MAX_BUILDS = 200;
+
+/** Attribution rows one timeline read returns. See
+ *  `getCoverageAttributionTimeline`. */
+export const COVERAGE_TIMELINE_ROW_LIMIT = 50000;
+
+/**
+ * Among the `maxBuilds` most-recent attributed builds, is any one missing its
+ * snapshot?
  *
  * The cheap gate in front of `backfillCoverageSnapshots`, which otherwise
  * loads the whole attribution timeline, every cell and every dimension just to
  * discover there is nothing to reconstruct — the normal outcome on every sync
- * after the first. `LIMIT 1` lets Postgres stop at the first gap it finds
- * rather than scanning the ledger out.
+ * after the first.
+ *
+ * Windowed deliberately, and to the same window: the backfill writes points
+ * only for the newest `maxBuilds` builds, walking everything older purely as
+ * cumulative input. Asking about *any* un-snapshotted build therefore answered
+ * "yes" permanently once a repo passed 200 attributed builds, since the ones
+ * beyond the window are never going to be written — the fast path switched
+ * itself off on precisely the repos it was for.
+ *
+ * Ordering matches the backfill's notion of "newest": max `ran_at` per build,
+ * descending, nulls first. `getCoverageAttributionTimeline` orders rows
+ * `ran_at ASC` (Postgres puts nulls last), so a build with no `ran_at` at all
+ * lands at the end of the timeline — the newest end — and must sort first here.
+ *
+ * The window also stays inside what the backfill can see: `maxBuilds` (200)
+ * builds is far below the timeline's `COVERAGE_TIMELINE_ROW_LIMIT` rows, so on
+ * any ledger the backfill reads whole, the two sets are identical.
+ *
+ * One round trip; the outer `LIMIT 1` lets Postgres stop at the first gap.
  */
 export async function hasUnsnapshottedCoverageBuilds(
   repositoryId: string,
   environmentKey: string = DEFAULT_COVERAGE_ENVIRONMENT,
+  opts: { maxBuilds?: number } = {},
 ): Promise<boolean> {
-  const rows = await db
+  const maxBuilds = opts.maxBuilds ?? DEFAULT_BACKFILL_MAX_BUILDS;
+
+  const recent = db
     .select({ buildId: coverageCellRuns.buildId })
     .from(coverageCellRuns)
     .innerJoin(coverageCells, eq(coverageCellRuns.cellId, coverageCells.id))
@@ -770,13 +806,23 @@ export async function hasUnsnapshottedCoverageBuilds(
         eq(coverageCells.repositoryId, repositoryId),
         eq(coverageCells.environmentKey, environmentKey),
         isNotNull(coverageCellRuns.buildId),
-        sql`NOT EXISTS (
-          SELECT 1 FROM ${coverageSnapshots} s
-          WHERE s.repository_id = ${coverageCells.repositoryId}
-            AND s.environment_key = ${coverageCells.environmentKey}
-            AND s.build_id = ${coverageCellRuns.buildId}
-        )`,
       ),
+    )
+    .groupBy(coverageCellRuns.buildId)
+    .orderBy(sql`max(${coverageCellRuns.ranAt}) desc nulls first`)
+    .limit(maxBuilds)
+    .as("recent");
+
+  const rows = await db
+    .select({ buildId: recent.buildId })
+    .from(recent)
+    .where(
+      sql`NOT EXISTS (
+        SELECT 1 FROM ${coverageSnapshots} s
+        WHERE s.repository_id = ${repositoryId}
+          AND s.environment_key = ${environmentKey}
+          AND s.build_id = ${recent.buildId}
+      )`,
     )
     .limit(1);
   return rows.length > 0;
@@ -820,7 +866,7 @@ export async function getCoverageAttributionTimeline(
       ),
     )
     .orderBy(asc(coverageCellRuns.ranAt), asc(coverageCellRuns.recordedAt))
-    .limit(opts.limit ?? 50000);
+    .limit(opts.limit ?? COVERAGE_TIMELINE_ROW_LIMIT);
 
   return rows.map((r) => ({
     cellId: r.cellId,

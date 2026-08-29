@@ -188,17 +188,23 @@ export async function backfillCoverageSnapshots(
 ): Promise<BackfillResult> {
   const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
   const strength = opts.strength ?? DEFAULT_COVERAGE_STOP_POLICY.strength;
-  const maxBuilds = opts.maxBuilds ?? 200;
+  const maxBuilds = opts.maxBuilds ?? queries.DEFAULT_BACKFILL_MAX_BUILDS;
 
   // Fast path. Reconstruction below reads the ENTIRE attribution timeline (up
-  // to 50,000 rows) plus every cell and dimension, and then rolls a summary up
-  // per build — all of it thrown away when every build already holds a
-  // snapshot, which is the normal case on the second and every later sync. One
-  // short-circuiting existence probe answers "is there anything to write?"
-  // first. Failing open (do the work) is the safe direction: a probe that
+  // to COVERAGE_TIMELINE_ROW_LIMIT rows) plus every cell and dimension, and
+  // then rolls a summary up per build — all of it thrown away when every build
+  // already holds a snapshot, which is the normal case on the second and every
+  // later sync. One short-circuiting existence probe answers "is there
+  // anything to write?" first.
+  //
+  // The probe is given the SAME window this call writes. Asked about the whole
+  // ledger it would report a gap forever on any repo past `maxBuilds` builds —
+  // the ones below `writeFrom` are walked but never written, so their gap is
+  // permanent — and the fast path would never engage on the large repos it
+  // exists for. Failing open (do the work) is the safe direction: a probe that
   // errors must not silently skip a real backfill.
   const hasGap = await queries
-    .hasUnsnapshottedCoverageBuilds(repositoryId, environmentKey)
+    .hasUnsnapshottedCoverageBuilds(repositoryId, environmentKey, { maxBuilds })
     .catch(() => true);
   if (!hasGap) {
     // Nothing was examined, so nothing is reported — `buildsSeen` counts what
