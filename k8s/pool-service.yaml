@@ -106,9 +106,14 @@ spec:
                   key: eb-pool-service-token
                   optional: true
             # --- OpenTelemetry tracing (packages/pool-service/src/otel.ts) ---
+            # OPT-IN, same gate as the app: inert until this is "1", and only
+            # ever active inside a Kubernetes pod. Flip it together with
+            # k8s/app.yaml — tracing one side of the app→pool call produces a
+            # waterfall with a hole in it.
+            - name: OTEL_TRACING_ENABLED
+              value: "0"
             # Must point at the SAME collector as k8s/app.yaml, or the
             # app→pool→k8s-API waterfall arrives split across two backends.
-            # Unsetting the endpoint disables tracing entirely.
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://otel-collector.observability.svc.cluster.local:4318"
             - name: OTEL_SERVICE_NAME

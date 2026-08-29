@@ -134,13 +134,18 @@ describe("instrumentPostgresClient", () => {
     return client;
   }
 
-  it("is a pass-through when no collector is configured", () => {
+  it("is a pass-through when tracing is not opted in", () => {
+    // The default everywhere: dev, self-host, CI. Gate cases live in
+    // src/otel.test.ts, which checks this predicate against both otel.ts copies.
+    delete process.env.OTEL_TRACING_ENABLED;
     delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
     const client = fakeClient();
     expect(instrumentPostgresClient(client)).toBe(client);
   });
 
   it("is a pass-through when OTEL_DB_TRACING=0", () => {
+    process.env.OTEL_TRACING_ENABLED = "1";
+    process.env.KUBERNETES_SERVICE_HOST = "10.43.0.1";
     process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://collector:4318";
     process.env.OTEL_DB_TRACING = "0";
     const client = fakeClient();
@@ -149,6 +154,8 @@ describe("instrumentPostgresClient", () => {
 
   describe("when enabled", () => {
     function enabled(onQuery?: (sql: string) => void) {
+      process.env.OTEL_TRACING_ENABLED = "1";
+      process.env.KUBERNETES_SERVICE_HOST = "10.43.0.1";
       process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://collector:4318";
       delete process.env.OTEL_DB_TRACING;
       return instrumentPostgresClient(
@@ -196,6 +203,8 @@ describe("instrumentPostgresClient", () => {
     });
 
     it("propagates rejections instead of swallowing them", async () => {
+      process.env.OTEL_TRACING_ENABLED = "1";
+      process.env.KUBERNETES_SERVICE_HOST = "10.43.0.1";
       process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://collector:4318";
       const boom = {
         then: (_r: unknown, rej: (e: unknown) => unknown) =>
@@ -235,6 +244,8 @@ describe("instrumentPostgresClient", () => {
       const { instrumentPostgresClient: freshInstrument } =
         await import("./tracing");
 
+      process.env.OTEL_TRACING_ENABLED = "1";
+      process.env.KUBERNETES_SERVICE_HOST = "10.43.0.1";
       process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://collector:4318";
       delete process.env.OTEL_DB_TRACING;
       const client = freshInstrument(

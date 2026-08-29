@@ -32,6 +32,11 @@
  *   3. The text is capped at MAX_STATEMENT_LENGTH.
  *
  * Env:
+ *   OTEL_TRACING_ENABLED         the opt-in switch shared with src/otel.ts —
+ *                                unset (the default) = no tracing at all, so
+ *                                no DB spans. Also requires a Kubernetes pod
+ *                                and a collector endpoint; see
+ *                                `dbTracingEnabled` below.
  *   OTEL_EXPORTER_OTLP_ENDPOINT  unset = no tracing at all, so no DB spans
  *   OTEL_DB_TRACING              "0" disables DB spans while leaving HTTP
  *                                tracing on
@@ -126,9 +131,29 @@ export function describeStatement(sqlText: string): {
   return { operation };
 }
 
-function dbTracingEnabled(): boolean {
-  if (!process.env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim()) return false;
-  return process.env.OTEL_DB_TRACING !== "0";
+/**
+ * THIRD COPY of the gate in `src/otel.ts` / `packages/pool-service/src/otel.ts`
+ * — change all three together; `src/otel.test.ts` runs the same cases against
+ * every copy and fails if they drift. It is duplicated rather than imported
+ * because neither otel.ts can be pulled in here: the app's resolves the OTel
+ * SDK from node_modules at runtime while the pool's ships as a standalone
+ * bundle, and this module is loaded by both.
+ *
+ * If the gate is shut, spans would be created against a no-op provider and
+ * dropped — cheap, but not free, and this wrapper sits on every single
+ * statement. Checking the same three conditions keeps DB spans strictly a
+ * subset of the traces the SDK is actually exporting.
+ */
+export function dbTracingEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const flag = env.OTEL_TRACING_ENABLED?.trim().toLowerCase();
+  if (!(flag === "1" || flag === "true" || flag === "yes" || flag === "on")) {
+    return false;
+  }
+  if (!env.KUBERNETES_SERVICE_HOST?.trim()) return false;
+  if (!env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim()) return false;
+  return env.OTEL_DB_TRACING !== "0";
 }
 
 /** Database name for `db.namespace`, parsed from the connection string. */

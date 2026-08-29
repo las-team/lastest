@@ -9,9 +9,17 @@
  * deliberately not used: it would add `@grpc/grpc-js` to the standalone image
  * for no benefit at this trace volume.
  *
+ * Tracing is OPT-IN and Kubernetes-only — see `otelGate()`. Nothing here runs
+ * unless OTEL_TRACING_ENABLED is truthy AND the process is inside a pod AND a
+ * collector endpoint is configured.
+ *
  * Env:
+ *   OTEL_TRACING_ENABLED         "1"/"true"/"yes"/"on" — the opt-in switch.
+ *                                UNSET = tracing disabled entirely (the
+ *                                default everywhere: dev, self-host, CI)
  *   OTEL_EXPORTER_OTLP_ENDPOINT  collector base URL, e.g. http://otel-collector:4318
- *                                UNSET = tracing disabled entirely (dev default)
+ *                                Required once opted in; on its own it does
+ *                                nothing.
  *   OTEL_SERVICE_NAME            service.name (default: lastest-app)
  *   OTEL_EXCLUDE_PATHS           comma-separated path prefixes never traced
  *                                (default: /api/health)
@@ -214,6 +222,65 @@ export function batchConfigFromEnv() {
   };
 }
 
+/**
+ * Name of the opt-in flag, exported so the tests and the log line below can
+ * refer to it without re-typing it.
+ */
+export const OTEL_ENABLE_FLAG = "OTEL_TRACING_ENABLED";
+
+/** Why the gate is shut. `opt-out` is the default and is not an error. */
+export type OtelOffReason = "opt-out" | "not-kubernetes" | "no-endpoint";
+
+export type OtelGate =
+  | { enabled: true; endpoint: string }
+  | { enabled: false; reason: OtelOffReason };
+
+/** Only the keys read here — `process.env` is assignable to this. */
+type EnvLike = Record<string, string | undefined>;
+
+function flagOn(raw: string | undefined): boolean {
+  const v = raw?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+/**
+ * Tracing is OFF unless ALL THREE hold. Setting the endpoint alone is
+ * deliberately NOT enough any more — it used to be the whole switch, which
+ * meant an OTEL_EXPORTER_OTLP_ENDPOINT inherited from a shared ConfigMap or a
+ * developer's `.env.local` silently turned instrumentation on.
+ *
+ *   1. OTEL_TRACING_ENABLED is truthy — the explicit opt-in.
+ *   2. The process is running inside a Kubernetes pod. Tracing is a
+ *      Kubernetes-only capability here: the collector is an in-cluster
+ *      Service, and the single-container self-host image (root Dockerfile,
+ *      Zima/CasaOS) ships no collector and must never pay for the
+ *      instrumentation. KUBERNETES_SERVICE_HOST is the kubelet-injected
+ *      marker for the default `kubernetes` Service — it is present in every
+ *      pod regardless of `enableServiceLinks`, and absent everywhere else.
+ *   3. OTEL_EXPORTER_OTLP_ENDPOINT names a collector.
+ */
+export function otelGate(env: EnvLike = process.env): OtelGate {
+  if (!flagOn(env[OTEL_ENABLE_FLAG])) {
+    return { enabled: false, reason: "opt-out" };
+  }
+  if (!env.KUBERNETES_SERVICE_HOST?.trim()) {
+    return { enabled: false, reason: "not-kubernetes" };
+  }
+  const endpoint = env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim();
+  if (!endpoint) return { enabled: false, reason: "no-endpoint" };
+  return { enabled: true, endpoint };
+}
+
+/**
+ * Explains a disabled gate for an operator who asked for tracing and did not
+ * get it. `opt-out` is the normal state and is never logged.
+ */
+export function gateExplanation(reason: OtelOffReason): string {
+  return reason === "not-kubernetes"
+    ? "this process is not running inside a Kubernetes pod (no KUBERNETES_SERVICE_HOST) — tracing is Kubernetes-only"
+    : "OTEL_EXPORTER_OTLP_ENDPOINT is unset";
+}
+
 let sdk: NodeSDK | undefined;
 
 /**
@@ -235,8 +302,19 @@ export function startOtel(): boolean {
   if (sdk) return true;
   if ((globalThis as OtelGlobal)[STARTED]) return true;
 
-  const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim();
-  if (!endpoint) return false;
+  const gate = otelGate();
+  if (!gate.enabled) {
+    // Silence is right for the default (no flag): dev, self-host and the
+    // migrate Job all land here every boot. A flag that was set and could not
+    // be honoured is a misconfiguration and must be loud.
+    if (gate.reason !== "opt-out") {
+      console.warn(
+        `[OTel] ${OTEL_ENABLE_FLAG} is set but ${gateExplanation(gate.reason)} — tracing stays off.`,
+      );
+    }
+    return false;
+  }
+  const endpoint = gate.endpoint;
 
   (globalThis as OtelGlobal)[STARTED] = true;
 

@@ -73,4 +73,10 @@ USER pool
 # `--require` here rather than ENV NODE_OPTIONS on purpose: NODE_OPTIONS would
 # also apply to the HEALTHCHECK's `node -e` above and to every process-mode EB
 # child this service spawns, booting a throwaway OTel SDK in each.
+#
+# The preload itself is inert unless OTEL_TRACING_ENABLED is truthy AND the
+# process is inside a Kubernetes pod AND a collector endpoint is set (see
+# `otelGate()` in src/otel.ts) — this image is k8s-only, so that is the only
+# place tracing can come on. The single-container self-host image bundles the
+# same `main.cjs` but never loads this preload (scripts/docker-entrypoint.sh).
 CMD ["node", "--require", "/app/otel-bootstrap.cjs", "main.cjs"]

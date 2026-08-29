@@ -46,13 +46,16 @@ fi
 # it as a dedicated single-replica Deployment and set EB_POOL_SERVICE_DISABLED=1
 # here so only that Deployment holds Job-create RBAC.
 #
-# The bundle is CommonJS and the OTel preload is a separate `--require` so the
-# HTTP instrumentation is installed before the pool service's first
-# `require("https")` to the k8s API. The preload is inert when
-# OTEL_EXPORTER_OTLP_ENDPOINT is unset, so this is safe with no collector.
+# NO OTel preload here, unlike packages/pool-service/Dockerfile. This entrypoint
+# belongs to the single-container self-host image (root Dockerfile), which ships
+# no collector; tracing is a Kubernetes-only capability (see src/otel.ts
+# `otelGate()`), so `dist-pool/otel-bootstrap.cjs` is simply never loaded in
+# this image. The bundle is `.cjs` rather than `.mjs` because the k8s pool image
+# needs CommonJS for require-in-the-middle patching, and both images consume the
+# same `pnpm build:pool` output.
 if [ "${EB_POOL_SERVICE_DISABLED:-0}" != "1" ] && [ -f /app/dist-pool/main.cjs ]; then
   echo "Starting EB pool service..."
-  node --require /app/dist-pool/otel-bootstrap.cjs /app/dist-pool/main.cjs &
+  node /app/dist-pool/main.cjs &
 fi
 
 # Execute the main command

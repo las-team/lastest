@@ -111,9 +111,15 @@ spec:
             - name: BETTER_AUTH_COOKIE_SECURE
               value: "false"
             # --- OpenTelemetry tracing (src/otel.ts) ---------------------
-            # OTLP over HTTP/protobuf. Unsetting OTEL_EXPORTER_OTLP_ENDPOINT
-            # disables tracing entirely — nothing else here has any effect on
-            # its own. CHANGE THIS to your collector's in-cluster Service DNS.
+            # OPT-IN: everything below is inert until this is "1". Tracing also
+            # requires a Kubernetes pod (KUBERNETES_SERVICE_HOST, injected by
+            # the kubelet) — it is deliberately unavailable in the
+            # single-container self-host image.
+            - name: OTEL_TRACING_ENABLED
+              value: "0"
+            # OTLP over HTTP/protobuf. Required once opted in; on its own it
+            # does nothing. CHANGE THIS to your collector's in-cluster Service
+            # DNS.
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://otel-collector.observability.svc.cluster.local:4318"
             - name: OTEL_SERVICE_NAME

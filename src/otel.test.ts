@@ -13,18 +13,36 @@ import type { Attributes, Context } from "@opentelemetry/api";
 import { SamplingDecision } from "@opentelemetry/sdk-trace-node";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { dbTracingEnabled } from "@lastest/db/tracing";
 import {
   batchConfigFromEnv as appBatchConfig,
   buildSampler as buildAppSampler,
+  otelGate as appGate,
 } from "@/otel";
 import {
   batchConfigFromEnv as poolBatchConfig,
   buildSampler as buildPoolSampler,
+  otelGate as poolGate,
 } from "@lastest/pool-service/otel";
 
 const IMPLS = [
   ["app", buildAppSampler],
   ["pool-service", buildPoolSampler],
+] as const;
+
+/**
+ * The gate has a THIRD copy in `packages/db/src/tracing.ts` (it cannot import
+ * either otel.ts — see the comment there), so it is checked here too. Its
+ * signature differs (a plain boolean plus the OTEL_DB_TRACING escape hatch),
+ * so it is adapted to the same shape rather than listed in GATE_IMPLS raw.
+ */
+const GATE_IMPLS = [
+  ["app", (env: Record<string, string | undefined>) => appGate(env).enabled],
+  [
+    "pool-service",
+    (env: Record<string, string | undefined>) => poolGate(env).enabled,
+  ],
+  ["db", (env: Record<string, string | undefined>) => dbTracingEnabled(env)],
 ] as const;
 
 const BATCH_IMPLS = [
@@ -235,5 +253,93 @@ describe.each(BATCH_IMPLS)("%s batch export config", (_name, batchConfig) => {
     const cfg = batchConfig();
     expect(cfg.maxQueueSize).toBeGreaterThan(2048);
     expect(cfg.scheduledDelayMillis).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * Tracing is opt-in AND Kubernetes-only. Both halves matter:
+ *
+ *  - opt-in, because OTEL_EXPORTER_OTLP_ENDPOINT alone used to be the whole
+ *    switch, so an endpoint inherited from a shared ConfigMap (or a stray
+ *    `.env.local` key) silently started exporting;
+ *  - Kubernetes-only, because the collector is an in-cluster Service and the
+ *    single-container self-host image (root Dockerfile) must never pay for the
+ *    instrumentation.
+ */
+describe.each(GATE_IMPLS)("%s tracing gate", (_name, enabled) => {
+  const ON = {
+    OTEL_TRACING_ENABLED: "1",
+    KUBERNETES_SERVICE_HOST: "10.43.0.1",
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://collector:4318",
+  } satisfies Record<string, string>;
+
+  it("is on when all three conditions hold", () => {
+    expect(enabled({ ...ON })).toBe(true);
+  });
+
+  it("is off with no opt-in flag, however complete the rest of the config", () => {
+    const { OTEL_TRACING_ENABLED: _flag, ...rest } = ON;
+    expect(enabled(rest)).toBe(false);
+  });
+
+  it("is off when the flag is explicitly falsy", () => {
+    for (const v of ["0", "false", "no", "off", "", "  "]) {
+      expect(enabled({ ...ON, OTEL_TRACING_ENABLED: v })).toBe(false);
+    }
+  });
+
+  it("accepts the usual truthy spellings, case-insensitively", () => {
+    for (const v of ["1", "true", "TRUE", "yes", "On", " true "]) {
+      expect(enabled({ ...ON, OTEL_TRACING_ENABLED: v })).toBe(true);
+    }
+  });
+
+  it("is off outside Kubernetes even when opted in with an endpoint", () => {
+    // The self-host / dev case: KUBERNETES_SERVICE_HOST is injected by the
+    // kubelet in every pod and exists nowhere else.
+    const { KUBERNETES_SERVICE_HOST: _k8s, ...rest } = ON;
+    expect(enabled(rest)).toBe(false);
+    expect(enabled({ ...rest, KUBERNETES_SERVICE_HOST: "" })).toBe(false);
+  });
+
+  it("is off with no collector endpoint", () => {
+    const { OTEL_EXPORTER_OTLP_ENDPOINT: _ep, ...rest } = ON;
+    expect(enabled(rest)).toBe(false);
+  });
+});
+
+describe("app/pool gate reasons", () => {
+  it.each([
+    ["app", appGate],
+    ["pool-service", poolGate],
+  ])("%s reports why it stayed off", (_name, gate) => {
+    expect(gate({})).toEqual({ enabled: false, reason: "opt-out" });
+    expect(gate({ OTEL_TRACING_ENABLED: "1" })).toEqual({
+      enabled: false,
+      reason: "not-kubernetes",
+    });
+    expect(
+      gate({ OTEL_TRACING_ENABLED: "1", KUBERNETES_SERVICE_HOST: "10.43.0.1" }),
+    ).toEqual({ enabled: false, reason: "no-endpoint" });
+    expect(
+      gate({
+        OTEL_TRACING_ENABLED: "1",
+        KUBERNETES_SERVICE_HOST: "10.43.0.1",
+        OTEL_EXPORTER_OTLP_ENDPOINT: " http://collector:4318 ",
+      }),
+    ).toEqual({ enabled: true, endpoint: "http://collector:4318" });
+  });
+});
+
+describe("db gate escape hatch", () => {
+  it("still honours OTEL_DB_TRACING=0 with everything else on", () => {
+    expect(
+      dbTracingEnabled({
+        OTEL_TRACING_ENABLED: "1",
+        KUBERNETES_SERVICE_HOST: "10.43.0.1",
+        OTEL_EXPORTER_OTLP_ENDPOINT: "http://collector:4318",
+        OTEL_DB_TRACING: "0",
+      }),
+    ).toBe(false);
   });
 });

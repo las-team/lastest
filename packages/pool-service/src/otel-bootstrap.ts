@@ -16,8 +16,9 @@
  */
 // The preload runs before main.cjs, so it also runs before main's own
 // `import "./env"` — without this the OTEL_* keys in a dev `.env.local` would
-// be invisible here and tracing would silently stay off. Loading it twice is
-// harmless: the second pass skips every key already present in process.env.
+// be invisible here. (Tracing still refuses to start outside a Kubernetes pod,
+// so in a dev checkout this only affects what the gate reports.) Loading it
+// twice is harmless: the second pass skips every key already in process.env.
 import "./env";
 import { startOtel } from "./otel";
 

@@ -9,6 +9,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./schema": "./src/schema.ts",
+    "./tracing": "./src/tracing.ts",
     "./settings": "./src/settings.ts"
   },
   "scripts": {
