@@ -51,6 +51,70 @@ import {
  *  inherent object type — the variable names are all we know. */
 export const OBSERVED_OBJECT_TYPE = "run-variables";
 
+/**
+ * Stage boundaries a full sync passes through, in order.
+ *
+ * Reported to `SyncOptions.onStage` so a DETACHED caller can prove the sync is
+ * still alive: `syncCoverage` runs as a `coverage_sync` background job, and
+ * `cleanupStaleJobs` marks any `running` job whose lastActivityAt is older than
+ * five minutes as crashed. A sync on a large repo takes longer than that, so
+ * without these beats the watchdog failed a job whose promise was still
+ * working — which lied to the Coverage poller AND broke the per-repo dedupe,
+ * letting the next click start a second sync racing the first through
+ * reconcile/prune.
+ */
+export type CoverageSyncStage =
+  | "profile"
+  | "derive"
+  | "attribute"
+  | "weight"
+  | "snapshot";
+
+export interface CoverageSyncProgress {
+  stage: CoverageSyncStage;
+  /** Human-readable; safe to show as a background-job label. */
+  label: string;
+  /** Position within a stage that chunks, when it has one. */
+  done?: number;
+  total?: number;
+}
+
+const STAGE_LABELS: Record<CoverageSyncStage, string> = {
+  profile: "Coverage sync: profiling data sources",
+  derive: "Coverage sync: deriving cells",
+  attribute: "Coverage sync: attributing runs",
+  weight: "Coverage sync: scoring cells",
+  snapshot: "Coverage sync: recording snapshot",
+};
+
+/**
+ * How many rows/cells the chunked stages process between beats. Small enough
+ * that the five-minute watchdog window cannot close between two of them even
+ * on a slow database, large enough that the heartbeat write is noise next to
+ * the work it reports on.
+ */
+const HEARTBEAT_CHUNK = 200;
+
+/**
+ * Fire the progress hook, swallowing anything it throws.
+ *
+ * A heartbeat is bookkeeping for the caller; losing one must never lose the
+ * sync. Every call site awaits this, which also yields the event loop inside
+ * the CPU-bound matching loop.
+ */
+async function beat(
+  opts: SyncOptions,
+  stage: CoverageSyncStage,
+  position?: { done: number; total: number },
+): Promise<void> {
+  if (!opts.onStage) return;
+  try {
+    await opts.onStage({ stage, label: STAGE_LABELS[stage], ...position });
+  } catch (err) {
+    console.warn(`[coverage] sync heartbeat (${stage}) failed:`, err);
+  }
+}
+
 export interface SyncOptions {
   environmentKey?: string;
   weightPolicy?: CoverageWeightPolicy;
@@ -75,6 +139,13 @@ export interface SyncOptions {
    * the repos with the most coverage history.
    */
   runsSoFar?: number;
+  /**
+   * Progress heartbeat, fired at every stage boundary and every
+   * `HEARTBEAT_CHUNK` rows inside the two stages that scale with the data.
+   * Best-effort — see `beat`. Only in-process callers set it; it is not
+   * serializable across a server-action boundary.
+   */
+  onStage?: (progress: CoverageSyncProgress) => void | Promise<void>;
 }
 
 /** How many rows each data source's numbers actually rest on. Reported so a
@@ -367,6 +438,7 @@ export async function attributeRuns(
   }
 
   const attributions: Parameters<typeof queries.recordCoverageCellRuns>[0] = [];
+  let scanned = 0;
   for (const run of runs) {
     // Every group the run's variable map fully covers.
     const matched: Array<{ group: Group; cellId: string }> = [];
@@ -409,6 +481,13 @@ export async function attributeRuns(
         verdict: run.status,
         ranAt: run.ranAt,
       });
+    }
+
+    // Matching is O(runs x groups) in memory and can run for minutes on a repo
+    // with a long history — one beat per stage would not survive it.
+    scanned += 1;
+    if (scanned % HEARTBEAT_CHUNK === 0) {
+      await beat(opts, "attribute", { done: scanned, total: runs.length });
     }
   }
 
@@ -471,7 +550,16 @@ export async function recomputeWeights(
     });
   }
 
-  await queries.updateCoverageCellWeights(updates);
+  // One UPDATE per cell, so this is the longest stage on a big model. Persist
+  // in chunks and beat between them.
+  for (let i = 0; i < updates.length; i += HEARTBEAT_CHUNK) {
+    const chunk = updates.slice(i, i + HEARTBEAT_CHUNK);
+    await queries.updateCoverageCellWeights(chunk);
+    await beat(opts, "weight", {
+      done: Math.min(i + chunk.length, updates.length),
+      total: updates.length,
+    });
+  }
 }
 
 /** Full pass: profile → derive → attribute → weight → report → stop decision. */
@@ -481,14 +569,19 @@ export async function syncCoverage(
 ): Promise<SyncResult> {
   const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
 
+  await beat(opts, "profile");
   const { proposed, rejected, runsScanned, sources } = await profileDimensions(
     repositoryId,
     opts,
   );
+  await beat(opts, "derive");
   const { derived: cellsUpserted, pruned: cellsPruned } =
     await deriveAndPersistCells(repositoryId, opts);
+  await beat(opts, "attribute");
   const attribution = await attributeRuns(repositoryId, opts);
+  await beat(opts, "weight");
   await recomputeWeights(repositoryId, opts);
+  await beat(opts, "snapshot");
   // A sync re-derives the cell set, so page attribution built on the previous
   // one is stale by definition.
   invalidatePageCoverageAttribution(repositoryId);
