@@ -1,5 +1,6 @@
 import {
   AppMapClient,
+  type CoverageRailComponent,
   type ExploreProgressPanelComponent,
 } from "./app-map-client";
 import { getActiveExploration, getAppMap } from "../actions";
@@ -26,6 +27,11 @@ export default async function AppMapPage({
   maxExplorers,
   exploreProgressPanel,
   onCancelExploration,
+  dataView,
+  gapsView,
+  coverageRail,
+  coverageSummary,
+  coverageGapCount,
 }: {
   repositoryId: string;
   branch: string;
@@ -33,6 +39,12 @@ export default async function AppMapPage({
   maxExplorers: number;
   exploreProgressPanel: ExploreProgressPanelComponent;
   onCancelExploration: (sessionId: string) => Promise<void>;
+  /** Optional data-coverage surfaces — see `AppMapClientProps`. */
+  dataView?: React.ReactNode;
+  gapsView?: React.ReactNode;
+  coverageRail?: CoverageRailComponent;
+  coverageSummary?: string;
+  coverageGapCount?: number;
 }) {
   const [result, activeExploration] = await Promise.all([
     getAppMap({ repositoryId, branch }),
@@ -53,6 +65,11 @@ export default async function AppMapPage({
         activeExploration={activeExploration}
         exploreProgressPanel={exploreProgressPanel}
         onCancelExploration={onCancelExploration}
+        dataView={dataView}
+        gapsView={gapsView}
+        coverageRail={coverageRail}
+        coverageSummary={coverageSummary}
+        coverageGapCount={coverageGapCount}
       />
     </div>
   );

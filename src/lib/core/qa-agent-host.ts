@@ -492,4 +492,17 @@ export const appQaAgentHost: QaAgentHost = {
       email: session.user.email ?? null,
     };
   },
+
+  // ---- 13. Data coverage ---------------------------------------------------
+
+  async ensureCoverageFresh(repositoryId: string) {
+    const { ensureCoverageFresh } = await import("@/lib/core/coverage-reads");
+    return await ensureCoverageFresh(repositoryId);
+  },
+
+  async readExcludedCoverageCells(repositoryId: string) {
+    const { readExcludedCoverageCells } =
+      await import("@/lib/core/coverage-reads");
+    return await readExcludedCoverageCells(repositoryId);
+  },
 };

@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@lastest/coverage-model": "workspace:*",
     "@lastest/eb-protocol": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "postgres": "^3.4.8"

@@ -71,6 +71,12 @@ import {
   type SheetSourceLike,
 } from "@lastest/google-sheets";
 import { resolveCsvReferences, type CsvSourceLike } from "@lastest/csv";
+import {
+  expandTestsForMatrix,
+  type MatrixRunMeta,
+  type RunnableTest,
+} from "@/lib/execution/matrix-expand";
+import { matrixVariables } from "@lastest/coverage-model";
 import type { TestVariable } from "@/lib/db/schema";
 import { getAISettings } from "@/lib/db/queries";
 import { generateWithAI, type AIProviderConfig } from "@/lib/ai";
@@ -151,6 +157,51 @@ async function buildAIVarRuntime(
       }
     },
   };
+}
+
+/**
+ * Write advanced variable state back to the test row, so increment-mode vars
+ * walk forward across runs and 'fixed'/'random' AI vars can reuse or fall
+ * back to their last generated value. One helper for BOTH execution paths —
+ * the api path used to discard these and its increment/random-cursor
+ * variables never advanced between runs while the browser path's did.
+ * Best-effort by contract: never fail the run on a cursor write.
+ */
+async function persistVariableState(
+  test: Test,
+  nextRowCursors: Record<string, number>,
+  nextAiLastValues: Record<string, string>,
+): Promise<void> {
+  if (Object.keys(nextRowCursors).length > 0) {
+    try {
+      await db
+        .update(testsTable)
+        .set({ variableRowCursors: nextRowCursors })
+        .where(eq(testsTable.id, test.id));
+    } catch (err) {
+      console.warn(
+        `[executor] Failed to persist variableRowCursors for test ${test.id}:`,
+        err,
+      );
+    }
+  }
+  if (Object.keys(nextAiLastValues).length > 0) {
+    try {
+      const merged = {
+        ...(test.aiVarLastValues ?? {}),
+        ...nextAiLastValues,
+      };
+      await db
+        .update(testsTable)
+        .set({ aiVarLastValues: merged })
+        .where(eq(testsTable.id, test.id));
+    } catch (err) {
+      console.warn(
+        `[executor] Failed to persist aiVarLastValues for test ${test.id}:`,
+        err,
+      );
+    }
+  }
 }
 
 /**
@@ -354,7 +405,7 @@ export interface ExecutionProgress {
  * same way it does for browser tests.
  */
 async function executeApiTests(
-  apiTests: Test[],
+  apiTests: RunnableTest[],
   runId: string,
   options: ExecutionOptions,
   onResult?: (result: TestRunResult) => Promise<void>,
@@ -369,6 +420,18 @@ async function executeApiTests(
   const baseUrl = options.environmentConfig?.baseUrl ?? undefined;
   const results: TestRunResult[] = [];
 
+  // Data sources are only needed when a test actually binds variables, which
+  // most api tests do not. Loaded once, lazily, for the whole batch.
+  const needsVars = apiTests.some((t) => (t.variables ?? []).length > 0);
+  const gsheetSources =
+    needsVars && options.repositoryId
+      ? await googleSheetsDataSourcesForRepo(options.repositoryId)
+      : [];
+  const csvSources =
+    needsVars && options.repositoryId
+      ? await csvDataSourcesForRepo(options.repositoryId)
+      : [];
+
   for (const test of apiTests) {
     const def = test.apiDefinition;
     let result: TestRunResult;
@@ -381,7 +444,33 @@ async function executeApiTests(
         errorMessage: "API test has no apiDefinition",
       };
     } else {
-      const apiResult = await runApiTest(appApiTestHost, def, { baseUrl });
+      // Assign-mode variables resolve for api tests too. Without this an api
+      // test in a matrix expansion issued the SAME request once per cell:
+      // every instance carried its pinned row, and nothing read it. The
+      // `{{var:name}}` token is the same one test code uses, applied here to
+      // the definition's url / headers / query / body.
+      const { rowPicks, nextCursors } = pickRowsForVariables(
+        test.variables,
+        gsheetSources,
+        csvSources,
+        test.variableRowCursors ?? null,
+      );
+      const { values: assignedVariables, nextLastValues } =
+        await resolveAssignedValuesAsync(
+          test.variables,
+          gsheetSources,
+          csvSources,
+          rowPicks,
+          null,
+          test.aiVarLastValues ?? undefined,
+        );
+      // Same write-back the browser path does — without it, increment and
+      // random-cursor variables on api tests never advanced between runs.
+      await persistVariableState(test, nextCursors, nextLastValues);
+      const resolvedDef = substituteVarTokens(def, assignedVariables);
+      const apiResult = await runApiTest(appApiTestHost, resolvedDef, {
+        baseUrl,
+      });
       result = {
         testId: test.id,
         status: apiResult.passed ? "passed" : "failed",
@@ -392,12 +481,55 @@ async function executeApiTests(
           : (apiResult.error ??
             `${apiResult.assertionResults.filter((a) => !a.passed).length} assertion(s) failed`),
         apiResult,
+        assignedVariables:
+          Object.keys(assignedVariables).length > 0
+            ? assignedVariables
+            : undefined,
       };
+    }
+    // P2: matrix identity travels with an api result exactly as it does with a
+    // browser one, so coverage attribution and the build's denominator see the
+    // expanded runs rather than the single definition they came from.
+    if (test.matrixRun) {
+      result.dataCell = test.matrixRun.dataCell;
+      result.matrixIndex = test.matrixRun.index;
+      result.matrixTotal = test.matrixRun.total;
     }
     results.push(result);
     if (onResult) await onResult(result);
   }
   return results;
+}
+
+/**
+ * Replace `{{var:name}}` tokens throughout a JSON payload's strings.
+ *
+ * Structure-preserving (keys are rewritten too, since a header name can be
+ * data-bound) and non-destructive: a token with no matching variable is left
+ * as written rather than blanked, so a typo surfaces in the request instead of
+ * silently becoming an empty value.
+ */
+function substituteVarTokens<T>(value: T, values: Record<string, string>): T {
+  if (Object.keys(values).length === 0) return value;
+  const sub = (input: string): string =>
+    input.replace(/\{\{var:([^}]+)\}\}/g, (whole, name: string) => {
+      const v = values[name.trim()];
+      return v === undefined ? whole : v;
+    });
+  const walk = (node: unknown): unknown => {
+    if (typeof node === "string") return sub(node);
+    if (Array.isArray(node)) return node.map(walk);
+    if (node && typeof node === "object") {
+      return Object.fromEntries(
+        Object.entries(node as Record<string, unknown>).map(([k, v]) => [
+          sub(k),
+          walk(v),
+        ]),
+      );
+    }
+    return node;
+  };
+  return walk(value) as T;
 }
 
 export async function executeTests(
@@ -407,18 +539,79 @@ export async function executeTests(
   onProgress?: (progress: ExecutionProgress) => void,
   onResult?: (result: TestRunResult) => Promise<void>,
 ): Promise<TestRunResult[]> {
+  // P2: fan matrix tests out into one instance per data cell BEFORE any
+  // dispatch decision, so every path below inherits it unchanged. Guarded so a
+  // re-entrant call (the api/browser split recurses) does not expand twice.
+  const alreadyExpanded = tests.some(
+    (t) => (t as RunnableTest).matrixRun !== undefined,
+  );
+  // Cheap pre-check: loading every CSV/sheet source resolves whole uploaded
+  // files, and a build with no matrix variables has nothing to expand.
+  const hasMatrixWork = tests.some(
+    (t) => matrixVariables(t.variables).length > 0,
+  );
+  let runnable: RunnableTest[] = tests;
+  const preFailed: TestRunResult[] = [];
+  if (!alreadyExpanded && hasMatrixWork) {
+    const expansion = expandTestsForMatrix(
+      tests,
+      options.repositoryId
+        ? await googleSheetsDataSourcesForRepo(options.repositoryId)
+        : [],
+      options.repositoryId
+        ? await csvDataSourcesForRepo(options.repositoryId)
+        : [],
+    );
+    for (const note of expansion.notes) {
+      console.log(`[executor] matrix ${note.testName}: ${note.explanation}`);
+    }
+    // The expansion is ALWAYS what runs from here on. It used to be adopted
+    // only when the test count changed, which silently discarded it whenever
+    // it didn't: a matrix test expanding to exactly one run (a filter that
+    // selects one row, a pairwise reduction down to one) then ran the ORIGINAL
+    // test, whose variables still say `sourceRowMode: 'matrix'` — resolved
+    // downstream as an unpinned row, so it tested whichever row the fallback
+    // picked and carried no `dataCell`, meaning no coverage attribution
+    // either. Same for any set whose failures and extra runs happened to
+    // cancel out.
+    runnable = expansion.tests;
+    for (const f of expansion.failures) {
+      const failure: TestRunResult = {
+        testId: f.testId,
+        status: "failed",
+        durationMs: 0,
+        screenshots: [],
+        errorMessage: `Matrix expansion failed: ${f.error}`,
+      };
+      preFailed.push(failure);
+      await onResult?.(failure);
+    }
+    if (runnable.length === 0) return preFailed;
+  }
+  // Every return below funnels through this so expansion failures are never
+  // dropped on a path that returns early.
+  const withPreFailed = (results: TestRunResult[]) =>
+    preFailed.length > 0 ? [...preFailed, ...results] : results;
+
   // E1: API tests run in-process (no browser). Split them off the top and let
   // the remaining browser tests flow through the normal runner/EB dispatch.
-  const apiTests = tests.filter((t) => t.testType === "api");
-  const browserTests = tests.filter((t) => t.testType !== "api");
+  // Both halves come from the EXPANDED list: an api test with matrix variables
+  // is a fan-out like any other, and filtering the originals here was what
+  // made the api path ignore matrices entirely.
+  const apiTests = runnable.filter((t) => t.testType === "api");
+  const browserTests = runnable.filter((t) => t.testType !== "api");
   if (apiTests.length > 0) {
+    // Report the post-expansion count before dispatching: the api path has no
+    // per-test progress, and a caller sizing its progress bar off the
+    // pre-expansion test list would otherwise never learn the real total.
+    onProgress?.({ completed: 0, total: apiTests.length });
     const apiResults = await executeApiTests(
       apiTests,
       runId,
       options,
       onResult,
     );
-    if (browserTests.length === 0) return apiResults;
+    if (browserTests.length === 0) return withPreFailed(apiResults);
     const browserResults = await executeTests(
       browserTests,
       runId,
@@ -426,7 +619,7 @@ export async function executeTests(
       onProgress,
       onResult,
     );
-    return [...apiResults, ...browserResults];
+    return withPreFailed([...apiResults, ...browserResults]);
   }
 
   // 'local' is no longer supported — redirect to fallback chain
@@ -436,7 +629,15 @@ export async function executeTests(
     options.runnerId === "auto"
   ) {
     console.log("Execution target: auto (fallback chain)");
-    return executeFallbackChain(tests, runId, options, onProgress, onResult);
+    return withPreFailed(
+      await executeFallbackChain(
+        runnable,
+        runId,
+        options,
+        onProgress,
+        onResult,
+      ),
+    );
   }
 
   // Explicit runner ID provided - verify runner is available
@@ -454,22 +655,26 @@ export async function executeTests(
         runner.isSystem
       ) {
         console.log(`Runner ${runner.id} is a pool EB, redirecting to auto`);
-        return executeFallbackChain(
-          tests,
-          runId,
-          options,
-          onProgress,
-          onResult,
+        return withPreFailed(
+          await executeFallbackChain(
+            runnable,
+            runId,
+            options,
+            onProgress,
+            onResult,
+          ),
         );
       }
       console.log(`Execution target: runner ${runner.id} (explicit)`);
-      return executeViaRunner(
-        tests,
-        runId,
-        runner.id,
-        options,
-        onProgress,
-        onResult,
+      return withPreFailed(
+        await executeViaRunner(
+          runnable,
+          runId,
+          runner.id,
+          options,
+          onProgress,
+          onResult,
+        ),
       );
     }
     // Also check system runners (cross-team) — redirect system EBs to pool
@@ -480,22 +685,26 @@ export async function executeTests(
         console.log(
           `System runner ${sysRunner.id} is a pool EB, redirecting to auto`,
         );
-        return executeFallbackChain(
-          tests,
-          runId,
-          options,
-          onProgress,
-          onResult,
+        return withPreFailed(
+          await executeFallbackChain(
+            runnable,
+            runId,
+            options,
+            onProgress,
+            onResult,
+          ),
         );
       }
       console.log(`Execution target: system runner ${sysRunner.id} (explicit)`);
-      return executeViaRunner(
-        tests,
-        runId,
-        sysRunner.id,
-        options,
-        onProgress,
-        onResult,
+      return withPreFailed(
+        await executeViaRunner(
+          runnable,
+          runId,
+          sysRunner.id,
+          options,
+          onProgress,
+          onResult,
+        ),
       );
     }
     console.warn(
@@ -507,7 +716,9 @@ export async function executeTests(
     );
   }
 
-  return executeFallbackChain(tests, runId, options, onProgress, onResult);
+  return withPreFailed(
+    await executeFallbackChain(runnable, runId, options, onProgress, onResult),
+  );
 }
 
 /**
@@ -630,7 +841,7 @@ export async function executeSetupViaRunner(
  * Executor polls the DB for completion and results.
  */
 async function executeViaRunner(
-  tests: Test[],
+  tests: RunnableTest[],
   runId: string,
   runnerId: string,
   options: ExecutionOptions,
@@ -756,6 +967,8 @@ async function executeViaRunner(
       completedSeenAt?: number;
       assignedVariables?: Record<string, string>;
       sentDesignSystem?: boolean;
+      /** P2: matrix identity of this in-flight run, carried onto the result. */
+      matrixRun?: MatrixRunMeta;
     }
   >();
   let completedCount = 0;
@@ -910,42 +1123,9 @@ async function executeViaRunner(
         continue;
       }
 
-      // Persist the updated row cursors so increment-mode vars walk forward
-      // across runs. Best-effort — never fail the run on a cursor write fail.
-      if (Object.keys(nextRowCursors).length > 0) {
-        try {
-          await db
-            .update(testsTable)
-            .set({ variableRowCursors: nextRowCursors })
-            .where(eq(testsTable.id, test.id));
-        } catch (err) {
-          console.warn(
-            `[executor] Failed to persist variableRowCursors for test ${test.id}:`,
-            err,
-          );
-        }
-      }
-
-      // Persist newly generated AI-var values so 'fixed' refresh-mode reuses
-      // them and 'random' mode has a fallback when AI later becomes
-      // unavailable. Best-effort — never fail the run on a cache write.
-      if (Object.keys(nextAiLastValues).length > 0) {
-        try {
-          const merged = {
-            ...(test.aiVarLastValues ?? {}),
-            ...nextAiLastValues,
-          };
-          await db
-            .update(testsTable)
-            .set({ aiVarLastValues: merged })
-            .where(eq(testsTable.id, test.id));
-        } catch (err) {
-          console.warn(
-            `[executor] Failed to persist aiVarLastValues for test ${test.id}:`,
-            err,
-          );
-        }
-      }
+      // Persist advanced cursor/AI-var state (increment rows, generated
+      // values) — shared helper with the api path.
+      await persistVariableState(test, nextRowCursors, nextAiLastValues);
 
       // Default-ON `all_steps_executed`: only off when the user explicitly
       // persisted a severity:'warn' rule in stepCriteria. Mirrors the synthesis
@@ -1126,6 +1306,7 @@ async function executeViaRunner(
             ? assignedVariables
             : undefined,
         sentDesignSystem: !!designSystemPayload,
+        matrixRun: (test as RunnableTest).matrixRun,
       });
     }
   };
@@ -1469,6 +1650,13 @@ async function executeViaRunner(
         // alongside extractedVariables so the Vars-tab "Last run" column has
         // data for both modes (especially with random/increment row picks).
         assignedVariables: info.assignedVariables,
+        // P2: the data cell this run exercised. Persisted explicitly rather
+        // than re-derived from assignedVariables, so attribution survives the
+        // user enabling or disabling dimensions afterwards.
+        dataCell: info.matrixRun?.dataCell,
+        matrixIndex: info.matrixRun?.index,
+        matrixTotal: info.matrixRun?.total,
+        matrixCapturesVisual: info.matrixRun?.capturesVisual,
         logs: (() => {
           const base =
             Array.isArray(payload.logs) && payload.logs.length > 0
@@ -1898,7 +2086,7 @@ async function persistDeadEBAttempt(
 }
 
 async function executeViaPoolWorkers(
-  tests: Test[],
+  tests: RunnableTest[],
   runId: string,
   options: ExecutionOptions,
   maxParallelEBs: number,
@@ -2031,7 +2219,11 @@ async function executeViaPoolWorkers(
       return !(await probeEBHealth(runnerId));
     };
 
-    const resultMap = new Map<string, TestRunResult>();
+    // Keyed by the test's POSITION, not its id. A matrix expansion produces
+    // several runnable instances sharing one test id, so a Map keyed on the id
+    // kept exactly one of their results and reported every other cell as
+    // "Dispatch ended without recording a result".
+    const resultMap = new Map<number, TestRunResult>();
     let completedCount = 0;
     let activeCount = 0;
     let everClaimed = false;
@@ -2195,7 +2387,14 @@ async function executeViaPoolWorkers(
       return r;
     };
 
-    const runOneTest = async (test: Test): Promise<TestRunResult> => {
+    const runOneTest = async (
+      test: RunnableTest,
+      /** Position in `tests`. Matrix instances share a test id, so liveness
+       *  bookkeeping keys on this instead — one instance finishing must not
+       *  drop a sibling's still-running EB from the keepalive set. */
+      index: number,
+    ): Promise<TestRunResult> => {
+      const inFlightKey = `${index}:${test.id}`;
       let lastError: string | undefined;
       for (let attempt = 1; attempt <= MAX_EB_ATTEMPTS; attempt++) {
         const eb = await claimWithRetry();
@@ -2212,7 +2411,7 @@ async function executeViaPoolWorkers(
         await recordActualRunner(eb.runnerId);
         // A1: register the claimed EB so the liveness tick keeps the build job
         // alive while this (possibly long) test runs on a heart-beating pod.
-        inFlightRunners.set(test.id, eb.runnerId);
+        inFlightRunners.set(inFlightKey, eb.runnerId);
         console.log(
           `[Dispatch] Claimed EB ${eb.runnerId.slice(0, 8)} for "${test.name}" (attempt ${attempt}/${MAX_EB_ATTEMPTS})`,
         );
@@ -2278,7 +2477,7 @@ async function executeViaPoolWorkers(
           });
         } finally {
           // A1: stop counting this EB toward the build's liveness once released.
-          inFlightRunners.delete(test.id);
+          inFlightRunners.delete(inFlightKey);
           try {
             await releasePoolEB(eb.runnerId);
           } catch {
@@ -2322,13 +2521,13 @@ async function executeViaPoolWorkers(
     };
 
     await Promise.all(
-      tests.map(async (test) => {
+      tests.map(async (test, index) => {
         await acquire();
         activeCount++;
         updateProgress(test.name);
         try {
-          const r = await runOneTest(test);
-          resultMap.set(test.id, r);
+          const r = await runOneTest(test, index);
+          resultMap.set(index, r);
         } finally {
           activeCount--;
           completedCount++;
@@ -2343,8 +2542,8 @@ async function executeViaPoolWorkers(
     );
 
     const results: TestRunResult[] = [];
-    for (const t of tests) {
-      const r = resultMap.get(t.id);
+    for (const [index, t] of tests.entries()) {
+      const r = resultMap.get(index);
       if (r) {
         results.push(r);
       } else {
@@ -2520,7 +2719,7 @@ async function getAvailableSystemRunnerById(runnerId: string) {
  * Used when local execution is disabled (cloud deployment).
  */
 async function executeFallbackChain(
-  tests: Test[],
+  tests: RunnableTest[],
   runId: string,
   options: ExecutionOptions,
   onProgress?: (progress: ExecutionProgress) => void,

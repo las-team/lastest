@@ -73,7 +73,9 @@ const EARLY_ADOPTER_ITEMS = new Set(["Compose", "Compare", "Impact"]);
 
 const definitionNav = [
   { name: "Tests", href: "/tests", icon: FileCode },
-  { name: "App Map", href: "/app-map", icon: Waypoints },
+  // App Map and Coverage merged into one screen — the canvas is the default
+  // view, the data space is the rail beside it. `/app-map` redirects here.
+  { name: "Coverage", href: "/coverage", icon: Waypoints },
   { name: "Setup", href: "/setup", icon: Wrench },
   { name: "Compose", href: "/compose", icon: Layers },
 ];

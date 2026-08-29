@@ -32,9 +32,10 @@ export const appMapPlugin = definePlugin({
 
   capabilities: ["repos"],
 
-  ui: {
-    nav: [{ href: "/app-map", label: "App Map", icon: "Waypoints" }],
-  },
+  // No nav entry of its own any more. The map is mounted as the default view
+  // of core's Coverage screen (`src/app/(app)/coverage/page.tsx`) — the two
+  // were one question asked on two axes, and two entries for it was the seam.
+  // `/app-map` survives as a redirect there.
 });
 
 export default appMapPlugin;

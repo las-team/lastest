@@ -52,6 +52,9 @@ export type {
   ExplorerActivityEvent,
   ExplorerExistingAuth,
   ExplorerHost,
+  ExplorerIssueContext,
+  ExplorerIssueRequest,
+  ExplorerIssueResult,
   ExplorerSettings,
 } from "./host";
 export {

@@ -52,14 +52,17 @@ function buildIssueBody(data: BugReportIssueData): string {
   return body;
 }
 
-// ===== Visual diff issue submission =====
+// ===== Generic issue submission =====
 //
-// The issue body is composed by `buildVisualDiffBody` in
-// `@/lib/integrations/github-issue-body` (the shared enriched composer).
-// The legacy thin composer that used to live here was removed — every
-// Lastest-filed issue must carry the full snapshot evidence trail.
+// Title/body/labels in, issue out. Every Lastest surface that files an issue
+// composes its own enriched body first — `buildVisualDiffBody` /
+// `buildVerifyCaseBody` in `@/lib/integrations/github-issue-body` for core's
+// two, `buildFindingIssueBody` inside `@lastest/plugin-explorer` for a finding
+// — because the body is the part that differs and the POST is the part that
+// does not. (Named `createVisualDiffIssue` until the explorer's findings panel
+// became the third caller.)
 
-export async function createVisualDiffIssue(
+export async function createRepoIssue(
   token: string,
   owner: string,
   repo: string,

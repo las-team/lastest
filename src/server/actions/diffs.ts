@@ -20,7 +20,7 @@ import {
 } from "@/lib/storage/paths";
 import { awardScore } from "@lastest/plugin-gamification/actions";
 import * as gamificationReads from "@lastest/plugin-gamification/reads";
-import { createVisualDiffIssue } from "@/lib/integrations/github-issues";
+import { createRepoIssue } from "@/lib/integrations/github-issues";
 import { buildVisualDiffBody } from "@/lib/integrations/github-issue-body";
 import { approveDiffCore, rejectDiffCore } from "@/lib/diff/core";
 
@@ -662,7 +662,7 @@ export async function submitDiffAsIssue(diffId: string): Promise<{
   // without a human dispatcher.
   const assignees = notif.issueAssignee ? [notif.issueAssignee] : undefined;
 
-  const result = await createVisualDiffIssue(
+  const result = await createRepoIssue(
     ghAccount.accessToken,
     repo.owner,
     repo.name,
@@ -912,14 +912,28 @@ async function recalculateDiff(
         }))
       : undefined;
 
-  // Look up baseline: branch-specific first, then fallback to default branch
+  // Look up baseline: branch-specific first, then fallback to default branch.
+  // Scoped to the run's data cell (P2) so a re-diff of one matrix cell cannot
+  // pick up a different cell's baseline; both lookups fall back to the shared
+  // NULL-cell baseline on their own.
+  const dataCell = testResult?.dataCell ?? null;
   const baseline =
-    (await queries.getBranchBaseline(diff.testId, stepLabel, branch)) ??
+    (await queries.getBranchBaseline(
+      diff.testId,
+      stepLabel,
+      branch,
+      // Browser left at the historical default here — this path has never
+      // resolved per-browser baselines, and changing that is a separate fix.
+      "chromium",
+      dataCell,
+    )) ??
     (await queries.getActiveBaseline(
       diff.testId,
       stepLabel,
       branch,
       defaultBranch,
+      "chromium",
+      dataCell,
     ));
 
   const baselineExists =

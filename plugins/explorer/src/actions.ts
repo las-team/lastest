@@ -5,9 +5,10 @@ import { getNextRunTime, isValidCron } from "@lastest/cron";
 
 import { orm } from "./data/db";
 import * as q from "./data/queries";
+import { buildFindingIssueBody } from "./domain/issue-body";
 import { parseStyleRotation } from "./domain/styles";
 import { ExplorerSessionNotFoundError } from "./errors";
-import type { ExplorerHost } from "./host";
+import type { ExplorerHost, ExplorerIssueContext } from "./host";
 import { explorerPlugin } from "./index";
 import {
   abortSession,
@@ -325,6 +326,145 @@ export async function setFindingStatus(
   await q.updateFindingStatus(db, findingId, status);
   revalidatePath("/explorer");
   return { success: true };
+}
+
+export interface FileFindingIssueInput {
+  findingId: string;
+  /** Reviewer-edited title. Omitted = the finding's own, `[Explorer]`-prefixed. */
+  title?: string;
+  /** Free-text note rendered above the description. */
+  note?: string;
+}
+
+export interface FileFindingIssueResult {
+  ok: boolean;
+  issueUrl?: string;
+  issueNumber?: number;
+  error?: string;
+  code?: string;
+}
+
+/**
+ * File a finding as an issue on the repo's tracker, and mark it triaged.
+ *
+ * The counterpart of core's `createIssueForCase` for a verify case, and the
+ * reason this exists: "Triage" used to mean a status flip nobody outside this
+ * page could see, so the button read as doing nothing. A finding that matters
+ * has to leave Lastest and land where the work is tracked, carrying the
+ * scenario, the action log and the console/network evidence with it — that is
+ * what `buildFindingIssueBody` renders and what a reviewer would otherwise
+ * retype by hand.
+ *
+ * Failure never throws: a missing GitHub connection or a rejected POST comes
+ * back as `{ ok: false }` so the panel can show it without losing the note the
+ * reviewer typed.
+ */
+export async function fileFindingIssue(
+  input: FileFindingIssueInput,
+): Promise<FileFindingIssueResult> {
+  const { ctx, host } = await context();
+  const finding = await q.getFinding(dataOf(ctx, host), input.findingId);
+  if (!finding || finding.teamId !== ctx.team.id) {
+    return { ok: false, error: "Finding not found" };
+  }
+  if (finding.githubIssueUrl) {
+    // Already filed. Idempotent rather than a duplicate ticket.
+    return {
+      ok: true,
+      issueUrl: finding.githubIssueUrl,
+      issueNumber: finding.githubIssueNumber ?? undefined,
+    };
+  }
+
+  // Re-scope to the finding's repo: the row proves the team, but every repo-
+  // bound call below (issue context, the POST) must be authorized against the
+  // repository itself, and `contextFor` is what does that.
+  const { ctx: scoped, host: scopedHost } = await context(finding.repositoryId);
+  const db = dataOf(scoped, scopedHost);
+
+  const issueCtx = await scopedHost.issueContext(finding.repositoryId);
+  if (!issueCtx.connected) {
+    return {
+      ok: false,
+      error: issueCtx.error ?? "No issue tracker connected for this team",
+      code: issueCtx.code,
+    };
+  }
+
+  const session = await q.getSession(db, finding.sessionId);
+  const scenarioId = finding.scenario?.id;
+  const composed = buildFindingIssueBody({
+    finding: {
+      id: finding.id,
+      title: finding.title,
+      description: finding.description,
+      severity: finding.severity,
+      kind: finding.kind,
+      url: finding.url,
+      rootCauseCluster: finding.rootCauseCluster,
+      pageStateHash: finding.pageStateHash,
+      scenario: finding.scenario ?? null,
+      evidence: finding.evidence ?? null,
+      createdAt: finding.createdAt ?? null,
+    },
+    session: session
+      ? {
+          id: session.id,
+          targetUrl: session.metadata.targetUrl ?? null,
+          actionLog:
+            (scenarioId
+              ? session.metadata.actionLogs?.[scenarioId]
+              : undefined) ?? null,
+        }
+      : null,
+    cluster:
+      session?.metadata.report?.clusters.find((c) =>
+        c.findingIds.includes(finding.id),
+      ) ?? null,
+    repoFullName: issueCtx.repoFullName,
+    reporterEmail: issueCtx.reporterEmail,
+    appBaseUrl: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+    note: input.note?.trim() || null,
+    titleOverride: input.title ?? null,
+  });
+
+  const result = await scopedHost.createIssue({
+    repositoryId: scoped.repo?.id ?? finding.repositoryId,
+    title: composed.title,
+    body: composed.body,
+    labels: composed.labels,
+  });
+  if (!result.ok || !result.issueUrl) {
+    return {
+      ok: false,
+      error: result.error ?? "Could not create the issue",
+      code: result.code,
+    };
+  }
+
+  await q.updateFindingIssue(db, finding.id, {
+    url: result.issueUrl,
+    number: result.issueNumber,
+  });
+  revalidatePath("/explorer");
+  return {
+    ok: true,
+    issueUrl: result.issueUrl,
+    issueNumber: result.issueNumber,
+  };
+}
+
+/**
+ * Whether the findings panel can offer "File issue" at all, for this repo.
+ *
+ * Read before the dialog opens so a reviewer is told the tracker is not
+ * connected up front rather than after composing a note.
+ */
+export async function getFindingIssueContext(
+  repositoryId: string,
+): Promise<ExplorerIssueContext> {
+  const { host } = await context(repositoryId);
+  return host.issueContext(repositoryId);
 }
 
 // ── knowledge ────────────────────────────────────────────────────────────────

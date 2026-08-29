@@ -17,6 +17,8 @@ import type {
   CsvDataSource,
   GoogleSheetsDataSource,
 } from "@lastest/plugin-data-sources";
+import type { MatrixPolicy } from "@/lib/db/schema";
+import { MatrixPolicyCard } from "./matrix-policy-card";
 import { AI_VAR_PRESETS } from "@/lib/vars/ai-presets";
 import { VarEditDialog } from "./var-edit-dialog";
 import { CsvSourcesSettingsCard } from "@lastest/plugin-data-sources/ui/csv-sources-card";
@@ -63,6 +65,8 @@ export interface TestVarsTabProps {
   /** Cached last-known-good values for AI-generated vars, keyed by
    *  TestVariable.id. Read from tests.aiVarLastValues. */
   aiVarLastValues?: Record<string, string> | null;
+  /** Matrix-execution policy from tests.matrixPolicy. Null = the defaults. */
+  matrixPolicy?: MatrixPolicy | null;
 }
 
 function describeSource(v: TestVariable): string {
@@ -71,10 +75,17 @@ function describeSource(v: TestVariable): string {
       ? `${v.attribute || "value"} of ${v.targetSelector}`
       : "—";
   if (v.sourceType === "static") return `static: ${v.staticValue ?? ""}`;
-  if (v.sourceType === "gsheet")
-    return `gsheet:${v.sourceAlias}.${v.sourceColumn}[${v.sourceRow ?? 0}]`;
-  if (v.sourceType === "csv")
-    return `csv:${v.sourceAlias}.${v.sourceColumn}[${v.sourceRow ?? 0}]`;
+  if (v.sourceType === "gsheet" || v.sourceType === "csv") {
+    const base = `${v.sourceType}:${v.sourceAlias}.${v.sourceColumn}`;
+    // Matrix vars are bound to a SLICE, not a row — showing "[0]" for one
+    // would misdescribe what the test actually runs.
+    if (v.sourceRowMode === "matrix") {
+      return `${base} · matrix${v.rowFilter ? ` where ${v.rowFilter}` : " (all rows)"}`;
+    }
+    if (v.sourceRowMode === "random") return `${base} · random row`;
+    if (v.sourceRowMode === "increment") return `${base} · increments`;
+    return `${base}[${v.sourceRow ?? 0}]`;
+  }
   if (v.sourceType === "ai-generated") {
     const refresh = v.sourceRowMode === "fixed" ? "fixed" : "per-run";
     if (v.aiPreset === "custom") return `ai (custom · ${refresh})`;
@@ -100,6 +111,7 @@ export function TestVarsTab({
   onRefresh,
   aiAvailable = false,
   aiVarLastValues,
+  matrixPolicy = null,
 }: TestVarsTabProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TestVariable | null>(null);
@@ -357,6 +369,15 @@ export function TestVarsTab({
           )}
         </CardContent>
       </Card>
+
+      <MatrixPolicyCard
+        testId={testId}
+        variables={variables}
+        sheetSources={sheetSources}
+        csvSources={csvSources}
+        policy={matrixPolicy ?? null}
+        onSaved={onRefresh}
+      />
 
       <CsvSourcesSettingsCard
         dataSources={csvSources}

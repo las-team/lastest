@@ -87,6 +87,8 @@ import {
   extractSourceIp,
 } from "@/lib/security/outbound-url";
 import { checkRateLimit } from "@/lib/rate-limit/endpoint-bucket";
+import { ensureFreshCoverage, getCoverageReport } from "@/lib/coverage/sync";
+import { DEFAULT_COVERAGE_ENVIRONMENT } from "@/lib/db/schema";
 import {
   generateAndStoreCaptionsForBuild,
   storeCaptionsForBuild,
@@ -778,6 +780,79 @@ export async function GET(
               : 0,
         };
         return NextResponse.json({ routeCoverage, areaCoverage });
+      }
+
+      // GET /api/v1/repos/:id/data-coverage — data-driven coverage: per object
+      // type / dimension / cell, plus the stop decision. Kept separate from
+      // `coverage` above, which is route/area based and consumed by the MCP
+      // server — the two answer different questions.
+      if (subResource === "data-coverage") {
+        const environmentKey =
+          request.nextUrl.searchParams.get("environment") ?? undefined;
+        // `fresh=1` re-derives the model before answering. Off by default: a
+        // read of the current state must stay cheap, and a caller that wants
+        // an up-to-date number should have to say so.
+        const wantsFresh =
+          request.nextUrl.searchParams.get("fresh") === "1" ||
+          request.nextUrl.searchParams.get("fresh") === "true";
+        const trendLimit = Math.min(
+          Number(request.nextUrl.searchParams.get("trendLimit")) || 30,
+          200,
+        );
+
+        const state = wantsFresh
+          ? await ensureFreshCoverage(id, { environmentKey, force: true })
+          : await getCoverageReport(id, { environmentKey }).then((r) => ({
+              ...r,
+              synced: false,
+              stale: false,
+              lastSyncedAt: null as Date | null,
+            }));
+
+        const [trend, latestSnapshot] = await Promise.all([
+          queries.getCoverageTrend(id, { environmentKey, limit: trendLimit }),
+          // `source: "sync"` — the field is named lastSyncedAt, and a build
+          // snapshot is not a sync (it never re-profiles the sources).
+          queries.getLatestCoverageSnapshot(
+            id,
+            environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT,
+            { source: "sync" },
+          ),
+        ]);
+        const lastSyncedAt = state.lastSyncedAt ?? latestSnapshot?.capturedAt;
+
+        return NextResponse.json({
+          report: state.report,
+          stop: {
+            shouldStop: state.stop.shouldStop,
+            reasons: state.stop.reasons,
+            metrics: state.stop.metrics,
+            explanation: state.stop.explanation,
+            // The planner's work queue: highest-weight uncovered cells first.
+            queue: state.stop.queue.slice(0, 100),
+          },
+          // Freshness is part of the answer: a consumer that cannot tell a
+          // measurement from a stale one will quote the stale one.
+          freshness: {
+            lastSyncedAt: lastSyncedAt?.toISOString() ?? null,
+            resynced: state.synced,
+            stale: state.stale,
+          },
+          // Oldest first. `source` distinguishes measured points from ones
+          // reconstructed out of the attribution ledger.
+          trend: trend.map((s) => ({
+            capturedAt: s.capturedAt.toISOString(),
+            buildId: s.buildId,
+            source: s.source,
+            totalCells: s.totalCells,
+            coveredCells: s.coveredCells,
+            excludedCells: s.excludedCells,
+            failingCells: s.failingCells,
+            cellCoverage: s.cellCoverage,
+            tupleCoverage: s.tupleCoverage,
+            weightedVolumeCoverage: s.weightedVolumeCoverage,
+          })),
+        });
       }
 
       // GET /api/v1/repos/:id/qa-agent — QA agent status for external agents:

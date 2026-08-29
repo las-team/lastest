@@ -177,6 +177,13 @@ export const explorerFindings = pgTable(
      *  plugin action), but keeping the column preserves rows migrated
      *  from before the split instead of silently dropping them. */
     bugReportId: text("bug_report_id"),
+    /** The GitHub issue this finding was filed as, from the findings panel's
+     *  "File issue" action. Same pair core keeps on `step_comparisons` for a
+     *  verify case: the URL is what the UI links to, the number is what a
+     *  future webhook would match a close event against. Plain columns, no FK
+     *  — the issue lives on GitHub, not in a table here. */
+    githubIssueUrl: text("github_issue_url"),
+    githubIssueNumber: integer("github_issue_number"),
     scenario: jsonb("scenario").$type<ExplorerScenario>(),
     evidence: jsonb("evidence").$type<ExplorerFindingEvidence>(),
     status: text("status")
