@@ -27,9 +27,14 @@ vi.mock("@/lib/db/queries", () => ({
     updateCoverageCellWeights(...a),
 }));
 
+const csvDataSourceTablesForRepo = vi.fn();
+const sheetDataSourceTablesForRepo = vi.fn();
+
 vi.mock("@/lib/core/data-sources-reads", () => ({
-  csvDataSourceTablesForRepo: async () => [],
-  sheetDataSourceTablesForRepo: async () => [],
+  csvDataSourceTablesForRepo: (...a: unknown[]) =>
+    csvDataSourceTablesForRepo(...a),
+  sheetDataSourceTablesForRepo: (...a: unknown[]) =>
+    sheetDataSourceTablesForRepo(...a),
 }));
 
 vi.mock("./trend", () => ({
@@ -89,8 +94,13 @@ function cell(i: number): CoverageCell {
   } as unknown as CoverageCell;
 }
 
-/** 250 of each, so both chunked stages cross the 200-row heartbeat boundary. */
-const CELLS = Array.from({ length: 250 }, (_, i) => cell(i));
+/**
+ * Sized so both chunked stages cross their own boundary more than once:
+ * attribution beats every `HEARTBEAT_CHUNK` (200) runs, and weighting persists
+ * — and beats — every `WEIGHT_PERSIST_CHUNK` (500) cells, one statement per
+ * chunk rather than one UPDATE per cell.
+ */
+const CELLS = Array.from({ length: 750 }, (_, i) => cell(i));
 const RUNS = Array.from({ length: 250 }, (_, i) => ({
   testResultId: `res-${i}`,
   testId: `test-${i}`,
@@ -116,6 +126,8 @@ beforeEach(() => {
   recordCoverageCellRuns.mockReset().mockResolvedValue(undefined);
   refreshCoverageCellStats.mockReset().mockResolvedValue(undefined);
   updateCoverageCellWeights.mockReset().mockResolvedValue(undefined);
+  csvDataSourceTablesForRepo.mockReset().mockResolvedValue([]);
+  sheetDataSourceTablesForRepo.mockReset().mockResolvedValue([]);
 });
 
 describe("syncCoverage heartbeats", () => {
@@ -151,9 +163,12 @@ describe("syncCoverage heartbeats", () => {
     expect(weight.length).toBeGreaterThan(1);
     // Within-stage beats carry a position; boundary beats do not.
     expect(attribute.at(-1)).toMatchObject({ done: 200, total: 250 });
-    expect(weight.at(-1)).toMatchObject({ done: 250, total: 250 });
-    // Weights are persisted in the same chunks the beats report.
+    expect(weight.at(-1)).toMatchObject({ done: 750, total: 750 });
+    // Weights are persisted in the same chunks the beats report: 750 cells is
+    // two statements of at most 500 rows, not 750 single-row UPDATEs.
     expect(updateCoverageCellWeights).toHaveBeenCalledTimes(2);
+    expect(updateCoverageCellWeights.mock.calls[0][0]).toHaveLength(500);
+    expect(updateCoverageCellWeights.mock.calls[1][0]).toHaveLength(250);
   });
 
   it("survives a heartbeat that throws", async () => {
@@ -166,6 +181,27 @@ describe("syncCoverage heartbeats", () => {
     });
     expect(result.environmentKey).toBe("default");
     expect(updateCoverageCellWeights).toHaveBeenCalled();
+  });
+
+  it("fetches each input once, and re-reads only what a stage rewrote", async () => {
+    // The whole point of threading preloaded inputs through the stages. Data
+    // sources resolve to their FULL file (a blob read plus a parse each time)
+    // and the run scan walks up to 20,000 jsonb rows, so a stage fetching its
+    // own copy is not a cheap repeat — these three were fetched two, two and
+    // three times per sync respectively.
+    await syncCoverage("repo");
+    expect(csvDataSourceTablesForRepo).toHaveBeenCalledTimes(1);
+    expect(sheetDataSourceTablesForRepo).toHaveBeenCalledTimes(1);
+    expect(getAssignedVariableRuns).toHaveBeenCalledTimes(1);
+
+    // Dimensions are written by `profile` and read once after it.
+    expect(getCoverageDimensions).toHaveBeenCalledTimes(1);
+
+    // Cells are the one thing that legitimately reads twice: `derive` writes
+    // the cell set and `attribute` rewrites every counter on it in SQL, so
+    // weighting must see the post-attribution rows. Sharing one read across
+    // both would score the previous generation of the model.
+    expect(getCoverageCells).toHaveBeenCalledTimes(2);
   });
 
   it("stays optional — no hook, no beats, same result", async () => {

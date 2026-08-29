@@ -22,6 +22,7 @@ import {
   type CoverageWeightPolicy,
 } from "@/lib/db/schema";
 import * as queries from "@/lib/db/queries";
+import type { AssignedVariableRun } from "@/lib/db/queries";
 import { type SourceTable } from "./source-rows";
 import {
   csvDataSourceTablesForRepo,
@@ -96,6 +97,17 @@ const STAGE_LABELS: Record<CoverageSyncStage, string> = {
 const HEARTBEAT_CHUNK = 200;
 
 /**
+ * How many cells one weight UPDATE carries.
+ *
+ * `updateCoverageCellWeights` issues a single `UPDATE ... FROM (VALUES ...)`
+ * per call, so this is a statement size, not a loop bound — 500 mirrors the
+ * chunk the cell INSERTs already use in `src/lib/db/queries/coverage.ts`, and
+ * stays far inside Postgres's bind-parameter ceiling. A beat every 500 cells
+ * is still two orders of magnitude inside the five-minute watchdog window.
+ */
+const WEIGHT_PERSIST_CHUNK = 500;
+
+/**
  * Fire the progress hook, swallowing anything it throws.
  *
  * A heartbeat is bookkeeping for the caller; losing one must never lose the
@@ -148,6 +160,42 @@ export interface SyncOptions {
   onStage?: (progress: CoverageSyncProgress) => void | Promise<void>;
 }
 
+/**
+ * Everything a sync reads from OUTSIDE the coverage tables, loaded once.
+ *
+ * Each of these was previously fetched by every stage that needed it — the
+ * two data-source reads twice and the run scan three times per sync. That is
+ * not a cheap repeat: a CSV source resolves to its *full* file, so each fetch
+ * re-read the stored blob and re-parsed it, and `getAssignedVariableRuns`
+ * scans up to 20,000 jsonb rows.
+ *
+ * Only read-only-for-the-sync inputs belong here. Dimensions and cells
+ * deliberately do NOT: `profileDimensions` writes dimensions and
+ * `deriveAndPersistCells` writes cells, so anything preloaded at the top of
+ * the sync would describe the state BEFORE the stage that produces it.
+ * `syncCoverage` reads those between the stages that write them instead — see
+ * the ordering note there.
+ */
+export interface CoverageSyncInputs {
+  csvSources: SourceTable[];
+  sheetSources: SourceTable[];
+  runs: AssignedVariableRun[];
+}
+
+/** Load the shared inputs. Exported stages call this when a caller runs them
+ *  standalone; `syncCoverage` calls it once and passes the result down. */
+export async function loadCoverageSyncInputs(
+  repositoryId: string,
+  opts: SyncOptions = {},
+): Promise<CoverageSyncInputs> {
+  const [csvSources, sheetSources, runs] = await Promise.all([
+    csvDataSourceTablesForRepo(repositoryId),
+    sheetDataSourceTablesForRepo(repositoryId),
+    queries.getAssignedVariableRuns(repositoryId, { limit: opts.runLimit }),
+  ]);
+  return { csvSources, sheetSources, runs };
+}
+
 /** How many rows each data source's numbers actually rest on. Reported so a
  *  sampled profile can never be mistaken for the full distribution. */
 export interface SourceSample {
@@ -187,6 +235,9 @@ export interface SyncResult {
 export async function profileDimensions(
   repositoryId: string,
   opts: SyncOptions = {},
+  /** Preloaded shared inputs. Omit to have this stage load its own — the
+   *  standalone signature is unchanged. */
+  inputs?: CoverageSyncInputs,
 ): Promise<{
   proposed: ProfiledDimension[];
   rejected: ProfiledDimension[];
@@ -194,11 +245,8 @@ export async function profileDimensions(
   sources: SourceSample[];
 }> {
   const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
-  const [csvSources, sheetSources, runs] = await Promise.all([
-    csvDataSourceTablesForRepo(repositoryId),
-    sheetDataSourceTablesForRepo(repositoryId),
-    queries.getAssignedVariableRuns(repositoryId, { limit: opts.runLimit }),
-  ]);
+  const { csvSources, sheetSources, runs } =
+    inputs ?? (await loadCoverageSyncInputs(repositoryId, opts));
 
   const proposed: ProfiledDimension[] = [];
   const rejected: ProfiledDimension[] = [];
@@ -266,7 +314,16 @@ function toSample(table: SourceTable): SourceSample {
 export async function deriveAndPersistCells(
   repositoryId: string,
   opts: SyncOptions = {},
-): Promise<{ derived: number; pruned: number }> {
+  /** Preloaded shared inputs. Omit to have this stage load its own. */
+  inputs?: CoverageSyncInputs,
+): Promise<{
+  derived: number;
+  pruned: number;
+  /** The dimension rows this stage had to read anyway, returned so the caller
+   *  can report on them without a second read. Safe to reuse: nothing after
+   *  derivation writes dimensions. */
+  dimensions: CoverageDimension[];
+}> {
   const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
   const allDimensions = await queries.getCoverageDimensions(
     repositoryId,
@@ -300,14 +357,11 @@ export async function deriveAndPersistCells(
         [],
       );
     }
-    return { derived: 0, pruned };
+    return { derived: 0, pruned, dimensions: allDimensions };
   }
 
-  const [csvSources, sheetSources, runs] = await Promise.all([
-    csvDataSourceTablesForRepo(repositoryId),
-    sheetDataSourceTablesForRepo(repositoryId),
-    queries.getAssignedVariableRuns(repositoryId, { limit: opts.runLimit }),
-  ]);
+  const { csvSources, sheetSources, runs } =
+    inputs ?? (await loadCoverageSyncInputs(repositoryId, opts));
 
   const byObjectType = new Map<string, string[]>();
   for (const d of dimensions) {
@@ -369,7 +423,7 @@ export async function deriveAndPersistCells(
     );
   }
 
-  return { derived: derived.length, pruned };
+  return { derived: derived.length, pruned, dimensions: allDimensions };
 }
 
 function recordsForObjectType(
@@ -404,11 +458,15 @@ function recordsForObjectType(
 export async function attributeRuns(
   repositoryId: string,
   opts: SyncOptions = {},
+  /** Preloaded inputs. `cells` MUST have been read after derivation — see the
+   *  ordering note in `syncCoverage`. Omit either to load it here. */
+  inputs?: Partial<CoverageSyncInputs> & { cells?: CoverageCell[] },
 ): Promise<{ runsScanned: number; attributionsRecorded: number }> {
   const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
   const [cells, runs] = await Promise.all([
-    queries.getCoverageCells(repositoryId, { environmentKey }),
-    queries.getAssignedVariableRuns(repositoryId, { limit: opts.runLimit }),
+    inputs?.cells ?? queries.getCoverageCells(repositoryId, { environmentKey }),
+    inputs?.runs ??
+      queries.getAssignedVariableRuns(repositoryId, { limit: opts.runLimit }),
   ]);
   if (cells.length === 0 || runs.length === 0) {
     return { runsScanned: runs.length, attributionsRecorded: 0 };
@@ -499,18 +557,31 @@ export async function attributeRuns(
   };
 }
 
-/** Score every cell and persist weight + per-term breakdown. */
+/**
+ * Score every cell and persist weight + per-term breakdown.
+ *
+ * Returns the SAME cell rows with the new weight and breakdown applied in
+ * memory, so a caller that has to report on what it just wrote (the sync's
+ * `buildCoverageReport`/`evaluateStop`) does not re-read the table it is the
+ * sole writer of.
+ */
 export async function recomputeWeights(
   repositoryId: string,
   opts: SyncOptions = {},
-): Promise<void> {
+  /** Preloaded cells. MUST have been read after attribution: weighting reads
+   *  `runCount`/`failCount`/`status`, which `attributeRuns` recomputes in SQL
+   *  via `refreshCoverageCellStats`. Omit to read them here. */
+  inputs?: { cells?: CoverageCell[] },
+): Promise<CoverageCell[]> {
   const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
   const policy = opts.weightPolicy ?? DEFAULT_COVERAGE_WEIGHT_POLICY;
   const strength = (opts.stopPolicy ?? DEFAULT_COVERAGE_STOP_POLICY).strength;
-  const cells = await queries.getCoverageCells(repositoryId, {
-    environmentKey,
-  });
-  if (cells.length === 0) return;
+  const cells =
+    inputs?.cells ??
+    (await queries.getCoverageCells(repositoryId, {
+      environmentKey,
+    }));
+  if (cells.length === 0) return cells;
 
   // Weighting is relative within an object type — volumes are not comparable
   // across different tables, so normalizing globally would distort ranking.
@@ -550,16 +621,26 @@ export async function recomputeWeights(
     });
   }
 
-  // One UPDATE per cell, so this is the longest stage on a big model. Persist
-  // in chunks and beat between them.
-  for (let i = 0; i < updates.length; i += HEARTBEAT_CHUNK) {
-    const chunk = updates.slice(i, i + HEARTBEAT_CHUNK);
+  // Persist in chunks and beat between them. Each chunk is ONE statement
+  // (`UPDATE ... FROM (VALUES ...)`), not one round trip per cell.
+  for (let i = 0; i < updates.length; i += WEIGHT_PERSIST_CHUNK) {
+    const chunk = updates.slice(i, i + WEIGHT_PERSIST_CHUNK);
     await queries.updateCoverageCellWeights(chunk);
     await beat(opts, "weight", {
       done: Math.min(i + chunk.length, updates.length),
       total: updates.length,
     });
   }
+
+  // Mirror the persisted values onto the rows we were handed, so the caller's
+  // copy matches the table without reading it back.
+  const byId = new Map(updates.map((u) => [u.id, u]));
+  return cells.map((c) => {
+    const u = byId.get(c.id);
+    return u
+      ? { ...c, weight: u.weight, weightBreakdown: u.weightBreakdown }
+      : c;
+  });
 }
 
 /** Full pass: profile → derive → attribute → weight → report → stop decision. */
@@ -569,27 +650,58 @@ export async function syncCoverage(
 ): Promise<SyncResult> {
   const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
 
+  // ── Read ordering ───────────────────────────────────────────────────────
+  // Data sources and the historical run scan are read-only for the whole
+  // sync, so they are loaded ONCE here and handed to every stage that wants
+  // them. The coverage tables are not: each stage writes the rows the next
+  // one reads, so those reads have to sit BETWEEN the stages.
+  //
+  //   dimensions  written by profile → read by derive (and reused after)
+  //   cells       written by derive  → read for attribute
+  //   cell stats  written by attribute (refreshCoverageCellStats, in SQL)
+  //               → cells re-read for weight
+  //   weights     written by weight  → applied in memory, never re-read
+  //
+  // Taking any of those from a snapshot older than the stage that wrote it
+  // silently scores the previous generation of the model.
+  const inputs = await loadCoverageSyncInputs(repositoryId, opts);
+
   await beat(opts, "profile");
   const { proposed, rejected, runsScanned, sources } = await profileDimensions(
     repositoryId,
     opts,
+    inputs,
   );
   await beat(opts, "derive");
-  const { derived: cellsUpserted, pruned: cellsPruned } =
-    await deriveAndPersistCells(repositoryId, opts);
+  const {
+    derived: cellsUpserted,
+    pruned: cellsPruned,
+    dimensions,
+  } = await deriveAndPersistCells(repositoryId, opts, inputs);
+
   await beat(opts, "attribute");
-  const attribution = await attributeRuns(repositoryId, opts);
+  const derivedCells = await queries.getCoverageCells(repositoryId, {
+    environmentKey,
+  });
+  const attribution = await attributeRuns(repositoryId, opts, {
+    ...inputs,
+    cells: derivedCells,
+  });
+
   await beat(opts, "weight");
-  await recomputeWeights(repositoryId, opts);
+  // Re-read: attribution rewrote every cell's run counters and status in SQL,
+  // and weighting is a function of exactly those.
+  const attributedCells = await queries.getCoverageCells(repositoryId, {
+    environmentKey,
+  });
+  const cells = await recomputeWeights(repositoryId, opts, {
+    cells: attributedCells,
+  });
+
   await beat(opts, "snapshot");
   // A sync re-derives the cell set, so page attribution built on the previous
   // one is stale by definition.
   invalidatePageCoverageAttribution(repositoryId);
-
-  const [cells, dimensions] = await Promise.all([
-    queries.getCoverageCells(repositoryId, { environmentKey }),
-    queries.getCoverageDimensions(repositoryId, environmentKey),
-  ]);
 
   const stopPolicy = {
     ...DEFAULT_COVERAGE_STOP_POLICY,
@@ -628,6 +740,10 @@ export async function syncCoverage(
       source: "sync",
       strength: stopPolicy.strength,
       shouldStop: stop.shouldStop,
+      // Already in hand and already current — no third read of the two tables
+      // this function is, at this moment, the sole writer of.
+      cells,
+      dimensions,
     });
     await backfillCoverageSnapshots(repositoryId, {
       environmentKey,

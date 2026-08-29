@@ -210,6 +210,26 @@ export async function upsertCoverageCells(
   return rows.length;
 }
 
+/**
+ * Persist recomputed weights.
+ *
+ * One statement per chunk, not one per cell. Weighting scores EVERY cell in
+ * the model, so the awaited `UPDATE ... WHERE id = $1` loop this replaced cost
+ * one network round trip per row — thousands of them, serially, inside the
+ * serving process, and it was the longest stage of a coverage sync by a wide
+ * margin. The chunked `UPDATE ... FROM (VALUES ...)` form does the same work
+ * in one round trip per 500 rows.
+ *
+ * Every VALUES column is cast explicitly: bind parameters arrive with no type,
+ * and Postgres infers a VALUES list's column types from its FIRST row only, so
+ * an uncast list either fails outright or silently pins the wrong type.
+ *
+ * `has_breakdown` preserves the semantics of the drizzle `.set()` it replaced:
+ * an OMITTED `weightBreakdown` leaves the stored breakdown alone, while an
+ * explicit `null` clears it. Without the flag both collapse to NULL, which
+ * would quietly wipe breakdowns for any caller that only wants to restate a
+ * weight.
+ */
 export async function updateCoverageCellWeights(
   updates: Array<{
     id: string;
@@ -217,16 +237,34 @@ export async function updateCoverageCellWeights(
     weightBreakdown?: CoverageCell["weightBreakdown"];
   }>,
 ): Promise<void> {
-  const now = new Date();
-  for (const u of updates) {
-    await db
-      .update(coverageCells)
-      .set({
-        weight: u.weight,
-        weightBreakdown: u.weightBreakdown,
-        updatedAt: now,
-      })
-      .where(eq(coverageCells.id, u.id));
+  if (updates.length === 0) return;
+  // ISO-8601, matching what drizzle writes into these `timestamp` columns, so
+  // updated_at stays comparable across the two write paths. NOW() would be the
+  // database server's clock in its own timezone, which is not the same value.
+  const now = new Date().toISOString();
+
+  const CHUNK = 500;
+  for (let i = 0; i < updates.length; i += CHUNK) {
+    const rows = updates.slice(i, i + CHUNK).map((u) => {
+      const hasBreakdown = "weightBreakdown" in u;
+      const breakdown =
+        hasBreakdown && u.weightBreakdown != null
+          ? JSON.stringify(u.weightBreakdown)
+          : null;
+      return sql`(${u.id}::text, ${u.weight}::double precision, ${breakdown}::jsonb, ${hasBreakdown}::boolean)`;
+    });
+    await db.execute(sql`
+      UPDATE coverage_cells AS c SET
+        weight = v.weight,
+        weight_breakdown = CASE
+          WHEN v.has_breakdown THEN v.weight_breakdown
+          ELSE c.weight_breakdown
+        END,
+        updated_at = ${now}::timestamp
+      FROM (VALUES ${sql.join(rows, sql`, `)})
+        AS v(id, weight, weight_breakdown, has_breakdown)
+      WHERE c.id = v.id
+    `);
   }
 }
 
@@ -708,6 +746,40 @@ export async function getSnapshottedBuildIds(
       ),
     );
   return rows.map((r) => r.buildId!).filter(Boolean);
+}
+
+/**
+ * Does the ledger hold a build with attributions but no snapshot?
+ *
+ * The cheap gate in front of `backfillCoverageSnapshots`, which otherwise
+ * loads the whole attribution timeline, every cell and every dimension just to
+ * discover there is nothing to reconstruct — the normal outcome on every sync
+ * after the first. `LIMIT 1` lets Postgres stop at the first gap it finds
+ * rather than scanning the ledger out.
+ */
+export async function hasUnsnapshottedCoverageBuilds(
+  repositoryId: string,
+  environmentKey: string = DEFAULT_COVERAGE_ENVIRONMENT,
+): Promise<boolean> {
+  const rows = await db
+    .select({ buildId: coverageCellRuns.buildId })
+    .from(coverageCellRuns)
+    .innerJoin(coverageCells, eq(coverageCellRuns.cellId, coverageCells.id))
+    .where(
+      and(
+        eq(coverageCells.repositoryId, repositoryId),
+        eq(coverageCells.environmentKey, environmentKey),
+        isNotNull(coverageCellRuns.buildId),
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${coverageSnapshots} s
+          WHERE s.repository_id = ${coverageCells.repositoryId}
+            AND s.environment_key = ${coverageCells.environmentKey}
+            AND s.build_id = ${coverageCellRuns.buildId}
+        )`,
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
 }
 
 /**
