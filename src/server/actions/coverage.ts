@@ -3,11 +3,7 @@
 import { revalidatePath } from "next/cache";
 import * as queries from "@/lib/db/queries";
 import { requireRepoAccess } from "@/lib/auth";
-import {
-  getCoverageReport,
-  profileDimensions,
-  type SyncOptions,
-} from "@/lib/coverage/sync";
+import { getCoverageReport, type SyncOptions } from "@/lib/coverage/sync";
 import { buildCoverageSpec, renderSpecMarkdown } from "@lastest/coverage-model";
 import { DEFAULT_COVERAGE_ENVIRONMENT } from "@/lib/db/schema";
 import type { CoverageSyncSummary } from "@/lib/coverage/sync-job";
@@ -70,36 +66,19 @@ export async function getCoverageSyncStatusAction(jobId: string): Promise<{
   };
 }
 
-/** Profile only — proposes dimensions without deriving cells. Lets the user
- *  confirm which columns are real dimensions before the cell space is built. */
-export async function profileCoverageDimensionsAction(
-  repositoryId: string,
-  opts: SyncOptions = {},
-) {
-  await requireRepoAccess(repositoryId);
-  const { proposed, rejected, runsScanned } = await profileDimensions(
-    repositoryId,
-    opts,
-  );
-  revalidatePath(`/coverage`);
-  return {
-    proposed: proposed.length,
-    rejected: rejected.map((r) => ({
-      objectType: r.objectType,
-      field: r.field,
-      reason: r.rejectedReason ?? "rejected",
-    })),
-    runsScanned,
-  };
-}
-
-export async function getCoverageReportAction(
-  repositoryId: string,
-  opts: SyncOptions = {},
-) {
-  await requireRepoAccess(repositoryId);
-  return getCoverageReport(repositoryId, opts);
-}
+// There are deliberately NO read-only report/trend/list actions here, and no
+// profile-only action. Five existed (`profileCoverageDimensionsAction`,
+// `getCoverageReportAction`, `getCoverageTrendAction`,
+// `listCoverageDimensionsAction`, `listCoverageCellsAction`) with no caller
+// anywhere in the repo: reads reach the same data through the Coverage page's
+// server component (`src/app/(app)/coverage/page.tsx` calls the queries and
+// `coverageReportFrom` directly) and through `GET /api/v1/repos/:id/coverage`
+// and `/data-coverage`, and profiling only ever happens as one stage of a sync
+// (`profileDimensions` is called by `syncCoverage`, not by a click). A
+// `"use server"` export is a live POST endpoint for every signed-in user that
+// has to be auth-reviewed forever, so an unused one is pure liability — the
+// policy is to delete it and re-add it with its first real caller, next to that
+// caller's authorization story.
 
 /** The full test specification — scope, acceptance criteria, per-object-type
  *  coverage matrix, documented exclusions, ranked outstanding work. */
@@ -129,25 +108,6 @@ export async function getCoverageSpecAction(
   return { spec, markdown: renderSpecMarkdown(spec) };
 }
 
-/** The coverage trend, oldest first. Points are written by sync and by build
- *  completion; pre-snapshot history is reconstructed from the attribution
- *  ledger and marked `source: 'backfill'`. */
-export async function getCoverageTrendAction(
-  repositoryId: string,
-  opts: { environmentKey?: string; limit?: number } = {},
-) {
-  await requireRepoAccess(repositoryId);
-  return queries.getCoverageTrend(repositoryId, opts);
-}
-
-export async function listCoverageDimensionsAction(
-  repositoryId: string,
-  environmentKey: string = DEFAULT_COVERAGE_ENVIRONMENT,
-) {
-  await requireRepoAccess(repositoryId);
-  return queries.getCoverageDimensions(repositoryId, environmentKey);
-}
-
 export async function setCoverageDimensionEnabledAction(
   repositoryId: string,
   dimensionId: string,
@@ -164,14 +124,6 @@ export async function setCoverageDimensionEnabledAction(
   );
   if (!ok) throw new Error("Dimension not found for this repository");
   revalidatePath(`/coverage`);
-}
-
-export async function listCoverageCellsAction(
-  repositoryId: string,
-  opts: { environmentKey?: string; objectType?: string } = {},
-) {
-  await requireRepoAccess(repositoryId);
-  return queries.getCoverageCells(repositoryId, opts);
 }
 
 // P4's profile-from-SUT flow (`profileFromSut` + the Vault/REST profilers in
