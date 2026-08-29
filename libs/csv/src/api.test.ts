@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { parseCsv, parseCsvReference, findCsvReferences } from "./api";
+import {
+  parseCsv,
+  parseCsvBuffer,
+  parseCsvBufferYielding,
+  parseCsvYielding,
+  parseCsvReference,
+  findCsvReferences,
+} from "./api";
 
 describe("parseCsv", () => {
   it("parses headers and rows with comma delimiter", () => {
@@ -75,5 +82,63 @@ describe("findCsvReferences", () => {
     expect(results).toHaveLength(2);
     expect(results[0].reference.column).toBe("email");
     expect(results[1].reference.column).toBe("name");
+  });
+});
+
+describe("parseCsvYielding", () => {
+  /** Multi-chunk, and deliberately adversarial about where a chunk boundary
+   *  can land: quoted fields carrying the delimiter, escaped quotes, and
+   *  embedded newlines that make one record span several physical lines. */
+  function fixture(rows: number): string {
+    const out = ["name,bio,country"];
+    for (let i = 0; i < rows; i++) {
+      out.push(
+        `"User ${i}","line1\nline2, still ${i}\nsays ""hi""","C${i % 7}"`,
+      );
+    }
+    return out.join("\n");
+  }
+
+  it("produces byte-identical output to the synchronous parser", async () => {
+    const csv = fixture(200);
+    // chunkRows well under the record count, and not a divisor of it, so the
+    // pauses land mid-file rather than tidily at the end.
+    for (const chunkRows of [1, 3, 7, 64]) {
+      const async_ = await parseCsvYielding(csv, { chunkRows });
+      expect(async_).toEqual(parseCsv(csv));
+    }
+  });
+
+  it("keeps quoted state across a pause", async () => {
+    // One record per chunk, and every record contains newlines inside quotes —
+    // a parser that resumed on a line boundary instead of a suspended scan
+    // would split these.
+    const csv = fixture(10);
+    const r = await parseCsvYielding(csv, { chunkRows: 1 });
+    expect(r.rows).toHaveLength(10);
+    expect(r.rows[3][1]).toBe('line1\nline2, still 3\nsays "hi"');
+    expect(r.headers).toEqual(["name", "bio", "country"]);
+  });
+
+  it("matches on the edge cases the sync parser already handles", async () => {
+    for (const csv of [
+      "",
+      "a,b,c",
+      "a;b\n1;2",
+      "a,b,c\n1,2\n",
+      "a\tb\n1\t2\r\n3\t4\r\n",
+      '﻿a,b\n"x,y",2',
+    ]) {
+      expect(await parseCsvYielding(csv, { chunkRows: 1 })).toEqual(
+        parseCsv(csv),
+      );
+    }
+  });
+
+  it("parses a buffer the same way", async () => {
+    const csv = fixture(50);
+    expect(
+      await parseCsvBufferYielding(Buffer.from(csv), { chunkRows: 5 }),
+    ).toEqual(parseCsvBuffer(Buffer.from(csv)));
   });
 });

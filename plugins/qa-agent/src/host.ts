@@ -5,6 +5,11 @@ import type {
   QaRunMode,
   QaTestGroup,
 } from "@lastest/eb-protocol";
+import type {
+  CoverageReport,
+  StopCell,
+  StopDecision,
+} from "@lastest/coverage-model";
 
 import type {
   QaAgentRole,
@@ -20,7 +25,7 @@ import type {
 /**
  * The core surface QA Agent needs and core does not have yet.
  *
- * **Read this file first.** At **29 methods** it edges out `quickstart`'s 28
+ * **Read this file first.** At **31 methods** it edges out `quickstart`'s 28
  * (the previous largest) as the widest port in the repo, and for the same
  * reason quickstart's was defensible: recipe
  * §1.5's stop line ("> ~15, the port would be bigger than the feature") is
@@ -32,7 +37,7 @@ import type {
  * its triage protocols) plus ~2,700 lines of UI. The port is this large
  * because the *feature* is: an end-to-end suite builder that touches nearly
  * every other subsystem on purpose. Below is the grouping recipe §1.5 asks
- * for — **12 items, not 29 unrelated reads** — with each item's honest
+ * for — **13 items, not 31 unrelated reads** — with each item's honest
  * future. Methods marked *(verbatim: <plugin>)* already exist in another
  * plugin's port with the same shape; per recipe §1.5 that repetition is the
  * argument for the core capability that retires them.
@@ -124,6 +129,14 @@ import type {
  *    `gamification`'s four, `share`'s pair) — `core/identity` was already "a
  *    costed piece of work with a known payoff" at seven; this is two more
  *    data points for the same PR.
+ * 13. **Data coverage** (`ensureCoverageFresh`,
+ *    `readExcludedCoverageCells`, 2). `src/lib/coverage` is still a
+ *    pseudo-plugin, so the planner reading it directly would be the
+ *    feature -> feature edge RFC §3 forbids — the same crossing
+ *    `withAuthoringSession` (item 11) routes through the composition root for.
+ *    Both fill from `src/lib/core/coverage-reads.ts`, whose own header names
+ *    this port as its destination. When coverage becomes `plugins/coverage`,
+ *    these two are what its capability retires.
  */
 export interface QaAgentHost {
   // ---- 1. Session CRUD (agent_sessions, kind: "qa") ------------------------
@@ -250,6 +263,28 @@ export interface QaAgentHost {
     name: string | null;
     email: string | null;
   } | null>;
+
+  // ---- 13. Data coverage ---------------------------------------------------
+  /** Refresh the repo's coverage model if it has gone stale, and return it.
+   *  Null when there is no model or the read failed — planning then falls back
+   *  to the fixed item cap, which is what it did before coverage existed. */
+  ensureCoverageFresh(repositoryId: string): Promise<QaCoverageState | null>;
+  /** The ledger's excluded cells, for the directive's "do NOT plan these"
+   *  section. They are deliberately absent from `stop.queue`, so sourcing them
+   *  from the queue yielded an always empty list. Empty on failure. */
+  readExcludedCoverageCells(repositoryId: string): Promise<StopCell[]>;
+}
+
+/** The slice of the coverage feature's freshness result the planner reads.
+ *  Declared here — not imported from `src/lib/coverage/sync.ts` — so the
+ *  plugin does not reach into app code; the host's implementation is the
+ *  assignability assertion, the same way `QaExistingAuthSetup` works. The
+ *  `CoverageReport`/`StopDecision` types come from `@lastest/coverage-model`,
+ *  a lib both sides already share. */
+export interface QaCoverageState {
+  report: CoverageReport;
+  stop: StopDecision;
+  stale: boolean;
 }
 
 // ── Session shapes ───────────────────────────────────────────────────────────

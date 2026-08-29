@@ -69,6 +69,7 @@
     "@lastest/core-storage": "workspace:*",
     "@lastest/core-tests": "workspace:*",
     "@lastest/cron": "workspace:*",
+    "@lastest/coverage-model": "workspace:*",
     "@lastest/csv": "workspace:*",
     "@lastest/db": "workspace:*",
     "@lastest/design-tokens": "workspace:*",

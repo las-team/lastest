@@ -71,6 +71,7 @@ import {
   itemGroups,
   itemPlaywrightOverrides,
   matchPlanToExistingTests,
+  MAX_PLAN_ITEMS,
   mergeRefinedJourneys,
   normalizeQaGroups,
   sanitizeQaPlan,
@@ -80,6 +81,11 @@ import {
 } from "./domain/plan";
 import { extractDeclaredEndpoints } from "./domain/code-check";
 import { computePrChanges, computePrCoverage } from "./domain/pr-check";
+import {
+  buildCoverageDirective,
+  buildStopSummary,
+  computePlanBudget,
+} from "@lastest/coverage-model";
 import {
   buildTaskPlanFromTriage,
   buildTaskTriageSystemPrompt,
@@ -2074,6 +2080,89 @@ async function runQaPlan(
       ? buildExistingCoverageDigest(existingTests)
       : undefined;
 
+  // P3: the item budget and the planner's work queue come from measured data
+  // coverage rather than a constant. When no coverage model exists this yields
+  // the old fixed cap, so repos that never profiled dimensions are unaffected.
+  // Re-derive first when the model has gone stale. A scheduled run is exactly
+  // the case where nobody has opened the Coverage page since the data moved,
+  // and planning against yesterday's cell set produces a queue of gaps that no
+  // longer exist. A failed re-sync degrades to the stale model, never to none.
+  const coverageState = await host.ensureCoverageFresh(repositoryId);
+  if (coverageState?.stale) {
+    console.warn(
+      `[qa-agent] planning against a stale coverage model for repo ${repositoryId}`,
+    );
+  }
+  const planBudget = computePlanBudget({
+    stop: coverageState?.stop ?? null,
+    // The planner owns the wall-clock ceiling, not the coverage model — see
+    // the inversion note in `src/lib/coverage/budget.ts`.
+    hardCap: MAX_PLAN_ITEMS,
+  });
+  // Excluded cells are deliberately absent from stop.queue, so they have to be
+  // read back from the ledger — sourcing them from the queue yielded an always
+  // empty list and the "do NOT plan these" section never rendered.
+  const excludedCells = coverageState
+    ? await host.readExcludedCoverageCells(repositoryId)
+    : [];
+  const coverageDirective = coverageState
+    ? buildCoverageDirective({
+        report: coverageState.report,
+        queue: coverageState.stop.queue,
+        budget: planBudget,
+        excluded: excludedCells,
+      })
+    : null;
+
+  // An actual stop has to be able to stop. The planner rejects an empty plan
+  // (`isQaTestPlan` requires items.length > 0) and would retry until it got
+  // one, so a shouldStop budget could only ever be honoured BEFORE the model
+  // is asked — otherwise the run always produced at least one item and the
+  // stopping rule was decorative.
+  if (planBudget.shouldStop) {
+    const stopSummary = buildStopSummary({
+      budget: planBudget,
+      stop: coverageState?.stop ?? null,
+      plannedItems: 0,
+    });
+    substeps[0] = {
+      ...substeps[0],
+      status: "done",
+      durationMs: Date.now() - started,
+      outputSummary: stopSummary,
+    };
+    await updateSubsteps(sessionId, "qa_plan", substeps);
+    await setStepCompleted(sessionId, "qa_plan", {
+      journeys: 0,
+      items: 0,
+      stopped: true,
+      stopExplanation: planBudget.stopExplanation ?? null,
+    });
+    emitActivity(
+      teamId,
+      repositoryId,
+      sessionId,
+      "step:complete",
+      stopSummary,
+      { stepId: "qa_plan", agentType: "planner" },
+    );
+    await host.updateSession(sessionId, {
+      status: "completed",
+      completedAt: new Date(),
+    });
+    emitActivity(
+      teamId,
+      repositoryId,
+      sessionId,
+      "session:complete",
+      `No new tests warranted — ${stopSummary}`,
+    );
+    console.log(`[qa-agent] ${stopSummary}`);
+    // Halts the pipeline WITHOUT failing it: the run reached a correct
+    // terminal state, it just has nothing to generate.
+    return false;
+  }
+
   const callPlanner = async (extraFeedback?: string): Promise<string> => {
     const timeoutSignal = AbortSignal.timeout(PLANNER_TIMEOUT_MS);
     const result = await ctx.ai.generate(
@@ -2083,6 +2172,8 @@ async function runQaPlan(
         authenticated,
         existingCoverage,
         docsDigest: session.metadata.qaDocsDigest || undefined,
+        coverageDirective: coverageDirective ?? undefined,
+        maxItems: planBudget.coverageDriven ? planBudget.maxItems : undefined,
         feedback:
           [feedback, extraFeedback].filter(Boolean).join("\n") || undefined,
       }),
@@ -2162,7 +2253,22 @@ async function runQaPlan(
     return false;
   }
 
-  const sanitized = sanitizeQaPlan(plan, groups);
+  const sanitized = sanitizeQaPlan(plan, groups, {
+    maxItems: planBudget.maxItems,
+  });
+
+  // The account of what the agent planned AND what it deliberately skipped.
+  // Logged and emitted so a stop is never an unexplained silence.
+  const stopSummary = buildStopSummary({
+    budget: planBudget,
+    stop: coverageState?.stop ?? null,
+    plannedItems: sanitized.items.length,
+  });
+  console.log(`[qa-agent] ${stopSummary}`);
+  emitActivity(teamId, repositoryId, sessionId, "substep:update", stopSummary, {
+    stepId: "qa_plan",
+    agentType: "planner",
+  });
 
   // Annotate items a pre-existing test already covers so the review matrix
   // shows what exists vs what this run would create. Same matcher the

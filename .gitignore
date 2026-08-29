@@ -118,3 +118,6 @@ docs/olares-deploy-notes.md
 public/showcase/*
 appsumo-codes.csv
 .playback-demo/playback-demo.mp4
+docs/olares-deploy-notes.md
+
+docs/screenshots/coverage/coverage*.png

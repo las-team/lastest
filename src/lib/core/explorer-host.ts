@@ -3,10 +3,16 @@ import "server-only";
 import type {
   ExplorerExistingAuth,
   ExplorerHost,
+  ExplorerIssueContext,
+  ExplorerIssueRequest,
+  ExplorerIssueResult,
   ExplorerSettings,
 } from "@lastest/plugin-explorer";
 
 import * as queries from "@/lib/db/queries";
+import { getCurrentSession } from "@/lib/auth";
+import { createRepoIssue } from "@/lib/integrations/github-issues";
+import { githubNotConnected } from "@/lib/verify/github-connection";
 import { decryptField, encrypt, ENC_PREFIX } from "@/lib/crypto";
 import {
   assertSafeOutboundUrl,
@@ -72,4 +78,92 @@ export const appExplorerHost: ExplorerHost = {
   decryptField(stored: string): string {
     return decryptField(stored);
   },
+
+  async issueContext(repositoryId: string): Promise<ExplorerIssueContext> {
+    const resolved = await resolveIssueTarget(repositoryId);
+    if ("error" in resolved) {
+      return {
+        connected: false,
+        repoFullName: null,
+        reporterEmail: null,
+        error: resolved.error,
+        code: resolved.code,
+      };
+    }
+    const session = await getCurrentSession();
+    return {
+      connected: true,
+      repoFullName: resolved.repo.fullName,
+      reporterEmail: session?.user?.email ?? null,
+    };
+  },
+
+  /**
+   * The same POST core makes for a verify case, from the one place that holds
+   * the team's GitHub token. The body arrives fully rendered — explorer owns
+   * what a finding reads like, core owns the credential and the call.
+   */
+  async createIssue(req: ExplorerIssueRequest): Promise<ExplorerIssueResult> {
+    const resolved = await resolveIssueTarget(req.repositoryId);
+    if ("error" in resolved) {
+      return { ok: false, error: resolved.error, code: resolved.code };
+    }
+    const { repo, token } = resolved;
+
+    // Auto-assign the configured AI engineer (Settings → Notifications →
+    // Issue Tracker), same as a diff- or verify-filed ticket, so a finding
+    // does not need a human dispatcher that the other two surfaces don't.
+    const notif = await queries
+      .getNotificationSettings(req.repositoryId)
+      .catch(() => null);
+    const assignees = notif?.issueAssignee ? [notif.issueAssignee] : undefined;
+
+    const result = await createRepoIssue(token, repo.owner, repo.name, {
+      title: req.title,
+      body: req.body,
+      labels: req.labels,
+      assignees,
+    });
+    return result.success && result.issueUrl
+      ? {
+          ok: true,
+          issueUrl: result.issueUrl,
+          issueNumber: result.issueNumber,
+        }
+      : { ok: false, error: result.error ?? "Could not create the issue" };
+  },
 };
+
+/**
+ * Repo + token, or the reason there isn't one.
+ *
+ * Shared by both issue methods so "can I file?" and "file it" can never
+ * disagree — the dialog would otherwise offer a Create button for a repo the
+ * POST is about to reject.
+ */
+async function resolveIssueTarget(repositoryId: string): Promise<
+  | {
+      repo: { owner: string; name: string; fullName: string };
+      token: string;
+    }
+  | { error: string; code?: string }
+> {
+  const repo = await queries.getRepository(repositoryId);
+  if (!repo) return { error: "Repository not found" };
+  if (repo.provider !== "github") {
+    return {
+      error:
+        "Filing issues is only supported for GitHub repositories right now.",
+    };
+  }
+  const account = repo.teamId
+    ? await queries.getGithubAccountByTeam(repo.teamId)
+    : null;
+  if (!account?.accessToken) {
+    return { error: githubNotConnected.error, code: githubNotConnected.code };
+  }
+  return {
+    repo: { owner: repo.owner, name: repo.name, fullName: repo.fullName },
+    token: account.accessToken,
+  };
+}

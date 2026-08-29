@@ -274,6 +274,23 @@ export async function updateFindingStatus(
     .where(eq(explorerFindings.id, id));
 }
 
+export async function updateFindingIssue(
+  ctx: Ctx,
+  id: string,
+  issue: { url: string; number?: number },
+): Promise<void> {
+  await ctx.db
+    .update(explorerFindings)
+    // Filing an issue *is* the triage: the finding stops being an open
+    // question the moment it has a ticket someone owns.
+    .set({
+      githubIssueUrl: issue.url,
+      githubIssueNumber: issue.number ?? null,
+      status: "triaged",
+    })
+    .where(eq(explorerFindings.id, id));
+}
+
 export async function updateFindingCluster(
   ctx: Ctx,
   ids: string[],

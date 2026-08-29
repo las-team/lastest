@@ -9,6 +9,9 @@ import { getOpenMRsForBranch } from "@/lib/gitlab/oauth";
 import type { TestRunResult } from "@/lib/playwright/types";
 import type { SetupContext } from "@/lib/setup/types";
 import { executeTests } from "@/lib/execution/executor";
+import { baselineWriteCell } from "@lastest/coverage-model";
+import { attributeBuildRuns } from "@/lib/coverage/sync";
+import { captureCoverageSnapshot } from "@/lib/coverage/trend";
 import { resolveBuildSetup } from "@/lib/setup/resolve-build-setup";
 import { requireTeamAccess, requireRepoAccess } from "@/lib/auth";
 import { requireBuildOwnership } from "@/lib/auth/ownership";
@@ -812,8 +815,34 @@ async function runBuildAsync(
   // loop so a multi-browser build doesn't duplicate api test_results.
   const apiTestsForBuild = tests.filter((t) => t.testType === "api");
   const browserTestsForBuild = tests.filter((t) => t.testType !== "api");
-  const totalTestsAcrossBrowsers =
+  // Pre-expansion estimate. A matrix test is one row in `tests` but N runs at
+  // dispatch, so this is a FLOOR, not the truth — `learnDispatchTotal` below
+  // raises it the moment the executor reports how many runs it actually
+  // produced. Left un-raised, a 4-cell matrix reported "12 of 3" and the
+  // completion sanity check downstream read the build as having lost results.
+  let totalTestsAcrossBrowsers =
     browserTestsForBuild.length * browsers.length + apiTestsForBuild.length;
+  // Per-phase dispatch totals, learned from the executor's own progress
+  // reports (which are post-expansion).
+  let apiDispatchTotal = apiTestsForBuild.length;
+  let browserDispatchTotalPerBrowser = browserTestsForBuild.length;
+  let dispatchPhase: "api" | "browser" =
+    apiTestsForBuild.length > 0 ? "api" : "browser";
+  const learnDispatchTotal = async (reportedTotal: number) => {
+    if (!Number.isFinite(reportedTotal) || reportedTotal <= 0) return;
+    if (dispatchPhase === "api") {
+      if (reportedTotal <= apiDispatchTotal) return;
+      apiDispatchTotal = reportedTotal;
+    } else {
+      if (reportedTotal <= browserDispatchTotalPerBrowser) return;
+      browserDispatchTotalPerBrowser = reportedTotal;
+    }
+    const next =
+      browserDispatchTotalPerBrowser * browsers.length + apiDispatchTotal;
+    if (next === totalTestsAcrossBrowsers) return;
+    totalTestsAcrossBrowsers = next;
+    await queries.updateBuild(buildId, { totalTests: next });
+  };
 
   // Store browsers on the build record
   await queries.updateBuild(buildId, {
@@ -855,6 +884,11 @@ async function runBuildAsync(
     totalSteps?: number;
     extractedVariables?: Record<string, string>;
     assignedVariables?: Record<string, string>;
+    // P2 matrix identity — set only on runs from a matrix expansion.
+    dataCell?: string;
+    matrixIndex?: number;
+    matrixTotal?: number;
+    matrixCapturesVisual?: boolean;
     logs?: Array<{ timestamp: number; level: string; message: string }>;
     urlTrajectory?: import("@/lib/db/schema").UrlTrajectoryStep[];
     webVitals?: import("@/lib/db/schema").WebVitalsSample[];
@@ -895,6 +929,9 @@ async function runBuildAsync(
       totalSteps: result.totalSteps,
       extractedVariables: result.extractedVariables,
       assignedVariables: result.assignedVariables,
+      dataCell: result.dataCell,
+      matrixIndex: result.matrixIndex,
+      matrixTotal: result.matrixTotal,
       logs: result.logs,
       urlTrajectory: result.urlTrajectory,
       webVitals: result.webVitals,
@@ -930,26 +967,46 @@ async function runBuildAsync(
     // against that step's baseline snapshot inside processVisualDiff.
     const domDiffEnabled = playwrightSettings?.enableDomDiff ?? false;
 
+    // P2 visual policy. `matrixPolicy.visual` decides which expanded runs take
+    // part in the visual layer; 'representative' (the default) means one run
+    // per slice does. The flag was computed at expansion and then read by
+    // nothing, so a 40-cell matrix still produced 40 pending diffs and
+    // demanded 40 baselines — the exact cost the policy exists to avoid. The
+    // non-visual runs still report their cheap layers (console/network/dom/
+    // url/a11y) through the step-comparison block below.
+    const skipVisualLayer =
+      !!result.dataCell && result.matrixCapturesVisual === false;
+    if (skipVisualLayer) {
+      console.log(
+        `[build] matrix run ${result.matrixIndex}/${result.matrixTotal} of test ${result.testId} ` +
+          `does not capture the visual layer (cell ${result.dataCell}) — skipping ${screenshots.length} diff(s)`,
+      );
+    }
+
     // Generate visual diffs for all screenshots concurrently
-    const diffResults = await Promise.all(
-      screenshots.map((screenshot) =>
-        processVisualDiff(
-          buildId,
-          testResult.id,
-          result.testId,
-          screenshot.path,
-          branch,
-          repositoryId,
-          screenshot.label,
-          result.stabilityMetadata?.isStable === false,
-          currentBrowserType,
-          testDiffOverrides,
-          forceAutoApprove,
-          screenshot.domSnapshot,
-          domDiffEnabled,
-        ),
-      ),
-    );
+    const diffResults = skipVisualLayer
+      ? []
+      : await Promise.all(
+          screenshots.map((screenshot) =>
+            processVisualDiff(
+              buildId,
+              testResult.id,
+              result.testId,
+              screenshot.path,
+              branch,
+              repositoryId,
+              screenshot.label,
+              result.stabilityMetadata?.isStable === false,
+              currentBrowserType,
+              testDiffOverrides,
+              forceAutoApprove,
+              screenshot.domSnapshot,
+              domDiffEnabled,
+              result.dataCell ?? null,
+              baselineWriteCell(result.dataCell, testRecord?.matrixPolicy),
+            ),
+          ),
+        );
     for (const diffResult of diffResults) {
       if (diffResult.classification === "changed") changesDetected++;
       if (diffResult.classification === "flaky") flakyCount++;
@@ -1137,6 +1194,9 @@ async function runBuildAsync(
     activeCount?: number;
     activeTests?: string[];
   }) => {
+    // The executor's `total` is post-matrix-expansion, so it is the only
+    // honest denominator this side has.
+    await learnDispatchTotal(progress.total);
     await updateJobActivity(jobId, progress.activeCount, progress.activeTests);
   };
 
@@ -1196,6 +1256,8 @@ async function runBuildAsync(
         onResult,
       );
     }
+
+    dispatchPhase = "browser";
 
     // Run tests for each browser in the browsers list
     for (const browserType of browsers) {
@@ -1356,6 +1418,9 @@ async function runBuildAsync(
                 totalSteps: result.totalSteps,
                 extractedVariables: result.extractedVariables,
                 assignedVariables: result.assignedVariables,
+                dataCell: result.dataCell,
+                matrixIndex: result.matrixIndex,
+                matrixTotal: result.matrixTotal,
                 logs: result.logs,
                 urlTrajectory: result.urlTrajectory,
                 webVitals: result.webVitals,
@@ -1566,6 +1631,48 @@ async function runBuildAsync(
       ...a11yUpdate,
       ...designSystemUpdate,
     });
+
+    // Data-coverage attribution for matrix runs. A matrix run records its cell
+    // as `data_cell` on the result row and not in `assignedVariables`, so
+    // without this hook the cell it exercised stays "uncovered" until someone
+    // manually re-profiles. Best-effort: coverage is a reporting concern and
+    // must never fail a build.
+    try {
+      const dataCellResults = repositoryId
+        ? await queries.getDataCellResults(testRunId)
+        : [];
+      if (repositoryId && dataCellResults.length > 0) {
+        const { attributed, unmatchedCells } = await attributeBuildRuns(
+          repositoryId,
+          dataCellResults,
+        );
+        if (unmatchedCells.length > 0) {
+          console.warn(
+            `[coverage] build ${buildId}: ${unmatchedCells.length} run(s) hit a data cell with no profiled cell ` +
+              `(${unmatchedCells.slice(0, 3).join(", ")}) — the dimension set does not cover them`,
+          );
+        }
+        if (attributed > 0) {
+          console.log(
+            `[coverage] build ${buildId}: attributed ${attributed} matrix run(s) to coverage cells`,
+          );
+        }
+      }
+
+      // One point on the coverage trend per build. Taken after attribution so
+      // it reflects what this build actually covered, and keyed on buildId so
+      // a re-run or a later backfill updates the point instead of adding a
+      // second one for the same build.
+      if (repositoryId) {
+        await captureCoverageSnapshot(repositoryId, {
+          buildId,
+          source: "build",
+        });
+      }
+    } catch (err) {
+      console.warn("[coverage] build attribution failed:", err);
+    }
+
     await completeJob(jobId);
 
     // Send notifications after build completion
@@ -1924,6 +2031,19 @@ async function processVisualDiff(
   // one is created. Absent → no DOM overlay for this step.
   currentDomSnapshot?: import("@/lib/db/schema").DomSnapshotData,
   domDiffEnabled?: boolean,
+  /** P2: the data cell this run exercised, when it came from a matrix
+   *  expansion. Baseline resolution prefers a baseline captured for the same
+   *  cell and falls back to the shared one. */
+  dataCell?: string | null,
+  /** P2: the cell any baseline WRITE (auto-approve) is scoped to — the
+   *  caller computes it from the test's matrix policy via `baselineWriteCell`.
+   *  Distinct from `dataCell` because reads and writes differ: a
+   *  representative's baseline must be the shared (NULL-cell) row, while under
+   *  `visual: 'all'` each cell owns its baseline. Without this, auto-approve
+   *  deactivated EVERY cell's baseline and created a shared one, so the last
+   *  cell to finish became the baseline for all and every other cell diffed
+   *  "changed" on the next build. */
+  baselineDataCell?: string | null,
 ): Promise<{
   hasChanges: boolean;
   diffId: string;
@@ -2094,6 +2214,7 @@ async function processVisualDiff(
     stepLabel,
     branch,
     browser,
+    dataCell,
   );
   let baselineSourceBranch: string | undefined;
   let baselineExistsOn: { branch: string; createdAt: string } | undefined;
@@ -2103,6 +2224,7 @@ async function processVisualDiff(
       stepLabel,
       defaultBranch,
       browser,
+      dataCell,
     );
     if (fallback) {
       baseline = fallback;
@@ -2244,6 +2366,7 @@ async function processVisualDiff(
       stepLabel,
       defaultBranch,
       browser,
+      dataCell,
     );
     if (!mainBaseline) {
       return {
@@ -2405,6 +2528,7 @@ async function processVisualDiff(
         stepLabel || null,
         branch,
         browser,
+        baselineDataCell ?? null,
       );
       await queries.createBaseline({
         testId,
@@ -2414,6 +2538,7 @@ async function processVisualDiff(
         branch,
         browser,
         approvedFromDiffId: diff.id,
+        dataCell: baselineDataCell ?? null,
         // Ride the per-step DOM snapshot onto the baseline so later runs can
         // compute an aligned per-step DOM diff against it.
         domSnapshot: currentDomSnapshot,
@@ -2553,6 +2678,7 @@ async function processVisualDiff(
         stepLabel || null,
         branch,
         browser,
+        baselineDataCell ?? null,
       );
       await queries.createBaseline({
         testId,
@@ -2562,6 +2688,7 @@ async function processVisualDiff(
         branch,
         browser,
         approvedFromDiffId: diff.id,
+        dataCell: baselineDataCell ?? null,
         // Ride the per-step DOM snapshot onto the baseline so later runs can
         // compute an aligned per-step DOM diff against it.
         domSnapshot: currentDomSnapshot,

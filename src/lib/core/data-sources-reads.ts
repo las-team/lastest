@@ -1,11 +1,13 @@
 import "server-only";
 
 import {
+  listCsvDataSourceTables,
   listCsvDataSources,
   listGoogleSheetsDataSources,
 } from "@lastest/plugin-data-sources/reads";
 import type { CsvSourceLike } from "@lastest/csv";
 import type { SheetSourceLike } from "@lastest/google-sheets";
+import type { SourceTable } from "@lastest/coverage-model";
 
 /**
  * Reverse reads into the `data-sources` plugin's own tables, for
@@ -49,4 +51,44 @@ export async function googleSheetsDataSourcesForRepo(
   repositoryId: string | null | undefined,
 ): Promise<SheetSourceLike[]> {
   return listGoogleSheetsDataSources(repositoryId);
+}
+
+/**
+ * The same two reads, resolved into tables for `src/lib/coverage`.
+ *
+ * Coverage measures a distribution, so it cannot profile the capped
+ * `cachedData` preview the executor is happy with — it needs the whole file,
+ * and the file lives in the `data-sources` plugin's own `(teamId, pluginId)`
+ * storage namespace. `listCsvDataSourceTables` resolves that inside the plugin
+ * and returns parsed rows plus a truthful `truncated` flag (recipe §3.1 — "do
+ * the thing", not "give me the storage key"); nothing outside that package
+ * learns how the blob is keyed.
+ *
+ * Sheets cache their whole range and track no separate total, so the cache IS
+ * the full table and no blob read is involved.
+ *
+ * When coverage becomes `plugins/coverage`, these two are its host port's
+ * data-source methods rather than a direct import.
+ */
+export async function csvDataSourceTablesForRepo(
+  repositoryId: string | null | undefined,
+): Promise<SourceTable[]> {
+  return listCsvDataSourceTables(repositoryId);
+}
+
+export async function sheetDataSourceTablesForRepo(
+  repositoryId: string | null | undefined,
+): Promise<SourceTable[]> {
+  const rows = await listGoogleSheetsDataSources(repositoryId);
+  return rows.map((r) => {
+    const data = r.cachedData ?? [];
+    return {
+      alias: r.alias,
+      headers: r.cachedHeaders ?? [],
+      rows: data,
+      profiledRows: data.length,
+      totalRows: data.length,
+      truncated: false,
+    };
+  });
 }
