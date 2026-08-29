@@ -120,10 +120,14 @@ spec:
               value: "lastest-pool"
             - name: OTEL_EXCLUDE_PATHS
               value: "/health"
-            # Nearly every span here has a remote parent (the app's fetch), so
-            # this ratio only governs the reaper loop's own root traces.
-            - name: OTEL_TRACES_SAMPLER_ARG
-              value: "1"
+            # Head sampling is OFF here too — same AlwaysOn sampler as the
+            # app, so this service records its spans whether or not the app's
+            # inbound traceparent was sampled, and the reaper loop's own root
+            # traces are recorded alongside them. Unset == 1 == this default;
+            # set it below 1 only when there is no tail-sampling collector, and
+            # then set it to the SAME value as k8s/app.yaml.
+            # - name: OTEL_TRACES_SAMPLER_ARG
+            #   value: "0.1"
           ports:
             - containerPort: 9500
               name: http

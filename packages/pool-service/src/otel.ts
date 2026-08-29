@@ -20,7 +20,10 @@
  * Env: identical to the app's — OTEL_TRACING_ENABLED (the opt-in switch; unset
  * disables tracing entirely), OTEL_EXPORTER_OTLP_ENDPOINT (required once opted
  * in), OTEL_SERVICE_NAME (default lastest-pool), OTEL_EXCLUDE_PATHS (default
- * /health), OTEL_TRACES_SAMPLER_ARG, OTEL_DIAG_LOG_LEVEL.
+ * /health), OTEL_TRACES_SAMPLER_ARG, OTEL_DIAG_LOG_LEVEL. As in the app,
+ * OTEL_TRACES_SAMPLER_ARG is not the spec's variable of that name — its
+ * partner OTEL_TRACES_SAMPLER is ignored, because `NodeSDK` is handed an
+ * explicit `sampler`.
  */
 import { diag, DiagConsoleLogger, DiagLogLevel } from "@opentelemetry/api";
 import type { Attributes, Context, Link, SpanKind } from "@opentelemetry/api";

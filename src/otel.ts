@@ -27,6 +27,11 @@
  *                                record everything and let the collector's
  *                                tail sampler decide). Below 1 this re-enables
  *                                parent-based head sampling — see buildSampler.
+ *                                NOTE this is NOT the OTel spec's variable of
+ *                                that name: its partner OTEL_TRACES_SAMPLER is
+ *                                ignored here, because `NodeSDK` is handed an
+ *                                explicit `sampler` and explicit config beats
+ *                                env-based sampler selection.
  *   OTEL_BSP_MAX_QUEUE_SIZE      batch export tuning; see batchConfigFromEnv.
  *   OTEL_BSP_MAX_EXPORT_BATCH_SIZE
  *   OTEL_BSP_SCHEDULE_DELAY
