@@ -1,8 +1,9 @@
-import type {
-  AgentSession,
-  AgentSessionKind,
-  AgentStepState,
-} from "@/lib/db/schema";
+import type { AgentSession, AgentSessionKind } from "@/lib/db/schema";
+import {
+  activeStep,
+  sessionNarration,
+  sessionProgress,
+} from "@lastest/agent-steps";
 // Type-only, so this module stays pure and importable from a client component:
 // `explorer-reads` is `server-only`, and the import is erased at compile time.
 import type { ExplorerFleetSession } from "@/lib/core/explorer-reads";
@@ -18,7 +19,6 @@ import type { ExplorerFleetSession } from "@/lib/core/explorer-reads";
 export interface EscalatableTaskLike {
   id: string;
   title: string;
-  status: string;
   agentReply: string | null;
   createdAt: Date | null;
   updatedAt: Date | null;
@@ -59,6 +59,13 @@ export interface FleetRow {
   /** Only set when `state === "blocked"` — what the agent is waiting for. */
   blockedOn: string | null;
   /**
+   * Only set when `state === "blocked"` — when the gate was reached, which is
+   * NOT `startedAt`: a run that started at 09:00 and hit its gate at 12:00 has
+   * been waiting since 12:00. Sourced from the waiting step's own
+   * `startedAt`, stamped by the writer when the step went active.
+   */
+  blockedSince: Date | null;
+  /**
    * Whether this agent is *expected* to be holding an embedded browser.
    *
    * Inferred from the run's own state (`working` or `blocked`), NOT read back
@@ -71,26 +78,35 @@ export interface FleetRow {
   holdsBrowser: boolean;
 }
 
-/** Core kinds plus the plugin-owned explorer. */
-export type FleetAgentKind = AgentSessionKind | "explorer";
+/**
+ * The core kinds that appear on the roster, plus the plugin-owned explorer.
+ *
+ * Deliberately narrower than `AgentSessionKind`: Ranger, Play and QuickStart
+ * are one-shot onboarding flows, not agents that work a repo, so they have no
+ * row. `FLEET_AGENT_KINDS` in `queries/agents-fleet.ts` is the SQL-side twin
+ * of this list and must agree with it.
+ */
+export type FleetAgentKind =
+  | Extract<AgentSessionKind, "qa" | "triage" | "healer">
+  | "explorer";
 
 const KIND_LABELS: Record<FleetAgentKind, string> = {
   qa: "QA agent",
-  ranger: "Ranger",
-  play: "Play agent",
-  quickstart: "QuickStart",
   explorer: "Explorer",
   triage: "Triage agent",
+  healer: "Healer",
 };
 
 const KIND_HREFS: Record<FleetAgentKind, string> = {
   qa: "/qa-agent",
-  ranger: "/verify",
-  play: "/tests",
-  quickstart: "/",
   explorer: "/explorer",
   triage: "/triage-agent",
+  healer: "/healer-agent",
 };
+
+export function isFleetAgentKind(kind: string): kind is FleetAgentKind {
+  return kind in KIND_LABELS;
+}
 
 /**
  * Which agents can hold an embedded browser at all.
@@ -103,11 +119,11 @@ const KIND_HREFS: Record<FleetAgentKind, string> = {
  */
 const KIND_USES_BROWSER: Record<FleetAgentKind, boolean> = {
   qa: true,
-  ranger: true,
-  play: true,
-  quickstart: true,
   explorer: true,
   triage: false,
+  // The healer inspects the live page through an embedded browser while it
+  // patches, and holds it for the whole heal step.
+  healer: true,
 };
 
 /** True when a row in this state, for this kind, is holding a pool browser. */
@@ -118,49 +134,11 @@ export function holdsBrowserFor(kind: FleetAgentKind, state: FleetState) {
   return state === "working" || state === "blocked";
 }
 
-export function fleetLabel(kind: FleetAgentKind): string {
-  return KIND_LABELS[kind];
-}
-
-/**
- * The step a session is "at" — the first non-settled one, matching what
- * `PhaseTimeline` highlights so the console and the drill-through never
- * disagree about which phase is current.
- */
-export function activeStep(session: AgentSession): AgentStepState | undefined {
-  return session.steps.find(
-    (s) =>
-      s.status === "active" ||
-      s.status === "waiting_user" ||
-      s.status === "failed",
-  );
-}
-
-/**
- * One line of narration: the active step plus its freshest running substep.
- *
- * Mirrors `sessionNarration` in `qa-agent-header.tsx`. That copy stays where it
- * is — it is a client component and this module is imported by the server page
- * — but the two must produce the same sentence for the same session.
- */
-export function sessionNarration(session: AgentSession): string | null {
-  const step = activeStep(session);
-  if (!step) return null;
-  const running = [...(step.substeps ?? [])]
-    .reverse()
-    .find((s) => s.status === "running");
-  if (running) return `${step.label} — ${running.detail ?? running.label}`;
-  return `${step.label} — ${step.description}`;
-}
-
-/** Same formula as `use-qa-agent.ts` so the console's bar matches the page's. */
-export function sessionProgress(session: AgentSession): number {
-  const done = session.steps.filter(
-    (s) => s.status === "completed" || s.status === "skipped",
-  ).length;
-  const total = session.steps.length;
-  return total > 0 ? Math.round((done / total) * 100) : 0;
-}
+// The step helpers (`activeStep`, `sessionNarration`, `sessionProgress`) live
+// in `@lastest/agent-steps` so this module, the QA header and the phase
+// timelines all run the same code — they used to be three hand-mirrored
+// copies that had already drifted on whether a failed step is "current".
+export { activeStep, sessionNarration, sessionProgress };
 
 /**
  * A blocked agent is one whose current step is a human gate. It is NOT the
@@ -168,15 +146,39 @@ export function sessionProgress(session: AgentSession): number {
  * has released its browser, while a blocked one is mid-run and still holding
  * it. The console separates them because the second costs pool capacity and
  * the first does not.
+ *
+ * The gate is checked BEFORE the session status. Every writer of a human gate
+ * sets the step to `waiting_user` and then the session to `paused` (QA plan
+ * review, play-agent's `setStepWaitingUser`, spec import), so a real run at
+ * its gate is `paused` + `waiting_user` — and must read as blocked, not as a
+ * user-initiated pause. A `paused` session with no waiting step is the
+ * genuine pause.
  */
 export function deriveState(session: AgentSession): FleetState {
-  if (session.status === "paused") return "paused";
-  if (session.status !== "active") return "idle";
-  return activeStep(session)?.status === "waiting_user" ? "blocked" : "working";
+  if (session.status !== "active" && session.status !== "paused") return "idle";
+  if (activeStep(session)?.status === "waiting_user") return "blocked";
+  return session.status === "paused" ? "paused" : "working";
 }
 
-/** Build a roster row from a core `agent_sessions` row. */
+/** `AgentStepState.startedAt` is an ISO string; an unparseable one is null
+ *  rather than an Invalid Date that `timeAgo` would render as "NaNm ago". */
+function stepStartedAt(iso: string | undefined): Date | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Build a roster row from a core `agent_sessions` row.
+ *
+ * Callers select with `FLEET_AGENT_KINDS`, so a session of a non-roster kind
+ * never reaches here; the guard throws rather than rendering an unlabeled row
+ * if that invariant is ever broken.
+ */
 export function rowFromSession(session: AgentSession): FleetRow {
+  if (!isFleetAgentKind(session.kind)) {
+    throw new Error(`agent kind "${session.kind}" has no roster row`);
+  }
   const step = activeStep(session);
   const state = deriveState(session);
   const role =
@@ -193,6 +195,7 @@ export function rowFromSession(session: AgentSession): FleetRow {
     startedAt: session.createdAt ?? null,
     blockedOn:
       state === "blocked" ? (step?.description ?? step?.label ?? null) : null,
+    blockedSince: state === "blocked" ? stepStartedAt(step?.startedAt) : null,
     holdsBrowser: holdsBrowserFor(session.kind, state),
   };
 }
@@ -211,6 +214,7 @@ export function idleRow(kind: FleetAgentKind): FleetRow {
     href: KIND_HREFS[kind],
     startedAt: null,
     blockedOn: null,
+    blockedSince: null,
     holdsBrowser: false,
   };
 }
@@ -252,6 +256,9 @@ export function rowFromExplorer(session: ExplorerFleetSession): FleetRow {
     href: KIND_HREFS.explorer,
     startedAt: session.startedAt,
     blockedOn: state === "blocked" ? session.stepLabel : null,
+    // The explorer projection carries no per-step timestamps; the run start is
+    // the best available lower bound.
+    blockedSince: state === "blocked" ? session.startedAt : null,
     holdsBrowser: holdsBrowserFor("explorer", state),
   };
 }
@@ -308,44 +315,44 @@ export function sortRoster(rows: FleetRow[]): FleetRow[] {
  */
 export interface Escalation {
   id: string;
-  kind: FleetAgentKind;
   label: string;
   question: string;
   href: string;
+  /** When the human was first needed — the gate time, not the run start. */
   since: Date | null;
   /** True when answering this frees a browser back to the pool. */
   holdsBrowser: boolean;
 }
 
+/**
+ * @param needsInput Tasks already in `needs_input` — the caller reads exactly
+ *   those (`getQaConsoleQueue`), so they are not re-filtered here.
+ */
 export function escalationsFrom(
   rows: FleetRow[],
-  tasks: EscalatableTaskLike[],
+  needsInput: EscalatableTaskLike[],
 ): Escalation[] {
   const fromSessions: Escalation[] = rows
     .filter((r) => r.state === "blocked")
     .map((r) => ({
       id: r.id,
-      kind: r.kind,
       label: r.label,
       question: r.blockedOn ?? "Waiting for a decision",
       href: r.href,
-      since: r.startedAt,
+      since: r.blockedSince ?? r.startedAt,
       holdsBrowser: r.holdsBrowser,
     }));
 
-  const fromTasks: Escalation[] = tasks
-    .filter((t) => t.status === "needs_input")
-    .map((t) => ({
-      id: `task:${t.id}`,
-      kind: "qa" as const,
-      label: KIND_LABELS.qa,
-      question: t.agentReply ?? t.title,
-      href: "/qa-agent",
-      since: t.updatedAt ?? t.createdAt ?? null,
-      // A task pushed back to the queue is not holding anything — the run that
-      // raised it has already ended.
-      holdsBrowser: false,
-    }));
+  const fromTasks: Escalation[] = needsInput.map((t) => ({
+    id: `task:${t.id}`,
+    label: KIND_LABELS.qa,
+    question: t.agentReply ?? t.title,
+    href: "/qa-agent",
+    since: t.updatedAt ?? t.createdAt ?? null,
+    // A task pushed back to the queue is not holding anything — the run that
+    // raised it has already ended.
+    holdsBrowser: false,
+  }));
 
   // Oldest first — the thing that has been waiting longest is the thing to
   // answer next. An escalation with no timestamp sorts LAST rather than

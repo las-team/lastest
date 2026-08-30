@@ -41,10 +41,10 @@ export default async function TriageBuildPage({
   const team = session?.team;
 
   // Pro gate first — identical to /agents and /qa-agent.
-  if (team && !hasQaAgentAccess(team.plan, isBillingEnabled())) {
+  if (!hasQaAgentAccess(team?.plan ?? "free", isBillingEnabled())) {
     return (
       <QaAgentUpgradeGate
-        currentPlanName={planConfig(team.plan).name}
+        currentPlanName={planConfig(team?.plan ?? "free").name}
         requiredPlanName={qaAgentMinPlanName()}
       />
     );

@@ -41,13 +41,28 @@ function session(over: Partial<AgentSession> = {}): AgentSession {
 
 describe("deriveState", () => {
   it("separates a human gate from a user-initiated pause", () => {
+    // What every real gate writer produces: the step goes `waiting_user` AND
+    // the session goes `paused` (QA plan review, play-agent's
+    // setStepWaitingUser). That combination is blocked, not paused.
     const blocked = session({
+      status: "paused",
       steps: [step({ status: "completed" }), step({ status: "waiting_user" })],
     });
+    // A pause with no waiting step is the genuine, user-initiated one.
     const paused = session({ status: "paused" });
 
     expect(deriveState(blocked)).toBe("blocked");
     expect(deriveState(paused)).toBe("paused");
+  });
+
+  it("reads a gate as blocked whether the writer also paused the session or not", () => {
+    const gate = [step({ status: "waiting_user" })];
+    expect(deriveState(session({ status: "active", steps: gate }))).toBe(
+      "blocked",
+    );
+    expect(deriveState(session({ status: "paused", steps: gate }))).toBe(
+      "blocked",
+    );
   });
 
   it("treats a settled session as idle regardless of its steps", () => {
@@ -61,10 +76,28 @@ describe("rowFromSession", () => {
     // The whole point of the capacity read-out: a run parked on a human gate
     // has not released its embedded browser, so it costs pool capacity.
     const row = rowFromSession(
-      session({ steps: [step({ status: "waiting_user" })] }),
+      session({ status: "paused", steps: [step({ status: "waiting_user" })] }),
     );
     expect(row.state).toBe("blocked");
     expect(row.holdsBrowser).toBe(true);
+  });
+
+  it("dates the block from the gate step, not the run start", () => {
+    const row = rowFromSession(
+      session({
+        status: "paused",
+        createdAt: new Date("2026-08-27T09:00:00Z"),
+        steps: [
+          step({ status: "completed" }),
+          step({
+            status: "waiting_user",
+            startedAt: "2026-08-27T12:00:00Z",
+          }),
+        ],
+      }),
+    );
+    expect(row.blockedSince).toEqual(new Date("2026-08-27T12:00:00Z"));
+    expect(rowFromSession(session()).blockedSince).toBeNull();
   });
 
   it("does not count a paused agent as holding a browser", () => {
@@ -154,6 +187,51 @@ describe("triage rows", () => {
   });
 });
 
+describe("healer row", () => {
+  it("narrates a working healer and counts its browser", () => {
+    const row = rowFromSession(
+      session({
+        kind: "healer",
+        steps: [
+          step({ id: "healer_collect", status: "completed" }),
+          step({ id: "healer_gate", status: "completed" }),
+          step({
+            id: "healer_heal",
+            status: "active",
+            label: "Heal",
+            description: "Patch selectors and timing on the live page",
+          }),
+          step({ id: "healer_verify", status: "pending" }),
+        ],
+      }),
+    );
+    expect(row.kind).toBe("healer");
+    expect(row.label).toBe("Healer");
+    expect(row.href).toBe("/healer-agent");
+    expect(row.state).toBe("working");
+    expect(row.holdsBrowser).toBe(true);
+    expect(row.narration).toBe(
+      "Heal — Patch selectors and timing on the live page",
+    );
+    expect(row.progress).toBe(50);
+  });
+
+  it("has an idle row, and none for the retired onboarding flows", () => {
+    expect(idleRow("healer")).toMatchObject({
+      kind: "healer",
+      label: "Healer",
+      state: "idle",
+      href: "/healer-agent",
+      holdsBrowser: false,
+    });
+    expect(() => rowFromSession(session({ kind: "ranger" }))).toThrow(
+      /no roster row/,
+    );
+    expect(() => rowFromSession(session({ kind: "quickstart" }))).toThrow();
+    expect(() => rowFromSession(session({ kind: "play" }))).toThrow();
+  });
+});
+
 describe("sortRoster", () => {
   it("puts what needs a human above what is merely running", () => {
     const rows: FleetRow[] = [
@@ -225,8 +303,29 @@ describe("escalationsFrom", () => {
     expect(out.map((e) => e.id)).toEqual(["task:t1", "s-blocked"]);
   });
 
-  it("ignores tasks that are not waiting on a human", () => {
-    expect(escalationsFrom([], [task({ status: "queued" })])).toEqual([]);
+  it("sorts by when the gate was reached, not when the run started", () => {
+    // Run started 09:00, gate reached 12:00; the task was pushed back at
+    // 10:30 and has genuinely waited longer — it must come first.
+    const rows = [
+      rowFromSession(
+        session({
+          id: "s-blocked",
+          createdAt: new Date("2026-08-27T09:00:00Z"),
+          steps: [
+            step({
+              status: "waiting_user",
+              startedAt: "2026-08-27T12:00:00Z",
+            }),
+          ],
+        }),
+      ),
+    ];
+    const pushedBack = task({
+      updatedAt: new Date("2026-08-27T10:30:00Z"),
+    });
+    const out = escalationsFrom(rows, [pushedBack]);
+    expect(out.map((e) => e.id)).toEqual(["task:t1", "s-blocked"]);
+    expect(out[1].since).toEqual(new Date("2026-08-27T12:00:00Z"));
   });
 
   it("marks only the session escalation as holding a browser", () => {

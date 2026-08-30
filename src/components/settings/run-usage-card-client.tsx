@@ -10,6 +10,11 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PlayCircle } from "lucide-react";
+import {
+  computeRunUsageProjection,
+  formatRunCount,
+  formatRunMinutes,
+} from "@/lib/billing/run-usage";
 
 interface RunUsageCardProps {
   runsThisMonth: number;
@@ -53,13 +58,6 @@ function formatMonth(yyyymm: string): string {
   return `${MONTH_NAMES[m - 1]} ${y}`;
 }
 
-function formatNumber(n: number): string {
-  // Deterministic (no locale-dependent toLocaleString) to avoid SSR/CSR mismatch.
-  return Math.round(n)
-    .toString()
-    .replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-}
-
 export function RunUsageCard({
   runsThisMonth,
   monthlyRunQuota,
@@ -71,10 +69,13 @@ export function RunUsageCard({
   // The plan quota is denominated in run-minutes (plans.ts / Stripe
   // product metadata) — minutes drive the capped progress bar; the raw
   // run count is informational.
-  const percentUsed =
-    monthlyRunQuota > 0
-      ? Math.min(100, Math.round((runMinutesThisMonth / monthlyRunQuota) * 100))
-      : 0;
+  const percentUsed = Math.min(
+    100,
+    Math.round(
+      computeRunUsageProjection(runMinutesThisMonth, monthlyRunQuota).usedPct *
+        100,
+    ),
+  );
 
   const progressColor =
     percentUsed >= 90
@@ -83,10 +84,7 @@ export function RunUsageCard({
         ? "bg-yellow-500"
         : "bg-green-500";
 
-  const minutesDisplay =
-    runMinutesThisMonth < 10
-      ? runMinutesThisMonth.toFixed(1)
-      : formatNumber(runMinutesThisMonth);
+  const minutesDisplay = formatRunMinutes(runMinutesThisMonth);
 
   // Defer relative-time formatting to after mount; `new Date()` inside
   // formatRelativeTime would otherwise produce different "Xm ago" strings on
@@ -117,7 +115,7 @@ export function RunUsageCard({
         <div className="space-y-2">
           <div className="flex items-center justify-between text-sm">
             <span className="font-medium">
-              {minutesDisplay} of {formatNumber(monthlyRunQuota)} run-minutes
+              {minutesDisplay} of {formatRunCount(monthlyRunQuota)} run-minutes
               used
             </span>
             <span className="text-muted-foreground">{percentUsed}%</span>
@@ -130,7 +128,7 @@ export function RunUsageCard({
           </div>
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>
-              {formatNumber(runsThisMonth)} test runs this month (not capped)
+              {formatRunCount(runsThisMonth)} test runs this month (not capped)
             </span>
             {mounted && lastCalculatedAt && (
               <span>Last updated: {formatRelativeTime(lastCalculatedAt)}</span>

@@ -3,6 +3,9 @@
 import type { QaAgentTask as QaTask } from "../schema";
 import type { QaSessionRow as AgentSession } from "../types";
 import { Badge, Button, Card, CardContent, Progress } from "@lastest/ui";
+// Shared with the Agents console so both narrate the same sentence for the
+// same session (the console used to carry a hand-mirrored copy).
+import { sessionNarration } from "@lastest/agent-steps";
 import {
   Ban,
   Bot,
@@ -65,22 +68,6 @@ function StatusDot({ state }: { state: AgentState }) {
       />
     </span>
   );
-}
-
-/** Current one-line narration for a running session: the active step plus its
- *  freshest running substep. */
-function sessionNarration(session: AgentSession): string | null {
-  const step = session.steps.find(
-    (s) => s.status === "active" || s.status === "waiting_user",
-  );
-  if (!step) return null;
-  const running = [...(step.substeps ?? [])]
-    .reverse()
-    .find((s) => s.status === "running");
-  if (running) {
-    return `${step.label} — ${running.detail ?? running.label}`;
-  }
-  return `${step.label} — ${step.description}`;
 }
 
 export function QaAgentHeader({

@@ -130,10 +130,9 @@ export function Sidebar({
   const gamificationEnabled =
     (team?.gamificationEnabled ?? false) && !regulated;
   // Agents is a Pro-tier feature — surface a lock on the nav item so the
-  // gated destination doesn't look identical to unlocked pages.
-  const qaAgentLocked = team
-    ? !hasQaAgentAccess(team.plan, billingEnabled)
-    : false;
+  // gated destination doesn't look identical to unlocked pages. No team reads
+  // as the free plan, the same verdict `/agents` and `/qa-agent` reach.
+  const qaAgentLocked = !hasQaAgentAccess(team?.plan ?? "free", billingEnabled);
 
   const hideForSegment = (items: typeof definitionNav) =>
     regulated

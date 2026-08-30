@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   computeRunUsageProjection,
+  formatRunCount,
+  formatRunMinutes,
   deriveRunUsageBannerState,
   nextRunUsageResetLabel,
 } from "./run-usage";
@@ -120,5 +122,20 @@ describe("nextRunUsageResetLabel", () => {
     expect(nextRunUsageResetLabel(new Date(Date.UTC(2026, 11, 15)))).toBe(
       "Jan 1",
     );
+  });
+});
+
+describe("formatRunMinutes / formatRunCount", () => {
+  it("shows one decimal under ten minutes and whole minutes above", () => {
+    expect(formatRunMinutes(12.333333)).toBe("12");
+    expect(formatRunMinutes(1234.7)).toBe("1,235");
+    expect(formatRunMinutes(3.14159)).toBe("3.1");
+    expect(formatRunMinutes(0)).toBe("0.0");
+  });
+
+  it("groups thousands deterministically", () => {
+    expect(formatRunCount(1000)).toBe("1,000");
+    expect(formatRunCount(999)).toBe("999");
+    expect(formatRunCount(1234567.4)).toBe("1,234,567");
   });
 });
