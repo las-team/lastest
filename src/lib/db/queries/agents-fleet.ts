@@ -20,15 +20,15 @@ import { decryptAgentSessionRow } from "./integrations";
  */
 
 /** Kinds that can appear as a row on the fleet roster. */
-export const FLEET_AGENT_KINDS: AgentSessionKind[] = [
+export const FLEET_AGENT_KINDS = [
   "qa",
-  "ranger",
-  "play",
-  "quickstart",
-  // Triage runs are sessions like any other, so an idle Triage row appears on
-  // the roster even before a build has ever been triaged.
+  // Triage and Healer runs are sessions like any other, so an idle row for
+  // each appears on the roster even before a build has ever been triaged or
+  // healed. Ranger, Play and QuickStart are deliberately NOT on the roster:
+  // they are onboarding / one-shot flows, not agents that work a repo.
   "triage",
-];
+  "healer",
+] as const satisfies readonly AgentSessionKind[];
 
 /**
  * Every live (active or paused) session on a repo, any kind, newest first.
@@ -47,7 +47,7 @@ export async function listLiveAgentSessions(
     .where(
       and(
         eq(agentSessions.repositoryId, repositoryId),
-        inArray(agentSessions.kind, FLEET_AGENT_KINDS),
+        inArray(agentSessions.kind, [...FLEET_AGENT_KINDS]),
         or(
           eq(agentSessions.status, "active"),
           eq(agentSessions.status, "paused"),
@@ -80,7 +80,7 @@ export async function listRecentSettledAgentSessions(
     .where(
       and(
         eq(agentSessions.repositoryId, repositoryId),
-        inArray(agentSessions.kind, FLEET_AGENT_KINDS),
+        inArray(agentSessions.kind, [...FLEET_AGENT_KINDS]),
         inArray(agentSessions.status, ["completed", "failed", "cancelled"]),
       ),
     )

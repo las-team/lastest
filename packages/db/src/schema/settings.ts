@@ -297,6 +297,15 @@ export const aiSettings = pgTable("ai_settings", {
    *  Only settable by teams that pass the Pro gate; a downgraded team keeps
    *  the row but the setting reads as off. */
   triageAgentEnabled: boolean("triage_agent_enabled").default(false),
+  /** Healer agent — auto-repair failing tests the Triage agent classified as
+   *  a test problem (never a real regression). Same Pro gate as triage, and
+   *  it additionally needs triage on: no classifier, no healer. */
+  healerAgentEnabled: boolean("healer_agent_enabled").default(false),
+  /** Hard stop per test: heal attempts since the test last passed (or was
+   *  last edited by a human) before the healer escalates instead. */
+  healerMaxAttemptsPerTest: integer("healer_max_attempts_per_test").default(2),
+  /** Hard stop per campaign: how many failing tests one build may heal. */
+  healerMaxTestsPerBuild: integer("healer_max_tests_per_build").default(5),
   createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 });
@@ -329,6 +338,9 @@ export const DEFAULT_AI_SETTINGS = {
   explorerStyleRotation: "normal,curious,psycho",
   explorerModel: "",
   triageAgentEnabled: false,
+  healerAgentEnabled: false,
+  healerMaxAttemptsPerTest: 2,
+  healerMaxTestsPerBuild: 5,
 };
 
 // AI Prompt Logging for debugging and auditing
