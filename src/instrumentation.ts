@@ -5,7 +5,19 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
-  // Structured JSON logging first, so every boot step below is captured by it.
+  // OTel first — its HTTP/undici instrumentations patch `require("http")` and
+  // subscribe to undici's diagnostics channels, so anything that opens a
+  // socket before this point is invisible to tracing. No-ops when
+  // OTEL_EXPORTER_OTLP_ENDPOINT is unset.
+  try {
+    const { startOtel } = await import("./otel");
+    startOtel();
+  } catch (err) {
+    console.error("[Boot] startOtel failed:", err);
+  }
+
+  // Structured JSON logging second, so every boot step below is captured by it
+  // (and so log records can already carry trace_id/span_id from the mixin).
   // Production only — dev keeps the raw console output Next's overlay expects.
   if (process.env.NODE_ENV === "production") {
     try {

@@ -19,7 +19,7 @@
  * say which it is instead of implying a precision it does not have.
  */
 
-import type { CoverageCell } from "@/lib/db/schema";
+import type { CoverageCell, CoverageDimension } from "@/lib/db/schema";
 import {
   DEFAULT_COVERAGE_ENVIRONMENT,
   DEFAULT_COVERAGE_STOP_POLICY,
@@ -125,13 +125,21 @@ export async function captureCoverageSnapshot(
     strength?: number;
     shouldStop?: boolean;
     capturedAt?: Date;
+    /** Rows the caller already holds. `syncCoverage` calls this immediately
+     *  after writing both tables and would otherwise re-read what it just
+     *  wrote; a build hook has nothing in hand and omits them. Passing stale
+     *  rows snapshots a stale model, so only a caller that just derived them
+     *  should. */
+    cells?: CoverageCell[];
+    dimensions?: CoverageDimension[];
   } = {},
 ): Promise<CoverageTotals | null> {
   const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
   const strength = opts.strength ?? DEFAULT_COVERAGE_STOP_POLICY.strength;
   const [cells, dimensions] = await Promise.all([
-    queries.getCoverageCells(repositoryId, { environmentKey }),
-    queries.getCoverageDimensions(repositoryId, environmentKey),
+    opts.cells ?? queries.getCoverageCells(repositoryId, { environmentKey }),
+    opts.dimensions ??
+      queries.getCoverageDimensions(repositoryId, environmentKey),
   ]);
   // No cells means no model. Writing a 0% point would render as a cliff on the
   // chart for a repo that simply never profiled anything.
@@ -180,7 +188,29 @@ export async function backfillCoverageSnapshots(
 ): Promise<BackfillResult> {
   const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
   const strength = opts.strength ?? DEFAULT_COVERAGE_STOP_POLICY.strength;
-  const maxBuilds = opts.maxBuilds ?? 200;
+  const maxBuilds = opts.maxBuilds ?? queries.DEFAULT_BACKFILL_MAX_BUILDS;
+
+  // Fast path. Reconstruction below reads the ENTIRE attribution timeline (up
+  // to COVERAGE_TIMELINE_ROW_LIMIT rows) plus every cell and dimension, and
+  // then rolls a summary up per build — all of it thrown away when every build
+  // already holds a snapshot, which is the normal case on the second and every
+  // later sync. One short-circuiting existence probe answers "is there
+  // anything to write?" first.
+  //
+  // The probe is given the SAME window this call writes. Asked about the whole
+  // ledger it would report a gap forever on any repo past `maxBuilds` builds —
+  // the ones below `writeFrom` are walked but never written, so their gap is
+  // permanent — and the fast path would never engage on the large repos it
+  // exists for. Failing open (do the work) is the safe direction: a probe that
+  // errors must not silently skip a real backfill.
+  const hasGap = await queries
+    .hasUnsnapshottedCoverageBuilds(repositoryId, environmentKey, { maxBuilds })
+    .catch(() => true);
+  if (!hasGap) {
+    // Nothing was examined, so nothing is reported — `buildsSeen` counts what
+    // this call actually walked, not what the ledger holds.
+    return { buildsSeen: 0, written: 0, skippedExisting: 0 };
+  }
 
   const [cells, dimensions, timeline, existing] = await Promise.all([
     queries.getCoverageCells(repositoryId, { environmentKey }),
