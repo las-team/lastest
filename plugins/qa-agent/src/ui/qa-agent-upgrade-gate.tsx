@@ -1,3 +1,4 @@
+import type { ComponentType } from "react";
 import Link from "next/link";
 import {
   Badge,
@@ -270,25 +271,30 @@ function DoneScreenPreview() {
 export function QaAgentUpgradeGate({
   currentPlanName,
   requiredPlanName,
+  title = "QA Agent",
+  icon: Icon = Bot,
+  description = "An orchestrated agent team — scout, planner, generator, healer — that discovers your app, plans coverage against testing best practices, and builds a complete E2E suite you can watch and steer.",
 }: {
   /** Display name of the team's current plan (e.g. "Free"). */
   currentPlanName: string;
   /** Display name of the plan required to unlock (e.g. "Pro"). */
   requiredPlanName: string;
+  /** Heading shown above the preview. `/agents` is the gated door now, so it
+   *  passes its own name rather than inheriting this page's. The preview
+   *  below is unchanged either way — a QA run is what the plan unlocks. */
+  title?: string;
+  icon?: ComponentType<{ className?: string }>;
+  description?: string;
 }) {
   return (
     <div className="flex-1 overflow-auto p-6">
       <div className="mx-auto max-w-5xl space-y-6">
         <header className="space-y-1">
           <h1 className="flex items-center gap-2 text-2xl font-semibold">
-            <Bot className="h-6 w-6" />
-            QA Agent
+            <Icon className="h-6 w-6" />
+            {title}
           </h1>
-          <p className="text-sm text-muted-foreground">
-            An orchestrated agent team — scout, planner, generator, healer —
-            that discovers your app, plans coverage against testing best
-            practices, and builds a complete E2E suite you can watch and steer.
-          </p>
+          <p className="text-sm text-muted-foreground">{description}</p>
         </header>
 
         {/* Upgrade CTA */}

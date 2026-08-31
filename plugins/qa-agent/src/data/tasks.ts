@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
 
 import type { QaTaskStatus, QaTaskTestRef } from "../types";
 import { qaAgentTasks, type NewQaAgentTask, type QaAgentTask } from "../schema";
@@ -76,6 +76,44 @@ export async function getQaTasksByRepoRows(
       .limit(terminalLimit),
   ]);
   return [...open, ...terminal];
+}
+
+/**
+ * What the Agents console needs from the queue: the tasks pushed back for a
+ * human, plus how many are waiting to be picked up.
+ *
+ * Deliberately NOT `getQaTasksByRepoRows` — the console renders two numbers
+ * and a short list, and it is a `force-dynamic` page hit on every navigation.
+ * Pulling every task on the repo to filter two of them in JS is the shape
+ * flagged on #97; a filtered select plus a `count(*)` is the same answer for
+ * a fraction of the rows.
+ */
+export async function getQaConsoleQueueRows(
+  db: QaAgentDb,
+  repositoryId: string,
+): Promise<{ needsInput: QaAgentTask[]; queuedCount: number }> {
+  const [needsInput, queued] = await Promise.all([
+    db
+      .select()
+      .from(qaAgentTasks)
+      .where(
+        and(
+          eq(qaAgentTasks.repositoryId, repositoryId),
+          eq(qaAgentTasks.status, "needs_input"),
+        ),
+      )
+      .orderBy(desc(qaAgentTasks.updatedAt)),
+    db
+      .select({ n: count() })
+      .from(qaAgentTasks)
+      .where(
+        and(
+          eq(qaAgentTasks.repositoryId, repositoryId),
+          eq(qaAgentTasks.status, "queued"),
+        ),
+      ),
+  ]);
+  return { needsInput, queuedCount: Number(queued[0]?.n ?? 0) };
 }
 
 /** Oldest queued task for a repo — what the dispatcher picks up next. */
