@@ -15,6 +15,7 @@
  */
 import os from "node:os";
 import pino from "pino";
+import { context, isSpanContextValid, trace } from "@opentelemetry/api";
 
 const isProduction = process.env.NODE_ENV === "production";
 
@@ -75,12 +76,18 @@ function devDestination() {
         env: _env,
         gitHash: _gitHash,
         err,
+        trace_id,
+        span_id: _span_id,
         ...rest
       } = rec as Record<string, unknown> & { level: string; time: string };
 
       const ts = time.slice(11, 23);
       const name = level.toUpperCase().padEnd(5);
-      const prefix = scope ? ` [${scope}]` : "";
+      // Trace ids are 32 hex chars — full width drowns the message in dev, but
+      // the first 8 are enough to eyeball which lines share a trace.
+      const tid =
+        typeof trace_id === "string" ? ` ⟨${trace_id.slice(0, 8)}⟩` : "";
+      const prefix = `${tid}${scope ? ` [${scope}]` : ""}`;
       const extras = Object.keys(rest).length ? ` ${JSON.stringify(rest)}` : "";
       const stack =
         err && typeof err === "object" && "stack" in err
@@ -108,6 +115,17 @@ export const logger = pino(
       gitHash: process.env.NEXT_PUBLIC_GIT_HASH,
     },
     redact: { paths: REDACT_PATHS, censor: "[redacted]" },
+    // Correlates every log line with the span that emitted it, so a trace in
+    // the collector links to its logs and back. Independent of whether the
+    // OTel SDK is running: with no registered tracer provider the API's no-op
+    // tracer returns no active span and this contributes nothing.
+    mixin() {
+      const span = trace.getSpan(context.active());
+      if (!span) return {};
+      const sc = span.spanContext();
+      if (!isSpanContextValid(sc)) return {};
+      return { trace_id: sc.traceId, span_id: sc.spanId };
+    },
     // ISO timestamps beat epoch millis for anything that greps logs by hand.
     timestamp: pino.stdTimeFunctions.isoTime,
     formatters: {

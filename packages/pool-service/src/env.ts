@@ -14,7 +14,7 @@ import path from "node:path";
 
 function loadDotenvLocal(): void {
   // cwd is packages/pool-service under `pnpm --filter … dev`, the repo root
-  // under direct `node dist/main.mjs` runs — check both.
+  // under direct `node dist/main.cjs` runs — check both.
   const candidates = [
     path.resolve(process.cwd(), ".env.local"),
     path.resolve(process.cwd(), "../../.env.local"),

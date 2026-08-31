@@ -341,6 +341,45 @@ describe("expandMatrix", () => {
     expect(r.runs.length).toBeLessThanOrEqual(50);
   });
 
+  it("samples the truncated product by stride so every axis varies", () => {
+    // Positional truncation ("first cap" combinations) pins the first source
+    // to its row 0 — pairwise covering then has nothing to vary on that axis.
+    const big = (alias: string, col: string) =>
+      csvSource(
+        alias,
+        [col],
+        Array.from({ length: 5000 }, (_, i) => [`${col}${i}`]),
+      );
+    const r = expandMatrix({
+      variables: [
+        matrixVar({
+          id: "a",
+          name: "left",
+          sourceAlias: "l",
+          sourceColumn: "l",
+        }),
+        matrixVar({
+          id: "b",
+          name: "right",
+          sourceAlias: "r",
+          sourceColumn: "r",
+        }),
+      ],
+      gsheetSources: [],
+      csvSources: [big("l", "l"), big("r", "r")],
+      policy: {
+        selection: "all",
+        strength: 2,
+        visual: "none",
+        maxRuns: 5000,
+      },
+    });
+    const leftValues = new Set(r.runs.map((run) => run.coords["left"]));
+    const rightValues = new Set(r.runs.map((run) => run.coords["right"]));
+    expect(leftValues.size).toBeGreaterThan(100);
+    expect(rightValues.size).toBeGreaterThan(100);
+  });
+
   it("reports truncation rather than silently clipping", () => {
     const r = expandMatrix({
       variables: [matrixVar({})],

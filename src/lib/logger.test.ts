@@ -22,7 +22,21 @@ function runInProd(body: string): Record<string, unknown>[] {
 
   const out = execFileSync(
     process.execPath,
-    ["--import", "tsx", "--input-type=module", "-e", script],
+    // `--no-deprecation`: Node's default warning handler writes through
+    // `console.error`, and it fires on a later tick — so once the bridge is
+    // installed, any deprecation the child's own toolchain happens to emit
+    // lands on stdout as an extra pino record and breaks the exact-match
+    // assertions below. tsx's `module.register()` does exactly that from Node
+    // 26 on (not on CI's Node 24), which made this suite's result depend on
+    // the developer's Node version rather than on the bridge.
+    [
+      "--no-deprecation",
+      "--import",
+      "tsx",
+      "--input-type=module",
+      "-e",
+      script,
+    ],
     {
       encoding: "utf8",
       cwd: new URL("../..", import.meta.url).pathname,
