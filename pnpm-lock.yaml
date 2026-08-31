@@ -196,6 +196,9 @@ importers:
       '@lastest/test-templates':
         specifier: workspace:*
         version: link:libs/test-templates
+      '@lastest/triage-model':
+        specifier: workspace:*
+        version: link:libs/triage-model
       '@lastest/ui':
         specifier: workspace:*
         version: link:libs/ui
@@ -685,6 +688,18 @@ importers:
         specifier: ^4.1.0
         version: 4.1.8(@opentelemetry/api@1.9.1)(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
 
+  libs/triage-model:
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.30
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.8(@opentelemetry/api@1.9.1)(@types/node@20.19.30)(vite@7.3.5(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.9.0))
+
   libs/ui:
     dependencies:
       '@radix-ui/react-checkbox':
@@ -791,6 +806,9 @@ importers:
       '@lastest/eb-protocol':
         specifier: workspace:*
         version: link:../eb-protocol
+      '@lastest/triage-model':
+        specifier: workspace:*
+        version: link:../../libs/triage-model
       '@opentelemetry/api':
         specifier: 1.9.1
         version: 1.9.1
