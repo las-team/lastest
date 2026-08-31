@@ -6,7 +6,7 @@
 #
 # Self-contained: builds the TypeScript inside the image (esbuild bundles
 # @lastest/db + @lastest/eb-protocol + @lastest/shared straight from source,
-# so the runtime stage ships a single dependency-free dist/main.mjs — no
+# so the runtime stage ships two dependency-free CommonJS bundles — no
 # node_modules at all). Build context is the repo root:
 #   docker build -f packages/pool-service/Dockerfile -t lastest-pool-service:latest .
 
@@ -44,7 +44,10 @@ WORKDIR /app
 RUN groupadd --gid 1002 nodejs && \
     useradd --uid 1002 --gid nodejs --shell /bin/bash --create-home pool
 
-COPY --from=builder --chown=pool:nodejs /build/packages/pool-service/dist/main.mjs ./main.mjs
+COPY --from=builder --chown=pool:nodejs /build/packages/pool-service/dist/main.cjs ./main.cjs
+# OpenTelemetry preload — see src/otel-bootstrap.ts for why it is a separate
+# CommonJS bundle rather than an import inside main.cjs.
+COPY --from=builder --chown=pool:nodejs /build/packages/pool-service/dist/otel-bootstrap.cjs ./otel-bootstrap.cjs
 
 ENV NODE_ENV=production
 # DATABASE_URL must be injected by the deployment — no default.
@@ -67,4 +70,13 @@ LABEL com.docker.compose.project="lastest"
 
 USER pool
 
-CMD ["node", "main.mjs"]
+# `--require` here rather than ENV NODE_OPTIONS on purpose: NODE_OPTIONS would
+# also apply to the HEALTHCHECK's `node -e` above and to every process-mode EB
+# child this service spawns, booting a throwaway OTel SDK in each.
+#
+# The preload itself is inert unless OTEL_TRACING_ENABLED is truthy AND the
+# process is inside a Kubernetes pod AND a collector endpoint is set (see
+# `otelGate()` in src/otel.ts) — this image is k8s-only, so that is the only
+# place tracing can come on. The single-container self-host image bundles the
+# same `main.cjs` but never loads this preload (scripts/docker-entrypoint.sh).
+CMD ["node", "--require", "/app/otel-bootstrap.cjs", "main.cjs"]

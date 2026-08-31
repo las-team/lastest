@@ -210,6 +210,26 @@ export async function upsertCoverageCells(
   return rows.length;
 }
 
+/**
+ * Persist recomputed weights.
+ *
+ * One statement per chunk, not one per cell. Weighting scores EVERY cell in
+ * the model, so the awaited `UPDATE ... WHERE id = $1` loop this replaced cost
+ * one network round trip per row — thousands of them, serially, inside the
+ * serving process, and it was the longest stage of a coverage sync by a wide
+ * margin. The chunked `UPDATE ... FROM (VALUES ...)` form does the same work
+ * in one round trip per 500 rows.
+ *
+ * Every VALUES column is cast explicitly: bind parameters arrive with no type,
+ * and Postgres infers a VALUES list's column types from its FIRST row only, so
+ * an uncast list either fails outright or silently pins the wrong type.
+ *
+ * `has_breakdown` preserves the semantics of the drizzle `.set()` it replaced:
+ * an OMITTED `weightBreakdown` leaves the stored breakdown alone, while an
+ * explicit `null` clears it. Without the flag both collapse to NULL, which
+ * would quietly wipe breakdowns for any caller that only wants to restate a
+ * weight.
+ */
 export async function updateCoverageCellWeights(
   updates: Array<{
     id: string;
@@ -217,16 +237,34 @@ export async function updateCoverageCellWeights(
     weightBreakdown?: CoverageCell["weightBreakdown"];
   }>,
 ): Promise<void> {
-  const now = new Date();
-  for (const u of updates) {
-    await db
-      .update(coverageCells)
-      .set({
-        weight: u.weight,
-        weightBreakdown: u.weightBreakdown,
-        updatedAt: now,
-      })
-      .where(eq(coverageCells.id, u.id));
+  if (updates.length === 0) return;
+  // ISO-8601, matching what drizzle writes into these `timestamp` columns, so
+  // updated_at stays comparable across the two write paths. NOW() would be the
+  // database server's clock in its own timezone, which is not the same value.
+  const now = new Date().toISOString();
+
+  const CHUNK = 500;
+  for (let i = 0; i < updates.length; i += CHUNK) {
+    const rows = updates.slice(i, i + CHUNK).map((u) => {
+      const hasBreakdown = "weightBreakdown" in u;
+      const breakdown =
+        hasBreakdown && u.weightBreakdown != null
+          ? JSON.stringify(u.weightBreakdown)
+          : null;
+      return sql`(${u.id}::text, ${u.weight}::double precision, ${breakdown}::jsonb, ${hasBreakdown}::boolean)`;
+    });
+    await db.execute(sql`
+      UPDATE coverage_cells AS c SET
+        weight = v.weight,
+        weight_breakdown = CASE
+          WHEN v.has_breakdown THEN v.weight_breakdown
+          ELSE c.weight_breakdown
+        END,
+        updated_at = ${now}::timestamp
+      FROM (VALUES ${sql.join(rows, sql`, `)})
+        AS v(id, weight, weight_breakdown, has_breakdown)
+      WHERE c.id = v.id
+    `);
   }
 }
 
@@ -711,6 +749,86 @@ export async function getSnapshottedBuildIds(
 }
 
 /**
+ * How many of the most-recent attributed builds a backfill actually writes.
+ *
+ * Owned here rather than in `backfillCoverageSnapshots` so that the write
+ * window and the probe gating it read the same number. They must agree: a
+ * probe that asks about a wider window than the backfill ever writes reports
+ * a gap forever on any repo holding more builds than the window — which is
+ * exactly the large repo the gate was added to spare.
+ */
+export const DEFAULT_BACKFILL_MAX_BUILDS = 200;
+
+/** Attribution rows one timeline read returns. See
+ *  `getCoverageAttributionTimeline`. */
+export const COVERAGE_TIMELINE_ROW_LIMIT = 50000;
+
+/**
+ * Among the `maxBuilds` most-recent attributed builds, is any one missing its
+ * snapshot?
+ *
+ * The cheap gate in front of `backfillCoverageSnapshots`, which otherwise
+ * loads the whole attribution timeline, every cell and every dimension just to
+ * discover there is nothing to reconstruct — the normal outcome on every sync
+ * after the first.
+ *
+ * Windowed deliberately, and to the same window: the backfill writes points
+ * only for the newest `maxBuilds` builds, walking everything older purely as
+ * cumulative input. Asking about *any* un-snapshotted build therefore answered
+ * "yes" permanently once a repo passed 200 attributed builds, since the ones
+ * beyond the window are never going to be written — the fast path switched
+ * itself off on precisely the repos it was for.
+ *
+ * Ordering matches the backfill's notion of "newest": max `ran_at` per build,
+ * descending, nulls first. `getCoverageAttributionTimeline` orders rows
+ * `ran_at ASC` (Postgres puts nulls last), so a build with no `ran_at` at all
+ * lands at the end of the timeline — the newest end — and must sort first here.
+ *
+ * The window also stays inside what the backfill can see: `maxBuilds` (200)
+ * builds is far below the timeline's `COVERAGE_TIMELINE_ROW_LIMIT` rows, so on
+ * any ledger the backfill reads whole, the two sets are identical.
+ *
+ * One round trip; the outer `LIMIT 1` lets Postgres stop at the first gap.
+ */
+export async function hasUnsnapshottedCoverageBuilds(
+  repositoryId: string,
+  environmentKey: string = DEFAULT_COVERAGE_ENVIRONMENT,
+  opts: { maxBuilds?: number } = {},
+): Promise<boolean> {
+  const maxBuilds = opts.maxBuilds ?? DEFAULT_BACKFILL_MAX_BUILDS;
+
+  const recent = db
+    .select({ buildId: coverageCellRuns.buildId })
+    .from(coverageCellRuns)
+    .innerJoin(coverageCells, eq(coverageCellRuns.cellId, coverageCells.id))
+    .where(
+      and(
+        eq(coverageCells.repositoryId, repositoryId),
+        eq(coverageCells.environmentKey, environmentKey),
+        isNotNull(coverageCellRuns.buildId),
+      ),
+    )
+    .groupBy(coverageCellRuns.buildId)
+    .orderBy(sql`max(${coverageCellRuns.ranAt}) desc nulls first`)
+    .limit(maxBuilds)
+    .as("recent");
+
+  const rows = await db
+    .select({ buildId: recent.buildId })
+    .from(recent)
+    .where(
+      sql`NOT EXISTS (
+        SELECT 1 FROM ${coverageSnapshots} s
+        WHERE s.repository_id = ${repositoryId}
+          AND s.environment_key = ${environmentKey}
+          AND s.build_id = ${recent.buildId}
+      )`,
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
+/**
  * Every attribution this repo holds, oldest first, with the build that
  * produced it. This is the raw material the trend is reconstructed from — the
  * ledger already records which run touched which cell, so history exists even
@@ -748,7 +866,7 @@ export async function getCoverageAttributionTimeline(
       ),
     )
     .orderBy(asc(coverageCellRuns.ranAt), asc(coverageCellRuns.recordedAt))
-    .limit(opts.limit ?? 50000);
+    .limit(opts.limit ?? COVERAGE_TIMELINE_ROW_LIMIT);
 
   return rows.map((r) => ({
     cellId: r.cellId,

@@ -22,6 +22,7 @@ import {
   type CoverageWeightPolicy,
 } from "@/lib/db/schema";
 import * as queries from "@/lib/db/queries";
+import type { AssignedVariableRun } from "@/lib/db/queries";
 import { type SourceTable } from "./source-rows";
 import {
   csvDataSourceTablesForRepo,
@@ -51,6 +52,81 @@ import {
  *  inherent object type — the variable names are all we know. */
 export const OBSERVED_OBJECT_TYPE = "run-variables";
 
+/**
+ * Stage boundaries a full sync passes through, in order.
+ *
+ * Reported to `SyncOptions.onStage` so a DETACHED caller can prove the sync is
+ * still alive: `syncCoverage` runs as a `coverage_sync` background job, and
+ * `cleanupStaleJobs` marks any `running` job whose lastActivityAt is older than
+ * five minutes as crashed. A sync on a large repo takes longer than that, so
+ * without these beats the watchdog failed a job whose promise was still
+ * working — which lied to the Coverage poller AND broke the per-repo dedupe,
+ * letting the next click start a second sync racing the first through
+ * reconcile/prune.
+ */
+export type CoverageSyncStage =
+  | "profile"
+  | "derive"
+  | "attribute"
+  | "weight"
+  | "snapshot";
+
+export interface CoverageSyncProgress {
+  stage: CoverageSyncStage;
+  /** Human-readable; safe to show as a background-job label. */
+  label: string;
+  /** Position within a stage that chunks, when it has one. */
+  done?: number;
+  total?: number;
+}
+
+const STAGE_LABELS: Record<CoverageSyncStage, string> = {
+  profile: "Coverage sync: profiling data sources",
+  derive: "Coverage sync: deriving cells",
+  attribute: "Coverage sync: attributing runs",
+  weight: "Coverage sync: scoring cells",
+  snapshot: "Coverage sync: recording snapshot",
+};
+
+/**
+ * How many rows/cells the chunked stages process between beats. Small enough
+ * that the five-minute watchdog window cannot close between two of them even
+ * on a slow database, large enough that the heartbeat write is noise next to
+ * the work it reports on.
+ */
+const HEARTBEAT_CHUNK = 200;
+
+/**
+ * How many cells one weight UPDATE carries.
+ *
+ * `updateCoverageCellWeights` issues a single `UPDATE ... FROM (VALUES ...)`
+ * per call, so this is a statement size, not a loop bound — 500 mirrors the
+ * chunk the cell INSERTs already use in `src/lib/db/queries/coverage.ts`, and
+ * stays far inside Postgres's bind-parameter ceiling. A beat every 500 cells
+ * is still two orders of magnitude inside the five-minute watchdog window.
+ */
+const WEIGHT_PERSIST_CHUNK = 500;
+
+/**
+ * Fire the progress hook, swallowing anything it throws.
+ *
+ * A heartbeat is bookkeeping for the caller; losing one must never lose the
+ * sync. Every call site awaits this, which also yields the event loop inside
+ * the CPU-bound matching loop.
+ */
+async function beat(
+  opts: SyncOptions,
+  stage: CoverageSyncStage,
+  position?: { done: number; total: number },
+): Promise<void> {
+  if (!opts.onStage) return;
+  try {
+    await opts.onStage({ stage, label: STAGE_LABELS[stage], ...position });
+  } catch (err) {
+    console.warn(`[coverage] sync heartbeat (${stage}) failed:`, err);
+  }
+}
+
 export interface SyncOptions {
   environmentKey?: string;
   weightPolicy?: CoverageWeightPolicy;
@@ -75,6 +151,49 @@ export interface SyncOptions {
    * the repos with the most coverage history.
    */
   runsSoFar?: number;
+  /**
+   * Progress heartbeat, fired at every stage boundary and every
+   * `HEARTBEAT_CHUNK` rows inside the two stages that scale with the data.
+   * Best-effort — see `beat`. Only in-process callers set it; it is not
+   * serializable across a server-action boundary.
+   */
+  onStage?: (progress: CoverageSyncProgress) => void | Promise<void>;
+}
+
+/**
+ * Everything a sync reads from OUTSIDE the coverage tables, loaded once.
+ *
+ * Each of these was previously fetched by every stage that needed it — the
+ * two data-source reads twice and the run scan three times per sync. That is
+ * not a cheap repeat: a CSV source resolves to its *full* file, so each fetch
+ * re-read the stored blob and re-parsed it, and `getAssignedVariableRuns`
+ * scans up to 20,000 jsonb rows.
+ *
+ * Only read-only-for-the-sync inputs belong here. Dimensions and cells
+ * deliberately do NOT: `profileDimensions` writes dimensions and
+ * `deriveAndPersistCells` writes cells, so anything preloaded at the top of
+ * the sync would describe the state BEFORE the stage that produces it.
+ * `syncCoverage` reads those between the stages that write them instead — see
+ * the ordering note there.
+ */
+export interface CoverageSyncInputs {
+  csvSources: SourceTable[];
+  sheetSources: SourceTable[];
+  runs: AssignedVariableRun[];
+}
+
+/** Load the shared inputs. Exported stages call this when a caller runs them
+ *  standalone; `syncCoverage` calls it once and passes the result down. */
+export async function loadCoverageSyncInputs(
+  repositoryId: string,
+  opts: SyncOptions = {},
+): Promise<CoverageSyncInputs> {
+  const [csvSources, sheetSources, runs] = await Promise.all([
+    csvDataSourceTablesForRepo(repositoryId),
+    sheetDataSourceTablesForRepo(repositoryId),
+    queries.getAssignedVariableRuns(repositoryId, { limit: opts.runLimit }),
+  ]);
+  return { csvSources, sheetSources, runs };
 }
 
 /** How many rows each data source's numbers actually rest on. Reported so a
@@ -116,6 +235,9 @@ export interface SyncResult {
 export async function profileDimensions(
   repositoryId: string,
   opts: SyncOptions = {},
+  /** Preloaded shared inputs. Omit to have this stage load its own — the
+   *  standalone signature is unchanged. */
+  inputs?: CoverageSyncInputs,
 ): Promise<{
   proposed: ProfiledDimension[];
   rejected: ProfiledDimension[];
@@ -123,11 +245,8 @@ export async function profileDimensions(
   sources: SourceSample[];
 }> {
   const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
-  const [csvSources, sheetSources, runs] = await Promise.all([
-    csvDataSourceTablesForRepo(repositoryId),
-    sheetDataSourceTablesForRepo(repositoryId),
-    queries.getAssignedVariableRuns(repositoryId, { limit: opts.runLimit }),
-  ]);
+  const { csvSources, sheetSources, runs } =
+    inputs ?? (await loadCoverageSyncInputs(repositoryId, opts));
 
   const proposed: ProfiledDimension[] = [];
   const rejected: ProfiledDimension[] = [];
@@ -195,7 +314,16 @@ function toSample(table: SourceTable): SourceSample {
 export async function deriveAndPersistCells(
   repositoryId: string,
   opts: SyncOptions = {},
-): Promise<{ derived: number; pruned: number }> {
+  /** Preloaded shared inputs. Omit to have this stage load its own. */
+  inputs?: CoverageSyncInputs,
+): Promise<{
+  derived: number;
+  pruned: number;
+  /** The dimension rows this stage had to read anyway, returned so the caller
+   *  can report on them without a second read. Safe to reuse: nothing after
+   *  derivation writes dimensions. */
+  dimensions: CoverageDimension[];
+}> {
   const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
   const allDimensions = await queries.getCoverageDimensions(
     repositoryId,
@@ -229,14 +357,11 @@ export async function deriveAndPersistCells(
         [],
       );
     }
-    return { derived: 0, pruned };
+    return { derived: 0, pruned, dimensions: allDimensions };
   }
 
-  const [csvSources, sheetSources, runs] = await Promise.all([
-    csvDataSourceTablesForRepo(repositoryId),
-    sheetDataSourceTablesForRepo(repositoryId),
-    queries.getAssignedVariableRuns(repositoryId, { limit: opts.runLimit }),
-  ]);
+  const { csvSources, sheetSources, runs } =
+    inputs ?? (await loadCoverageSyncInputs(repositoryId, opts));
 
   const byObjectType = new Map<string, string[]>();
   for (const d of dimensions) {
@@ -298,7 +423,7 @@ export async function deriveAndPersistCells(
     );
   }
 
-  return { derived: derived.length, pruned };
+  return { derived: derived.length, pruned, dimensions: allDimensions };
 }
 
 function recordsForObjectType(
@@ -333,11 +458,15 @@ function recordsForObjectType(
 export async function attributeRuns(
   repositoryId: string,
   opts: SyncOptions = {},
+  /** Preloaded inputs. `cells` MUST have been read after derivation — see the
+   *  ordering note in `syncCoverage`. Omit either to load it here. */
+  inputs?: Partial<CoverageSyncInputs> & { cells?: CoverageCell[] },
 ): Promise<{ runsScanned: number; attributionsRecorded: number }> {
   const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
   const [cells, runs] = await Promise.all([
-    queries.getCoverageCells(repositoryId, { environmentKey }),
-    queries.getAssignedVariableRuns(repositoryId, { limit: opts.runLimit }),
+    inputs?.cells ?? queries.getCoverageCells(repositoryId, { environmentKey }),
+    inputs?.runs ??
+      queries.getAssignedVariableRuns(repositoryId, { limit: opts.runLimit }),
   ]);
   if (cells.length === 0 || runs.length === 0) {
     return { runsScanned: runs.length, attributionsRecorded: 0 };
@@ -367,6 +496,7 @@ export async function attributeRuns(
   }
 
   const attributions: Parameters<typeof queries.recordCoverageCellRuns>[0] = [];
+  let scanned = 0;
   for (const run of runs) {
     // Every group the run's variable map fully covers.
     const matched: Array<{ group: Group; cellId: string }> = [];
@@ -410,6 +540,13 @@ export async function attributeRuns(
         ranAt: run.ranAt,
       });
     }
+
+    // Matching is O(runs x groups) in memory and can run for minutes on a repo
+    // with a long history — one beat per stage would not survive it.
+    scanned += 1;
+    if (scanned % HEARTBEAT_CHUNK === 0) {
+      await beat(opts, "attribute", { done: scanned, total: runs.length });
+    }
   }
 
   await queries.recordCoverageCellRuns(attributions);
@@ -420,18 +557,31 @@ export async function attributeRuns(
   };
 }
 
-/** Score every cell and persist weight + per-term breakdown. */
+/**
+ * Score every cell and persist weight + per-term breakdown.
+ *
+ * Returns the SAME cell rows with the new weight and breakdown applied in
+ * memory, so a caller that has to report on what it just wrote (the sync's
+ * `buildCoverageReport`/`evaluateStop`) does not re-read the table it is the
+ * sole writer of.
+ */
 export async function recomputeWeights(
   repositoryId: string,
   opts: SyncOptions = {},
-): Promise<void> {
+  /** Preloaded cells. MUST have been read after attribution: weighting reads
+   *  `runCount`/`failCount`/`status`, which `attributeRuns` recomputes in SQL
+   *  via `refreshCoverageCellStats`. Omit to read them here. */
+  inputs?: { cells?: CoverageCell[] },
+): Promise<CoverageCell[]> {
   const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
   const policy = opts.weightPolicy ?? DEFAULT_COVERAGE_WEIGHT_POLICY;
   const strength = (opts.stopPolicy ?? DEFAULT_COVERAGE_STOP_POLICY).strength;
-  const cells = await queries.getCoverageCells(repositoryId, {
-    environmentKey,
-  });
-  if (cells.length === 0) return;
+  const cells =
+    inputs?.cells ??
+    (await queries.getCoverageCells(repositoryId, {
+      environmentKey,
+    }));
+  if (cells.length === 0) return cells;
 
   // Weighting is relative within an object type — volumes are not comparable
   // across different tables, so normalizing globally would distort ranking.
@@ -471,7 +621,26 @@ export async function recomputeWeights(
     });
   }
 
-  await queries.updateCoverageCellWeights(updates);
+  // Persist in chunks and beat between them. Each chunk is ONE statement
+  // (`UPDATE ... FROM (VALUES ...)`), not one round trip per cell.
+  for (let i = 0; i < updates.length; i += WEIGHT_PERSIST_CHUNK) {
+    const chunk = updates.slice(i, i + WEIGHT_PERSIST_CHUNK);
+    await queries.updateCoverageCellWeights(chunk);
+    await beat(opts, "weight", {
+      done: Math.min(i + chunk.length, updates.length),
+      total: updates.length,
+    });
+  }
+
+  // Mirror the persisted values onto the rows we were handed, so the caller's
+  // copy matches the table without reading it back.
+  const byId = new Map(updates.map((u) => [u.id, u]));
+  return cells.map((c) => {
+    const u = byId.get(c.id);
+    return u
+      ? { ...c, weight: u.weight, weightBreakdown: u.weightBreakdown }
+      : c;
+  });
 }
 
 /** Full pass: profile → derive → attribute → weight → report → stop decision. */
@@ -481,22 +650,58 @@ export async function syncCoverage(
 ): Promise<SyncResult> {
   const environmentKey = opts.environmentKey ?? DEFAULT_COVERAGE_ENVIRONMENT;
 
+  // ── Read ordering ───────────────────────────────────────────────────────
+  // Data sources and the historical run scan are read-only for the whole
+  // sync, so they are loaded ONCE here and handed to every stage that wants
+  // them. The coverage tables are not: each stage writes the rows the next
+  // one reads, so those reads have to sit BETWEEN the stages.
+  //
+  //   dimensions  written by profile → read by derive (and reused after)
+  //   cells       written by derive  → read for attribute
+  //   cell stats  written by attribute (refreshCoverageCellStats, in SQL)
+  //               → cells re-read for weight
+  //   weights     written by weight  → applied in memory, never re-read
+  //
+  // Taking any of those from a snapshot older than the stage that wrote it
+  // silently scores the previous generation of the model.
+  const inputs = await loadCoverageSyncInputs(repositoryId, opts);
+
+  await beat(opts, "profile");
   const { proposed, rejected, runsScanned, sources } = await profileDimensions(
     repositoryId,
     opts,
+    inputs,
   );
-  const { derived: cellsUpserted, pruned: cellsPruned } =
-    await deriveAndPersistCells(repositoryId, opts);
-  const attribution = await attributeRuns(repositoryId, opts);
-  await recomputeWeights(repositoryId, opts);
+  await beat(opts, "derive");
+  const {
+    derived: cellsUpserted,
+    pruned: cellsPruned,
+    dimensions,
+  } = await deriveAndPersistCells(repositoryId, opts, inputs);
+
+  await beat(opts, "attribute");
+  const derivedCells = await queries.getCoverageCells(repositoryId, {
+    environmentKey,
+  });
+  const attribution = await attributeRuns(repositoryId, opts, {
+    ...inputs,
+    cells: derivedCells,
+  });
+
+  await beat(opts, "weight");
+  // Re-read: attribution rewrote every cell's run counters and status in SQL,
+  // and weighting is a function of exactly those.
+  const attributedCells = await queries.getCoverageCells(repositoryId, {
+    environmentKey,
+  });
+  const cells = await recomputeWeights(repositoryId, opts, {
+    cells: attributedCells,
+  });
+
+  await beat(opts, "snapshot");
   // A sync re-derives the cell set, so page attribution built on the previous
   // one is stale by definition.
   invalidatePageCoverageAttribution(repositoryId);
-
-  const [cells, dimensions] = await Promise.all([
-    queries.getCoverageCells(repositoryId, { environmentKey }),
-    queries.getCoverageDimensions(repositoryId, environmentKey),
-  ]);
 
   const stopPolicy = {
     ...DEFAULT_COVERAGE_STOP_POLICY,
@@ -535,6 +740,10 @@ export async function syncCoverage(
       source: "sync",
       strength: stopPolicy.strength,
       shouldStop: stop.shouldStop,
+      // Already in hand and already current — no third read of the two tables
+      // this function is, at this moment, the sole writer of.
+      cells,
+      dimensions,
     });
     await backfillCoverageSnapshots(repositoryId, {
       environmentKey,
@@ -574,6 +783,50 @@ export function coverageMaxAgeMs(): number {
   const minutes =
     Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_COVERAGE_MAX_AGE_MINUTES;
   return minutes * 60_000;
+}
+
+/**
+ * Has the model gone longer than the max age without a SYNC-sourced snapshot?
+ *
+ * One snapshot-row read — the cheap gate for callers (the scheduler tick) that
+ * only need to DECIDE whether to sync, not to see the report.
+ * `ensureFreshCoverage` computes a full report even when fresh, which is the
+ * right shape for planning paths that consume it and pure waste for a
+ * once-a-minute staleness poll.
+ */
+export async function coverageIsStale(
+  repositoryId: string,
+  environmentKey: string = DEFAULT_COVERAGE_ENVIRONMENT,
+  maxAgeMs: number = coverageMaxAgeMs(),
+): Promise<boolean> {
+  const { stale } = await coverageStaleness(
+    repositoryId,
+    environmentKey,
+    maxAgeMs,
+  );
+  return stale;
+}
+
+/**
+ * The same one-row read as `coverageIsStale`, but reporting HOW stale.
+ *
+ * A caller that can only start a few syncs per tick has to choose between the
+ * stale repos, and the only fair basis for that choice is age — starting from
+ * the head of a repo list means the tail starves whenever the backlog is
+ * longer than the per-tick budget. `ageMs` is `Infinity` for a model that has
+ * never been sync-derived, which sorts it first, where it belongs.
+ */
+export async function coverageStaleness(
+  repositoryId: string,
+  environmentKey: string = DEFAULT_COVERAGE_ENVIRONMENT,
+  maxAgeMs: number = coverageMaxAgeMs(),
+): Promise<{ stale: boolean; ageMs: number; lastSyncedAt: Date | null }> {
+  const latest = await queries
+    .getLatestCoverageSnapshot(repositoryId, environmentKey, { source: "sync" })
+    .catch(() => null);
+  const lastSyncedAt = latest?.capturedAt ?? null;
+  const ageMs = lastSyncedAt ? Date.now() - lastSyncedAt.getTime() : Infinity;
+  return { stale: ageMs > maxAgeMs, ageMs, lastSyncedAt };
 }
 
 /**

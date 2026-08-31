@@ -9,6 +9,7 @@ import { getOpenMRsForBranch } from "@/lib/gitlab/oauth";
 import type { TestRunResult } from "@/lib/playwright/types";
 import type { SetupContext } from "@/lib/setup/types";
 import { executeTests } from "@/lib/execution/executor";
+import { baselineWriteCell } from "@lastest/coverage-model";
 import { attributeBuildRuns } from "@/lib/coverage/sync";
 import { captureCoverageSnapshot } from "@/lib/coverage/trend";
 import { resolveBuildSetup } from "@/lib/setup/resolve-build-setup";
@@ -1001,6 +1002,7 @@ async function runBuildAsync(
               screenshot.domSnapshot,
               domDiffEnabled,
               result.dataCell ?? null,
+              baselineWriteCell(result.dataCell, testRecord?.matrixPolicy),
             ),
           ),
         );
@@ -2037,6 +2039,15 @@ async function processVisualDiff(
    *  expansion. Baseline resolution prefers a baseline captured for the same
    *  cell and falls back to the shared one. */
   dataCell?: string | null,
+  /** P2: the cell any baseline WRITE (auto-approve) is scoped to — the
+   *  caller computes it from the test's matrix policy via `baselineWriteCell`.
+   *  Distinct from `dataCell` because reads and writes differ: a
+   *  representative's baseline must be the shared (NULL-cell) row, while under
+   *  `visual: 'all'` each cell owns its baseline. Without this, auto-approve
+   *  deactivated EVERY cell's baseline and created a shared one, so the last
+   *  cell to finish became the baseline for all and every other cell diffed
+   *  "changed" on the next build. */
+  baselineDataCell?: string | null,
 ): Promise<{
   hasChanges: boolean;
   diffId: string;
@@ -2521,6 +2532,7 @@ async function processVisualDiff(
         stepLabel || null,
         branch,
         browser,
+        baselineDataCell ?? null,
       );
       await queries.createBaseline({
         testId,
@@ -2530,6 +2542,7 @@ async function processVisualDiff(
         branch,
         browser,
         approvedFromDiffId: diff.id,
+        dataCell: baselineDataCell ?? null,
         // Ride the per-step DOM snapshot onto the baseline so later runs can
         // compute an aligned per-step DOM diff against it.
         domSnapshot: currentDomSnapshot,
@@ -2669,6 +2682,7 @@ async function processVisualDiff(
         stepLabel || null,
         branch,
         browser,
+        baselineDataCell ?? null,
       );
       await queries.createBaseline({
         testId,
@@ -2678,6 +2692,7 @@ async function processVisualDiff(
         branch,
         browser,
         approvedFromDiffId: diff.id,
+        dataCell: baselineDataCell ?? null,
         // Ride the per-step DOM snapshot onto the baseline so later runs can
         // compute an aligned per-step DOM diff against it.
         domSnapshot: currentDomSnapshot,
