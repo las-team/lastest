@@ -34,6 +34,10 @@ spec:
       labels:
         app: lastest-ocr
     spec:
+      # Processes untrusted screenshot bytes and never calls the K8s API.
+      # Stated here rather than inherited from the token-denied default SA
+      # (k8s/namespace.yaml), so it holds in a namespace without that patch.
+      automountServiceAccountToken: false
       containers:
         - name: ocr-service
           image: lastest-ocr-service:latest

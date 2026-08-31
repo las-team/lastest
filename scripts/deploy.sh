@@ -233,6 +233,83 @@ deploy_olares_ocr() {
   ok "OCR service deployed (activate with OCR_SERVICE_URL=http://lastest-ocr:8891 on the app)"
 }
 
+# Apply the namespace security baseline (the default-SA token denial from
+# k8s/namespace.yaml) to the Olares namespace, so no pod gets a cluster
+# credential unless it names a scoped SA. Idempotent — re-run every deploy.
+#
+# GUARDED ON PURPOSE. Olares runs the SINGLE-CONTAINER image: build_olares
+# builds `-f Dockerfile`, and scripts/docker-entrypoint.sh starts the EB pool
+# service in-process, so the app pod provisions EB Jobs itself and needs
+# Job-create RBAC. If it is still on the namespace `default` SA, denying
+# automount here would 403 every provision on the rollout that follows —
+# surfacing to users as "no browser available". So probe first and apply only
+# when every app Deployment already names its own ServiceAccount. Skipping is
+# always safe: it leaves the cluster exactly as it was.
+#
+# Only the ServiceAccount document is sent, scoped with `-n $OLARES_NS`. The
+# Namespace object is never applied — on Olares it is platform-managed, and
+# adopting it into kubectl's last-applied tracking buys nothing here.
+deploy_olares_hardening() {
+  log "Checking namespace security baseline preconditions ($OLARES_NS)..."
+
+  # name|serviceAccountName|EB_PROVISIONER per app Deployment. An unset
+  # serviceAccountName means the pod runs as `default` and would lose its
+  # token the moment the baseline lands.
+  local probe
+  if ! probe="$(ssh "$OLARES_USER@$OLARES_HOST" \
+    "kubectl -n '$OLARES_NS' get deploy '$OLARES_DEPLOY' '$OLARES_INTERNAL_DEPLOY' --ignore-not-found -o jsonpath='{range .items[*]}{.metadata.name}|{.spec.template.spec.serviceAccountName}|{.spec.template.spec.containers[*].env[?(@.name==\"EB_PROVISIONER\")].value}{\"\n\"}{end}'")"; then
+    warn "Could not inspect Deployments in $OLARES_NS — skipping namespace baseline (cluster unchanged)"
+    return 0
+  fi
+
+  local blockers="" seen=0 name sa prov
+  while IFS='|' read -r name sa prov; do
+    [ -z "$name" ] && continue
+    seen=$((seen + 1))
+    if [ -z "$sa" ] || [ "$sa" = "default" ]; then
+      blockers="$blockers $name(EB_PROVISIONER=${prov:-unset})"
+    fi
+  done <<<"$probe"
+
+  # No rows back means the probe told us nothing (renamed Deployments, a
+  # partial-read RBAC denial). Absent evidence must never authorize the
+  # change — skip rather than harden a namespace we could not inspect.
+  if [ "$seen" -eq 0 ]; then
+    warn "Probe returned no Deployments in $OLARES_NS — skipping namespace baseline (cluster unchanged)"
+    return 0
+  fi
+
+  if [ -n "$blockers" ]; then
+    warn "Skipping namespace baseline — still on the default ServiceAccount:$blockers"
+    warn "This image runs the pool service in-process, so denying automount now would 403 EB provisioning."
+    warn "To enable the baseline, give the app pod its own scoped SA first:"
+    warn "  sed 's/namespace: lastest/namespace: $OLARES_NS/' k8s/embedded-browser-rbac.yaml | ssh $OLARES_USER@$OLARES_HOST 'kubectl apply -f -'"
+    warn "  ssh $OLARES_USER@$OLARES_HOST \"kubectl -n $OLARES_NS set serviceaccount deployment/$OLARES_DEPLOY lastest-app\""
+    warn "  (repeat for $OLARES_INTERNAL_DEPLOY if it also provisions) then re-run the deploy"
+    return 0
+  fi
+
+  # Everything after the first `---` in k8s/namespace.yaml is the default-SA
+  # document; drop its hardcoded `namespace:` and let `-n` place it.
+  local sa_doc
+  sa_doc="$(awk 'f; /^---$/{f=1}' "$ROOT_DIR/k8s/namespace.yaml" | grep -v '^  namespace: ')"
+  case "$sa_doc" in
+    *"kind: ServiceAccount"*"name: default"*) ;;
+    *)
+      warn "k8s/namespace.yaml no longer ends with the default-SA document — skipping baseline"
+      return 0
+      ;;
+  esac
+
+  log "Applying namespace security baseline to Olares ($OLARES_NS)..."
+  printf '%s\n' "$sa_doc" | \
+    ssh "$OLARES_USER@$OLARES_HOST" "kubectl apply -n '$OLARES_NS' -f -" || {
+      warn "Namespace baseline apply failed (quota/policy?) — default SA keeps mounting tokens until it lands"
+      return 0
+    }
+  ok "Namespace security baseline applied (default SA token denied in $OLARES_NS)"
+}
+
 # --- Targets ---
 deploy_zima() {
   log "Deploying to ZimaOS ($ZIMA_HOST)"
@@ -311,6 +388,8 @@ deploy_olares() {
   docker save "${olares_images[@]}" | \
     ssh "$OLARES_USER@$OLARES_HOST" 'ctr -n k8s.io images import -'
   ok "Images imported on Olares"
+
+  deploy_olares_hardening
 
   if [ "$WITH_OCR" = true ]; then
     deploy_olares_ocr

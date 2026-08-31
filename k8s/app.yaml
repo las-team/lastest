@@ -57,6 +57,16 @@ spec:
       labels:
         app: lastest
     spec:
+      # Deliberately NO serviceAccountName: this split-topology app pod does
+      # all provisioning through the pool service (EB_POOL_SERVICE_URL below),
+      # so it needs no K8s API access. The opt-out is stated here rather than
+      # inherited from the token-denied default SA (k8s/namespace.yaml), so
+      # this pod stays tokenless in a namespace that never got that patch.
+      # The single-container variant (root Dockerfile, pool service
+      # in-process) DOES need the API: it must set
+      # `serviceAccountName: lastest-app` per k8s/embedded-browser-rbac.yaml
+      # AND drop this line, which would otherwise deny it the token.
+      automountServiceAccountToken: false
       containers:
         - name: app
           image: lastest-app:latest

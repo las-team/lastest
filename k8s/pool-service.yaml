@@ -23,10 +23,17 @@ metadata:
   name: lastest-pool
   namespace: lastest
 ---
+# Deliberately named `lastest-pool-eb-provisioner` (NOT `lastest-eb-provisioner`,
+# which k8s/embedded-browser-rbac.yaml binds to lastest-app for the
+# single-container topology): same name + namespace = the SAME cluster object,
+# and `kubectl apply` is last-writer-wins — applying the two files in either
+# order would silently overwrite the other's RoleBinding subject and revoke
+# one side's provisioning rights with no error. Rules mirror the other file —
+# keep the two in sync.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: lastest-eb-provisioner
+  name: lastest-pool-eb-provisioner
   namespace: lastest
 rules:
   - apiGroups: ["batch"]
@@ -42,7 +49,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: lastest-eb-provisioner
+  name: lastest-pool-eb-provisioner
   namespace: lastest
 subjects:
   - kind: ServiceAccount
@@ -50,7 +57,7 @@ subjects:
     namespace: lastest
 roleRef:
   kind: Role
-  name: lastest-eb-provisioner
+  name: lastest-pool-eb-provisioner
   apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: apps/v1

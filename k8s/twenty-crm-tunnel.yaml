@@ -33,6 +33,10 @@ spec:
       labels:
         app: cloudflared-crm
     spec:
+      # Egress tunnel — holds a Cloudflare credential and never calls the K8s
+      # API. Stated here rather than inherited from the token-denied default
+      # SA (k8s/namespace.yaml), so it holds in a namespace without that patch.
+      automountServiceAccountToken: false
       containers:
         - name: cloudflared
           image: cloudflare/cloudflared:2025.2.0

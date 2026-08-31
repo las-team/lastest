@@ -21,6 +21,10 @@ spec:
             app: lastest-db-backup
         spec:
           restartPolicy: OnFailure
+          # Holds the DB credential and never calls the K8s API. Stated here
+          # rather than inherited from the token-denied default SA
+          # (k8s/namespace.yaml), so it holds in a namespace without that patch.
+          automountServiceAccountToken: false
           securityContext:
             runAsUser: 1000
             runAsGroup: 1000
