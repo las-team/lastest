@@ -1,0 +1,13 @@
+{
+  "name": "maestro-app-runner",
+  "version": "0.0.0-poc",
+  "private": true,
+  "type": "module",
+  "description": "PoC: a fake embedded-browser-protocol runner that launches Maestro mobile tests instead of Playwright browser tests. Throwaway spike for issue #197.",
+  "bin": {
+    "maestro-app-runner": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "node --experimental-strip-types src/index.ts"
+  }
+}

@@ -1,0 +1,61 @@
+# Self-contained Maestro flow driving the built-in iOS Settings app.
+#
+# Why Settings (not the bundled RN app): the RN app doesn't build on this
+# machine's Xcode toolchain (Swift 6.2 / Boost — see FINDINGS.md), so Settings is
+# used as a real, always-present iOS app to exercise the runner end to end.
+#
+# Hardened for a FRESH simulator:
+#   - No `clearState` — you can't clear a system app (Maestro errors on it).
+#   - `optional: true` taps dismiss the first-run popups a clean iOS throws
+#     (Apple-Account sheet, "not now" prompts) without failing the flow.
+#   - `extendedWaitUntil` waits for each screen instead of racing it.
+#   - `waitForAnimationToEnd` lets transitions settle — deliberate pacing that
+#     also reduces stream tearing during the live-view demo.
+appId: com.apple.Preferences
+---
+- launchApp
+- waitForAnimationToEnd
+
+# A fresh Settings sometimes opens on the Apple-Account sign-in sheet. Dismiss
+# it if present; harmless if not (optional).
+- tapOn:
+    text: "Cancel"
+    optional: true
+- tapOn:
+    text: "Not Now"
+    optional: true
+
+# Wait for the Settings root to actually be on screen before asserting.
+- extendedWaitUntil:
+    visible: "General"
+    timeout: 15000
+- takeScreenshot: 01-settings-home
+
+- tapOn: "General"
+- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible: "About"
+    timeout: 10000
+- takeScreenshot: 02-general
+
+- tapOn: "About"
+- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible: "Name"
+    timeout: 10000
+- takeScreenshot: 03-about
+
+# Navigate back by TAPPING the nav-bar back buttons (iOS `back` swipe-gesture is
+# unreliable in Settings). About's back button reads "Back"; General's reads
+# "Settings".
+- tapOn: "Back"
+- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible: "About"
+    timeout: 10000
+- tapOn: "Settings"
+- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible: "General"
+    timeout: 10000
+- takeScreenshot: 04-back-home
