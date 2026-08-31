@@ -30,7 +30,12 @@ export type AgentSessionStatus =
   | "failed"
   | "cancelled";
 
-export type AgentSessionKind = "play" | "quickstart" | "ranger" | "qa";
+export type AgentSessionKind =
+  | "play"
+  | "quickstart"
+  | "ranger"
+  | "qa"
+  | "triage";
 
 export type AgentStepId =
   | "settings_check"
@@ -67,7 +72,12 @@ export type AgentStepId =
   | "qa_generate"
   | "qa_execute"
   | "qa_heal"
-  | "qa_summary";
+  | "qa_summary"
+  // Triage agent (build-scoped failure classifier, /triage-agent page)
+  | "triage_collect"
+  | "triage_cluster"
+  | "triage_assess"
+  | "triage_publish";
 
 export type AgentStepStatus =
   | "pending"

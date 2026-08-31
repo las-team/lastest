@@ -43,6 +43,7 @@ const nextConfig: NextConfig = {
     "@lastest/route-scan",
     "@lastest/static-scout",
     "@lastest/test-templates",
+    "@lastest/triage-model",
     "@lastest/page-map",
     "@lastest/url-canonical",
     "@lastest/ui",

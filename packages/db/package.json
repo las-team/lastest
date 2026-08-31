@@ -18,6 +18,7 @@
   "dependencies": {
     "@lastest/coverage-model": "workspace:*",
     "@lastest/eb-protocol": "workspace:*",
+    "@lastest/triage-model": "workspace:*",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/semantic-conventions": "1.43.0",
     "drizzle-orm": "^0.45.2",

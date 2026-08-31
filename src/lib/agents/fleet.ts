@@ -80,6 +80,7 @@ const KIND_LABELS: Record<FleetAgentKind, string> = {
   play: "Play agent",
   quickstart: "QuickStart",
   explorer: "Explorer",
+  triage: "Triage agent",
 };
 
 const KIND_HREFS: Record<FleetAgentKind, string> = {
@@ -88,7 +89,34 @@ const KIND_HREFS: Record<FleetAgentKind, string> = {
   play: "/tests",
   quickstart: "/",
   explorer: "/explorer",
+  triage: "/triage-agent",
 };
+
+/**
+ * Which agents can hold an embedded browser at all.
+ *
+ * Triage is the exception that makes this a table rather than a boolean on
+ * state: it reads artifacts a build already produced (screenshots, diffs, step
+ * comparisons, logs) and never drives a page, so a working triage run costs no
+ * pool capacity. The console's `browsersHeld` read-out is capacity accounting,
+ * so a row that cannot hold a browser must never report one.
+ */
+const KIND_USES_BROWSER: Record<FleetAgentKind, boolean> = {
+  qa: true,
+  ranger: true,
+  play: true,
+  quickstart: true,
+  explorer: true,
+  triage: false,
+};
+
+/** True when a row in this state, for this kind, is holding a pool browser. */
+export function holdsBrowserFor(kind: FleetAgentKind, state: FleetState) {
+  if (!KIND_USES_BROWSER[kind]) return false;
+  // A run holds its browser for as long as it is not settled — including while
+  // it waits on a human, which is the whole point of showing this.
+  return state === "working" || state === "blocked";
+}
 
 export function fleetLabel(kind: FleetAgentKind): string {
   return KIND_LABELS[kind];
@@ -165,9 +193,7 @@ export function rowFromSession(session: AgentSession): FleetRow {
     startedAt: session.createdAt ?? null,
     blockedOn:
       state === "blocked" ? (step?.description ?? step?.label ?? null) : null,
-    // A run holds its browser for as long as it is not settled — including
-    // while it waits on a human, which is the whole point of showing this.
-    holdsBrowser: state === "working" || state === "blocked",
+    holdsBrowser: holdsBrowserFor(session.kind, state),
   };
 }
 
@@ -226,7 +252,7 @@ export function rowFromExplorer(session: ExplorerFleetSession): FleetRow {
     href: KIND_HREFS.explorer,
     startedAt: session.startedAt,
     blockedOn: state === "blocked" ? session.stepLabel : null,
-    holdsBrowser: state === "working" || state === "blocked",
+    holdsBrowser: holdsBrowserFor("explorer", state),
   };
 }
 
