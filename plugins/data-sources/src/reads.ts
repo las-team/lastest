@@ -1,4 +1,4 @@
-import { parseCsvBuffer } from "@lastest/csv";
+import { parseCsvBufferYielding } from "@lastest/csv";
 import { createStorageCapability } from "@lastest/core-storage";
 
 import { db } from "./data/db";
@@ -90,7 +90,11 @@ export async function listCsvDataSourceTables(
         );
         const stored = await storage.get(`csv/${source.id}`);
         if (!stored) return cached;
-        const parsed = parseCsvBuffer(Buffer.from(stored));
+        // Cooperative parse: this is the FULL file (megabytes on a real
+        // extract) and the only caller is a coverage sync running inside the
+        // serving process. The synchronous parser held the event loop for the
+        // whole scan, stalling every other request behind it.
+        const parsed = await parseCsvBufferYielding(Buffer.from(stored));
         return {
           alias: source.alias,
           headers: parsed.headers,

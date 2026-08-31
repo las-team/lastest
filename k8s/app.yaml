@@ -110,6 +110,44 @@ spec:
             # drop, production defaults secure) behind a TLS ingress.
             - name: BETTER_AUTH_COOKIE_SECURE
               value: "false"
+            # --- OpenTelemetry tracing (src/otel.ts) ---------------------
+            # OPT-IN: everything below is inert until this is "1". Tracing also
+            # requires a Kubernetes pod (KUBERNETES_SERVICE_HOST, injected by
+            # the kubelet) — it is deliberately unavailable in the
+            # single-container self-host image.
+            - name: OTEL_TRACING_ENABLED
+              value: "0"
+            # OTLP over HTTP/protobuf. Required once opted in; on its own it
+            # does nothing. CHANGE THIS to your collector's in-cluster Service
+            # DNS.
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector.observability.svc.cluster.local:4318"
+            - name: OTEL_SERVICE_NAME
+              value: "lastest-app"
+            # Kubelet probes /api/health 4×/min forever. Excluded in the
+            # sampler, not just in the HTTP instrumentation, because Next
+            # emits its own spans per request that would otherwise survive as
+            # orphan roots.
+            - name: OTEL_EXCLUDE_PATHS
+              value: "/api/health"
+            # Head sampling is OFF: the head records EVERYTHING and the
+            # collector's tail sampler decides what to keep. A tail policy like
+            # "keep every trace that errored or blew a latency budget" can only
+            # be applied to traces that actually arrived, so whatever the head
+            # drops is unrecoverable.
+            #
+            # The sampler is AlwaysOn and deliberately NOT ParentBased, so an
+            # inbound traceparent's sampled flag is IGNORED — Traefik's
+            # sampleRate is not a ceiling on what this pod records. Set
+            # Traefik's sampleRate to 1.0 to match, or its own spans go missing
+            # from the waterfall.
+            #
+            # Unset == 1 == this default, so there is nothing to set here. Set
+            # OTEL_TRACES_SAMPLER_ARG below 1 ONLY for a deployment with no
+            # tail-sampling collector (a backend that ingests everything sent
+            # to it); that switches back to parent-based head sampling.
+            # - name: OTEL_TRACES_SAMPLER_ARG
+            #   value: "0.1"
           ports:
             - containerPort: 3000
               name: http

@@ -117,6 +117,17 @@ const nextConfig: NextConfig = {
     "pino",
     "pino-std-serializers",
     "thread-stream",
+    // OTel instrumentations work by patching the module registry at
+    // `require()` time (require-in-the-middle). A webpack-bundled copy of
+    // `http` / `undici` is a different module object than the one the patch
+    // targets, so bundling these silently produces zero spans. They must stay
+    // external and be resolved from node_modules at runtime.
+    "@opentelemetry/api",
+    "@opentelemetry/sdk-node",
+    "@opentelemetry/sdk-trace-node",
+    "@opentelemetry/exporter-trace-otlp-proto",
+    "@opentelemetry/instrumentation-http",
+    "@opentelemetry/instrumentation-undici",
   ],
   experimental: {
     serverActions: {
