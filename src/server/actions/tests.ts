@@ -9,6 +9,7 @@ import {
   requireTeamAccess,
   requireCapability,
   requireRepoCapability,
+  hasCapability,
 } from "@/lib/auth";
 import {
   requireAreaOwnership,
@@ -567,6 +568,7 @@ export async function getTestDetailData(
     envConfig,
     testSpec,
     aiSettings,
+    credentials,
   ] = await Promise.all([
     queries.getTestResultsByTest(testId),
     getTestScreenshotsGrouped(testId, repoId),
@@ -582,6 +584,13 @@ export async function getTestDetailData(
     repoId ? queries.getEnvironmentConfig(repoId) : Promise.resolve(null),
     queries.getTestSpec(testId),
     queries.getAISettings(repoId ?? undefined),
+    // Masked at the query layer — no secret plaintext reaches the browser.
+    // Same `repos:settings` gate as the Setup tab, applied as a filter rather
+    // than a throw: a viewer sees no Credentials section instead of a page
+    // that fails to load.
+    repoId && hasCapability(session, "repos:settings")
+      ? queries.listCredentials(repoId).catch(() => [])
+      : Promise.resolve([]),
   ]);
 
   // AI is "available" for variable generation when a non-CLI provider is
@@ -644,6 +653,7 @@ export async function getTestDetailData(
     envBaseUrl: envConfig?.baseUrl ?? null,
     testSpec,
     aiAvailable,
+    credentials,
   };
 }
 

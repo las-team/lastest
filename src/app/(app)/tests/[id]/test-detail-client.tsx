@@ -140,6 +140,7 @@ import {
 import { TestStepsTab } from "@/components/tests/success-criteria-tab";
 import { StepCriteriaTab } from "@/components/tests/step-criteria-tab";
 import { TestVarsTab } from "@/components/tests/test-vars-tab";
+import type { MaskedCredential } from "@/lib/db/queries/credentials";
 import type { ScreenshotGroup } from "@/server/actions/tests";
 import { SheetDataPreview } from "@lastest/plugin-data-sources/ui/sheet-data-preview";
 import { SheetReferenceInserter } from "@lastest/plugin-data-sources/ui/sheet-reference-inserter";
@@ -226,6 +227,8 @@ interface TestDetailClientProps {
   availableScripts?: SetupScript[];
   sheetDataSources?: GoogleSheetsDataSource[];
   csvDataSources?: CsvDataSource[];
+  /** Repo credentials, masked server-side. Rendered read-only on the Vars tab. */
+  credentials?: MaskedCredential[];
   googleSheetsAccount?: {
     id: string;
     googleEmail: string;
@@ -445,6 +448,7 @@ export function TestDetailClient({
   availableScripts = [],
   sheetDataSources = [],
   csvDataSources = [],
+  credentials = [],
   googleSheetsAccount = null,
   stabilizationDefaults,
   earlyAdopterMode = false,
@@ -1820,6 +1824,7 @@ export function TestDetailClient({
               aiAvailable={aiAvailable && aiEnabled}
               aiVarLastValues={test.aiVarLastValues ?? null}
               matrixPolicy={test.matrixPolicy ?? null}
+              credentials={credentials}
               onSaveVariables={async (next) => {
                 const { saveTestVariables } =
                   await import("@/server/actions/tests");

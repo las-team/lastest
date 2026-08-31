@@ -12,6 +12,10 @@ import { setupFreezeScripts } from "./stabilization.js";
 import { installKeepNamesShim } from "./page-shims.js";
 import { isUsableSelectorValue } from "@lastest/shared";
 import { EmbeddedRecorder } from "./embedded-recorder.js";
+import {
+  createCredentialScrubber,
+  freezeCredentials,
+} from "./credential-redaction.js";
 
 // Types matching the protocol definitions
 export interface DebugStep {
@@ -111,6 +115,11 @@ export interface StartDebugPayload {
   }>;
   pointerGestures?: boolean;
   cursorFPS?: number;
+  /** Named repo logins, decrypted by the host at dispatch. The step debugger
+   *  runs the same body as a real run, so `credentials.*` must resolve here
+   *  too — otherwise stepping through a login is the one thing you can't do. */
+  credentials?: Record<string, Record<string, string>>;
+  credentialSecretKeys?: Record<string, string[]>;
 }
 
 export interface DebugActionPayload {
@@ -251,6 +260,10 @@ export class EmbeddedDebugExecutor {
   private error?: string;
   private codeVersion = 0;
   private targetUrl = "";
+  private credentials: Record<string, Record<string, string>> | undefined;
+  /** Declared secret keys, carried alongside `credentials` — the EB scrubs on
+   *  these rather than re-guessing secrecy from the key name. */
+  private credentialSecretKeys: Record<string, string[]> | undefined;
   private viewport = { width: 1280, height: 720 };
   private storageState?: string;
   private setupVariables?: Record<string, unknown>;
@@ -322,6 +335,8 @@ export class EmbeddedDebugExecutor {
     this.selectorPriority = payload.selectorPriority;
     this.pointerGestures = payload.pointerGestures;
     this.cursorFPS = payload.cursorFPS;
+    this.credentials = payload.credentials;
+    this.credentialSecretKeys = payload.credentialSecretKeys;
     this.generation++;
 
     await this.createContextAndPage();
@@ -755,9 +770,14 @@ export class EmbeddedDebugExecutor {
     const page = this.debugPage;
 
     // Build helpers
+    const credScrub = createCredentialScrubber(this.credentials, {
+      secretKeys: this.credentialSecretKeys,
+    });
+    const credentials = freezeCredentials(this.credentials);
+
     const logFn = (level: string, message: string) => {
       console.log(
-        `  [${level.toUpperCase()}] [debug:${this.testId}] ${message}`,
+        `  [${level.toUpperCase()}] [debug:${this.testId}] ${credScrub.scrub(message)}`,
       );
     };
 
@@ -1084,6 +1104,7 @@ export class EmbeddedDebugExecutor {
         "expect",
         "locateWithFallback",
         "replayCursorPath",
+        "credentials",
         "__checkpoint",
         instrumentedBody,
       );
@@ -1096,6 +1117,7 @@ export class EmbeddedDebugExecutor {
         expect,
         locateWithFallback,
         replayCursorPath,
+        credentials,
         checkpoint,
       );
 
@@ -1115,12 +1137,16 @@ export class EmbeddedDebugExecutor {
             stepId: steps[executingStepIdx].id,
             status: "failed",
             durationMs: Date.now() - stepStartTimes[executingStepIdx],
-            error: err instanceof Error ? err.message : String(err),
+            error: credScrub.scrub(
+              err instanceof Error ? err.message : String(err),
+            ),
           };
           this.currentStepIndex = executingStepIdx;
         }
         this.status = "error";
-        this.error = err instanceof Error ? err.message : String(err);
+        this.error = credScrub.scrub(
+          err instanceof Error ? err.message : String(err),
+        );
       }
     }
   }

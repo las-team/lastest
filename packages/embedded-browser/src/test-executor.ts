@@ -41,6 +41,12 @@ import {
   type StorageStateSnapshot,
 } from "./multi-layer-capture.js";
 import {
+  createCredentialScrubber,
+  freezeCredentials,
+  scrubNetworkRequests,
+  scrubDomSnapshot,
+} from "./credential-redaction.js";
+import {
   instrumentAssertionTracking,
   instrumentStepTracking,
   stripTypeAnnotations,
@@ -269,6 +275,11 @@ export interface RunSetupPayload {
    *  via newContext({ userAgent }) on the setup context. Sourced from
    *  playwright_settings.userAgentOverride. */
   userAgentOverride?: string;
+  /** Named repo logins, decrypted by the host at dispatch. Injected as the
+   *  test body's `credentials` parameter (`credentials.vaultAdmin.password`)
+   *  and never persisted — see docs/credentials-plan.md §1 for why these do
+   *  not travel the variable-substitution path with the rest of the vars. */
+  credentials?: Record<string, Record<string, string>>;
 }
 
 export interface RunTestPayload {
@@ -363,6 +374,11 @@ export interface RunTestPayload {
    *  return it alongside `screenshots[]` so the host can run a text-diff
    *  against the prior baseline. */
   textCaptureEnabled?: boolean;
+  /** Named repo logins, decrypted by the host at dispatch. Injected as the
+   *  test body's `credentials` parameter (`credentials.vaultAdmin.password`)
+   *  and never persisted — see docs/credentials-plan.md §1 for why these do
+   *  not travel the variable-substitution path with the rest of the vars. */
+  credentials?: Record<string, Record<string, string>>;
 }
 
 /**
@@ -557,10 +573,22 @@ export class EmbeddedTestExecutor {
     let allNetworkRequests: EmbeddedNetworkRequest[] = [];
     const testTimeout = Math.max(command.timeout || 120000, 30000);
 
+    // Credentials are decrypted by the host at dispatch and live only for this
+    // run. The scrubber masks their secret values in everything that leaves
+    // here — log lines, error messages, DOM captures. See credential-redaction.ts.
+    // Scrub on the keys the user DECLARED secret, not on a re-guess from the
+    // key name: `CredentialField.secret` is what decided encryption at rest,
+    // and `passphrase` / `clientAssertion` match no keyword hint.
+    const credScrub = createCredentialScrubber(command.credentials, {
+      secretKeys: command.credentialSecretKeys,
+    });
+    const credentials = freezeCredentials(command.credentials);
+
     const logFn = (level: LogEntry["level"], message: string) => {
-      logs.push({ timestamp: Date.now(), level, message });
+      const safe = credScrub.scrub(message);
+      logs.push({ timestamp: Date.now(), level, message: safe });
       console.log(
-        `  [${level.toUpperCase()}] [embedded:${command.testId}] ${message}`,
+        `  [${level.toUpperCase()}] [embedded:${command.testId}] ${safe}`,
       );
     };
 
@@ -885,12 +913,18 @@ export class EmbeddedTestExecutor {
     const captureFinalDomSnapshot = async () => {
       if (!page || page.isClosed()) return;
       try {
-        domSnapshot = await getAllDomSelectors(
-          page,
-          DEFAULT_DOM_SNAPSHOT_PRIORITY,
-          // Capture curated computed styles so RCA can surface per-property CSS
-          // deltas in the diff drill-down (takes effect after an EB rebuild).
-          true,
+        // A password input renders as dots in a screenshot, but its `value`
+        // attribute and the text around it do not — scrub before the snapshot
+        // is attached to the result.
+        domSnapshot = scrubDomSnapshot(
+          await getAllDomSelectors(
+            page,
+            DEFAULT_DOM_SNAPSHOT_PRIORITY,
+            // Capture curated computed styles so RCA can surface per-property CSS
+            // deltas in the diff drill-down (takes effect after an EB rebuild).
+            true,
+          ),
+          credScrub,
         );
       } catch (err) {
         logFn(
@@ -1145,14 +1179,16 @@ export class EmbeddedTestExecutor {
             );
             return;
           }
-          consoleErrors.push(text);
+          // An app that console.logs its own login payload puts the secret
+          // here, and both of these are persisted.
+          consoleErrors.push(credScrub.scrub(text));
           consoleEntries.push({
             atMs:
               videoStartMs != null
                 ? Math.max(0, Date.now() - videoStartMs)
                 : null,
             level: "error",
-            text,
+            text: credScrub.scrub(text),
           });
           logFn("warn", `Console error: ${text}`);
         }
@@ -1303,10 +1339,13 @@ export class EmbeddedTestExecutor {
           // failure just means this step has no DOM overlay.
           let stepDomSnapshot: DomSnapshotResult | undefined;
           try {
-            stepDomSnapshot = await getAllDomSelectors(
-              page,
-              DEFAULT_DOM_SNAPSHOT_PRIORITY,
-              false,
+            stepDomSnapshot = scrubDomSnapshot(
+              await getAllDomSelectors(
+                page,
+                DEFAULT_DOM_SNAPSHOT_PRIORITY,
+                false,
+              ),
+              credScrub,
             );
           } catch (domErr) {
             logFn(
@@ -1336,7 +1375,12 @@ export class EmbeddedTestExecutor {
               const rawText = await page.evaluate(
                 () => document.body?.innerText ?? "",
               );
-              const safeText = typeof rawText === "string" ? rawText : "";
+              // Same argument as the DOM snapshot: a page that renders a
+              // credential in its own text (a confirmation screen, a debug
+              // panel) would otherwise persist it into the text-diff baseline.
+              const safeText = credScrub.scrub(
+                typeof rawText === "string" ? rawText : "",
+              );
               const capped =
                 safeText.length > TEXT_CAP_BYTES
                   ? safeText.slice(0, TEXT_CAP_BYTES) +
@@ -1822,7 +1866,11 @@ export class EmbeddedTestExecutor {
           // tests rely on that to fail-fast on TypeError / ReferenceError.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           if (e && (e as any).__hardAssertion) throw e;
-          const msg = e instanceof Error ? e.message : String(e);
+          // Persisted twice over (assertionResults + softErrors), so scrub at
+          // the source rather than at each store.
+          const msg = credScrub.scrub(
+            e instanceof Error ? e.message : String(e),
+          );
           assertionResults.push({
             assertionId: id,
             status: "failed",
@@ -1863,10 +1911,15 @@ export class EmbeddedTestExecutor {
       );
 
       // Step logger with softExpect/softAction (matches runner)
+      // Every `msg` here is scrubbed at capture, not just on the way to
+      // logFn: `softErrors` is returned on the result and persisted, so
+      // scrubbing only the printed copy would leave the stored one in the
+      // clear. A soft-failed `expect(...).toHaveValue('hunter2')` is exactly
+      // the message that carries a secret.
       const stepLogger = {
         log: (msg: string) => logFn("info", `Step: ${msg}`),
         warn: (msg: string) => {
-          softErrors.push(msg);
+          softErrors.push(credScrub.scrub(msg));
           logFn("warn", `[WARN] ${msg}`);
         },
         error: (msg: string) => logFn("error", `Step error: ${msg}`),
@@ -1874,7 +1927,9 @@ export class EmbeddedTestExecutor {
           try {
             await fn();
           } catch (e: unknown) {
-            const msg = label || (e instanceof Error ? e.message : String(e));
+            const msg = credScrub.scrub(
+              label || (e instanceof Error ? e.message : String(e)),
+            );
             softErrors.push(msg);
             logFn("warn", `[SOFT FAIL] ${msg}`);
           }
@@ -1883,7 +1938,9 @@ export class EmbeddedTestExecutor {
           try {
             await fn();
           } catch (e: unknown) {
-            const msg = label || (e instanceof Error ? e.message : String(e));
+            const msg = credScrub.scrub(
+              label || (e instanceof Error ? e.message : String(e)),
+            );
             softErrors.push(msg);
             logFn("warn", `[SOFT FAIL] ${msg}`);
           }
@@ -2219,6 +2276,7 @@ export class EmbeddedTestExecutor {
               "network",
               "replayCursorPath",
               "fixtures",
+              "credentials",
               "__stepReached",
               "__assertion",
               body,
@@ -2237,6 +2295,7 @@ export class EmbeddedTestExecutor {
               networkHelper,
               replayCursorPathFn,
               fixturesMap,
+              credentials,
               __stepReached,
               __assertion,
             );
@@ -3003,7 +3062,9 @@ export class EmbeddedTestExecutor {
         texts: texts.length > 0 ? texts : undefined,
         consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
         networkRequests:
-          allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
+          allNetworkRequests.length > 0
+            ? scrubNetworkRequests(allNetworkRequests, credScrub)
+            : undefined,
         softErrors: softErrors.length > 0 ? softErrors : undefined,
         assertionResults:
           assertionResults.length > 0 ? assertionResults : undefined,
@@ -3027,9 +3088,16 @@ export class EmbeddedTestExecutor {
       };
     } catch (error) {
       const durationMs = Date.now() - startTime;
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      const errorStack = error instanceof Error ? error.stack : undefined;
+      // Playwright puts the fill() argument in the message when a locator
+      // times out, so the error text is a real leak path — scrub before it is
+      // read anywhere, including into the persisted result.
+      const errorMessage = credScrub.scrub(
+        error instanceof Error ? error.message : String(error),
+      );
+      const errorStack =
+        error instanceof Error && error.stack
+          ? credScrub.scrub(error.stack)
+          : undefined;
       const isCancelled =
         errorMessage.includes("cancelled") || abortCtrl.signal.aborted;
 
@@ -3051,7 +3119,9 @@ export class EmbeddedTestExecutor {
           texts: texts.length > 0 ? texts : undefined,
           consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
           networkRequests:
-            allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
+            allNetworkRequests.length > 0
+              ? scrubNetworkRequests(allNetworkRequests, credScrub)
+              : undefined,
           softErrors: softErrors.length > 0 ? softErrors : undefined,
           assertionResults:
             assertionResults.length > 0 ? assertionResults : undefined,
@@ -3144,7 +3214,9 @@ export class EmbeddedTestExecutor {
           texts: texts.length > 0 ? texts : undefined,
           consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
           networkRequests:
-            allNetworkRequests.length > 0 ? allNetworkRequests : undefined,
+            allNetworkRequests.length > 0
+              ? scrubNetworkRequests(allNetworkRequests, credScrub)
+              : undefined,
           softErrors: softErrors.length > 0 ? softErrors : undefined,
           assertionResults:
             assertionResults.length > 0 ? assertionResults : undefined,
@@ -3218,10 +3290,22 @@ export class EmbeddedTestExecutor {
     const logs: LogEntry[] = [];
     const setupTimeout = Math.max(command.timeout || 120000, 30000);
 
+    // Setup is the login flow more often than not, so it is the payload's
+    // primary user — and the place credential plaintext most wants to reach
+    // a log line.
+    // Scrub on the keys the user DECLARED secret, not on a re-guess from the
+    // key name: `CredentialField.secret` is what decided encryption at rest,
+    // and `passphrase` / `clientAssertion` match no keyword hint.
+    const credScrub = createCredentialScrubber(command.credentials, {
+      secretKeys: command.credentialSecretKeys,
+    });
+    const credentials = freezeCredentials(command.credentials);
+
     const logFn = (level: LogEntry["level"], message: string) => {
-      logs.push({ timestamp: Date.now(), level, message });
+      const safe = credScrub.scrub(message);
+      logs.push({ timestamp: Date.now(), level, message: safe });
       console.log(
-        `  [${level.toUpperCase()}] [setup:${command.setupId}] ${message}`,
+        `  [${level.toUpperCase()}] [setup:${command.setupId}] ${safe}`,
       );
     };
 
@@ -3452,6 +3536,7 @@ export class EmbeddedTestExecutor {
             "appState",
             "locateWithFallback",
             "replayCursorPath",
+            "credentials",
             body,
           );
           await setupFn(
@@ -3463,6 +3548,7 @@ export class EmbeddedTestExecutor {
             null,
             locateWithFallback,
             replayCursorPathFn,
+            credentials,
           );
         })().then((r) => {
           clearTimeout(timeoutTimer);
@@ -3568,8 +3654,9 @@ export class EmbeddedTestExecutor {
         logs,
       };
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
+      const errorMessage = credScrub.scrub(
+        error instanceof Error ? error.message : String(error),
+      );
       const isTimeout = errorMessage.includes("timed out");
       logFn(
         "error",

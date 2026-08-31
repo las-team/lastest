@@ -252,7 +252,7 @@ describe("today's core (CORE_SRC_PATHS)", () => {
         rule: "core-to-plugin",
         specifier: "@lastest/plugin-api-test/runner",
         file: "src/lib/execution/executor.ts",
-        line: 418,
+        line: 419,
       }),
     ]);
   });

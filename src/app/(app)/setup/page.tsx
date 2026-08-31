@@ -14,6 +14,7 @@ import { getSetupConfigs } from "@/server/actions/setup-configs";
 import { getDefaultSetupSteps } from "@/server/actions/setup-steps";
 import { getDefaultTeardownSteps } from "@/server/actions/teardown-steps";
 import { listStorageStates } from "@/server/actions/storage-states";
+import { getCredentials } from "@/server/actions/credentials";
 
 export default async function SetupPage() {
   const session = await getCurrentSession();
@@ -40,6 +41,7 @@ export default async function SetupPage() {
     defaultTeardownSteps,
     storageStates,
     playwrightSettings,
+    credentials,
   ] = await Promise.all([
     getSetupScripts(selectedRepo.id),
     getSetupConfigs(selectedRepo.id),
@@ -48,6 +50,9 @@ export default async function SetupPage() {
     getDefaultTeardownSteps(selectedRepo.id),
     listStorageStates(selectedRepo.id),
     getPlaywrightSettings(selectedRepo.id),
+    // Masked — the list action never returns a secret's plaintext, so this is
+    // safe to hand to a client component.
+    getCredentials(selectedRepo.id).catch(() => []),
   ]);
 
   return (
@@ -62,6 +67,7 @@ export default async function SetupPage() {
         storageStates={storageStates}
         designSystem={playwrightSettings?.designSystem ?? null}
         designSystemEnabled={!!playwrightSettings?.enableDesignSystem}
+        credentials={credentials}
       />
     </div>
   );

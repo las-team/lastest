@@ -34,6 +34,7 @@ import {
 } from "@/app/api/ws/runner/route";
 import { resolveSetupCodeForRunner } from "@/lib/execution/setup-capture";
 import { executeSetupViaRunner } from "@/lib/execution/executor";
+import { resolveRunCredentials } from "@/lib/execution/run-credentials";
 import {
   claimOrProvisionPoolEB,
   releasePoolEB,
@@ -145,6 +146,11 @@ export async function startDebugSession(
       ? { width: settings.viewportWidth, height: settings.viewportHeight }
       : undefined;
 
+  // Decrypt-at-dispatch, shared by the setup run and the debug session itself.
+  const resolvedCredentials = await resolveRunCredentials(repoId);
+  const credentials = resolvedCredentials?.credentials;
+  const credentialSecretKeys = resolvedCredentials?.secretKeys;
+
   // Run setup on the remote runner if needed (get storageState for auth)
   let storageState: string | undefined;
   let setupVariables: Record<string, unknown> | undefined;
@@ -163,6 +169,7 @@ export async function startDebugSession(
         // headed: keep screencast attached to the setup page so the user can
         // watch setup (login flow, OAuth redirects) live in the debug stream.
         true,
+        resolvedCredentials,
       );
       // Prefer the serialized JSON snapshot over the `persistent:<id>` marker —
       // debug-executor creates its own BrowserContext and can't reach the
@@ -201,6 +208,8 @@ export async function startDebugSession(
       selectorPriority: settings?.selectorPriority ?? undefined,
       pointerGestures: settings?.pointerGestures ?? undefined,
       cursorFPS: settings?.cursorFPS ?? undefined,
+      credentials,
+      credentialSecretKeys,
     },
   } as unknown as Message);
 

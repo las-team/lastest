@@ -175,6 +175,9 @@ async function tryCaptureViaRunner(
   if (!runnerId) return null;
 
   try {
+    // No `credentials` payload: QuickStart carries its own login in
+    // `input.testCode`, and this runs before the repo has a Credentials tab
+    // to have filled in. Same call as play-agent's — see the note there.
     const result = await executeSetupViaRunner(
       input.testCode,
       `quickstart-auth-${input.repositoryId}`,

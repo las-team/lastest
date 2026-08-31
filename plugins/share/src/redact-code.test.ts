@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { redactCodeSecrets } from "./redact-code";
+import { redactCodeSecrets, CREDENTIAL_REFERENCE } from "./redact-code";
 
 // The real payload reported as leaking on the public share page: a Supabase
 // session baked into a top-level const, containing a JWT access_token, a Google
@@ -66,6 +66,25 @@ describe("redactCodeSecrets", () => {
     expect(out).toContain("Enter your password");
     expect(out).toContain("Reset token");
     expect(out).not.toContain("•••");
+  });
+
+  it("leaves `credentials.x.y` references intact", () => {
+    // A reference carries no value — the plaintext lives in repo_credentials
+    // and only reaches the EB at run time — so masking it would misrepresent
+    // the test as having had a literal secret in its source. Each of these
+    // sits next to a pattern one of the passes reacts to (a /password/i
+    // regex, a #password selector, a `password:` key), which is what makes
+    // the case worth pinning.
+    const code = [
+      `await page.getByLabel(/password/i).fill(credentials.vaultAdmin.password);`,
+      `await page.locator("#password").fill(credentials.vaultAdmin.password);`,
+      `const password = credentials.vaultAdmin.password;`,
+      `login({ password: credentials.vaultAdmin.password });`,
+      `login({ "password": credentials.vaultAdmin.password });`,
+    ].join("\n");
+    const out = redactCodeSecrets(code);
+    expect(out).toBe(code);
+    expect(out.match(CREDENTIAL_REFERENCE)).toHaveLength(5);
   });
 
   it("preserves ordinary code and returns a string for empty input", () => {

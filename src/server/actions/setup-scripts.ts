@@ -10,6 +10,7 @@ import {
 import type { SetupScriptType } from "@/lib/db/schema";
 import { validateApiScript } from "@/lib/setup/api-seeder";
 import { executeSetupViaRunner } from "@/lib/execution/executor";
+import { resolveRunCredentials } from "@/lib/execution/run-credentials";
 import {
   claimOrProvisionPoolEB,
   releasePoolEB,
@@ -178,6 +179,11 @@ export async function testSetupScript(
       viewport,
       settings?.navigationTimeout ?? undefined,
       settings,
+      undefined,
+      undefined,
+      // "Test this script" must behave like the real thing — a login script
+      // that works in a build and fails here would be a debugging dead end.
+      await resolveRunCredentials(script.repositoryId),
     );
     return {
       success: true,

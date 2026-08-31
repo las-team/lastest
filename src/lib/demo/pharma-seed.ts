@@ -6,13 +6,19 @@
  * check-layer defaults, so the pharma fork of onboarding lands on a repo that
  * already looks like their job rather than on an empty project.
  *
- * Both tests are seeded **quarantined**. They cannot run yet: there is no
- * per-repo secret store, so `process.env.VAULT_USER` inside a test resolves
- * against the embedded browser's own process environment (see
- * `docs/pharma-restricted-scope.md` §2.1). Seeding them green-able would be a
- * lie; seeding them quarantined, with the blocking reason in the first line of
- * the failure, is the honest version — and it matches how the same two tests
- * ship in the MuniConS bundle.
+ * Both tests read their logins from the repo's Credentials store
+ * (`credentials.vault.username`, `credentials.salesforce.password`), which is
+ * what makes them runnable: they used to reach for `process.env.VAULT_USER`,
+ * which resolved against the embedded browser's own process environment and so
+ * could never be satisfied — the blocker `docs/pharma-restricted-scope.md`
+ * §2.1 named, closed by `docs/credentials-plan.md`.
+ *
+ * They stay seeded **quarantined** for a different and smaller reason: the
+ * target URL is a placeholder, because pointing a seeded test at a real Vault
+ * would be pointing it at somebody else's tenant. Quarantined tests run but
+ * never block a build, so the first build stays green while the consultant
+ * fills in their sandbox URL and adds the two credentials — at which point
+ * un-quarantining is one toggle rather than a platform gap.
  *
  * Sibling of `sandbox-seeds.ts` and deliberately shaped like it: same
  * area→test→version insert, same "no-op if the repo already has tests"
@@ -25,9 +31,10 @@ import { randomUUID as uuid } from "crypto";
 import { upsertPlaywrightSettings } from "@/lib/db/queries/settings";
 import { REGULATED_CHECK_MODES } from "@/lib/segment/regulated";
 
-const VAULT_CODE = `export async function test(page, baseUrl, screenshotPath, stepLogger) {
+const VAULT_CODE = `export async function test(page, baseUrl, screenshotPath, stepLogger, credentials) {
   // ───────────────────────────────────────────────────────────────────────────
-  // QUARANTINED — blocked on credentials, so it never reds your first build.
+  // QUARANTINED until you point it at your sandbox — so it never reds your
+  // first build. Quarantined tests still run; they just don't block.
   //
   // Vault ships three general releases a year. Each lands in your sandbox
   // weeks before production, and every validated configuration on top of it
@@ -35,26 +42,32 @@ const VAULT_CODE = `export async function test(page, baseUrl, screenshotPath, st
   // screenshot folder. This is that person's checklist, executed on every
   // release and diffed against the last known-good run.
   //
-  // To unblock:
+  // To run it:
   //   1. Point this test's target URL at a Vault SANDBOX (never production).
-  //   2. Provide a service account with a fixed, known role — a permission
-  //      change should surface as a test failure, not as noise.
-  //   3. Seed a fixture document the account may move through the lifecycle.
+  //   2. Setup → Credentials → New credential, named \`vault\`, with fields
+  //      username, password and docId. Use a service account with a fixed,
+  //      known role — a permission change should surface as a test failure,
+  //      not as noise — and a fixture document it may move through the
+  //      lifecycle.
+  //   3. Un-quarantine.
+  //
+  // The values below are read from that store at run time. They are never
+  // written into this source, never hashed into the baseline, and never
+  // recorded in run history — so rotating the password changes nothing here.
   // ───────────────────────────────────────────────────────────────────────────
   const shot = (n, slug) => screenshotPath.replace('.png', \`-\${n}-\${slug}.png\`);
-  const VAULT_USER = process.env.VAULT_USER;
-  const VAULT_PASSWORD = process.env.VAULT_PASSWORD;
-  const DOC_ID = process.env.VAULT_DOC_ID; // seeded fixture document
+  const vault = credentials?.vault;
+  const DOC_ID = vault?.docId; // seeded fixture document
 
-  if (!VAULT_USER || !VAULT_PASSWORD) {
-    throw new Error('Blocked: VAULT_USER / VAULT_PASSWORD are not available to this run, and this test targets a Vault sandbox. Lastest has no per-repo secret store yet — see docs/pharma-restricted-scope.md §2.1.');
+  if (!vault?.username || !vault?.password) {
+    throw new Error('This test needs a credential named "vault" with username and password fields. Add one under Setup → Credentials, then reference it as credentials.vault.username.');
   }
 
   // ── 1. Authentication ─────────────────────────────────────────────────────
   stepLogger.log('Scenario 1: Vault login');
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
-  await page.getByLabel(/user name|username/i).fill(VAULT_USER);
-  await page.getByLabel(/password/i).fill(VAULT_PASSWORD);
+  await page.getByLabel(/user name|username/i).fill(credentials.vault.username);
+  await page.getByLabel(/password/i).fill(credentials.vault.password);
   await page.getByRole('button', { name: /log ?in|sign in/i }).click();
   await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
   await page.screenshot({ path: shot(1, 'vault-home') });
@@ -117,9 +130,10 @@ const VAULT_CODE = `export async function test(page, baseUrl, screenshotPath, st
 }
 `;
 
-const SALESFORCE_CODE = `export async function test(page, baseUrl, screenshotPath, stepLogger) {
+const SALESFORCE_CODE = `export async function test(page, baseUrl, screenshotPath, stepLogger, credentials) {
   // ───────────────────────────────────────────────────────────────────────────
-  // QUARANTINED — blocked on credentials, so it never reds your first build.
+  // QUARANTINED until you point it at your org — so it never reds your first
+  // build. Quarantined tests still run; they just don't block.
   //
   // Salesforce ships three seasonal releases a year (Spring, Summer, Winter)
   // and pushes them to sandboxes on a published preview window. The regression
@@ -127,22 +141,24 @@ const SALESFORCE_CODE = `export async function test(page, baseUrl, screenshotPat
   // layouts, LWC rendering, validation rules and Flow screens, none of which
   // unit tests see. This test walks those.
   //
-  // To unblock: point the target URL at a Salesforce SANDBOX or Developer org
-  // and provide SF_USER / SF_PASSWORD.
+  // To run it: point the target URL at a Salesforce SANDBOX or Developer org,
+  // add a credential named \`salesforce\` under Setup → Credentials with
+  // username and password fields, and un-quarantine. The values are read from
+  // that store at run time — never written into this source, never hashed into
+  // the baseline, never recorded in run history.
   // ───────────────────────────────────────────────────────────────────────────
   const shot = (n, slug) => screenshotPath.replace('.png', \`-\${n}-\${slug}.png\`);
-  const SF_USER = process.env.SF_USER;
-  const SF_PASSWORD = process.env.SF_PASSWORD;
+  const sf = credentials?.salesforce;
 
-  if (!SF_USER || !SF_PASSWORD) {
-    throw new Error('Blocked: SF_USER / SF_PASSWORD are not available to this run, and this test targets a Salesforce sandbox. Lastest has no per-repo secret store yet — see docs/pharma-restricted-scope.md §2.1.');
+  if (!sf?.username || !sf?.password) {
+    throw new Error('This test needs a credential named "salesforce" with username and password fields. Add one under Setup → Credentials, then reference it as credentials.salesforce.username.');
   }
 
   // ── 1. Login ──────────────────────────────────────────────────────────────
   stepLogger.log('Scenario 1: Salesforce login');
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
-  await page.locator('#username').fill(SF_USER);
-  await page.locator('#password').fill(SF_PASSWORD);
+  await page.locator('#username').fill(credentials.salesforce.username);
+  await page.locator('#password').fill(credentials.salesforce.password);
   await page.locator('#Login').click();
   await page.waitForLoadState('networkidle', { timeout: 40000 }).catch(() => {});
   await page.screenshot({ path: shot(1, 'sf-home') });
@@ -268,8 +284,13 @@ export async function seedPharmaSuite(
       code: seed.code,
       targetUrl: seed.targetUrl,
       executionMode: "procedural",
-      // Neither can run until a sandbox URL and a service account exist.
-      // Quarantined tests run but never block a build.
+      // The platform block is gone — both read their logins from the repo's
+      // Credentials store now. What remains is per-customer setup: the target
+      // URL is a placeholder (pointing a seeded test at a real Vault would be
+      // pointing it at somebody else's tenant) and the `vault` / `salesforce`
+      // credentials don't exist until the consultant adds them. Quarantined
+      // tests run but never block a build, so the first build stays green
+      // until both are filled in.
       quarantined: true,
       isPlaceholder: true,
       createdAt: now,
