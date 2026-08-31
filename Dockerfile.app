@@ -14,6 +14,10 @@
 # EB_POOL_SERVICE_URL (+ EB_POOL_SERVICE_TOKEN). No tests run at build time
 # (run `pnpm test` in CI instead) and no other package's dist is copied in.
 #
+# This image is also the only one wired for OpenTelemetry tracing: it is
+# Kubernetes-only and opt-in (OTEL_TRACING_ENABLED) — see the OTel block in the
+# runner stage below and src/otel.ts.
+#
 # Build (repo root as context):
 #   docker build -f Dockerfile.app -t lastest-app:latest .
 # =============================================================================
@@ -179,6 +183,36 @@ RUN set -e; \
 # Resolve both the way the app does at runtime, so a broken layout fails the
 # build instead of surfacing as "Native CLI binary not found" on a live pod.
 RUN node --input-type=module -e "import { createRequire } from 'node:module'; const m = await import('@anthropic-ai/claude-agent-sdk'); if (typeof m.query !== 'function') throw new Error('claude-agent-sdk: missing query export'); const req = createRequire('/app/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs'); const arch = process.arch === 'arm64' ? 'arm64' : 'x64'; console.log('claude-agent-sdk OK:', req.resolve('@anthropic-ai/claude-agent-sdk-linux-' + arch + '-musl/claude'));"
+
+# OpenTelemetry tracing (src/otel.ts). This is the ONLY app image that can
+# trace: `otelGate()` requires KUBERNETES_SERVICE_HOST, so the root Dockerfile's
+# single-container self-host image never loads any of this even if the OTLP env
+# vars are present. Tracing additionally stays off until OTEL_TRACING_ENABLED is
+# set — see k8s/app.yaml for the full env block.
+#
+# The OTel packages are serverExternalPackages (next.config.ts): webpack must
+# not bundle them, because require-in-the-middle patches the module registry at
+# `require()` time and a bundled copy of `http`/`undici` is a different object
+# than the patched one — the failure mode is silently zero spans. That means
+# src/otel.ts resolves them by BARE SPECIFIER at runtime, so they need the same
+# top-level-symlink fixup playwright does above (nft traces the content into
+# .pnpm/… but does not create node_modules/@opentelemetry/*). The list below is
+# exactly next.config.ts's serverExternalPackages entries — @opentelemetry/
+# resources and semantic-conventions are plain JS with nothing to patch, so
+# webpack bundles them and they need no runtime resolution. Unpinned on
+# purpose: the glob picks up whatever the lockfile resolved, so a version bump
+# needs no edit here and `scripts/sync-docker-pins.mjs` has nothing to sync.
+RUN set -e; \
+    mkdir -p /app/node_modules/@opentelemetry; \
+    for p in api sdk-node sdk-trace-node exporter-trace-otlp-proto \
+             instrumentation-http instrumentation-undici; do \
+      d=$(ls -d /app/node_modules/.pnpm/@opentelemetry+$p@*/node_modules/@opentelemetry/$p 2>/dev/null | head -1); \
+      if [ -n "$d" ]; then ln -sfn "$d" /app/node_modules/@opentelemetry/$p; fi; \
+    done
+
+# Resolve them the way src/otel.ts does at runtime, so a broken layout fails the
+# BUILD instead of degrading to a pod that boots fine and exports no traces.
+RUN node -e "['@opentelemetry/api','@opentelemetry/sdk-node','@opentelemetry/sdk-trace-node','@opentelemetry/exporter-trace-otlp-proto','@opentelemetry/instrumentation-http','@opentelemetry/instrumentation-undici'].forEach((m) => require.resolve(m)); console.log('opentelemetry OK');"
 
 # AI providers in this image: the Claude Agent SDK runs (its JS + native runtime
 # are both present, see above); the 'claude-cli' provider does NOT — no `claude`
