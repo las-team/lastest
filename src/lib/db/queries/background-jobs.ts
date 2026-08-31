@@ -1,5 +1,11 @@
 import { db } from "../index";
-import { backgroundJobs, builds, testResults, testRuns } from "../schema";
+import {
+  backgroundJobs,
+  builds,
+  repositories,
+  testResults,
+  testRuns,
+} from "../schema";
 import type { NewBackgroundJob, BackgroundJobType } from "../schema";
 import {
   eq,
@@ -61,6 +67,80 @@ export async function getActiveBackgroundJobs() {
       ),
     )
     .orderBy(desc(backgroundJobs.createdAt));
+}
+
+/** Active (pending or running) jobs of one type for one repo. Used to dedupe
+ *  work that is idempotent but expensive — a second coverage sync started
+ *  while one is in flight only races the first through reconcile/prune. */
+export async function getActiveBackgroundJobsForRepo(
+  type: BackgroundJobType,
+  repositoryId: string,
+) {
+  return db
+    .select()
+    .from(backgroundJobs)
+    .where(
+      and(
+        eq(backgroundJobs.type, type),
+        eq(backgroundJobs.repositoryId, repositoryId),
+        or(
+          eq(backgroundJobs.status, "pending"),
+          eq(backgroundJobs.status, "running"),
+        ),
+      ),
+    )
+    .orderBy(desc(backgroundJobs.createdAt));
+}
+
+/** How many jobs of one type a team currently has pending or running, across
+ *  all of its repos. The in-flight cap in `createJob` reads this so one
+ *  authenticated user looping a spawn-a-job action cannot pile unbounded work
+ *  onto the shared web process. */
+export async function countActiveBackgroundJobsForTeam(
+  type: BackgroundJobType,
+  teamId: string,
+): Promise<number> {
+  const rows = await db
+    .select({ id: backgroundJobs.id })
+    .from(backgroundJobs)
+    .innerJoin(repositories, eq(backgroundJobs.repositoryId, repositories.id))
+    .where(
+      and(
+        eq(backgroundJobs.type, type),
+        eq(repositories.teamId, teamId),
+        or(
+          eq(backgroundJobs.status, "pending"),
+          eq(backgroundJobs.status, "running"),
+        ),
+      ),
+    );
+  return rows.length;
+}
+
+/**
+ * How many jobs of one type are pending or running across EVERY team.
+ *
+ * The per-team cap (`countActiveBackgroundJobsForTeam`) bounds what one tenant
+ * can pile on; it says nothing about what happens when the scheduler fans a
+ * tick out over every tenant at once. This is the global ledger a fan-out
+ * ceiling reads before deciding how many detached jobs it may start.
+ */
+export async function countActiveBackgroundJobsByType(
+  type: BackgroundJobType,
+): Promise<number> {
+  const rows = await db
+    .select({ id: backgroundJobs.id })
+    .from(backgroundJobs)
+    .where(
+      and(
+        eq(backgroundJobs.type, type),
+        or(
+          eq(backgroundJobs.status, "pending"),
+          eq(backgroundJobs.status, "running"),
+        ),
+      ),
+    );
+  return rows.length;
 }
 
 export async function getRecentBackgroundJobs(sinceMs = 10000) {

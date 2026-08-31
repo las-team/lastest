@@ -111,7 +111,11 @@ export function evaluateStop(
   cells: StopCell[],
   opts: {
     policy?: CoverageStopPolicy;
-    /** Runs already generated/executed this session, against policy.maxRuns. */
+    /** Runs already generated/executed this session, against policy.maxRuns.
+     *  No production caller passes this yet — planning runs once per session,
+     *  at which point the true count is 0 — so `budget_exhausted` is
+     *  reachable only from a caller that re-evaluates mid-session. See the
+     *  inertness note on `CoverageStopPolicy.maxRuns`. */
     runsSoFar?: number;
     /** Remaining budget in minutes; <= 0 stops. Undefined = unbounded. */
     budgetMinutesRemaining?: number;

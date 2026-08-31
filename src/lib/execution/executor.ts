@@ -161,6 +161,51 @@ async function buildAIVarRuntime(
 }
 
 /**
+ * Write advanced variable state back to the test row, so increment-mode vars
+ * walk forward across runs and 'fixed'/'random' AI vars can reuse or fall
+ * back to their last generated value. One helper for BOTH execution paths —
+ * the api path used to discard these and its increment/random-cursor
+ * variables never advanced between runs while the browser path's did.
+ * Best-effort by contract: never fail the run on a cursor write.
+ */
+async function persistVariableState(
+  test: Test,
+  nextRowCursors: Record<string, number>,
+  nextAiLastValues: Record<string, string>,
+): Promise<void> {
+  if (Object.keys(nextRowCursors).length > 0) {
+    try {
+      await db
+        .update(testsTable)
+        .set({ variableRowCursors: nextRowCursors })
+        .where(eq(testsTable.id, test.id));
+    } catch (err) {
+      console.warn(
+        `[executor] Failed to persist variableRowCursors for test ${test.id}:`,
+        err,
+      );
+    }
+  }
+  if (Object.keys(nextAiLastValues).length > 0) {
+    try {
+      const merged = {
+        ...(test.aiVarLastValues ?? {}),
+        ...nextAiLastValues,
+      };
+      await db
+        .update(testsTable)
+        .set({ aiVarLastValues: merged })
+        .where(eq(testsTable.id, test.id));
+    } catch (err) {
+      console.warn(
+        `[executor] Failed to persist aiVarLastValues for test ${test.id}:`,
+        err,
+      );
+    }
+  }
+}
+
+/**
  * Resolve {{sheet:...}}, {{csv:...}}, and {{var:...}} references in test code
  * before sending to the runner. Also returns the extract-mode TestVariable
  * specs the runner should pull from page fields after the test body completes.
@@ -405,20 +450,24 @@ async function executeApiTests(
       // every instance carried its pinned row, and nothing read it. The
       // `{{var:name}}` token is the same one test code uses, applied here to
       // the definition's url / headers / query / body.
-      const { rowPicks } = pickRowsForVariables(
+      const { rowPicks, nextCursors } = pickRowsForVariables(
         test.variables,
         gsheetSources,
         csvSources,
         test.variableRowCursors ?? null,
       );
-      const { values: assignedVariables } = await resolveAssignedValuesAsync(
-        test.variables,
-        gsheetSources,
-        csvSources,
-        rowPicks,
-        null,
-        test.aiVarLastValues ?? undefined,
-      );
+      const { values: assignedVariables, nextLastValues } =
+        await resolveAssignedValuesAsync(
+          test.variables,
+          gsheetSources,
+          csvSources,
+          rowPicks,
+          null,
+          test.aiVarLastValues ?? undefined,
+        );
+      // Same write-back the browser path does — without it, increment and
+      // random-cursor variables on api tests never advanced between runs.
+      await persistVariableState(test, nextCursors, nextLastValues);
       const resolvedDef = substituteVarTokens(def, assignedVariables);
       const apiResult = await runApiTest(appApiTestHost, resolvedDef, {
         baseUrl,
@@ -1094,42 +1143,9 @@ async function executeViaRunner(
         continue;
       }
 
-      // Persist the updated row cursors so increment-mode vars walk forward
-      // across runs. Best-effort — never fail the run on a cursor write fail.
-      if (Object.keys(nextRowCursors).length > 0) {
-        try {
-          await db
-            .update(testsTable)
-            .set({ variableRowCursors: nextRowCursors })
-            .where(eq(testsTable.id, test.id));
-        } catch (err) {
-          console.warn(
-            `[executor] Failed to persist variableRowCursors for test ${test.id}:`,
-            err,
-          );
-        }
-      }
-
-      // Persist newly generated AI-var values so 'fixed' refresh-mode reuses
-      // them and 'random' mode has a fallback when AI later becomes
-      // unavailable. Best-effort — never fail the run on a cache write.
-      if (Object.keys(nextAiLastValues).length > 0) {
-        try {
-          const merged = {
-            ...(test.aiVarLastValues ?? {}),
-            ...nextAiLastValues,
-          };
-          await db
-            .update(testsTable)
-            .set({ aiVarLastValues: merged })
-            .where(eq(testsTable.id, test.id));
-        } catch (err) {
-          console.warn(
-            `[executor] Failed to persist aiVarLastValues for test ${test.id}:`,
-            err,
-          );
-        }
-      }
+      // Persist advanced cursor/AI-var state (increment rows, generated
+      // values) — shared helper with the api path.
+      await persistVariableState(test, nextRowCursors, nextAiLastValues);
 
       // Default-ON `all_steps_executed`: only off when the user explicitly
       // persisted a severity:'warn' rule in stepCriteria. Mirrors the synthesis

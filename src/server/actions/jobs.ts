@@ -95,6 +95,41 @@ async function refuseCrossTeamRepoMutation(
   }
 }
 
+/**
+ * Per-team in-flight ceiling on jobs of one type.
+ *
+ * Every job created here runs (or will run) inside the ONE web process, so an
+ * authenticated user looping a spawn-a-job action — coverage syncs, builds —
+ * piles synchronous CSV parses, matrix expansions and diffing onto the node
+ * until page loads, SSE ticks and EB stream auth stall for every tenant. The
+ * client-side busy flag is not back-pressure; this is. Generous enough that a
+ * real team never sees it (parallel builds queue well below it), small enough
+ * that a runaway loop stops at the cap instead of at process death.
+ */
+const TEAM_ACTIVE_JOB_CAP = (() => {
+  const raw = Number(process.env.BACKGROUND_JOBS_TEAM_CAP);
+  return Number.isFinite(raw) && raw > 0 ? raw : 50;
+})();
+
+async function refuseTeamJobFlood(
+  type: BackgroundJobType,
+  repositoryId?: string | null,
+): Promise<void> {
+  if (!repositoryId) return;
+  const repo = await queries.getRepository(repositoryId);
+  if (!repo?.teamId) return;
+  const active = await queries.countActiveBackgroundJobsForTeam(
+    type,
+    repo.teamId,
+  );
+  if (active >= TEAM_ACTIVE_JOB_CAP) {
+    throw new Error(
+      `Too many "${type}" jobs already pending or running for this team (${active}). ` +
+        `Wait for some to finish before starting more.`,
+    );
+  }
+}
+
 export async function isRunnerBusy(targetRunnerId: string): Promise<boolean> {
   const running = await queries.getRunningJobsForRunner(targetRunnerId);
   return running.length > 0;
@@ -109,6 +144,7 @@ export async function createJob(
   targetRunnerId?: string,
 ) {
   await refuseCrossTeamRepoMutation(repositoryId);
+  await refuseTeamJobFlood(type, repositoryId);
   const { id } = await queries.createBackgroundJob({
     type,
     label,
@@ -136,6 +172,7 @@ export async function createPendingJob(
   targetRunnerId?: string,
 ) {
   await refuseCrossTeamRepoMutation(repositoryId);
+  await refuseTeamJobFlood(type, repositoryId);
   const { id } = await queries.createBackgroundJob({
     type,
     label,

@@ -45,6 +45,9 @@ export async function forkBaselinesForBranch(
       branch: toBranch,
       browser: baseline.browser,
       approvedFromDiffId: baseline.approvedFromDiffId,
+      // Preserve cell scoping — forking a cell-scoped baseline as NULL-cell
+      // would silently make one cell's PNG the shared baseline for all cells.
+      dataCell: baseline.dataCell,
     });
     forked++;
   }
@@ -73,10 +76,12 @@ export async function mergeBaselinesFromBranch(
     toBranch,
   );
 
-  // Build a lookup map for target baselines: key = testId:stepLabel:browser
+  // Build a lookup map for target baselines:
+  // key = testId:stepLabel:browser:dataCell — cell included so promoting one
+  // cell's baseline never compares against (or retires) another cell's.
   const targetMap = new Map<string, (typeof targetBaselines)[0]>();
   for (const b of targetBaselines) {
-    const key = `${b.testId}:${b.stepLabel || ""}:${b.browser || "chromium"}`;
+    const key = `${b.testId}:${b.stepLabel || ""}:${b.browser || "chromium"}:${b.dataCell || ""}`;
     targetMap.set(key, b);
   }
 
@@ -84,7 +89,7 @@ export async function mergeBaselinesFromBranch(
   let unchanged = 0;
 
   for (const source of sourceBaselines) {
-    const key = `${source.testId}:${source.stepLabel || ""}:${source.browser || "chromium"}`;
+    const key = `${source.testId}:${source.stepLabel || ""}:${source.browser || "chromium"}:${source.dataCell || ""}`;
     const existing = targetMap.get(key);
 
     if (existing && existing.imageHash === source.imageHash) {
@@ -93,12 +98,13 @@ export async function mergeBaselinesFromBranch(
       continue;
     }
 
-    // Deactivate old target baseline and create new one (browser-scoped)
+    // Deactivate old target baseline and create new one (browser + cell scoped)
     await queries.deactivateBaselines(
       source.testId,
       source.stepLabel,
       toBranch,
       source.browser || undefined,
+      source.dataCell ?? null,
     );
     await queries.createBaseline({
       repositoryId: source.repositoryId,
@@ -109,6 +115,7 @@ export async function mergeBaselinesFromBranch(
       branch: toBranch,
       browser: source.browser,
       approvedFromDiffId: source.approvedFromDiffId,
+      dataCell: source.dataCell,
     });
     promoted++;
   }

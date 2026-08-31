@@ -12,6 +12,7 @@
 import { revalidatePath } from "next/cache";
 import path from "path";
 import * as queries from "@/lib/db/queries";
+import { baselineWriteCell } from "@lastest/coverage-model";
 import { hashImageWithDimensions } from "@/lib/diff/hasher";
 import { STORAGE_ROOT } from "@/lib/storage/paths";
 
@@ -59,11 +60,15 @@ export async function approveDiffCore(diffId: string, approvedBy?: string) {
 
   // Branch-scoped approval: only deactivate/create baselines for THIS branch + browser
   // Main baselines are only updated via PR merge promotion or direct main builds
-  // P2: a diff produced by a matrix run belongs to ONE data cell, so approving
-  // it establishes that cell's baseline and retires only that cell's previous
-  // one. Without the scoping, approving cell A's screenshot deactivated cell
-  // B's baseline and the next build reported B as a new test.
-  const dataCell = testResult?.dataCell ?? null;
+  // P2: which cell the approved baseline belongs to depends on the test's
+  // matrix policy, not just the run's cell. Under `visual: 'all'` every cell
+  // owns its baseline, so approving cell A must not retire cell B's. Under
+  // 'representative' the ONE run that captures visuals establishes the shared
+  // (NULL-cell) baseline — writing it cell-scoped would strand it: if a
+  // reordered row set picks a different representative next build, the new one
+  // can't see a cell-scoped baseline and reports "new test" forever.
+  const test = testResult?.dataCell ? await queries.getTest(diff.testId) : null;
+  const dataCell = baselineWriteCell(testResult?.dataCell, test?.matrixPolicy);
   await queries.deactivateBaselines(
     diff.testId,
     diff.stepLabel,
