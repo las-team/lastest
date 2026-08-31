@@ -20,6 +20,8 @@ const PUBLIC_PATHS = [
   "/api/og/", // Public OG/Twitter card images for shared builds
   "/api/badge/", // Public embeddable badge SVGs
   "/api/auth/",
+  "/.well-known/", // OAuth discovery documents — must be reachable unauthed,
+  // that is the entire point of them (RFC 8414 / RFC 9728).
   "/api/health",
   "/api/webhooks/",
   "/api/builds/",
@@ -42,6 +44,22 @@ const PUBLIC_PATHS = [
   "/_umami/",
   "/api/umami/", // resilient umami ingest forwarder (rewrite target of /_umami/api/*)
 ];
+
+/**
+ * Public paths matched EXACTLY, not by prefix.
+ *
+ * `/api/mcp` is here rather than in the prefix list on purpose. As a prefix it
+ * also exempted `/api/mcp/session` and every future `/api/mcp*` route, making
+ * the default for that subtree "public unless the route remembers to check" —
+ * the wrong direction for the one subtree that carries an agent's access to a
+ * signed-in user's data. A new route under it now has to opt in.
+ *
+ * `/api/mcp` itself must stay public: it is bearer-only (API key or OAuth
+ * access token) and carries no cookie, so without the exemption every MCP
+ * client gets a 307 to /login instead of the 401 with `WWW-Authenticate` that
+ * starts the OAuth flow. The route authenticates every request itself.
+ */
+const PUBLIC_EXACT_PATHS = ["/api/mcp"];
 
 const isDev = process.env.NODE_ENV !== "production";
 
@@ -113,7 +131,9 @@ export default function proxy(request: NextRequest) {
   const csp = nonce ? buildCsp(nonce) : null;
 
   // Auth check first — redirects skip CSP wiring entirely.
-  const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
+  const isPublic =
+    PUBLIC_EXACT_PATHS.includes(pathname) ||
+    PUBLIC_PATHS.some((p) => pathname.startsWith(p));
   if (!isPublic) {
     const session = getSessionCookie(request);
     if (!session) {

@@ -156,9 +156,56 @@ while you migrate.
 lastest-mcp --url <url> --api-key <key>
 ```
 
-Both flags are required. The process communicates with the host client over stdio.
+The process communicates with the host client over stdio.
+
+| Flag | Default | Meaning |
+| ---- | ------- | ------- |
+| `--url` | _(required)_ | Lastest instance the tools call. |
+| `--api-key` | — | API key. Required for stdio; in `http` mode it is the fallback for requests that arrive without an `Authorization` header. |
+| `--transport` | `stdio` | `stdio` for a local agent, `http` for a remote Streamable HTTP endpoint. |
+| `--port` / `--host` | `9700` / `127.0.0.1` | Where to listen in `http` mode. |
+| `--access-level` | `full` | `read`, `write` or `full` — how much of the tool surface to expose. |
 
 **Requirements:** Node.js 18+ and a reachable [Lastest](https://lastest.cloud) instance.
+
+## Remote (Streamable HTTP)
+
+Most people want the endpoint your Lastest instance already serves:
+
+```
+https://your-lastest-instance/api/mcp
+```
+
+It speaks Streamable HTTP and accepts either an API key or an OAuth 2.1
+connection, so an agent platform that only knows a URL (Salesforce Agentforce,
+ChatGPT, Claude web) can connect on its own — it discovers the authorization
+server from the `WWW-Authenticate` header, registers itself, and sends you
+through a consent screen. OAuth connections get a **read** or **write** subset
+of the tools; deleting things, revoking shares and publishing public links stay
+behind your own API key.
+
+Run this package as its own HTTP server when you want the MCP endpoint on a
+separate host or port:
+
+```bash
+lastest-mcp --url https://your-lastest-instance --transport http --port 9700
+# → POST http://127.0.0.1:9700/mcp with Authorization: Bearer <api-key>
+```
+
+This mode is API-key only; there is no OAuth in the standalone process.
+
+## Access levels
+
+`--access-level` (and, on `/api/mcp`, the OAuth scope) picks the tool surface:
+
+| Level | Sees |
+| ----- | ---- |
+| `read` | Projects, tests, builds, diffs, coverage, verification, job status. |
+| `write` | Everything in `read`, plus running tests, creating/updating tests and areas, and approving or rejecting visual changes. |
+| `full` | Everything, including deletes, revoking shares and publishing public `/r/` links. API key only. |
+
+Tools are filtered at registration, so a restricted connection never sees an
+action it cannot call.
 
 ## Authentication
 
