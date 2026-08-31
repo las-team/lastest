@@ -100,8 +100,8 @@ export async function approveDiffCore(diffId: string, approvedBy?: string) {
     await queries.updateBuild(diff.buildId, { overallStatus: newStatus });
   }
 
-  revalidatePath("/builds");
-  revalidatePath(`/builds/${diff.buildId}`);
+  revalidatePath("/verify");
+  revalidatePath(`/verify/${diff.buildId}`);
 
   return { success: true };
 }
@@ -122,8 +122,8 @@ export async function rejectDiffCore(diffId: string) {
     await queries.updateBuild(diff.buildId, { overallStatus: "blocked" });
   }
 
-  revalidatePath("/builds");
-  revalidatePath(`/builds/${diff.buildId}`);
+  revalidatePath("/verify");
+  revalidatePath(`/verify/${diff.buildId}`);
 
   return { success: true };
 }
@@ -141,8 +141,8 @@ export async function approveAllDiffsCore(
     await approveDiffCore(diff.id, approvedBy);
   }
 
-  revalidatePath("/builds");
-  revalidatePath(`/builds/${buildId}`);
+  revalidatePath("/verify");
+  revalidatePath(`/verify/${buildId}`);
 
   return { approvedCount: pendingDiffs.length };
 }
@@ -158,7 +158,7 @@ export async function batchApproveDiffsCore(
     await approveDiffCore(diffId, approvedBy);
   }
 
-  revalidatePath("/builds");
+  revalidatePath("/verify");
 
   return { approvedCount: diffIds.length };
 }
@@ -171,7 +171,7 @@ export async function batchRejectDiffsCore(diffIds: string[]) {
     await rejectDiffCore(diffId);
   }
 
-  revalidatePath("/builds");
+  revalidatePath("/verify");
 
   return { rejectedCount: diffIds.length };
 }

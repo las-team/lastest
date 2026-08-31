@@ -94,7 +94,7 @@ async function tokenFor(
 
 function revalidateGroup(buildId: string) {
   revalidatePath(`/triage-agent/${buildId}`);
-  revalidatePath(`/builds/${buildId}`);
+  revalidatePath(`/verify/${buildId}`);
 }
 
 // ---------------------------------------------------------------------------

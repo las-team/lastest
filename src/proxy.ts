@@ -12,6 +12,13 @@ const PUBLIC_PATHS = [
   "/dpa",
   "/r/", // Public share pages
   "/share/", // Static share media (public/share/<slug>/...)
+  "/api/webmcp/share/", // The share page's own WebMCP tools. Same audience and
+  // same data as /r/<slug> itself: slug-scoped, read-only,
+  // and it reads no cookies (route.ts is explicit about
+  // that). Without this an anonymous agent's tool call is
+  // redirected to /login and comes back as an HTML page,
+  // which surfaces as an unparseable tool result rather
+  // than as an auth error.
   "/sitemap.xml", // Crawler discovery of /r/<slug> share pages
   "/robots.txt", // Crawler directives
   "/oauth/", // Launch OAuth authorize endpoint — the handler itself does

@@ -346,16 +346,24 @@ describe("§4 step 13 — billing page and QA Agent gating agree", () => {
     const page = s.page;
     await page.goto(`${BASE_URL}/qa-agent`, { waitUntil: "domcontentloaded" });
 
-    const qaLink = page.locator("nav a[href='/qa-agent']").first();
-    await qaLink.waitFor({ state: "visible", timeout: 60_000 });
+    // The lock badge moved with the nav. `feat(agents): add the Agents console
+    // as the entry point for agent work` replaced the per-agent sidebar links
+    // with a single "Agents" item (`sidebar.tsx`'s nav list), so there is no
+    // `a[href='/qa-agent']` in the sidebar any more — this used to wait out a
+    // full minute on an element the redesign deleted. `/qa-agent` itself is
+    // still a real route, reached by drilling through the console, and it is
+    // still what renders the upgrade screen.
+    const agentsLink = page.locator("nav a[href='/agents']").first();
+    await agentsLink.waitFor({ state: "visible", timeout: 60_000 });
 
     // §2.9 is about *drift*: `sidebar.tsx`'s client-side "Pro" lock badge
-    // (aria-label="Pro feature") and `/qa-agent/page.tsx`'s server-side
-    // upgrade screen must reach the same verdict as `hasQaAgentAccess`. With
-    // billing configured a free team is gated on both; with billing off
-    // (self-hosted) plan gates are lifted on both.
+    // (aria-label="Pro feature", now on the Agents item) and
+    // `/qa-agent/page.tsx`'s server-side upgrade screen must reach the same
+    // verdict as `hasQaAgentAccess`. With billing configured a free team is
+    // gated on both; with billing off (self-hosted) plan gates are lifted on
+    // both.
     const gated = !hasQaAgentAccess("free", BILLING_ENABLED);
-    expect(await qaLink.locator("[aria-label='Pro feature']").count()).toBe(
+    expect(await agentsLink.locator("[aria-label='Pro feature']").count()).toBe(
       gated ? 1 : 0,
     );
     const body = await page.locator("body").textContent();
@@ -383,9 +391,11 @@ describe("§4 step 13 — billing page and QA Agent gating agree", () => {
       .toMatch(/Current plan:\s*Pro/);
 
     await page.goto(`${BASE_URL}/qa-agent`, { waitUntil: "domcontentloaded" });
-    const qaLink = page.locator("nav a[href='/qa-agent']").first();
-    await qaLink.waitFor({ state: "visible", timeout: 60_000 });
-    expect(await qaLink.locator("[aria-label='Pro feature']").count()).toBe(0);
+    const agentsLink = page.locator("nav a[href='/agents']").first();
+    await agentsLink.waitFor({ state: "visible", timeout: 60_000 });
+    expect(await agentsLink.locator("[aria-label='Pro feature']").count()).toBe(
+      0,
+    );
     expect(await page.locator("body").textContent()).not.toMatch(
       /Unlock the QA Agent with/i,
     );

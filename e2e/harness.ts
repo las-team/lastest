@@ -134,6 +134,15 @@ export async function launchSession(): Promise<Session> {
   const context = await browser.newContext({
     viewport: { width: 1440, height: 900 },
   });
+  // Playwright's 30s default is a dev-server assumption these suites cannot
+  // make: the app under test is `next dev` with Turbopack, and the *first*
+  // request to a route compiles it on demand. A cold `/triage-agent` or
+  // `/qa-agent` routinely takes longer than 30s, which surfaces as
+  // "navigating to … waiting until domcontentloaded" on every case in a file
+  // — a compile budget masquerading as a product failure. Raised here rather
+  // than per-call so it applies to `goto`, `waitForURL` and form submissions
+  // alike.
+  context.setDefaultNavigationTimeout(120_000);
   const page = await context.newPage();
   const consoleErrors: string[] = [];
   page.on("console", (m) => {
@@ -205,6 +214,23 @@ export async function onboardWithSandbox(
   // Same hydration guard as `registerViaUi` — the wizard's cards are client
   // components and a pre-hydration click is a silent no-op.
   await page.waitForLoadState("networkidle").catch(() => {});
+
+  // Step 0 — the segment fork ("Hi <name>, what are you testing?"), added by
+  // `feat(pharma): segment fork in onboarding + the regulated profile`. It is
+  // now the *first* screen, and the wizard will not show the path step until
+  // it is answered — every suite that onboards died here until this existed.
+  //
+  // "Custom app testing" is the branch that keeps the full product surface;
+  // "Pharma & life sciences" jumps straight to step 6 (the Vault workspace)
+  // and never reaches the sandbox/URL screens these suites depend on.
+  await page
+    .locator("h2", { hasText: /^Custom app testing$/ })
+    .first()
+    .click();
+  await page.getByRole("button", { name: /^Continue$/ }).click();
+  await page
+    .getByRole("heading", { name: /how do you want to build tests/i, level: 1 })
+    .waitFor({ state: "visible", timeout: 60_000 });
 
   // Step 1 — pick the "Manual" path (no AI/MCP dependency in CI).
   await page

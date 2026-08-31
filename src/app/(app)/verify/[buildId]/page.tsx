@@ -1,4 +1,4 @@
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import {
   getBuild,
   getBuildChangeMap,
@@ -11,11 +11,19 @@ import {
   getDesignSystemScoreTrend,
   getBuildDesignSystemViolations,
   getPlaywrightSettings,
+  getComposeConfig,
+  getTeamRunUsage,
 } from "@/lib/db/queries";
 import { getCurrentSession, requireRepoAccess } from "@/lib/auth";
-import { isVerifyPhaseEnabled } from "@/lib/verify/feature-flag";
 import { isInteractivePlaybackEnabled } from "@/lib/playback/feature-flag";
 import { fetchRepoBranches } from "@/server/actions/repos";
+import { getStreamUrlForRunner } from "@/server/actions/embedded-sessions";
+import { getBuildsByComparisonPairId } from "@/lib/db/queries";
+import { getEnvironmentConfig } from "@/server/actions/environment";
+import {
+  computeRunUsageProjection,
+  deriveRunUsageBannerState,
+} from "@/lib/billing/run-usage";
 import { BoardFocusClient } from "./board-focus-client";
 import { WebMcpRouteContext } from "@/components/webmcp/webmcp-route-context-client";
 
@@ -30,10 +38,6 @@ export default async function VerifyBuildPage({
 }: VerifyBuildPageProps) {
   const { buildId } = await params;
   const session = await getCurrentSession();
-  if (!isVerifyPhaseEnabled(session?.team)) {
-    redirect(`/builds/${buildId}`);
-  }
-
   const build = await getBuild(buildId);
   if (!build) notFound();
 
@@ -81,6 +85,70 @@ export default async function VerifyBuildPage({
       : Promise.resolve(null),
   ]);
 
+  // Run split-button inputs. The old `/run` dashboard fetched all of this to
+  // render three cards; here it decorates one button, so everything is either
+  // already loaded (tests, branches) or a single cheap lookup.
+  const activeBranch =
+    testRun?.gitBranch ?? repo?.selectedBranch ?? repo?.defaultBranch ?? "main";
+  const [composeConfig, envConfig, runUsage] = await Promise.all([
+    repo
+      ? getComposeConfig(repo.id, activeBranch).catch(() => null)
+      : Promise.resolve(null),
+    getEnvironmentConfig(repo?.id).catch(() => null),
+    session?.team?.id
+      ? getTeamRunUsage(session.team.id).catch(() => null)
+      : Promise.resolve(null),
+  ]);
+
+  // `excludedTestIds` and `selectedTestIds` are two spellings of the same
+  // selection; normalise to the inclusive one the run actions take.
+  const composedTestIds = composeConfig?.excludedTestIds
+    ? tests
+        .map((t) => t.id)
+        .filter((id) => !composeConfig.excludedTestIds!.includes(id))
+    : (composeConfig?.selectedTestIds ?? null);
+
+  // Live browser stream, when this build runs on an embedded browser. Resolved
+  // at render like the retired build page did: the board shows it only while
+  // the build is in flight, and the Run button refreshes the route on start,
+  // which is what re-resolves the URL for a freshly claimed EB.
+  let embeddedStreamUrl: string | null = null;
+  if (testRun?.runnerId) {
+    const streamInfo = await getStreamUrlForRunner(testRun.runnerId).catch(
+      () => null,
+    );
+    embeddedStreamUrl = streamInfo?.streamUrl ?? null;
+  }
+
+  // The other half of a comparison run — a chip beside the branch picker, so a
+  // baseline build never reads as "the" result of the run.
+  let comparisonSibling: { id: string; role: string } | null = null;
+  if (build.comparisonPairId) {
+    const pair = await getBuildsByComparisonPairId(
+      build.comparisonPairId,
+    ).catch(() => []);
+    const sibling = pair.find((b) => b.id !== buildId);
+    if (sibling) {
+      comparisonSibling = {
+        id: sibling.id,
+        role: sibling.comparisonRole || "unknown",
+      };
+    }
+  }
+
+  const runsPaused =
+    !!runUsage &&
+    process.env.ENFORCE_RUN_LIMITS === "true" &&
+    deriveRunUsageBannerState({
+      used: runUsage.runMinutesThisMonth,
+      quota: runUsage.monthlyRunQuota,
+      projected: computeRunUsageProjection(
+        runUsage.runMinutesThisMonth,
+        runUsage.monthlyRunQuota,
+      ).projected,
+      enforcementEnabled: true,
+    }) === "paused";
+
   return (
     <>
       {/* Scopes the build-level WebMCP tools to this build. */}
@@ -108,6 +176,20 @@ export default async function VerifyBuildPage({
         designSystemViolations={designSystemViolations}
         repoDesignSystem={pwSettings?.designSystem ?? null}
         interactivePlayback={isInteractivePlaybackEnabled(session?.team)}
+        embeddedStreamUrl={embeddedStreamUrl}
+        comparisonSibling={comparisonSibling}
+        runOptions={{
+          totalTests: tests.length,
+          composedTestIds,
+          versionOverrides: composeConfig?.versionOverrides ?? null,
+          comparisonBaselineBranch: repo?.comparisonBaselineBranch ?? null,
+          branchBaseUrls: repo?.branchBaseUrls ?? null,
+          baseUrl:
+            repo?.branchBaseUrls?.[activeBranch] ??
+            envConfig?.baseUrl ??
+            "http://localhost:3000",
+          runsPaused,
+        }}
       />
     </>
   );

@@ -11,8 +11,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   Filter,
   GitBranch,
-  Play,
+  GitCompare,
   ChevronDown,
+  ChevronUp,
+  Tv2,
   X,
   Loader2,
   Sparkles,
@@ -22,6 +24,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { runVerifyBuild } from "@/server/actions/smart-run";
+import { BrowserViewer } from "@/components/embedded-browser/browser-viewer-client";
+import { BuildHistoryDrawer } from "./build-history-drawer";
+import { ReviewDrawer } from "./review-drawer";
+import { RunMenu } from "./run-menu";
 import { decideLayer } from "@/server/actions/layer-feedback";
 import { confirmCase, type ConfirmKind } from "@/server/actions/verify-issues";
 import { GITHUB_NOT_CONNECTED } from "@/lib/verify/github-connection";
@@ -103,6 +109,10 @@ export interface VisualDiffLite {
   /** RCA verdict — "is this diff the test or the code?" (Phase 1). Null on
    *  diffs predating the feature or not yet classified. */
   rca: import("@/lib/db/schema").RcaVerdict | null;
+  /** The AI analysis called this pending diff safe to accept. Drives the
+   *  board's "Accept all safe" bulk action — the one piece of the retired
+   *  build page's AI row that had no equivalent on the board. */
+  aiSafe?: boolean;
 }
 
 export interface TestResultLite {
@@ -154,6 +164,12 @@ export interface VerifyFilters {
   areaIds: Set<string>;
   /** Issue state filter. 'any' = no filter. */
   issueFilter: "any" | "with" | "without";
+  /** Restrict to specific browsers (chromium/firefox/webkit). Empty = all.
+   *  Carried over from the retired build page: a case that only fails on one
+   *  engine is a different kind of finding from one that fails on all three. */
+  browsers: Set<string>;
+  /** RCA headline — "is this diff the test or the code?". 'any' = no filter. */
+  rcaSource: "any" | "code" | "test" | "uncertain";
   /** Free-text search against test name + step label. */
   query: string;
 }
@@ -163,6 +179,8 @@ export function emptyFilters(): VerifyFilters {
     statuses: new Set(),
     areaIds: new Set(),
     issueFilter: "any",
+    browsers: new Set(),
+    rcaSource: "any",
     query: "",
   };
 }
@@ -210,6 +228,28 @@ interface BoardFocusClientProps {
    *  `@/lib/playback/feature-flag`). When false the Run pane renders no
    *  recording card at all — its pre-spec-28 state. */
   interactivePlayback?: boolean;
+  /** Live CDP stream for the EB running this build, when there is one. Shown
+   *  as a collapsible panel above the board while the build is in flight. */
+  embeddedStreamUrl?: string | null;
+  /** The other build of a comparison pair, when this build is half of one. */
+  comparisonSibling?: { id: string; role: string } | null;
+  /** Everything the header's Run split-button needs to offer smart / all /
+   *  comparison without a second page. Mirrors the props `/run`'s Run Tests
+   *  card used to take. */
+  runOptions: RunOptions;
+}
+
+export interface RunOptions {
+  totalTests: number;
+  /** Compose selection, when the repo has one narrower than the full suite. */
+  composedTestIds: string[] | null;
+  versionOverrides: Record<string, string> | null;
+  comparisonBaselineBranch: string | null;
+  branchBaseUrls: Record<string, string> | null;
+  baseUrl: string;
+  /** Over quota with enforcement on — the server refuses new runs, so the
+   *  button says so instead of throwing on click. */
+  runsPaused: boolean;
 }
 
 type Mode = "board" | "focus";
@@ -299,6 +339,9 @@ function BoardFocusInner(props: BoardFocusClientProps) {
   const [refreshing, startRefresh] = useTransition();
   const [, startTransition] = useTransition();
   const [filtersOpen, setFiltersOpen] = useState(false);
+  /** Live browser panel starts collapsed — triage is the job, the stream is
+   *  reassurance that something is happening. */
+  const [streamOpen, setStreamOpen] = useState(false);
   const [branchOpen, setBranchOpen] = useState(false);
   const [filters, setFilters] = useState<VerifyFilters>(emptyFilters());
   const [issuePickerStepId, setIssuePickerStepId] = useState<string | null>(
@@ -590,6 +633,14 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     return m;
   }, [testResults]);
 
+  // Browsers this build actually produced results for — the chips in the
+  // filter panel. Sorted so the row doesn't reshuffle as results stream in.
+  const buildBrowsers = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of testResults) if (r.browser) set.add(r.browser);
+    return Array.from(set).sort();
+  }, [testResults]);
+
   // Filter step comparisons before passing into views.
   const filteredSteps = useMemo(() => {
     return stepComparisons.filter((step) => {
@@ -604,6 +655,21 @@ function BoardFocusInner(props: BoardFocusClientProps) {
       if (filters.issueFilter === "with" && !step.githubIssueUrl) return false;
       if (filters.issueFilter === "without" && step.githubIssueUrl)
         return false;
+      if (filters.browsers.size > 0) {
+        const result = step.testResultId
+          ? testResultById.get(step.testResultId)
+          : null;
+        // A case with no run row has no browser to match — excluding it is the
+        // honest answer to "show me only webkit".
+        if (!result?.browser || !filters.browsers.has(result.browser))
+          return false;
+      }
+      if (filters.rcaSource !== "any") {
+        const visual = visualByStepKey.get(
+          `${step.testId}::${step.stepLabel ?? ""}`,
+        );
+        if (visual?.rca?.headline !== filters.rcaSource) return false;
+      }
       if (filters.query.trim().length > 0) {
         const q = filters.query.trim().toLowerCase();
         const test = testById.get(step.testId);
@@ -616,7 +682,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
       // and let them honor it.
       return true;
     });
-  }, [stepComparisons, filters, testById]);
+  }, [stepComparisons, filters, testById, testResultById, visualByStepKey]);
 
   const totalCases = filteredSteps.length;
   // A case is "verified" when its derived status is anything but `unknown`:
@@ -782,7 +848,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
    *  Broken/Missed) without dragging each card individually. */
   const handleColumnAction = (
     column: CaseStatus,
-    action: "verify" | "report",
+    action: "verify" | "report" | "accept_ai_safe",
   ) => {
     const fbByStep = new Map<string, StepLayerFeedback[]>();
     for (const f of layerFeedback) {
@@ -820,7 +886,14 @@ function BoardFocusInner(props: BoardFocusClientProps) {
         verdictOverride: effectiveVerdict(step.evidence, modes),
         visualBaselineMissing: isVisualBaselineMissing(visual, modes.visual),
       });
-      if (derived === column) targets.push(step.id);
+      if (derived !== column) continue;
+      // "Accept all safe" is "Verify all", restricted to the cases the AI
+      // analysis already judged safe — the board equivalent of the retired
+      // build page's Accept-All-Safe button. Everything downstream (per-layer
+      // approval, baseline write, ticket close) is identical, which is the
+      // point: an AI recommendation selects the set, it never decides it.
+      if (action === "accept_ai_safe" && !visual?.aiSafe) continue;
+      targets.push(step.id);
     }
     if (targets.length === 0) {
       toast.message("No cases in this column to act on");
@@ -832,7 +905,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     // — the underlying decideAllForStep keeps the case in its current
     // column while confirmCase files the typed GH ticket.
     let confirmKind: ConfirmKind | null = null;
-    if (action === "verify") {
+    if (action === "verify" || action === "accept_ai_safe") {
       confirmKind = "done";
     } else if (column === "regression") {
       confirmKind = "regression";
@@ -843,7 +916,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
     }
 
     const decision =
-      action === "verify"
+      action === "verify" || action === "accept_ai_safe"
         ? "approved"
         : column === "regression"
           ? "rejected"
@@ -867,7 +940,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
       // 3) Settle the UI against the authoritative server state.
       await refreshFromServer();
 
-      if (action === "verify") {
+      if (action === "verify" || action === "accept_ai_safe") {
         toast.success(
           `${targets.length} case${targets.length === 1 ? "" : "s"} verified`,
           closed > 0
@@ -1144,6 +1217,30 @@ function BoardFocusInner(props: BoardFocusClientProps) {
               Focus
             </button>
           </div>
+          {props.comparisonSibling && (
+            <a
+              className="v-chip info"
+              href={`/verify/${props.comparisonSibling.id}`}
+              title="This build is one half of a comparison run"
+              style={{ textDecoration: "none" }}
+            >
+              <GitCompare size={11} />
+              {props.comparisonSibling.role === "baseline"
+                ? "baseline ↔ open feature"
+                : "feature ↔ open baseline"}
+            </a>
+          )}
+          <BuildHistoryDrawer
+            repositoryId={props.repositoryId}
+            currentBuildId={props.build.id}
+            activeBranch={props.branch}
+            defaultBranch={props.defaultBranch}
+          />
+          <ReviewDrawer
+            repositoryId={props.repositoryId}
+            branch={props.branch}
+            defaultBranch={props.defaultBranch}
+          />
           <div style={{ position: "relative" }}>
             <button className="v-btn" onClick={() => setFiltersOpen((v) => !v)}>
               <Filter size={13} />
@@ -1161,6 +1258,7 @@ function BoardFocusInner(props: BoardFocusClientProps) {
               <FilterPanel
                 filters={filters}
                 areas={props.areas}
+                browsers={buildBrowsers}
                 onChange={setFilters}
                 onClose={() => setFiltersOpen(false)}
               />
@@ -1186,14 +1284,20 @@ function BoardFocusInner(props: BoardFocusClientProps) {
               />
             )}
           </div>
-          <button
-            className="v-btn primary"
-            onClick={handleRefresh}
-            disabled={refreshing || !props.repositoryId}
-          >
-            <Play size={13} />
-            {refreshing ? "Running…" : "Run"}
-          </button>
+          <RunMenu
+            repositoryId={props.repositoryId}
+            activeBranch={props.branch}
+            defaultBranch={props.defaultBranch}
+            comparisonBaselineBranch={props.runOptions.comparisonBaselineBranch}
+            totalTests={props.runOptions.totalTests}
+            composedTestIds={props.runOptions.composedTestIds}
+            versionOverrides={props.runOptions.versionOverrides}
+            branchBaseUrls={props.runOptions.branchBaseUrls}
+            baseUrl={props.runOptions.baseUrl}
+            runsPaused={props.runOptions.runsPaused}
+            running={refreshing}
+            onSmartFallbackRun={handleRefresh}
+          />
         </div>
       </div>
 
@@ -1205,6 +1309,31 @@ function BoardFocusInner(props: BoardFocusClientProps) {
         onRetry={props.repositoryId ? handleRefresh : undefined}
         retrying={refreshing}
       />
+
+      {props.embeddedStreamUrl && isRunning && (
+        <div className="v-card" style={{ overflow: "hidden" }}>
+          <button
+            type="button"
+            className="v-btn ghost"
+            style={{ width: "100%", justifyContent: "flex-start" }}
+            onClick={() => setStreamOpen((v) => !v)}
+          >
+            <Tv2 size={13} />
+            Live browser view
+            {streamOpen ? (
+              <ChevronUp size={11} style={{ marginLeft: "auto" }} />
+            ) : (
+              <ChevronDown size={11} style={{ marginLeft: "auto" }} />
+            )}
+          </button>
+          {streamOpen && (
+            <BrowserViewer
+              streamUrl={props.embeddedStreamUrl}
+              className="max-h-[420px]"
+            />
+          )}
+        </div>
+      )}
 
       <CoverageGapsBanner
         gaps={coverageGaps}
@@ -1319,7 +1448,9 @@ function filterCount(f: VerifyFilters): number {
   let n = 0;
   n += f.statuses.size;
   n += f.areaIds.size;
+  n += f.browsers.size;
   if (f.issueFilter !== "any") n += 1;
+  if (f.rcaSource !== "any") n += 1;
   if (f.query.trim().length > 0) n += 1;
   return n;
 }
@@ -1523,11 +1654,20 @@ function CoverageGapsBanner({
 interface FilterPanelProps {
   filters: VerifyFilters;
   areas: AreaLite[];
+  /** Browsers this build actually ran on — an empty row is more honest than
+   *  three chips that match nothing. */
+  browsers: string[];
   onChange: (f: VerifyFilters) => void;
   onClose: () => void;
 }
 
-function FilterPanel({ filters, areas, onChange, onClose }: FilterPanelProps) {
+function FilterPanel({
+  filters,
+  areas,
+  browsers,
+  onChange,
+  onClose,
+}: FilterPanelProps) {
   const STATUSES: CaseStatus[] = ["unknown", "regression", "missed", "done"];
   const toggle = <T,>(set: Set<T>, val: T): Set<T> => {
     const next = new Set(set);
@@ -1676,6 +1816,69 @@ function FilterPanel({ filters, areas, onChange, onClose }: FilterPanelProps) {
                   textTransform: "capitalize",
                 }}
                 onClick={() => onChange({ ...filters, issueFilter: opt })}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {browsers.length > 0 && (
+          <div>
+            <div className="label" style={{ fontSize: 9, marginBottom: 4 }}>
+              Browser
+            </div>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {browsers.map((b) => {
+                const active = filters.browsers.has(b);
+                return (
+                  <button
+                    key={b}
+                    className={`v-chip ${active ? "info" : ""}`}
+                    style={{
+                      cursor: "pointer",
+                      opacity: active ? 1 : 0.55,
+                      textTransform: "capitalize",
+                    }}
+                    onClick={() =>
+                      onChange({
+                        ...filters,
+                        browsers: toggle(filters.browsers, b),
+                      })
+                    }
+                  >
+                    {b}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div>
+          <div className="label" style={{ fontSize: 9, marginBottom: 4 }}>
+            Root cause
+          </div>
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+            {(["any", "code", "test", "uncertain"] as const).map((opt) => (
+              <button
+                key={opt}
+                className={`v-chip ${filters.rcaSource === opt ? "info" : ""}`}
+                style={{
+                  cursor: "pointer",
+                  opacity: filters.rcaSource === opt ? 1 : 0.55,
+                  textTransform: "capitalize",
+                }}
+                onClick={() => onChange({ ...filters, rcaSource: opt })}
+                title={
+                  opt === "code"
+                    ? "The app changed"
+                    : opt === "test"
+                      ? "The test is noisy or stale"
+                      : opt === "uncertain"
+                        ? "The analysis could not tell"
+                        : "No root-cause filter"
+                }
               >
                 {opt}
               </button>

@@ -1,237 +1,35 @@
-import { notFound } from "next/navigation";
-import Link from "next/link";
-import {
-  getDiff,
-  getSortedDiffsByBuild,
-  getStepLabelSuggestions,
-  getFocusRegionsForDiff,
-  getIgnoreRegionsForDiff,
-  getMultiLayerComparisonForDiff,
-} from "@/server/actions/diffs";
-import { getBuild } from "@/server/actions/builds";
-import { getPlaywrightSettings } from "@/server/actions/settings";
-import { computePageTextDiff } from "@/lib/diff/page-text-diff";
-import { DiffViewerClient } from "./diff-viewer-client";
-import { StepLabelEditor } from "./step-label-editor";
-import { MultiLayerPanel } from "@/components/diff/multi-layer-panel";
-import { ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
-import { BrowserIcon } from "@/components/ui/browser-icon";
+import { redirect } from "next/navigation";
+import { getDiff } from "@/server/actions/diffs";
+import { getStepComparisonsByBuild } from "@/lib/db/queries";
 
-interface PageProps {
+/**
+ * The classic diff viewer was superseded by Verify's Focus view
+ * (docs/architecture/retire-run-build-pages.md §2 item 19).
+ *
+ * A diff maps to a case through `(testId, stepLabel)` — the same key the board
+ * uses to attach visuals to `step_comparisons`. When the lookup finds nothing
+ * (a diff whose step was never scored, or a build predating the multi-layer
+ * scorer) we land on the build's board rather than 404: the user asked to see
+ * a change, and the board shows every change in that build.
+ */
+export default async function DiffPage({
+  params,
+}: {
   params: Promise<{ buildId: string; diffId: string }>;
-}
-
-export default async function DiffPage({ params }: PageProps) {
+}) {
   const { buildId, diffId } = await params;
-  const { getCurrentSession } = await import("@/lib/auth");
-  const session = await getCurrentSession();
-  const banAiMode = session?.team?.banAiMode ?? false;
-  const diff = await getDiff(diffId);
+  const diff = await getDiff(diffId).catch(() => null);
+  if (!diff) redirect(`/verify/${buildId}`);
 
-  if (!diff) {
-    notFound();
-  }
-
-  // Get build to resolve the correct base URL for "Open Page" link
-  const build = await getBuild(buildId);
-  const playwrightSettings = await getPlaywrightSettings(
-    diff.test?.repositoryId ?? null,
+  const steps = await getStepComparisonsByBuild(buildId).catch(() => []);
+  const match = steps.find(
+    (s) =>
+      s.testId === diff.testId &&
+      (s.stepLabel ?? "") === (diff.stepLabel ?? ""),
   );
-  const enableDomDiff = playwrightSettings?.enableDomDiff ?? false;
-
-  // Replace the test's targetUrl origin with the build's baseUrl
-  let openPageUrl = diff.test?.targetUrl ?? null;
-  if (openPageUrl && build?.baseUrl) {
-    try {
-      const testUrl = new URL(openPageUrl);
-      const buildBase = new URL(build.baseUrl);
-      testUrl.protocol = buildBase.protocol;
-      testUrl.host = buildBase.host;
-      openPageUrl = testUrl.toString();
-    } catch {
-      // targetUrl is a relative path — combine with build baseUrl
-      const base = build.baseUrl.replace(/\/+$/, "");
-      const path = openPageUrl.startsWith("/")
-        ? openPageUrl
-        : `/${openPageUrl}`;
-      openPageUrl = `${base}${path}`;
-    }
-  }
-
-  // Get step label suggestions for inline editing
-  const suggestions = await getStepLabelSuggestions(diff.testId);
-
-  // Focus regions for this (testId, stepLabel) — positive mask shared across tabs
-  const focusRegions = await getFocusRegionsForDiff(diffId);
-  // Ignore regions for this (testId, stepLabel) — per-step mask
-  const ignoreRegions = await getIgnoreRegionsForDiff(diffId);
-
-  // Multi-layer comparison record (v1.13). Null on first runs / when no
-  // baseline existed for the scorer to diff against.
-  const multiLayerComparison = await getMultiLayerComparisonForDiff(diffId);
-
-  // Get all diffs sorted by test/step for consistent navigation
-  const allDiffs = await getSortedDiffsByBuild(buildId);
-  const currentIndex = allDiffs.findIndex((d) => d.id === diffId);
-  const prevDiff = currentIndex > 0 ? allDiffs[currentIndex - 1] : null;
-  const nextDiff =
-    currentIndex < allDiffs.length - 1 ? allDiffs[currentIndex + 1] : null;
-
-  // Page-text diff: read both stored text blobs and run the line-level diff.
-  // Hidden in the UI when status is `skipped` and both paths are null.
-  const textDiff =
-    diff.baselineTextPath || diff.currentTextPath || diff.textDiffStatus
-      ? await computePageTextDiff(
-          diff.baselineTextPath ?? null,
-          diff.currentTextPath ?? null,
-        )
-      : null;
-
-  return (
-    <div className="flex-1 p-6 overflow-auto">
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Link
-              href={`/builds/${buildId}`}
-              className="text-muted-foreground hover:text-gray-700"
-            >
-              ← Back to Build
-            </Link>
-            <div>
-              <h1 className="text-xl font-bold flex items-center gap-2">
-                {diff.test?.name || `Test ${diff.testId.slice(0, 8)}`}
-                <StepLabelEditor
-                  diffId={diffId}
-                  testId={diff.testId}
-                  currentStepLabel={diff.stepLabel}
-                  suggestions={suggestions}
-                />
-              </h1>
-              <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                {diff.browser && (
-                  <>
-                    <BrowserIcon browser={diff.browser} className="w-4 h-4" />
-                    <span>·</span>
-                  </>
-                )}
-                {openPageUrl && (
-                  <a
-                    href={openPageUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1 text-primary hover:text-primary/80 hover:underline"
-                  >
-                    Open Page
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                )}
-                <span>·</span>
-                <Link
-                  href={`/tests?test=${encodeURIComponent(diff.testId)}`}
-                  className="flex items-center gap-1 text-primary hover:text-primary/80 hover:underline"
-                >
-                  View Test
-                  <ExternalLink className="w-3 h-3" />
-                </Link>
-              </div>
-            </div>
-          </div>
-
-          {/* Navigation */}
-          <div className="flex items-center gap-2">
-            {prevDiff ? (
-              <Link
-                href={`/builds/${buildId}/diff/${prevDiff.id}`}
-                className="flex items-center gap-1 px-3 py-1 border rounded hover:bg-muted"
-              >
-                <ChevronLeft className="w-4 h-4" />
-                Prev
-              </Link>
-            ) : (
-              <button
-                disabled
-                className="flex items-center gap-1 px-3 py-1 border rounded opacity-50 cursor-not-allowed"
-              >
-                <ChevronLeft className="w-4 h-4" />
-                Prev
-              </button>
-            )}
-
-            <span className="text-sm text-muted-foreground">
-              {currentIndex + 1} / {allDiffs.length}
-            </span>
-
-            {nextDiff ? (
-              <Link
-                href={`/builds/${buildId}/diff/${nextDiff.id}`}
-                className="flex items-center gap-1 px-3 py-1 border rounded hover:bg-muted"
-              >
-                Next
-                <ChevronRight className="w-4 h-4" />
-              </Link>
-            ) : (
-              <button
-                disabled
-                className="flex items-center gap-1 px-3 py-1 border rounded opacity-50 cursor-not-allowed"
-              >
-                Next
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Multi-layer comparison summary (v1.13) — shown above the visual diff
-             so reviewers see the verdict and high-signal evidence first. */}
-        {multiLayerComparison && (
-          <MultiLayerPanel comparison={multiLayerComparison} />
-        )}
-
-        {/* Diff Viewer */}
-        <DiffViewerClient
-          diff={diff}
-          buildId={buildId}
-          prevDiffId={prevDiff?.id}
-          nextDiffId={nextDiff?.id}
-          banAiMode={banAiMode}
-          enableDomDiff={enableDomDiff}
-          initialFocusRegions={focusRegions.map((r) => ({
-            id: r.id,
-            x: r.x,
-            y: r.y,
-            width: r.width,
-            height: r.height,
-          }))}
-          initialIgnoreRegions={ignoreRegions.map((r) => ({
-            id: r.id,
-            x: r.x,
-            y: r.y,
-            width: r.width,
-            height: r.height,
-          }))}
-          allDiffs={allDiffs}
-          textDiff={
-            textDiff
-              ? {
-                  status: textDiff.status,
-                  summary: textDiff.summary,
-                  lines: textDiff.lines,
-                }
-              : null
-          }
-        />
-
-        {/* Keyboard shortcuts hint */}
-        <div className="text-sm text-muted-foreground text-center">
-          Keyboard shortcuts: <kbd className="px-1 bg-muted rounded">E</kbd>{" "}
-          Expected Change · <kbd className="px-1 bg-muted rounded">T</kbd> Todo
-          · <kbd className="px-1 bg-muted rounded">S</kbd> Skip ·{" "}
-          <kbd className="px-1 bg-muted rounded">←</kbd>{" "}
-          <kbd className="px-1 bg-muted rounded">→</kbd> Navigate
-        </div>
-      </div>
-    </div>
+  redirect(
+    match
+      ? `/verify/${buildId}?mode=focus&step=${match.id}`
+      : `/verify/${buildId}`,
   );
 }

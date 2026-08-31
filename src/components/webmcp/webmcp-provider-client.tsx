@@ -90,18 +90,25 @@ export function WebMcpProvider({
   useEffect(() => {
     if (!enabled) return;
     // Async because a browser without WebMCP gets the polyfill installed first.
+    //
+    // The controller is what makes that safe. Cleanup runs synchronously, but
+    // a disposer returned through `.then` does not — under StrictMode's
+    // double-effect the first pass would register, and the second pass would
+    // register the same names before the first pass's queued disposer ran
+    // ("Tool already registered"). Aborting cancels the stale pass before it
+    // ever touches `document.modelContext`.
+    const controller = new AbortController();
     let dispose: (() => void) | null = null;
-    let cancelled = false;
-    void registerWebMcpToolsWithPolyfill(WEBMCP_TOOLS, {
-      repositoryId: activeRepositoryId,
-      buildId,
-      testId,
-    }).then((disposer) => {
-      if (cancelled) disposer();
+    void registerWebMcpToolsWithPolyfill(
+      WEBMCP_TOOLS,
+      { repositoryId: activeRepositoryId, buildId, testId },
+      { signal: controller.signal },
+    ).then((disposer) => {
+      if (controller.signal.aborted) disposer();
       else dispose = disposer;
     });
     return () => {
-      cancelled = true;
+      controller.abort();
       dispose?.();
     };
   }, [enabled, activeRepositoryId, buildId, testId]);

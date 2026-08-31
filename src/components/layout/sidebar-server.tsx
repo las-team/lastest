@@ -10,7 +10,6 @@ import { getCurrentSession } from "@/lib/auth";
 import { syncReposIfStale, fetchRepoBranches } from "@/server/actions/repos";
 import { getEnvironmentConfig } from "@/server/actions/environment";
 import { listSystemEmbeddedSessions } from "@/server/actions/embedded-sessions";
-import { isVerifyPhaseEnabled } from "@/lib/verify/feature-flag";
 import { isBillingEnabled } from "@/lib/billing/enabled";
 import { Sidebar } from "./sidebar";
 
@@ -61,13 +60,12 @@ export async function SidebarServer({
   // Verify badge: count of unsorted (untriaged) cases on the active branch's
   // latest build. When zero, surface a "newer commit" hint instead so the
   // reviewer knows the code has moved past their last verified build.
-  const verifyBadge =
-    isVerifyPhaseEnabled(session.team) && selectedRepo
-      ? await computeVerifyBadge(
-          selectedRepo.id,
-          selectedRepo.selectedBranch || selectedRepo.defaultBranch || "main",
-        ).catch(() => ({ unsortedCount: 0, hasNewerCommit: false }))
-      : { unsortedCount: 0, hasNewerCommit: false };
+  const verifyBadge = selectedRepo
+    ? await computeVerifyBadge(
+        selectedRepo.id,
+        selectedRepo.selectedBranch || selectedRepo.defaultBranch || "main",
+      ).catch(() => ({ unsortedCount: 0, hasNewerCommit: false }))
+    : { unsortedCount: 0, hasNewerCommit: false };
 
   return (
     <Sidebar

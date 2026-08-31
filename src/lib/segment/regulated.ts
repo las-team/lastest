@@ -114,16 +114,19 @@ export const REGULATED_LOCKED_POLICY = {
  * Nav entries hidden under the regulated profile, keyed by the `name` used in
  * `src/components/layout/sidebar.tsx`.
  *
- * `Agents` covers the QA-agent planner and the Explorer, which the agents
- * console folded together: exploratory, non-deterministic run content cannot
- * be an execution record. The features stay reachable by URL — this is a
- * merchandising decision, not an access control. The one entry that is a real
- * control (public sharing) is refused server-side instead; see
+ * Deliberately narrow. Hiding a nav entry is merchandising, not access
+ * control — the destination stays reachable by URL — so the only thing worth
+ * hiding is a surface that misrepresents the product to this buyer.
+ *
+ * `Agents` is NOT hidden: the QA-agent planner and the Explorer author tests,
+ * which a validation lead wants; what must never happen is an AI *verdict* in
+ * the execution record, and that is enforced by `REGULATED_LOCKED_POLICY`
+ * (`aiDiffing` / `builtInAi`), not by hiding the console. The one entry that is
+ * a real control (public sharing) is refused server-side instead; see
  * `isSharingPermitted`.
  */
 export const REGULATED_HIDDEN_NAV: ReadonlySet<string> = new Set([
   "Leaderboard",
-  "Agents",
 ]);
 
 /**

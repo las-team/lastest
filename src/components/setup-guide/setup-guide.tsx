@@ -94,7 +94,7 @@ export function SetupGuide({ initialStatus, latestBuildId }: SetupGuideProps) {
       label: "Set Baseline",
       description: "Approve screenshots as visual baselines",
       actionLabel: "Review Diffs",
-      href: latestBuildId ? `/builds/${latestBuildId}` : "/builds",
+      href: latestBuildId ? `/verify/${latestBuildId}` : "/verify",
     },
     {
       label: "Run Again",
@@ -106,7 +106,7 @@ export function SetupGuide({ initialStatus, latestBuildId }: SetupGuideProps) {
       label: "Check Results",
       description: "Review visual diffs and approve or reject",
       actionLabel: "View Results",
-      href: latestBuildId ? `/builds/${latestBuildId}` : "/builds",
+      href: latestBuildId ? `/verify/${latestBuildId}` : "/verify",
     },
   ];
 

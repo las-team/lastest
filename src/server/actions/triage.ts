@@ -66,7 +66,6 @@ function snoozeUntil(days: number | undefined): Date | null {
 
 function revalidateBuild(buildId: string): void {
   revalidatePath(`/triage-agent/${buildId}`);
-  revalidatePath(`/builds/${buildId}`);
   revalidatePath(`/verify/${buildId}`);
 }
 

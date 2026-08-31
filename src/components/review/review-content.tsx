@@ -285,7 +285,7 @@ export function ReviewContent({
             <CardTitle>Branch Overview</CardTitle>
             {latestBuildId && (
               <a
-                href={`/builds/${latestBuildId}`}
+                href={`/verify/${latestBuildId}`}
                 className="text-sm text-primary hover:underline flex items-center gap-1"
               >
                 View build <ExternalLink className="w-3 h-3" />

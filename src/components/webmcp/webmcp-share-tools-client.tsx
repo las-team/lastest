@@ -46,18 +46,23 @@ export function WebMcpShareTools({
 }) {
   useEffect(() => {
     if (!enabled) return;
+    // See `webmcp-provider-client.tsx` for why cancellation is an AbortSignal
+    // handed to the registrar rather than a `cancelled` flag checked after it.
+    const controller = new AbortController();
     let dispose: (() => void) | null = null;
-    let cancelled = false;
     void registerWebMcpToolsWithPolyfill(
       WEBMCP_SHARE_TOOLS,
       {},
-      { dispatch: (tool) => callShareTool(slug, tool) },
+      {
+        dispatch: (tool) => callShareTool(slug, tool),
+        signal: controller.signal,
+      },
     ).then((disposer) => {
-      if (cancelled) disposer();
+      if (controller.signal.aborted) disposer();
       else dispose = disposer;
     });
     return () => {
-      cancelled = true;
+      controller.abort();
       dispose?.();
     };
   }, [slug, enabled]);
