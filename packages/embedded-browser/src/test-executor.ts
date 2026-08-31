@@ -414,6 +414,74 @@ function removeFunctionDefinition(
   };
 }
 
+/**
+ * URL helpers that recorded test bodies call but never receive.
+ *
+ * `wrapInRunnerFormat` (src/lib/playwright/code-transformer.ts) writes
+ * `buildUrl` / `urlMatch` into the wrapper *preamble* as plain text, while the
+ * runner hands every other helper (`expect`, `locateWithFallback`, `downloads`,
+ * …) in as a function parameter. A body that reaches the executor without that
+ * preamble — re-extracted, hand-written, or AI-generated — therefore throws
+ * `urlMatch is not defined` at the first URL assertion. The recorder emits
+ * `urlMatch(...)` for every click-triggered navigation
+ * (libs/recording-codegen/src/event-to-code.ts), so that is not a rare path.
+ *
+ * These are prepended rather than injected as parameters on purpose: a body
+ * that DOES carry the preamble declares `const buildUrl = …`, and a parameter
+ * of the same name would make the whole function a SyntaxError (a `const` in
+ * the body cannot redeclare a parameter). Prepending only when absent leaves
+ * self-sufficient bodies byte-identical.
+ */
+export function ensureUrlHelpers(body: string): {
+  body: string;
+  added: string[];
+} {
+  const added: string[] = [];
+  // Comments and string literals blanked before the declaration test. `declares`
+  // matches on source text, so a body that merely *mentions* `const buildUrl`
+  // inside a comment or a quoted string would otherwise suppress the injection
+  // and reintroduce the exact `is not defined` failure this function fixes.
+  const code = body
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/\/\/[^\n]*/g, " ")
+    .replace(/`(?:\\.|[^`\\])*`/g, "``")
+    .replace(/'(?:\\.|[^'\\\n])*'/g, "''")
+    .replace(/"(?:\\.|[^"\\\n])*"/g, '""');
+  // Word-boundary match on a declaration, not a mere mention: a body that only
+  // *calls* urlMatch(...) still needs the definition prepended.
+  const declares = (name: string) =>
+    new RegExp(
+      `(?:^|[;{}\\n])\\s*(?:const|let|var|function|async\\s+function)\\s+${name}\\b`,
+    ).test(code);
+
+  const needsBuildUrl = !declares("buildUrl");
+  const needsUrlMatch = !declares("urlMatch");
+  if (!needsBuildUrl && !needsUrlMatch) return { body, added };
+
+  // urlMatch is defined in terms of buildUrl, so a body that declares its own
+  // buildUrl but not urlMatch still composes correctly: prepending both would
+  // redeclare, prepending neither would leave urlMatch undefined. Emit the
+  // whole preamble only when both are missing; otherwise emit just the gap.
+  if (needsBuildUrl) added.push("buildUrl");
+  if (needsUrlMatch) added.push("urlMatch");
+
+  const lines: string[] = [];
+  if (needsBuildUrl) {
+    lines.push("const buildUrl = (base, path) => new URL(path, base).href;");
+  }
+  if (needsUrlMatch) {
+    lines.push(
+      String.raw`const urlMatch = (base, path) => new RegExp("^" + buildUrl(base, path).replace(/[.*+?()|[{}^\]\\$]/g, "\\$&"));`,
+    );
+  }
+  // Joined onto ONE line and prepended without a newline, so every line of the
+  // original body keeps its original line number. Anything mapping a runtime
+  // stack frame back to the stored test source (step attribution, the failure
+  // excerpt in the run detail) would otherwise be off by one or two for
+  // exactly the bodies that needed this repair.
+  return { body: lines.join(" ") + " " + body, added };
+}
+
 export class EmbeddedTestExecutor {
   private abortController: AbortController | null = null;
   // Persistent setup contexts — setup stores its BrowserContext here keyed by setupId.
@@ -1709,10 +1777,52 @@ export class EmbeddedTestExecutor {
         );
       }
 
+      // Supply buildUrl/urlMatch when the body arrived without the wrapper
+      // preamble that normally declares them (see ensureUrlHelpers).
+      const urlHelpers = ensureUrlHelpers(body);
+      if (urlHelpers.added.length > 0) {
+        body = urlHelpers.body;
+        logFn(
+          "info",
+          `Supplied missing URL helper(s): ${urlHelpers.added.join(", ")}`,
+        );
+      }
+
       // Patch selectAll (mirrors runner.ts)
       body = body.replace(
         /page\.keyboard\.selectAll\(\)/g,
         "page.keyboard.press('Control+a')",
+      );
+
+      // Bound unbounded `waitForLoadState('networkidle')` waits.
+      //
+      // networkidle never fires against an app holding a long-lived connection
+      // open (SSE, websocket, long-poll), so each unbounded call burns the full
+      // navigation timeout. Recorded suites emit one per navigation, which is
+      // how a test with ~11 navigations blows past the executor's hard cap and
+      // reports a timeout rather than the assertion that actually mattered.
+      // The generator no longer emits these (libs/recording-codegen), but
+      // bodies recorded before that fix are stored in the DB and still run.
+      // Only the no-options form is rewritten — an explicit { timeout } is the
+      // author's decision and is left alone. Note a trailing `.catch(() => {})`
+      // does NOT make the call safe: it swallows the rejection but still waits
+      // the full timeout first, so those are rewritten too.
+      //
+      // The rewrite deliberately does NOT swallow the rejection. It used to
+      // append `.catch(() => {})`, which ran *before* the assertion
+      // instrumentation below — so "Verify no pending network requests"
+      // recorded `passed` unconditionally: on an app that never reaches idle,
+      // on a page that 500s, on anything. The check still appeared in the
+      // results and no longer checked anything.
+      //
+      // Letting the timeout reject is soft, not fatal, on both paths: an
+      // instrumented line is caught by `__assertion` and recorded `failed`
+      // (which is the honest verdict), and an un-instrumented one is caught by
+      // the soft-error wrapper further down. Bounding the wait is what fixes
+      // the runaway timeout; reporting the bound as a pass was never part of it.
+      body = body.replace(
+        /page\.waitForLoadState\(\s*(['"`])networkidle\1\s*\)(\s*\.catch\(\s*\(\s*\)\s*=>\s*\{\s*\}\s*\))?/g,
+        "page.waitForLoadState('networkidle', { timeout: 3000 })",
       );
 
       // Instrument assertions BEFORE step instrumentation and soft-wrapping.
@@ -3371,6 +3481,8 @@ export class EmbeddedTestExecutor {
       if (lwfResult.removed) body = lwfResult.body;
       const rcpResult = removeFunctionDefinition(body, "replayCursorPath");
       if (rcpResult.removed) body = rcpResult.body;
+      const setupUrlHelpers = ensureUrlHelpers(body);
+      if (setupUrlHelpers.added.length > 0) body = setupUrlHelpers.body;
 
       // Patch selectAll
       body = body.replace(

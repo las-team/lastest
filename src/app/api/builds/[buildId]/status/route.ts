@@ -56,6 +56,10 @@ export async function GET(
       totalTests: build.totalTests,
       passedCount: build.passedCount,
       failedCount: build.failedCount,
+      // Test-level progress in the same unit as totalTests. The CI runner used
+      // to derive this as passed+failed+changes+flaky, which mixes per-test and
+      // per-diff counters and overshoots totalTests.
+      completedTests: build.completedTests,
       changesDetected: build.changesDetected,
       flakyCount: build.flakyCount,
       completedAt: build.completedAt,

@@ -8,7 +8,7 @@ on:
 jobs:
   visual-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -19,7 +19,7 @@ jobs:
           LASTEST_TOKEN: ${{ secrets.LASTEST_TOKEN }}
           LASTEST_URL: ${{ secrets.LASTEST_URL }}
         run: |
-          npx @lastest/runner@0.4.2 trigger \
+          npx @lastest/runner@0.5.2 trigger \
             -t "$LASTEST_TOKEN" \
             -s "$LASTEST_URL" \
             --repo "las-team/lastest" \

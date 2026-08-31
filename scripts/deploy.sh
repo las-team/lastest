@@ -335,25 +335,62 @@ deploy_olares() {
 deploy_npm() {
   log "Publishing @lastest/runner to npm"
 
-  # Sync version from root
   local runner_dir="$ROOT_DIR/packages/runner"
-  local current=$(node -p "require('$runner_dir/package.json').version")
 
-  if [ "$current" != "$VERSION" ]; then
-    log "Syncing version $current → $VERSION"
-    node -e "
-      const fs = require('fs');
-      const pkg = JSON.parse(fs.readFileSync('$runner_dir/package.json', 'utf8'));
-      pkg.version = '$VERSION';
-      fs.writeFileSync('$runner_dir/package.json', JSON.stringify(pkg, null, 2) + '\n');
-    "
+  # The runner is a published npm package on its own semver line; the root
+  # package.json version tracks the app and is unrelated. Overwriting the
+  # runner's version with the app's (as this used to) tried to republish
+  # whatever the app happened to be at — an already-published version, so the
+  # publish failed — while the version the CI workflow pins never reached the
+  # registry at all. packages/runner/package.json is the source of truth.
+  local runner_version
+  runner_version=$(node -p "require('$runner_dir/package.json').version")
+
+  # Refuse to republish. npm rejects it regardless; failing here says why.
+  #
+  # A non-zero exit from `npm view` is ambiguous: "this version is not
+  # published" and "the registry was unreachable" look identical, and treating
+  # the second as the first fails the guard OPEN. So distinguish them on the
+  # output: E404 means genuinely unpublished; anything else means we could not
+  # find out, and a guard that cannot answer must not wave the publish through.
+  local view_out view_rc
+  view_out=$(npm view "@lastest/runner@$runner_version" version 2>&1) && view_rc=0 || view_rc=$?
+  if [ "$view_rc" -eq 0 ]; then
+    err "@lastest/runner@$runner_version is already published - bump packages/runner/package.json first"
+  elif ! printf '%s' "$view_out" | grep -q 'E404'; then
+    err "could not check whether @lastest/runner@$runner_version is published (npm view failed): $view_out"
+  fi
+
+  # The CI workflow generators pin an exact runner version. Shipping one they
+  # do not reference publishes a package no generated workflow will install.
+  local pinned
+  pinned=$(grep -ho 'RUNNER_VERSION = "[^"]*"' \
+    "$ROOT_DIR/plugins/ci/src/domain/workflow-yaml.ts" \
+    "$ROOT_DIR/plugins/ci/src/domain/ci-yaml.ts" 2>/dev/null \
+    | sed 's/.*"\(.*\)"/\1/' | sort -u)
+  if [ -n "$pinned" ] && [ "$pinned" != "$runner_version" ]; then
+    # Quoted, and newlines folded to a comma: when the two RUNNER_VERSION
+    # constants disagree `sort -u` yields two lines, and that is exactly the
+    # moment the message has to be readable rather than mangled by word
+    # splitting.
+    err "plugins/ci pins $(printf '%s' "$pinned" | paste -sd, -) but packages/runner is $runner_version - sync them first"
+  fi
+
+  # npm requires a second factor to publish. A web-login session token is not
+  # one: it authenticates `whoami` but is rejected at PUT with
+  # "Two-factor authentication or granular access token with bypass 2fa
+  # enabled is required". Supply a TOTP code as NPM_OTP for an interactive
+  # publish, or configure a granular access token with 2FA bypass for CI.
+  local otp_args=()
+  if [ -n "${NPM_OTP:-}" ]; then
+    otp_args=(--otp "$NPM_OTP")
   fi
 
   cd "$runner_dir"
   pnpm build
-  pnpm publish --no-git-checks --access public
+  pnpm publish --no-git-checks --access public "${otp_args[@]}"
   cd "$ROOT_DIR"
-  ok "Published @lastest/runner@$VERSION"
+  ok "Published @lastest/runner@$runner_version"
 }
 
 deploy_all() {

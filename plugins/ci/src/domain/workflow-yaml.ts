@@ -1,6 +1,6 @@
 import type { GithubActionMode, GithubActionTriggerEvent } from "../schema";
 
-const RUNNER_VERSION = "0.4.2";
+const RUNNER_VERSION = "0.5.2";
 
 export interface WorkflowConfig {
   mode: GithubActionMode;
@@ -82,7 +82,11 @@ function buildPersistentSteps(config: WorkflowConfig): string {
 }
 
 export function generateWorkflowYaml(config: WorkflowConfig): string {
-  const timeoutMinutes = Math.ceil(config.timeout / 60000);
+  // Give the job headroom over the runner's own poll timeout. Setting them
+  // equal means GitHub cancels the job at the same moment the runner would
+  // have printed "Timeout: build did not complete within Ns" — so a genuine
+  // build timeout surfaces as an opaque cancellation with no diagnosis.
+  const timeoutMinutes = Math.ceil(config.timeout / 60000) + 5;
   const onBlock = buildOnBlock(config);
   const steps = buildPersistentSteps(config); // 'persistent' and 'auto' both use trigger-only steps
 

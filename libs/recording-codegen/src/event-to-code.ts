@@ -461,7 +461,15 @@ export function eventsToCodeLines(
             lines.push(
               `${indent}// Assertion: Verify no pending network requests`,
             );
-            lines.push(`${indent}await page.waitForLoadState('networkidle');`);
+            // Bounded, and non-fatal on timeout. `networkidle` is a hint, not
+            // a contract: any app holding a long-lived connection open (an SSE
+            // stream, a websocket, a long-poll) never reaches it, so an
+            // unbounded wait burns the full navigation timeout on every call
+            // and pushes the test past the executor's hard cap. Lastest's own
+            // pages do exactly this via /api/runners/status.
+            lines.push(
+              `${indent}await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});`,
+            );
             break;
           case "urlMatch": {
             lines.push(
