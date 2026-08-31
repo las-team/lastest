@@ -9,6 +9,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./schema": "./src/schema.ts",
+    "./tracing": "./src/tracing.ts",
     "./settings": "./src/settings.ts"
   },
   "scripts": {
@@ -17,6 +18,8 @@
   "dependencies": {
     "@lastest/coverage-model": "workspace:*",
     "@lastest/eb-protocol": "workspace:*",
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/semantic-conventions": "1.43.0",
     "drizzle-orm": "^0.45.2",
     "postgres": "^3.4.8"
   },

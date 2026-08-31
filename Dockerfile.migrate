@@ -19,6 +19,12 @@
 # cross-package imports vanish. The barrel `export * from "./schema/<mod>"` is a
 # VALUE re-export, so esbuild DOES resolve it — the directory must come along.
 #
+# NOT traced. scripts/migrate.js talks to `postgres` directly and never loads
+# @lastest/db's instrumented client, so the DB spans in packages/db/src/tracing.ts
+# cannot apply here; wiring OTel in would mean adding the whole SDK to a one-shot
+# Job for a handful of DDL spans. Tracing lives in Dockerfile.app and
+# packages/pool-service/Dockerfile only.
+#
 # Only DATABASE_URL is required at run time (migrate.js + drizzle.config.ts).
 # Versions are pinned to the repo lockfile — bump them together.
 #
