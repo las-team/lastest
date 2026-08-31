@@ -104,12 +104,18 @@ the honest fix is a core capability, not a third narrow read.
 4. The Coverage page (`src/app/(app)/coverage/`) moves to
    `plugins/coverage/src/ui/page.tsx` with the app keeping only the
    composition, per §6.
-5. **Ten `"use server"` exports, four action ids.** The production build mints
-   ids for only 4 of the 10 exports in `src/server/actions/coverage.ts`. Per
-   §8's table that is the "fewer, but not zero" case: the other six are
-   unreachable from any client boundary — server components read them directly
-   — so they are **dead actions** and should become a plain `reads.ts` rather
-   than moving as actions. This is the same finding `ci` had (10 of 13). It is
+5. **~~Ten `"use server"` exports, four action ids.~~ Fixed — five exports
+   remain, all with UI callers.** The production build minted ids for only 4 of
+   the 10 exports in `src/server/actions/coverage.ts`. Per §8's table that was
+   the "fewer, but not zero" case: the rest were unreachable from any client
+   boundary — server components read the queries directly — so they were **dead
+   actions**. Rather than move them as a `reads.ts`, they were deleted:
+   `syncCoverageAction` and `profileFromSutAction` first (each has a note in the
+   file saying why it must not come back), then
+   `profileCoverageDimensionsAction`, `getCoverageReportAction`,
+   `getCoverageTrendAction`, `listCoverageDimensionsAction` and
+   `listCoverageCellsAction`. The five survivors are all dispatched from
+   `coverage-client.tsx`. This was the same finding `ci` had (10 of 13), and was
    worth fixing whether or not the migration happens: a `"use server"` export
    nobody dispatches is an unauthenticated-by-default entry point.
 
@@ -127,6 +133,7 @@ Per recipe §9, stated explicitly:
 - **No SUT profiler was exercised.** `VaultProfiler` and `RestProfiler` have
   unit tests over fixtures; neither has run against a live Vault or REST
   endpoint since the rebase.
-- **The six dead actions in §4.5 were identified from the build manifest, not
-  by tracing callers.** The count is reliable; the conclusion that each of the
-  six is genuinely unreachable has not been checked one by one.
+- ~~**The six dead actions in §4.5 were identified from the build manifest, not
+  by tracing callers.**~~ Since resolved: each was traced by name across `src/`,
+  `plugins/`, `packages/`, `libs/`, `scripts/`, `tools/` and `docs/`, found to
+  have no caller, and deleted (see §4.5).

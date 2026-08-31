@@ -1,6 +1,29 @@
-import { describe, it, expect } from "vitest";
-import { summarizeCoverage } from "./trend";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { CoverageCell } from "@/lib/db/schema";
+
+const hasUnsnapshottedCoverageBuilds = vi.fn();
+const getCoverageCells = vi.fn();
+const getCoverageDimensions = vi.fn();
+const getCoverageAttributionTimeline = vi.fn();
+const getSnapshottedBuildIds = vi.fn();
+const recordCoverageSnapshot = vi.fn();
+
+vi.mock("@/lib/db/queries", () => ({
+  DEFAULT_BACKFILL_MAX_BUILDS: 200,
+  hasUnsnapshottedCoverageBuilds: (...a: unknown[]) =>
+    hasUnsnapshottedCoverageBuilds(...a),
+  getCoverageCells: (...a: unknown[]) => getCoverageCells(...a),
+  getCoverageDimensions: (...a: unknown[]) => getCoverageDimensions(...a),
+  getCoverageAttributionTimeline: (...a: unknown[]) =>
+    getCoverageAttributionTimeline(...a),
+  getSnapshottedBuildIds: (...a: unknown[]) => getSnapshottedBuildIds(...a),
+  recordCoverageSnapshot: (...a: unknown[]) => recordCoverageSnapshot(...a),
+}));
+
+import {
+  summarizeCoverage,
+  backfillCoverageSnapshots,
+} from "@/lib/coverage/trend";
 
 function cell(
   partial: Partial<CoverageCell> & { coordsKey: string },
@@ -110,5 +133,72 @@ describe("summarizeCoverage", () => {
       byObjectType: [],
     });
     expect(Number.isNaN(totals.weightedVolumeCoverage)).toBe(false);
+  });
+});
+
+describe("backfillCoverageSnapshots", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getCoverageCells.mockResolvedValue(CELLS);
+    getCoverageDimensions.mockResolvedValue([]);
+    getSnapshottedBuildIds.mockResolvedValue([]);
+    getCoverageAttributionTimeline.mockResolvedValue([
+      {
+        cellId: "country=DE|type=A",
+        buildId: "build-1",
+        ranAt: new Date("2026-01-01T00:00:00Z"),
+        verdict: "passed",
+      },
+    ]);
+    recordCoverageSnapshot.mockResolvedValue(undefined);
+  });
+
+  it("short-circuits before reading the timeline when the probe finds no gap", async () => {
+    hasUnsnapshottedCoverageBuilds.mockResolvedValue(false);
+
+    const result = await backfillCoverageSnapshots("repo");
+
+    expect(result).toEqual({ buildsSeen: 0, written: 0, skippedExisting: 0 });
+    // The whole point of the gate: none of the expensive reads happen.
+    expect(getCoverageAttributionTimeline).not.toHaveBeenCalled();
+    expect(getCoverageCells).not.toHaveBeenCalled();
+    expect(getSnapshottedBuildIds).not.toHaveBeenCalled();
+    expect(recordCoverageSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("asks the probe about the same window it writes", async () => {
+    hasUnsnapshottedCoverageBuilds.mockResolvedValue(false);
+
+    await backfillCoverageSnapshots("repo");
+    expect(hasUnsnapshottedCoverageBuilds).toHaveBeenLastCalledWith(
+      "repo",
+      "default",
+      { maxBuilds: 200 },
+    );
+
+    // A caller narrowing the write window narrows the probe with it —
+    // otherwise the probe reports gaps this call would never fill and the
+    // fast path never engages.
+    await backfillCoverageSnapshots("repo", {
+      environmentKey: "staging",
+      maxBuilds: 5,
+    });
+    expect(hasUnsnapshottedCoverageBuilds).toHaveBeenLastCalledWith(
+      "repo",
+      "staging",
+      { maxBuilds: 5 },
+    );
+  });
+
+  it("fails open and does the work when the probe errors", async () => {
+    hasUnsnapshottedCoverageBuilds.mockRejectedValue(new Error("probe down"));
+
+    const result = await backfillCoverageSnapshots("repo");
+
+    expect(getCoverageAttributionTimeline).toHaveBeenCalled();
+    expect(result).toMatchObject({ buildsSeen: 1, written: 1 });
+    expect(recordCoverageSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ buildId: "build-1", source: "backfill" }),
+    );
   });
 });

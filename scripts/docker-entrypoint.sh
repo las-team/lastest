@@ -45,9 +45,17 @@ fi
 # reaches it on loopback :9500 (EB_POOL_SERVICE_URL). On k8s, prefer running
 # it as a dedicated single-replica Deployment and set EB_POOL_SERVICE_DISABLED=1
 # here so only that Deployment holds Job-create RBAC.
-if [ "${EB_POOL_SERVICE_DISABLED:-0}" != "1" ] && [ -f /app/dist-pool/main.mjs ]; then
+#
+# NO OTel preload here, unlike packages/pool-service/Dockerfile. This entrypoint
+# belongs to the single-container self-host image (root Dockerfile), which ships
+# no collector; tracing is a Kubernetes-only capability (see src/otel.ts
+# `otelGate()`), so `dist-pool/otel-bootstrap.cjs` is simply never loaded in
+# this image. The bundle is `.cjs` rather than `.mjs` because the k8s pool image
+# needs CommonJS for require-in-the-middle patching, and both images consume the
+# same `pnpm build:pool` output.
+if [ "${EB_POOL_SERVICE_DISABLED:-0}" != "1" ] && [ -f /app/dist-pool/main.cjs ]; then
   echo "Starting EB pool service..."
-  node /app/dist-pool/main.mjs &
+  node /app/dist-pool/main.cjs &
 fi
 
 # Execute the main command
