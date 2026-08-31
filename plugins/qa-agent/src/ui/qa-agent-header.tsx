@@ -93,7 +93,6 @@ export function QaAgentHeader({
   loading,
   setupOpen,
   canStartRun,
-  triggerSummary,
   onToggleSetup,
   onPause,
   onResume,
@@ -112,8 +111,6 @@ export function QaAgentHeader({
   loading: boolean;
   setupOpen: boolean;
   canStartRun: boolean;
-  /** From the automation config — e.g. "manual runs · task queue · on PR". */
-  triggerSummary: string;
   onToggleSetup: () => void;
   onPause: () => void;
   onResume: () => void;
@@ -137,115 +134,122 @@ export function QaAgentHeader({
     : "Ready — start a run, or drop a task in the queue below";
 
   return (
-    <Card>
-      <CardContent className="pt-4 space-y-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 shrink-0">
-            <Bot className="h-5 w-5 text-primary" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 font-medium">
-              QA agent
-              <span
-                className={`flex items-center gap-1.5 text-xs font-medium ${meta.textClass}`}
-              >
-                <StatusDot state={state} />
-                {meta.label}
-              </span>
-              {session?.metadata.qaMode &&
-                session.metadata.qaMode !== "full" && (
-                  <Badge variant="outline" className="text-[10px] px-1.5">
-                    {session.metadata.qaMode === "refresh_spec"
-                      ? "spec refresh"
-                      : "fill gaps"}
-                  </Badge>
-                )}
-              {workingTask && (
-                <Badge
-                  variant="outline"
-                  className="text-[10px] px-1.5 gap-1 bg-primary/5 border-primary/30 max-w-56"
-                  title={workingTask.title}
-                >
-                  <ListTodo className="h-3 w-3 shrink-0" />
-                  <span className="truncate">{workingTask.title}</span>
-                </Badge>
-              )}
-            </div>
-            <div
-              className="text-xs text-muted-foreground truncate"
-              title={narration}
+    <Card className="gap-0 p-3.5">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-info/10">
+          <Bot className="h-5 w-5 text-info" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            QA agent
+            <span
+              className={`flex items-center gap-1.5 text-xs font-medium ${meta.textClass}`}
             >
-              {narration}
-              {session?.metadata.qaTargetUrl && (
-                <span className="opacity-70">
-                  {" "}
-                  · {repositoryName} → {session.metadata.qaTargetUrl}
+              <StatusDot state={state} />
+              {meta.label}
+            </span>
+            {session?.metadata.qaMode && session.metadata.qaMode !== "full" && (
+              <Badge variant="outline" className="text-[10px] px-1.5">
+                {session.metadata.qaMode === "refresh_spec"
+                  ? "spec refresh"
+                  : "fill gaps"}
+              </Badge>
+            )}
+            {workingTask && (
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1.5 gap-1 bg-primary/5 border-primary/30 max-w-56"
+                title={workingTask.title}
+              >
+                <ListTodo className="h-3 w-3 shrink-0" />
+                <span className="truncate">{workingTask.title}</span>
+              </Badge>
+            )}
+          </div>
+          <div
+            className="mt-0.5 truncate text-xs text-muted-foreground"
+            title={narration}
+          >
+            {narration}
+            {session?.metadata.qaTargetUrl && (
+              <span className="opacity-70">
+                {" "}
+                · {repositoryName} →{" "}
+                <span className="font-mono">
+                  {session.metadata.qaTargetUrl}
                 </span>
-              )}
+              </span>
+            )}
+          </div>
+          {externalActivity && (
+            <div className="mt-0.5 flex items-center gap-1 text-[11px] text-info truncate">
+              <Plug className="h-3 w-3 shrink-0" />
+              <span className="truncate">
+                {externalActivity.sourceLabel}: {externalActivity.summary}
+              </span>
             </div>
-            {externalActivity && (
-              <div className="mt-0.5 flex items-center gap-1 text-[11px] text-info truncate">
-                <Plug className="h-3 w-3 shrink-0" />
-                <span className="truncate">
-                  {externalActivity.sourceLabel}: {externalActivity.summary}
-                </span>
-              </div>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            {isRunning && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onPause}
-                disabled={loading}
-              >
-                <Pause className="h-3.5 w-3.5" />
-                Pause
-              </Button>
-            )}
-            {isPaused && !awaitingReview && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onResume}
-                disabled={loading}
-              >
-                <Play className="h-3.5 w-3.5" />
-                Resume
-              </Button>
-            )}
-            {(isRunning || isPaused) && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onCancel}
-                disabled={loading}
-              >
-                <Ban className="h-3.5 w-3.5" />
-                Cancel
-              </Button>
-            )}
-            {!session && canStartRun && (
-              <Button size="sm" variant="outline" onClick={onToggleSetup}>
-                {setupOpen ? (
-                  <ChevronUp className="h-3.5 w-3.5" />
-                ) : (
-                  <Plus className="h-3.5 w-3.5" />
-                )}
-                New run
-                {!setupOpen && <ChevronDown className="h-3.5 w-3.5" />}
-              </Button>
-            )}
-          </div>
+          )}
         </div>
+
         {(isRunning || isPaused) && (
-          <Progress value={progress} className="h-1.5" />
+          <div className="w-52 shrink-0">
+            <div className="mb-1 flex justify-between text-[11px]">
+              <span className="text-muted-foreground">Pipeline</span>
+              <span className="font-mono font-semibold text-info tabular-nums">
+                {Math.round(progress)}%
+              </span>
+            </div>
+            <Progress value={progress} className="h-1.5" />
+          </div>
         )}
-        <div className="text-[11px] text-muted-foreground">
-          Triggers: {triggerSummary} — configure below
+
+        <div className="flex items-center gap-2">
+          {isRunning && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onPause}
+              disabled={loading}
+            >
+              <Pause className="h-3.5 w-3.5" />
+              Pause
+            </Button>
+          )}
+          {isPaused && !awaitingReview && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onResume}
+              disabled={loading}
+            >
+              <Play className="h-3.5 w-3.5" />
+              Resume
+            </Button>
+          )}
+          {(isRunning || isPaused) && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onCancel}
+              disabled={loading}
+            >
+              <Ban className="h-3.5 w-3.5" />
+              Cancel
+            </Button>
+          )}
+          {!session && canStartRun && (
+            <Button size="sm" variant="outline" onClick={onToggleSetup}>
+              {setupOpen ? (
+                <ChevronUp className="h-3.5 w-3.5" />
+              ) : (
+                <Plus className="h-3.5 w-3.5" />
+              )}
+              New run
+              {!setupOpen && <ChevronDown className="h-3.5 w-3.5" />}
+            </Button>
+          )}
         </div>
-      </CardContent>
+      </div>
     </Card>
   );
 }

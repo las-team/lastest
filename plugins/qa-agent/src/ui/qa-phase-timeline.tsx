@@ -93,10 +93,14 @@ function SubstepRow({
 export function PhaseTimeline({
   session,
   bare = false,
+  detailOnly = false,
 }: {
   session: AgentSession;
   /** Render without the Card wrapper (inside an expanded history row). */
   bare?: boolean;
+  /** Drop the phase row and show only the active-step detail — the console
+   *  already draws the phases as its own pipeline strip. */
+  detailOnly?: boolean;
 }) {
   const activeStep = session.steps.find(
     (s) =>
@@ -106,37 +110,39 @@ export function PhaseTimeline({
   );
   const body = (
     <>
-      <div className="flex items-start gap-0 overflow-x-auto pb-1">
-        {session.steps.map((step, i) => (
-          <div key={step.id} className="flex items-start min-w-0">
-            {i > 0 && (
+      {!detailOnly && (
+        <div className="flex items-start gap-0 overflow-x-auto pb-1">
+          {session.steps.map((step, i) => (
+            <div key={step.id} className="flex items-start min-w-0">
+              {i > 0 && (
+                <div
+                  className={`h-px w-5 sm:w-8 mt-2 shrink-0 ${
+                    step.status === "pending" ? "bg-border" : "bg-success/50"
+                  }`}
+                />
+              )}
               <div
-                className={`h-px w-5 sm:w-8 mt-2 shrink-0 ${
-                  step.status === "pending" ? "bg-border" : "bg-success/50"
-                }`}
-              />
-            )}
-            <div
-              className="flex flex-col items-center gap-1 px-1 min-w-14"
-              title={step.description}
-            >
-              <StepDot step={step} />
-              <span
-                className={`text-[11px] leading-tight text-center ${
-                  step.status === "active" || step.status === "waiting_user"
-                    ? "text-foreground font-medium"
-                    : "text-muted-foreground"
-                }`}
+                className="flex flex-col items-center gap-1 px-1 min-w-14"
+                title={step.description}
               >
-                {step.id === "qa_login" && (
-                  <Lock className="inline h-3 w-3 mr-0.5 align-[-1px]" />
-                )}
-                {step.label}
-              </span>
+                <StepDot step={step} />
+                <span
+                  className={`text-[11px] leading-tight text-center ${
+                    step.status === "active" || step.status === "waiting_user"
+                      ? "text-foreground font-medium"
+                      : "text-muted-foreground"
+                  }`}
+                >
+                  {step.id === "qa_login" && (
+                    <Lock className="inline h-3 w-3 mr-0.5 align-[-1px]" />
+                  )}
+                  {step.label}
+                </span>
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       {activeStep && (
         <div className="rounded-md border bg-muted/30 p-3 space-y-1">

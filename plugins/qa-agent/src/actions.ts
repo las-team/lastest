@@ -97,6 +97,7 @@ import {
 } from "./domain/task-triage";
 import type { QaActivityEvent, QaAgentHost, QaExistingAuthSetup } from "./host";
 import { qaAgentPlugin } from "./index";
+import { QA_PHASES } from "./phases";
 import type { QaAgentTask } from "./schema";
 import type {
   QaAgentRole,
@@ -156,58 +157,9 @@ import { qaAgentWiring } from "./wiring";
  *   `host.ts` for the full port and each group's honest future.
  */
 
-const QA_STEP_DEFINITIONS: Array<{
-  id: QaStepId;
-  label: string;
-  description: string;
-}> = [
-  {
-    id: "qa_setup",
-    label: "Preflight",
-    description: "Validate target URL, AI provider, and GitHub connection",
-  },
-  {
-    id: "qa_login",
-    label: "Login",
-    description:
-      "Resolve authentication — existing setup, provided credentials, or an agent-registered account",
-  },
-  {
-    id: "qa_discover",
-    label: "Discover",
-    description: "Scan source routes and crawl the live app for DOM/selectors",
-  },
-  {
-    id: "qa_plan",
-    label: "Plan",
-    description: "Design a risk-prioritized test plan from real discovery data",
-  },
-  {
-    id: "qa_plan_review",
-    label: "Review",
-    description: "Human review gate — approve or request plan changes",
-  },
-  {
-    id: "qa_generate",
-    label: "Generate",
-    description: "Generate tests per plan item with live selector verification",
-  },
-  {
-    id: "qa_execute",
-    label: "Execute",
-    description: "Run the generated suite against the target app",
-  },
-  {
-    id: "qa_heal",
-    label: "Heal",
-    description: "Fix failing tests and re-run them",
-  },
-  {
-    id: "qa_summary",
-    label: "Summary",
-    description: "Coverage matrix and journey traceability",
-  },
-];
+/** The pipeline shape lives in `./phases` so the screen can draw it before a
+ *  session exists. */
+const QA_STEP_DEFINITIONS = QA_PHASES;
 
 const EB_CLAIM_TIMEOUT_MS = 5 * 60 * 1000;
 const PLANNER_TIMEOUT_MS = 5 * 60 * 1000;
