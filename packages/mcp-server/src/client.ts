@@ -5,7 +5,19 @@
 
 export interface LastestClientConfig {
   baseUrl: string;
-  apiKey: string;
+  /**
+   * Bearer token for REST API v1. Optional so a caller that already carries the
+   * user's identity another way can omit it — the browser WebMCP bridge
+   * (`/api/mcp/session`) forwards the request's own session cookie via
+   * `extraHeaders` instead, because a cookie-authed page has no API key and we
+   * do not want to mint one per page load.
+   */
+  apiKey?: string;
+  /**
+   * Extra headers sent on every v1 request (e.g. `cookie`). Never logged.
+   * `Authorization` and `Content-Type` set here win over the defaults.
+   */
+  extraHeaders?: Record<string, string>;
 }
 
 export interface ToolResponse {
@@ -18,10 +30,12 @@ export interface ToolResponse {
 export class LastestClient {
   private baseUrl: string;
   private apiKey: string;
+  private extraHeaders: Record<string, string>;
 
   constructor(config: LastestClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/+$/, "");
-    this.apiKey = config.apiKey;
+    this.apiKey = config.apiKey ?? "";
+    this.extraHeaders = config.extraHeaders ?? {};
   }
 
   private async request<T = unknown>(
@@ -31,8 +45,12 @@ export class LastestClient {
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.apiKey}`,
       "Content-Type": "application/json",
+      // Omitted when there is no key: `getCurrentSession()` on the v1 side is
+      // cookie-first and only falls back to the bearer path, so an empty
+      // `Bearer ` header would be noise at best.
+      ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
+      ...this.extraHeaders,
     };
 
     const res = await fetch(url, {

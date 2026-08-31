@@ -10,6 +10,7 @@ import { ActivityFeedPanel } from "@/components/activity-feed/activity-feed-pane
 import { CelebrationListener } from "@/components/gamification/celebration-listener-client";
 import { UmamiIdentifyClient } from "@/components/analytics/umami-identify-client";
 import { AiAvailabilityProvider } from "@/components/ai/ai-availability-context";
+import { WebMcpProvider } from "@/components/webmcp/webmcp-provider-client";
 import { RunUsageBanner } from "@/components/layout/run-usage-banner-client";
 import { getCurrentSession } from "@/lib/auth";
 import * as queries from "@/lib/db/queries";
@@ -76,51 +77,65 @@ export default async function AppLayout({
   const aiEnabled =
     !session?.team?.banAiMode && (session?.team?.builtInAiEnabled ?? false);
 
+  // WebMCP ("site tools"): register Lastest's tools with the browser's AI agent
+  // — Chrome's origin trial, or the ChatGPT desktop / Codex built-in browser.
+  // Opt-in per deployment; inert in browsers without `document.modelContext`.
+  // See docs/design/webmcp.md.
+  const webMcpEnabled =
+    process.env.WEBMCP_ENABLED === "1" &&
+    Boolean(session?.user) &&
+    (session?.team?.webMcpEnabled ?? false);
+
   return (
     <AiAvailabilityProvider aiEnabled={aiEnabled}>
-      <JobPollingProvider>
-        <ContextCollectorProvider>
-          <ActivityFeedProvider>
-            <div className="flex h-screen">
-              {/* Desktop rail wrapper is a static <div> now — safe because the
-               *  async <SidebarServer /> has already been resolved above, so
-               *  the wrapper no longer creates a nested async boundary inside
-               *  the client provider chain (which was the SSR/client hydration
-               *  hazard the previous "merge class onto <aside>" hack was
-               *  working around). */}
-              <div className="hidden md:flex">{sidebarEl}</div>
-              <div className="flex-1 flex flex-col overflow-hidden">
-                {mobileTopBarEl}
-                {runUsage && runProjection && runBannerState !== "ok" && (
-                  <RunUsageBanner
-                    state={runBannerState}
-                    quota={runUsage.monthlyRunQuota}
-                    projected={runProjection.projected}
-                    usageMonth={runUsage.usageMonth ?? ""}
-                    resetLabel={nextRunUsageResetLabel()}
+      <WebMcpProvider
+        enabled={webMcpEnabled}
+        repositoryId={session?.user?.selectedRepositoryId ?? undefined}
+      >
+        <JobPollingProvider>
+          <ContextCollectorProvider>
+            <ActivityFeedProvider>
+              <div className="flex h-screen">
+                {/* Desktop rail wrapper is a static <div> now — safe because the
+                 *  async <SidebarServer /> has already been resolved above, so
+                 *  the wrapper no longer creates a nested async boundary inside
+                 *  the client provider chain (which was the SSR/client hydration
+                 *  hazard the previous "merge class onto <aside>" hack was
+                 *  working around). */}
+                <div className="hidden md:flex">{sidebarEl}</div>
+                <div className="flex-1 flex flex-col overflow-hidden">
+                  {mobileTopBarEl}
+                  {runUsage && runProjection && runBannerState !== "ok" && (
+                    <RunUsageBanner
+                      state={runBannerState}
+                      quota={runUsage.monthlyRunQuota}
+                      projected={runProjection.projected}
+                      usageMonth={runUsage.usageMonth ?? ""}
+                      resetLabel={nextRunUsageResetLabel()}
+                    />
+                  )}
+                  <main className="flex-1 overflow-auto relative pb-14 md:pb-0">
+                    {children}
+                  </main>
+                  <MobileBottomNav
+                    sidebar={sidebarEl}
+                    verifyEnabled={session?.team?.verifyPhaseEnabled ?? false}
                   />
-                )}
-                <main className="flex-1 overflow-auto relative pb-14 md:pb-0">
-                  {children}
-                </main>
-                <MobileBottomNav
-                  sidebar={sidebarEl}
-                  verifyEnabled={session?.team?.verifyPhaseEnabled ?? false}
-                />
+                </div>
               </div>
-            </div>
-            <BugReportWidget />
-            <ActivityFeedPanel />
-            <CelebrationListener />
-            {session?.user && (
-              <UmamiIdentifyClient
-                userId={session.user.id}
-                teamId={session.team?.id ?? null}
-              />
-            )}
-          </ActivityFeedProvider>
-        </ContextCollectorProvider>
-      </JobPollingProvider>
+              <BugReportWidget />
+              <ActivityFeedPanel />
+              <CelebrationListener />
+              {session?.user && (
+                <UmamiIdentifyClient
+                  userId={session.user.id}
+                  teamId={session.team?.id ?? null}
+                />
+              )}
+            </ActivityFeedProvider>
+          </ContextCollectorProvider>
+        </JobPollingProvider>
+      </WebMcpProvider>
     </AiAvailabilityProvider>
   );
 }
