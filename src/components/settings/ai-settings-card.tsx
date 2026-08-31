@@ -61,6 +61,10 @@ interface AISettingsCardProps {
    *  the claude-agent-sdk provider is not offered. Server env is not visible
    *  here, so both flags are resolved server-side and passed in. */
   agentSdkAvailable?: boolean;
+  /** Set when `REGULATED_LOCKED_POLICY.aiDiffing` forces AI diffing off. The
+   *  switch stays visible and disabled — `saveAISettings` refuses the value
+   *  independently, so this is presentation, not the control. */
+  aiDiffingLockedReason?: string;
 }
 
 const OPENROUTER_MODELS = [
@@ -87,6 +91,7 @@ export function AISettingsCard({
   repositoryId,
   claudeCliAvailable,
   agentSdkAvailable,
+  aiDiffingLockedReason,
 }: AISettingsCardProps) {
   const [isPending, startTransition] = useTransition();
   const [isTesting, setIsTesting] = useState(false);
@@ -909,11 +914,17 @@ export function AISettingsCard({
           {/* Enable Toggle */}
           <div className="flex items-center gap-3 mb-4">
             <Switch
-              checked={aiDiffingEnabled}
+              checked={aiDiffingLockedReason ? false : aiDiffingEnabled}
               onCheckedChange={setAiDiffingEnabled}
+              disabled={!!aiDiffingLockedReason}
             />
             <Label>Enable AI Diff Analysis</Label>
           </div>
+          {aiDiffingLockedReason && (
+            <p className="text-xs text-muted-foreground mb-4">
+              {aiDiffingLockedReason}
+            </p>
+          )}
 
           {aiDiffingEnabled && (
             <div className="space-y-4 pl-2 border-l-2 border-border ml-2">

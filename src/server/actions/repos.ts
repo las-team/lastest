@@ -4,6 +4,11 @@ import { revalidatePath } from "next/cache";
 import * as queries from "@/lib/db/queries";
 import { planConfig } from "@/lib/billing/plans";
 import {
+  isLockedSettingAllowed,
+  isRegulatedTeam,
+} from "@/lib/segment/regulated";
+import { applyRegulatedCheckModes } from "@/lib/demo/pharma-seed";
+import {
   requireTeamAccess,
   requireRepoAccess,
   requireCapability,
@@ -279,6 +284,17 @@ export async function createLocalRepo(
     // the user's app rather than a third-party demo.
     seededTestId = await seedGenericSmokeTest(repo.id, baseUrl);
   }
+
+  // Regulated (pharma) profile: the check-mode table is a property of the
+  // segment, not of the onboarding fork that happens to be the usual way in.
+  // Without this, a repo created from /tests while the team is regulated gets
+  // product defaults — including `text: "log"`, the single most important
+  // change in that table (a 21 CFR Part 11 §11.50 signature manifestation
+  // losing "Meaning" is a compliance finding, not a cosmetic one).
+  if (isRegulatedTeam(session.team)) {
+    await applyRegulatedCheckModes(repo.id);
+  }
+
   revalidatePath("/");
   revalidatePath("/settings");
   return { ...repo, seededTestId };
@@ -330,6 +346,14 @@ export async function updateAutoApproveDefaultBranch(
   const session = await requireCapability("repos:settings");
   const repo = await queries.getRepository(repositoryId);
   if (!repo || repo.teamId !== session.team.id) return;
+  // REGULATED_LOCKED_POLICY.autoApprove: an approval is an attributable human
+  // act under the regulated profile. The settings UI renders the switch
+  // disabled; this is what makes it a control rather than a hidden button.
+  if (!isLockedSettingAllowed("autoApprove", enabled, session.team)) {
+    throw new Error(
+      "Auto-approval is locked off for this team. Regulated mode requires every approval to be an attributable human act.",
+    );
+  }
   await queries.updateRepository(repositoryId, {
     autoApproveDefaultBranch: enabled,
   });

@@ -7,6 +7,9 @@ import { updateBuiltInAiEnabled } from "@/server/actions/settings";
 
 interface AiModeToggleProps {
   enabled: boolean;
+  /** Set when `REGULATED_LOCKED_POLICY` forces this off — rendered
+   *  visible-but-disabled, with the server action refusing independently. */
+  lockedReason?: string;
 }
 
 /**
@@ -14,7 +17,7 @@ interface AiModeToggleProps {
  * is the dedicated gate for in-product AI + background AI — it no longer infers
  * availability from whether an AI key/provider is configured.
  */
-export function AiModeToggle({ enabled }: AiModeToggleProps) {
+export function AiModeToggle({ enabled, lockedReason }: AiModeToggleProps) {
   const [isPending, startTransition] = useTransition();
   const [optimisticEnabled, setOptimisticEnabled] = useOptimistic(enabled);
 
@@ -35,15 +38,16 @@ export function AiModeToggle({ enabled }: AiModeToggleProps) {
       <div className="space-y-0.5">
         <span className="text-sm font-medium">Built-in AI</span>
         <p className="text-xs text-muted-foreground/70">
-          {optimisticEnabled
-            ? "Lastest runs AI server-side for fixes, triage, and diff review."
-            : "MCP mode (default) — drive Lastest's AI from your own agent over MCP."}
+          {lockedReason ??
+            (optimisticEnabled
+              ? "Lastest runs AI server-side for fixes, triage, and diff review."
+              : "MCP mode (default) — drive Lastest's AI from your own agent over MCP.")}
         </p>
       </div>
       <Switch
-        checked={optimisticEnabled}
+        checked={lockedReason ? false : optimisticEnabled}
         onCheckedChange={handleToggle}
-        disabled={isPending}
+        disabled={isPending || !!lockedReason}
       />
     </div>
   );

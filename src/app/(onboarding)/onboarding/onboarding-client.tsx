@@ -16,11 +16,13 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
   Check,
+  ChevronLeft,
   ChevronRight,
   Github,
   Hand,
   Loader2,
   Rocket,
+  ShieldCheck,
   Sparkles,
   ArrowRight,
   X,
@@ -36,7 +38,9 @@ import {
   setBaseUrl,
   completeOnboarding,
   kickoffPlayAgent,
+  startPharmaOnboarding,
 } from "@/server/actions/onboarding";
+import type { OnboardingSegment } from "@/lib/segment/regulated";
 import {
   selectRepo,
   createLocalRepo,
@@ -59,6 +63,9 @@ type AccountLite = { username: string };
 interface OnboardingClientProps {
   initialStep: number;
   initialPath: OnboardingPath | null;
+  /** `"pharma"` when the team is already in the regulated profile (a return
+   *  visit), otherwise null so the fork is asked. */
+  initialSegment: OnboardingSegment | null;
   userName: string;
   serverUrl: string;
   githubAccount: AccountLite | null;
@@ -106,6 +113,7 @@ const PATHS: Array<{
 export function OnboardingClient({
   initialStep,
   initialPath,
+  initialSegment,
   userName,
   serverUrl,
   githubAccount,
@@ -117,16 +125,29 @@ export function OnboardingClient({
   const router = useRouter();
   const [step, setStep] = useState(initialStep);
   const [path, setPath] = useState<OnboardingPath | null>(initialPath ?? "mcp");
+  const [segment, setSegment] = useState<OnboardingSegment | null>(
+    initialSegment,
+  );
   const [pending, startTransition] = useTransition();
   // Captured from createLocalRepo when the sandbox flow picks a known template
   // so Step 5 can deep-link to the seeded test instead of /tests/new?ai=true.
   const [seededTestId, setSeededTestId] = useState<string | null>(null);
 
-  // For manual path, step 4 (AI) is skipped entirely.
+  // Step 0 is the segment fork and step 6 is the pharma setup; both sit
+  // *outside* the original 1–5 numbering rather than renumbering it, so the
+  // `?step=` deep links, the Esc-to-skip range and every existing step body
+  // keep meaning exactly what they did before.
+  //
+  // For the manual path, step 4 (AI) is skipped entirely.
   const visibleSteps = useMemo(() => {
-    if (path === "manual") return [1, 2, 3, 5];
-    return [1, 2, 3, 4, 5];
-  }, [path]);
+    // Before the fork is answered we don't know the length of the path yet.
+    // Project the custom one rather than `[0]`, which would render the very
+    // first screen as "Step 1 of 1" at 100% complete.
+    if (segment === null) return [0, 1, 2, 3, 4, 5];
+    if (segment === "pharma") return [0, 6];
+    if (path === "manual") return [0, 1, 2, 3, 5];
+    return [0, 1, 2, 3, 4, 5];
+  }, [path, segment]);
 
   const next = useCallback(() => {
     setStep((s) => {
@@ -202,6 +223,48 @@ export function OnboardingClient({
 
       {/* Step body */}
       <div className="flex-1">
+        {step === 0 && (
+          <Step0Segment
+            userName={userName}
+            selected={segment}
+            onSelect={setSegment}
+            pending={pending}
+            onNext={() => {
+              if (!segment) return;
+              setStep(segment === "pharma" ? 6 : 1);
+            }}
+          />
+        )}
+
+        {step === 6 && (
+          <StepPharma
+            pending={pending}
+            onBack={() => {
+              setSegment(null);
+              setStep(0);
+            }}
+            onStart={(projectName) =>
+              startTransition(async () => {
+                try {
+                  const created = await startPharmaOnboarding(projectName);
+                  track(Events.repo_linked, { source: "pharma" });
+                  await finish(
+                    created.seededTestId
+                      ? `/tests?test=${encodeURIComponent(created.seededTestId)}`
+                      : "/tests",
+                  );
+                } catch (err) {
+                  toast.error(
+                    err instanceof Error
+                      ? err.message
+                      : "Could not set up the Vault workspace",
+                  );
+                }
+              })
+            }
+          />
+        )}
+
         {step === 1 && (
           <Step1Fork
             userName={userName}
@@ -390,6 +453,218 @@ export function OnboardingClient({
           <DiscordIcon className="h-3 w-3" />
           Need help? Join Discord
         </a>
+      </div>
+    </div>
+  );
+}
+
+// ─── Step 0: Segment fork ────────────────────────────────────────────────────
+
+const SEGMENTS: Array<{
+  id: OnboardingSegment;
+  name: string;
+  tagline: string;
+  bullets: string[];
+  bestFor: string;
+  Icon: typeof Hand;
+}> = [
+  {
+    id: "pharma",
+    name: "Pharma & life sciences",
+    tagline: "Veeva Vault and Salesforce release regression.",
+    bullets: [
+      "Vault + Salesforce suites ready on arrival",
+      "Check layers tuned for a validated system",
+      "Leaderboards, public links and AI verdicts off",
+    ],
+    bestFor: "Validation leads · Veeva consultants",
+    Icon: ShieldCheck,
+  },
+  {
+    id: "custom",
+    name: "Custom app testing",
+    tagline: "Your own web app, your own suite.",
+    bullets: [
+      "Connect a repo or start from a URL",
+      "Record, generate or write tests",
+      "The full product surface",
+    ],
+    bestFor: "Product & QA teams",
+    Icon: Rocket,
+  },
+];
+
+function Step0Segment({
+  userName,
+  selected,
+  onSelect,
+  onNext,
+  pending,
+}: {
+  userName: string;
+  selected: OnboardingSegment | null;
+  onSelect: (s: OnboardingSegment) => void;
+  onNext: () => void;
+  pending: boolean;
+}) {
+  return (
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <h1 className="text-3xl font-semibold tracking-tight">
+          Hi {userName}, what are you testing?
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          This picks your starting suite and how much of the product you see.
+          You can change it later in Settings.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {SEGMENTS.map((s) => {
+          const active = selected === s.id;
+          return (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => onSelect(s.id)}
+              className={`relative rounded-lg border-2 p-4 text-left transition-all ${
+                active
+                  ? "border-primary bg-primary/5 shadow-sm"
+                  : "border-border bg-card hover:border-muted-foreground/40"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <s.Icon className="h-5 w-5 text-primary" />
+                <h2 className="text-base font-semibold">{s.name}</h2>
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">{s.tagline}</p>
+              <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
+                {s.bullets.map((b) => (
+                  <li key={b} className="flex items-start gap-1.5">
+                    <Check className="mt-0.5 h-3 w-3 shrink-0 text-primary" />
+                    <span>{b}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-3 border-t pt-2 text-[11px] uppercase tracking-wide text-muted-foreground">
+                Best for: {s.bestFor}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex justify-end">
+        <Button onClick={onNext} disabled={!selected || pending} size="lg">
+          Continue
+          <ChevronRight className="ml-1 h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Step 6: Pharma setup (terminal step of the pharma fork) ─────────────────
+
+function StepPharma({
+  onStart,
+  onBack,
+  pending,
+}: {
+  onStart: (projectName: string) => void;
+  onBack: () => void;
+  pending: boolean;
+}) {
+  const [projectName, setProjectName] = useState("Vault + Salesforce");
+
+  return (
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <h1 className="text-3xl font-semibold tracking-tight">
+          Your Vault workspace
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          We&apos;ll create a project with both release-regression suites
+          already in it, and set the check layers for a validated system.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="pharma-project">Project name</Label>
+        <Input
+          id="pharma-project"
+          value={projectName}
+          onChange={(e) => setProjectName(e.target.value)}
+          placeholder="Vault + Salesforce"
+        />
+      </div>
+
+      <Card>
+        <CardContent className="space-y-3 py-4 text-sm">
+          <div className="font-medium">What you get</div>
+          <ul className="space-y-2 text-muted-foreground">
+            <li className="flex items-start gap-2">
+              <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+              <span>
+                <span className="font-medium text-foreground">
+                  Vault release regression
+                </span>{" "}
+                — lifecycle actions by role, the 21 CFR Part 11 §11.50 signature
+                manifestation, a retrievable audit trail, and visual baselines
+                of your configured surfaces.
+              </span>
+            </li>
+            <li className="flex items-start gap-2">
+              <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+              <span>
+                <span className="font-medium text-foreground">
+                  Salesforce release regression
+                </span>{" "}
+                — Lightning page layouts, LWC rendering, declarative validation
+                rules, and visual baselines of home, list and report surfaces.
+              </span>
+            </li>
+            <li className="flex items-start gap-2">
+              <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+              <span>
+                Text and DOM checks raised to{" "}
+                <span className="font-medium text-foreground">enforce</span>;
+                performance, storage, accessibility and design-token checks off.
+                Auto-approval and AI verdicts are locked off — an approval stays
+                an attributable human act.
+              </span>
+            </li>
+          </ul>
+        </CardContent>
+      </Card>
+
+      {/* Say the blocking part out loud here rather than letting them discover
+          it on a red first build. */}
+      <Card className="border-amber-500/40 bg-amber-500/5">
+        <CardContent className="py-3 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">
+            Both tests arrive quarantined.
+          </span>{" "}
+          They need a sandbox URL — never production — and a service account
+          with a fixed role before they can run. Quarantined tests never block a
+          build, so your first run stays green while you wire that up.
+        </CardContent>
+      </Card>
+
+      <div className="flex items-center justify-between">
+        <Button variant="ghost" onClick={onBack} disabled={pending}>
+          <ChevronLeft className="mr-1 h-4 w-4" />
+          Back
+        </Button>
+        <Button
+          size="lg"
+          onClick={() => onStart(projectName)}
+          disabled={pending}
+        >
+          {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+          Create my workspace
+          <ChevronRight className="ml-1 h-4 w-4" />
+        </Button>
       </div>
     </div>
   );

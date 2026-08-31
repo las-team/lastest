@@ -145,6 +145,30 @@ export async function revokePublicShareById(id: string): Promise<void> {
     .where(eq(sharePublicShares.id, id));
 }
 
+/**
+ * Revoke every live share owned by a team, returning how many were revoked.
+ *
+ * Exists for the regulated-mode switch: turning the profile on refuses to mint
+ * new links, but the links already out there are the actual exposure, and the
+ * toast says they are gone. This is what makes that true. Idempotent — a
+ * second call revokes nothing.
+ */
+export async function revokePublicSharesForTeam(
+  teamId: string,
+): Promise<number> {
+  const rows = await db()
+    .update(sharePublicShares)
+    .set({ status: "revoked", revokedAt: new Date() })
+    .where(
+      and(
+        eq(sharePublicShares.ownerTeamId, teamId),
+        eq(sharePublicShares.status, "public"),
+      ),
+    )
+    .returning({ id: sharePublicShares.id });
+  return rows.length;
+}
+
 export async function markPublicShareClaimed(
   slug: string,
   claimedByTeamId: string,

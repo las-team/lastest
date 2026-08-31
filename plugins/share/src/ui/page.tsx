@@ -76,6 +76,11 @@ export async function generateMetadata({
   const share = await queries.getPublicShareBySlug(slug);
   if (!share || share.status !== "public") return { title: "Share removed" };
   const { host } = shareWiring();
+  // Same refusal as the page below — the card must not leak a title or an
+  // og:image for a share the owner's segment no longer permits.
+  const ownerFlags = await host.getOwnerTeamFlags(share.repositoryId);
+  if (ownerFlags && !ownerFlags.sharingPermitted)
+    return { title: "Share removed" };
   const rendered = await host.getBuildRenderContext({
     buildId: share.buildId,
     testId: share.testId,
@@ -238,6 +243,15 @@ export default async function PublicSharePage({
 
   const share = await queries.getPublicShareBySlug(slug);
   if (!share || share.status !== "public") notFound();
+
+  // Refusing to *mint* a link is not the whole control: a team that flips into
+  // the regulated profile already has live ones, and every one of them keeps
+  // serving run screenshots to anyone holding the URL. `toggleRegulatedMode`
+  // revokes them, and this is the backstop for anything that revocation misses
+  // — a partial revoke, a share minted in a race, a row restored from a
+  // backup. Cheap: one flag read before the expensive render context.
+  const ownerFlags = await host.getOwnerTeamFlags(share.repositoryId);
+  if (ownerFlags && !ownerFlags.sharingPermitted) notFound();
 
   const rendered = await host.getBuildRenderContext({
     buildId: share.buildId,
@@ -435,7 +449,11 @@ export default async function PublicSharePage({
   // follow) is Early Adopter only. Viewers here are anonymous, so the gate
   // reads the flag of the team that published the share.
   const interactivePlayback = isInteractivePlaybackEnabled(
-    await host.getOwnerTeamFlags(repoIdForNotes),
+    // Already read above for the sharing refusal when the share carries a
+    // repository; only re-read for the (legacy) rows that do not.
+    share.repositoryId === repoIdForNotes
+      ? ownerFlags
+      : await host.getOwnerTeamFlags(repoIdForNotes),
   );
 
   // Platform-wide activity numbers for the social-proof strip near the claim
