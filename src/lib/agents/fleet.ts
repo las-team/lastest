@@ -3,6 +3,9 @@ import type {
   AgentSessionKind,
   AgentStepState,
 } from "@/lib/db/schema";
+// Type-only, so this module stays pure and importable from a client component:
+// `explorer-reads` is `server-only`, and the import is erased at compile time.
+import type { ExplorerFleetSession } from "@/lib/core/explorer-reads";
 
 /**
  * The slice of a QA-agent task this module needs.
@@ -183,6 +186,47 @@ export function idleRow(kind: FleetAgentKind): FleetRow {
     startedAt: null,
     blockedOn: null,
     holdsBrowser: false,
+  };
+}
+
+/**
+ * The explorer's projection, as a roster row.
+ *
+ * Kept here beside `rowFromSession` rather than in the read port so both
+ * sources land on one shape and one set of rules — the console must not care
+ * which table a row came from.
+ *
+ * Takes `ExplorerFleetSession` itself rather than an inline structural copy of
+ * it: two hand-maintained shapes that must stay byte-identical would let a
+ * field added to the projection be silently dropped here.
+ */
+export function rowFromExplorer(session: ExplorerFleetSession): FleetRow {
+  const state: FleetState =
+    session.status === "paused"
+      ? "paused"
+      : session.awaitingUser
+        ? "blocked"
+        : "working";
+  const narration = session.stepLabel
+    ? session.stepDetail
+      ? `${session.stepLabel} — ${session.stepDetail}`
+      : session.stepLabel
+    : null;
+  return {
+    id: session.id,
+    kind: "explorer",
+    label: KIND_LABELS.explorer,
+    state,
+    narration: session.targetUrl
+      ? `${narration ?? "Exploring"} · ${session.targetUrl}`
+      : narration,
+    progress: session.progress,
+    // Explorer's steps carry no sub-agent role the way a QA run's do.
+    role: null,
+    href: KIND_HREFS.explorer,
+    startedAt: session.startedAt,
+    blockedOn: state === "blocked" ? session.stepLabel : null,
+    holdsBrowser: state === "working" || state === "blocked",
   };
 }
 

@@ -12,12 +12,14 @@ import { getQaConsoleQueue } from "@lastest/plugin-qa-agent/reads";
 import {
   escalationsFrom,
   idleRow,
+  rowFromExplorer,
   rowFromSession,
   sortRoster,
   summarise,
   type FleetAgentKind,
   type FleetRow,
 } from "@/lib/agents/fleet";
+import { getLiveExplorerSession } from "@/lib/core/explorer-reads";
 import { AgentsConsole } from "@/components/agents/agents-console-client";
 import { QaAgentUpgradeGate } from "@lastest/plugin-qa-agent/ui/qa-agent-upgrade-gate";
 import {
@@ -35,9 +37,10 @@ export const dynamic = "force-dynamic";
  * This is the only sidebar entry for agent work: the QA agent and the Explorer
  * are reached by drilling through a row rather than by their own nav items.
  *
- * Explorer rows are absent from this PR. They live in the explorer plugin's
- * own table and arrive through `src/lib/core/explorer-reads.ts`, which is the
- * next change in the stack — until then the Explorer keeps its sidebar entry.
+ * The roster is composed from two stores that cannot be joined in SQL: core's
+ * `agent_sessions`, and the explorer plugin's own `explorer_sessions`, which
+ * core reaches only through `src/lib/core/explorer-reads.ts`. Both become
+ * `FleetRow`s before the console sees them.
  */
 export default async function AgentsPage() {
   const session = await getCurrentSession();
@@ -91,28 +94,34 @@ export default async function AgentsPage() {
     );
   }
 
-  const [liveSessions, settled, queue, runUsage] = await Promise.all([
-    listLiveAgentSessions(selectedRepo.id).catch(() => []),
-    listRecentSettledAgentSessions(selectedRepo.id).catch(() => []),
-    // Only the two things the console renders — the escalations and the queued
-    // count — rather than every task on the repo. This page is
-    // `force-dynamic`, so the query runs on every navigation.
-    getQaConsoleQueue(selectedRepo.id).catch(() => ({
-      needsInput: [],
-      queuedCount: 0,
-    })),
-    teamId ? getTeamRunUsage(teamId).catch(() => null) : Promise.resolve(null),
-  ]);
+  const [liveSessions, settled, queue, runUsage, explorerSession] =
+    await Promise.all([
+      listLiveAgentSessions(selectedRepo.id).catch(() => []),
+      listRecentSettledAgentSessions(selectedRepo.id).catch(() => []),
+      // Only the two things the console renders — the escalations and the
+      // queued count — rather than every task on the repo. This page is
+      // `force-dynamic`, so the query runs on every navigation.
+      getQaConsoleQueue(selectedRepo.id).catch(() => ({
+        needsInput: [],
+        queuedCount: 0,
+      })),
+      teamId
+        ? getTeamRunUsage(teamId).catch(() => null)
+        : Promise.resolve(null),
+      getLiveExplorerSession(selectedRepo.id),
+    ]);
 
   // One row per live session, plus an idle row for every kind that has none —
   // the roster is the whole fleet, not just what happens to be running.
-  const liveRows = liveSessions.map(rowFromSession);
+  const liveRows = [
+    ...liveSessions.map(rowFromSession),
+    ...(explorerSession ? [rowFromExplorer(explorerSession)] : []),
+  ];
   const kindsWithLiveRow = new Set<FleetAgentKind>(liveRows.map((r) => r.kind));
+  const rosterKinds: FleetAgentKind[] = [...FLEET_AGENT_KINDS, "explorer"];
   const rows: FleetRow[] = sortRoster([
     ...liveRows,
-    ...FLEET_AGENT_KINDS.filter(
-      (k: FleetAgentKind) => !kindsWithLiveRow.has(k),
-    ).map(idleRow),
+    ...rosterKinds.filter((k) => !kindsWithLiveRow.has(k)).map(idleRow),
   ]);
 
   return (

@@ -3,6 +3,7 @@ import type { AgentSession, AgentStepState } from "@/lib/db/schema";
 import {
   deriveState,
   escalationsFrom,
+  rowFromExplorer,
   rowFromSession,
   sortRoster,
   summarise,
@@ -215,5 +216,56 @@ describe("escalationsFrom", () => {
   it("prefers the agent's reply over the task title as the question", () => {
     const out = escalationsFrom([], [task({ agentReply: "Need fresh codes" })]);
     expect(out[0].question).toBe("Need fresh codes");
+  });
+});
+
+describe("rowFromExplorer", () => {
+  const explorer = (over: Record<string, unknown> = {}) => ({
+    id: "x1",
+    status: "active" as const,
+    stepLabel: "Act",
+    stepDetail: "scenario 3 of 4",
+    progress: 62,
+    awaitingUser: false,
+    startedAt: new Date("2026-08-27T10:00:00Z"),
+    targetUrl: "https://staging.example.dev",
+    ...over,
+  });
+
+  it("lands on the same shape as a core session row", () => {
+    const row = rowFromExplorer(explorer());
+    expect(row).toMatchObject({
+      kind: "explorer",
+      state: "working",
+      progress: 62,
+      holdsBrowser: true,
+      href: "/explorer",
+    });
+  });
+
+  it("narrates step, detail and target together", () => {
+    expect(rowFromExplorer(explorer()).narration).toBe(
+      "Act — scenario 3 of 4 · https://staging.example.dev",
+    );
+  });
+
+  it("falls back to the step label when no substep is running", () => {
+    expect(rowFromExplorer(explorer({ stepDetail: null })).narration).toBe(
+      "Act · https://staging.example.dev",
+    );
+  });
+
+  it("frees the browser when the run is paused", () => {
+    const row = rowFromExplorer(explorer({ status: "paused" }));
+    expect(row.state).toBe("paused");
+    expect(row.holdsBrowser).toBe(false);
+  });
+
+  it("becomes an escalation when explorer grows a human gate", () => {
+    // `awaitingUser` is always false today — this pins the wiring so the day
+    // the pipeline gains a gate, the console already routes it correctly.
+    const rows = [rowFromExplorer(explorer({ awaitingUser: true }))];
+    expect(rows[0].state).toBe("blocked");
+    expect(escalationsFrom(rows, [])).toHaveLength(1);
   });
 });

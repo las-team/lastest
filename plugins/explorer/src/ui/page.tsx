@@ -31,6 +31,11 @@ export interface ExplorerPageProps {
   browserViewer?: ComponentType<{ streamUrl: string }>;
   /** Shown instead of the tool when the team's plan does not include it. */
   upgradeGate?: ReactNode;
+  /** Rendered above the title. Core passes the "Agents › Explorer" trail —
+   *  the console is the only sidebar entry for agent work, so this page needs
+   *  a visible parent. A plugin cannot import a core component, so it arrives
+   *  as a node, the same seam `upgradeGate` and `noRepository` already use. */
+  breadcrumb?: ReactNode;
   /** Shown when no repository is selected. */
   noRepository?: ReactNode;
 }
@@ -42,6 +47,7 @@ export default async function ExplorerPage({
   browserViewer,
   upgradeGate,
   noRepository,
+  breadcrumb,
 }: ExplorerPageProps) {
   if (!repositoryId) return <>{noRepository ?? null}</>;
 
@@ -87,7 +93,8 @@ export default async function ExplorerPage({
     <div className="flex-1 p-6 overflow-auto">
       <div className="max-w-5xl mx-auto space-y-6">
         <header className="space-y-1">
-          <h1 className="text-2xl font-semibold flex items-center gap-2">
+          {breadcrumb}
+          <h1 className="text-2xl font-semibold flex items-center gap-2 pt-1">
             <Compass className="h-6 w-6" />
             Explorer
           </h1>
