@@ -293,14 +293,12 @@ describe("environments and SUT connectors", () => {
     // through an identically shaped map. This is the whole feature.
     const uatConn = connectors.find((c) => c.label === "Vault UAT")!;
     const prodConn = connectors.find((c) => c.label === "Vault Production")!;
-    const inProd = (await queries.getCredentialsForRun(
-      repoId,
-      prodConn.environmentId,
-    )).credentials;
-    const inUat = (await queries.getCredentialsForRun(
-      repoId,
-      uatConn.environmentId,
-    )).credentials;
+    const inProd = (
+      await queries.getCredentialsForRun(repoId, prodConn.environmentId)
+    ).credentials;
+    const inUat = (
+      await queries.getCredentialsForRun(repoId, uatConn.environmentId)
+    ).credentials;
     expect(inProd.vault.password).toBe(PROD_SECRET);
     expect(inUat.vault.password).toBe(UAT_SECRET);
     expect(Object.keys(inProd.vault).sort()).toEqual(
@@ -352,10 +350,9 @@ describe("environments and SUT connectors", () => {
     // store while the UI says the org is disconnected.
     const creds = await credentialsForRepo();
     expect(creds).toHaveLength(1);
-    const remaining = (await queries.getCredentialsForRun(
-      repoId,
-      creds[0].environmentId,
-    )).credentials;
+    const remaining = (
+      await queries.getCredentialsForRun(repoId, creds[0].environmentId)
+    ).credentials;
     expect(remaining.vault.password).toBe(UAT_SECRET);
   });
 

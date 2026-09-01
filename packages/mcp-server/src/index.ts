@@ -1,25 +1,25 @@
 import { Command } from "commander";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { LastestClient } from "./client.js";
-import { createServer } from "./server.js";
-import { startHttpServer } from "./http-server.js";
-import type { ToolAccessLevel } from "./policy.js";
+import { LastestClient } from "./client";
+import { createServer } from "./server";
+import { startHttpServer } from "./http-server";
+import type { ToolAccessLevel } from "./policy";
 
 // Re-exports so the Next.js HTTP route (and any other consumer) can build
 // an MCP server with the same tool surface as the stdio CLI.
-export { LastestClient } from "./client.js";
-export type { LastestClientConfig, ToolResponse } from "./client.js";
-export { createServer } from "./server.js";
-export type { CreateServerOptions } from "./server.js";
-export { startHttpServer } from "./http-server.js";
-export type { HttpServerOptions } from "./http-server.js";
+export { LastestClient } from "./client";
+export type { LastestClientConfig, ToolResponse } from "./client";
+export { createServer } from "./server";
+export type { CreateServerOptions } from "./server";
+export { startHttpServer } from "./http-server";
+export type { HttpServerOptions } from "./http-server";
 export {
   TOOL_RULES,
   decideTool,
   levelAllows,
   deniedActionMessage,
-} from "./policy.js";
-export type { ToolAccessLevel, ToolRule, ToolDecision } from "./policy.js";
+} from "./policy";
+export type { ToolAccessLevel, ToolRule, ToolDecision } from "./policy";
 
 const ACCESS_LEVELS: ToolAccessLevel[] = ["read", "write", "full"];
 

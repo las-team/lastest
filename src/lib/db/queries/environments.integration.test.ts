@@ -312,7 +312,8 @@ describe("per-environment credentials", () => {
       ],
     });
 
-    const inUat = (await getCredentialsForRun(repositoryId, uat.id)).credentials;
+    const inUat = (await getCredentialsForRun(repositoryId, uat.id))
+      .credentials;
     const unscoped = (await getCredentialsForRun(repositoryId)).credentials;
 
     expect(inUat.vault.password).toBe("uat-pw");
@@ -335,7 +336,8 @@ describe("per-environment credentials", () => {
       label: "SF",
       fields: [{ key: "password", value: "sf-pw", secret: true }],
     });
-    const inUat = (await getCredentialsForRun(repositoryId, uat.id)).credentials;
+    const inUat = (await getCredentialsForRun(repositoryId, uat.id))
+      .credentials;
     expect(inUat.salesforce.password).toBe("sf-pw");
   });
 
