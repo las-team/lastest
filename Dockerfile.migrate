@@ -12,12 +12,19 @@
 #   - postgres     : the DB driver drizzle-kit connects through, and what
 #                    migrate.js's pre-steps require() for the backfill SQL
 #
-# No @lastest/* workspace packages are needed: packages/db/src/schema.ts imports
-# @lastest/eb-protocol as `import type` only (and re-exports it as `export type`),
-# both of which esbuild — drizzle-kit's schema loader — erases without resolving.
-# So only the schema barrel plus its own ./schema/ directory are copied; the
-# cross-package imports vanish. The barrel `export * from "./schema/<mod>"` is a
-# VALUE re-export, so esbuild DOES resolve it — the directory must come along.
+# Almost no @lastest/* workspace package is needed: packages/db/src/schema.ts
+# imports @lastest/eb-protocol and @lastest/triage-model as `import type` only
+# (and re-exports them as `export type`), both of which esbuild — drizzle-kit's
+# schema loader — erases without resolving. So the schema barrel plus its own
+# ./schema/ directory are copied; those cross-package imports vanish. The barrel
+# `export * from "./schema/<mod>"` is a VALUE re-export, so esbuild DOES resolve
+# it — the directory must come along.
+#
+# The one exception is @lastest/coverage-model: schema/coverage.ts and
+# schema/tests.ts re-export its DEFAULT_* policies as VALUES, so esbuild must
+# resolve it. It is a dependency-free pure-TypeScript lib, so it is dropped in
+# as a bare node_modules entry (its package.json "main" points at src/index.ts,
+# which esbuild loads as TS) rather than dragging in a pnpm workspace install.
 #
 # NOT traced. scripts/migrate.js talks to `postgres` directly and never loads
 # @lastest/db's instrumented client, so the DB spans in packages/db/src/tracing.ts
@@ -48,6 +55,8 @@ RUN npm install --no-audit --no-fund \
 # files, so the drizzle/ out-dir is intentionally absent.
 COPY packages/db/src/schema.ts ./packages/db/src/schema.ts
 COPY packages/db/src/schema/ ./packages/db/src/schema/
+COPY libs/coverage-model/package.json ./node_modules/@lastest/coverage-model/
+COPY libs/coverage-model/src/ ./node_modules/@lastest/coverage-model/src/
 COPY drizzle.config.ts ./
 COPY scripts/migrate.js ./scripts/migrate.js
 

@@ -5,9 +5,10 @@
 # via @lastest/pool-service/client (EB_POOL_SERVICE_URL / _TOKEN).
 #
 # Self-contained: builds the TypeScript inside the image (esbuild bundles
-# @lastest/db + @lastest/eb-protocol + @lastest/shared straight from source,
-# so the runtime stage ships two dependency-free CommonJS bundles — no
-# node_modules at all). Build context is the repo root:
+# @lastest/db + @lastest/eb-protocol + @lastest/shared + the pure model libs
+# under libs/ straight from source, so the runtime stage ships two
+# dependency-free CommonJS bundles — no node_modules at all). Build context is
+# the repo root:
 #   docker build -f packages/pool-service/Dockerfile -t lastest-pool-service:latest .
 
 # -----------------------------------------------------------------------------
@@ -24,6 +25,11 @@ COPY packages/shared/package.json ./packages/shared/
 COPY packages/eb-protocol/package.json ./packages/eb-protocol/
 COPY packages/db/package.json ./packages/db/
 COPY packages/pool-service/package.json ./packages/pool-service/
+# @lastest/db's own workspace deps. `pnpm install` only writes a *relative*
+# symlink for each, so a missing directory here fails not at install time but
+# later, as an esbuild "Could not resolve" during the bundle.
+COPY libs/coverage-model/package.json ./libs/coverage-model/
+COPY libs/triage-model/package.json ./libs/triage-model/
 
 RUN pnpm install --frozen-lockfile
 
@@ -31,6 +37,12 @@ COPY packages/shared/ ./packages/shared/
 COPY packages/eb-protocol/ ./packages/eb-protocol/
 COPY packages/db/ ./packages/db/
 COPY packages/pool-service/ ./packages/pool-service/
+# Sources for the two pure model libs. coverage-model is a hard requirement —
+# packages/db/src/schema/{coverage,tests}.ts *value*-re-export its defaults;
+# triage-model is type-only today (esbuild erases it) and comes along so a
+# future value import doesn't break this image.
+COPY libs/coverage-model/ ./libs/coverage-model/
+COPY libs/triage-model/ ./libs/triage-model/
 
 RUN pnpm --filter @lastest/pool-service build
 
