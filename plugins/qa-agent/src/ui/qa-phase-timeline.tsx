@@ -1,5 +1,6 @@
 "use client";
 
+import { activeStep as findActiveStep } from "@lastest/agent-steps";
 import type {
   QaSessionRow as AgentSession,
   QaStepState as AgentStepState,
@@ -102,12 +103,7 @@ export function PhaseTimeline({
    *  already draws the phases as its own pipeline strip. */
   detailOnly?: boolean;
 }) {
-  const activeStep = session.steps.find(
-    (s) =>
-      s.status === "active" ||
-      s.status === "waiting_user" ||
-      s.status === "failed",
-  );
+  const activeStep = findActiveStep(session);
   const body = (
     <>
       {!detailOnly && (

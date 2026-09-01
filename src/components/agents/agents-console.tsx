@@ -1,5 +1,8 @@
-"use client";
-
+// Deliberately a server component (no "use client"): nothing here has state
+// or handlers, and `timeAgo()` reads the clock at render — as a client
+// component that runs twice, once on the server and once on hydration, and a
+// minute boundary between the two is a hydration mismatch. Rendered once on
+// the server it cannot disagree with itself.
 import Link from "next/link";
 import {
   Bot,
@@ -7,9 +10,9 @@ import {
   ChevronRight,
   Circle,
   Compass,
+  HeartPulse,
   ListTodo,
   Network,
-  Play,
   Stethoscope,
   UserRound,
   XCircle,
@@ -18,6 +21,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { timeAgo } from "@/lib/utils";
+import {
+  computeRunUsageProjection,
+  formatRunCount,
+  formatRunMinutes,
+} from "@/lib/billing/run-usage";
 import type {
   Escalation,
   FleetAgentKind,
@@ -28,11 +36,9 @@ import type {
 
 const KIND_ICONS: Record<FleetAgentKind, typeof Bot> = {
   qa: Bot,
-  ranger: Play,
-  play: Play,
-  quickstart: Bot,
   explorer: Compass,
   triage: Stethoscope,
+  healer: HeartPulse,
 };
 
 const STATE_META: Record<
@@ -196,9 +202,17 @@ export function AgentsConsole({
   queuedCount: number;
   runUsage: { used: number; quota: number } | null;
 }) {
+  // Same projection and formatting as the settings card — minutes accumulate
+  // as fractions, so the raw number would render as `12.333333 / 1000`.
   const minutePct =
     runUsage && runUsage.quota > 0
-      ? Math.min(100, Math.round((runUsage.used / runUsage.quota) * 100))
+      ? Math.min(
+          100,
+          Math.round(
+            computeRunUsageProjection(runUsage.used, runUsage.quota).usedPct *
+              100,
+          ),
+        )
       : null;
 
   return (
@@ -262,7 +276,8 @@ export function AgentsConsole({
                   />
                 </span>
                 <span className="font-mono text-xs font-medium text-foreground">
-                  {runUsage.used} / {runUsage.quota}
+                  {formatRunMinutes(runUsage.used)} /{" "}
+                  {formatRunCount(runUsage.quota)}
                 </span>
               </span>
             )}

@@ -1778,6 +1778,23 @@ async function runBuildAsync(
                 console.error(`[triage] run failed for build ${buildId}:`, e);
               }),
             )
+            .then(() => {
+              // Fire-and-forget Healer — AFTER triage, because it acts only on
+              // failures triage classified as a test problem. Gated the same
+              // way (plus its own toggle), single-flight per repo, and hard
+              // budgets inside `runHealer`; a build on any other plan, or a
+              // verify run the healer itself launched, is a no-op here.
+              if (failedCount > 0) {
+                return import("@/lib/healer/run").then(({ runHealer }) =>
+                  runHealer(buildId).catch((e) => {
+                    console.error(
+                      `[healer] run failed for build ${buildId}:`,
+                      e,
+                    );
+                  }),
+                );
+              }
+            })
             .catch(console.error);
         }
       });

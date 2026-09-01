@@ -41,11 +41,13 @@ export default async function QaAgentPage() {
 
   // QA Agent is a Pro-tier feature. Gate before anything else so teams below
   // the required plan always land on the upgrade screen (regardless of whether
-  // they've connected a repo yet).
-  if (team && !hasQaAgentAccess(team.plan, isBillingEnabled())) {
+  // they've connected a repo yet). A request that resolves no team is gated
+  // as free, the same verdict `/agents` and the sidebar lock reach — the three
+  // surfaces must agree (settings-ui.integration.test.ts §2.9).
+  if (!hasQaAgentAccess(team?.plan ?? "free", isBillingEnabled())) {
     return (
       <QaAgentUpgradeGate
-        currentPlanName={planConfig(team.plan).name}
+        currentPlanName={planConfig(team?.plan ?? "free").name}
         requiredPlanName={qaAgentMinPlanName()}
       />
     );

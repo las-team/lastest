@@ -80,6 +80,9 @@ export async function saveAISettings(data: {
   explorerStyleRotation?: string | null;
   explorerModel?: string | null;
   triageAgentEnabled?: boolean;
+  healerAgentEnabled?: boolean;
+  healerMaxAttemptsPerTest?: number;
+  healerMaxTestsPerBuild?: number;
 }) {
   const session = data.repositoryId
     ? await requireRepoAccess(data.repositoryId)

@@ -59,6 +59,7 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@lastest/agent-steps": "workspace:*",
     "@lastest/ai-kit": "workspace:*",
     "@lastest/analytics": "workspace:*",
     "@lastest/contracts": "workspace:*",

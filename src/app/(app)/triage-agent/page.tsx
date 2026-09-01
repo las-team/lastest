@@ -40,10 +40,10 @@ export default async function TriageAgentPage() {
 
   // Pro-gated, same gate as `/agents` and `/qa-agent`, and checked before the
   // repo lookup so a team below the plan always lands on the upgrade screen.
-  if (team && !hasQaAgentAccess(team.plan, isBillingEnabled())) {
+  if (!hasQaAgentAccess(team?.plan ?? "free", isBillingEnabled())) {
     return (
       <QaAgentUpgradeGate
-        currentPlanName={planConfig(team.plan).name}
+        currentPlanName={planConfig(team?.plan ?? "free").name}
         requiredPlanName={qaAgentMinPlanName()}
         title="Triage agent"
         icon={Stethoscope}

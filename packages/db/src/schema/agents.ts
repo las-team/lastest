@@ -35,7 +35,8 @@ export type AgentSessionKind =
   | "quickstart"
   | "ranger"
   | "qa"
-  | "triage";
+  | "triage"
+  | "healer";
 
 export type AgentStepId =
   | "settings_check"
@@ -77,7 +78,13 @@ export type AgentStepId =
   | "triage_collect"
   | "triage_cluster"
   | "triage_assess"
-  | "triage_publish";
+  | "triage_publish"
+  // Healer agent (build-scoped test repairer, /healer-agent page)
+  | "healer_collect"
+  | "healer_gate"
+  | "healer_heal"
+  | "healer_verify"
+  | "healer_report";
 
 export type AgentStepStatus =
   | "pending"
@@ -320,8 +327,38 @@ import type {
   QaTestPlan,
 } from "@lastest/eb-protocol";
 
+/** Why the Healer did, or did not, touch a failing test. */
+export type HealerOutcomeKind =
+  | "healed"
+  | "still_failing"
+  | "skipped_real_bug"
+  | "skipped_environment"
+  | "skipped_unclassified"
+  | "skipped_human_verdict"
+  | "skipped_budget"
+  | "skipped_cap"
+  | "heal_failed";
+
+export interface HealerOutcome {
+  testId: string;
+  testName: string;
+  outcome: HealerOutcomeKind;
+  /** Heal attempts spent on this test across campaigns (post-run). */
+  attempts: number;
+  /** One line for the report — the triage classification, the error, or why
+   *  the healer gave up. */
+  detail?: string;
+}
+
 export interface AgentSessionMetadata {
   buildIds?: string[];
+  /** Healer agent — per-test outcome ledger for the campaign. See
+   *  `src/lib/healer/run.ts`. */
+  healerOutcomes?: HealerOutcome[];
+  /** Healer agent — how many heal→verify rounds the campaign ran. */
+  healerRounds?: number;
+  /** Healer agent — the test run the current verify round is waiting on. */
+  verifyRunId?: string;
   fixAttempts?: Record<string, number>;
   codeHashes?: Record<string, string[]>;
   testsCreated?: number;

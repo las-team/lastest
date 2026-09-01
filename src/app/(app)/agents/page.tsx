@@ -12,6 +12,7 @@ import { getQaConsoleQueue } from "@lastest/plugin-qa-agent/reads";
 import {
   escalationsFrom,
   idleRow,
+  isFleetAgentKind,
   rowFromExplorer,
   rowFromSession,
   sortRoster,
@@ -20,7 +21,7 @@ import {
   type FleetRow,
 } from "@/lib/agents/fleet";
 import { getLiveExplorerSession } from "@/lib/core/explorer-reads";
-import { AgentsConsole } from "@/components/agents/agents-console-client";
+import { AgentsConsole } from "@/components/agents/agents-console";
 import { QaAgentUpgradeGate } from "@lastest/plugin-qa-agent/ui/qa-agent-upgrade-gate";
 import {
   hasQaAgentAccess,
@@ -130,12 +131,16 @@ export default async function AgentsPage() {
       rows={rows}
       summary={summarise(rows)}
       escalations={escalationsFrom(rows, queue.needsInput)}
-      settled={settled.map((s) => ({
-        id: s.id,
-        kind: s.kind,
-        status: s.status,
-        completedAt: s.completedAt ?? s.createdAt ?? null,
-      }))}
+      settled={settled
+        // The query already selects on FLEET_AGENT_KINDS; the guard narrows
+        // the type and drops anything that slipped through.
+        .filter((s) => isFleetAgentKind(s.kind))
+        .map((s) => ({
+          id: s.id,
+          kind: s.kind as FleetAgentKind,
+          status: s.status,
+          completedAt: s.completedAt ?? s.createdAt ?? null,
+        }))}
       queuedCount={queue.queuedCount}
       runUsage={
         runUsage

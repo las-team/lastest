@@ -90,6 +90,25 @@ export function deriveRunUsageBannerState(params: {
   return "ok";
 }
 
+/**
+ * Deterministic thousands grouping (no locale-dependent `toLocaleString`, which
+ * would differ between SSR and CSR and trip hydration).
+ */
+export function formatRunCount(n: number): string {
+  return Math.round(n)
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+/**
+ * Run-minutes for display. Minutes accumulate as fractions (see
+ * `getTeamRunUsage`), so a raw value renders as `12.333333`; under ten minutes
+ * one decimal is meaningful, above that whole minutes are.
+ */
+export function formatRunMinutes(minutes: number): string {
+  return minutes < 10 ? minutes.toFixed(1) : formatRunCount(minutes);
+}
+
 const MONTHS_ABBR = [
   "Jan",
   "Feb",

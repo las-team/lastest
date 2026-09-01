@@ -175,9 +175,10 @@ Create tests (one-time)          Run tests (forever)
 - **Route Discovery** — AI scans your source code to discover routes and suggest tests.
 - **MCP Selector Validation** — Real-time selector validation on live pages via Claude MCP.
 - **Play Agent (Autonomous)** — One-click 11-step pipeline: check settings → select repo → environment setup → scan & template → plan areas → review → generate tests → run → fix failures (up to 3 attempts) → re-run → summary. Uses specialized sub-agents (Orchestrator, Planner, Scout, Diver, Generator, Healer). Pause/resume, approve plans, skip steps.
-- **Agents Console** — `/agents` is the single entry point for agent work: one roster of every agent working the selected repo, what each is doing, what it is blocked on, and which embedded browsers it is holding. Paused (browser released) and blocked-on-a-human (browser still held) are shown as different states, and escalations from parked sessions and pushed-back tasks are merged into one queue. Drill into a row to reach the QA agent, the Triage agent, or the Explorer. Pro-plan gated.
+- **Agents Console** — `/agents` is the single entry point for agent work: one roster of every agent working the selected repo, what each is doing, what it is blocked on, and which embedded browsers it is holding. Paused (browser released) and blocked-on-a-human (browser still held) are shown as different states, and escalations from parked sessions and pushed-back tasks are merged into one queue. Drill into a row to reach the QA agent, the Triage agent, the Healer, or the Explorer (Ranger, Play and QuickStart are one-shot onboarding flows and have no roster row). Pro-plan gated.
 - **QA Agent** — Autonomous comprehensive-suite builder on an eight-phase pipeline: preflight → discovery (static GitHub-tree route scan + live EB crawl with verified selectors and observed API endpoints) → risk-prioritized plan → human plan review (approve / exclude / send feedback) → generation (one test per plan item over the EB's CDP endpoint) → run → heal → summary. Console shows a live pipeline strip, coverage matrix, direction queue, and activity feed.
 - **Triage Agent** — Replaces the two independent AI passes (per-diff analysis and per-test failure triage) with one build-scoped classifier that groups by root cause, ranks by risk, and suggests verdicts.
+- **Healer Agent** — After triage, repairs failing tests in a heal → verify loop and stops itself. It only touches failures triage classified as a **test problem** (`test_maintenance`, `flaky_test`); real regressions, environment issues, unclassified failures and cases a reviewer already decided are left red with the reason recorded. Hard stops: a per-test attempt budget (default 2, counted from `ai_fix` versions since the test last passed or was hand-edited), a per-build cap (default 5), an identical-error no-progress guard, one campaign per repo at a time, and heal/verify timeouts. Every patch is a versioned `ai_fix` edit you can revert. `/healer-agent` owns the toggle, the budgets, a Stop button and a per-test outcome ledger.
 - **Agent Monitoring & Activity Feed** — Real-time tracking of Play Agent sessions with step-by-step progress, SSE streaming, and session history. Monitor active/paused/completed agents from the dashboard.
 - **Codebase Intelligence** — Automatic detection of project context (framework, CSS framework, auth, state management, API layer, key dependencies) to enrich AI prompts. 100+ package database mapping dependencies to testing recommendations.
 
@@ -437,7 +438,8 @@ For CI/CD, the `@lastest/runner` CLI creates a build over HTTP and polls for the
 - **Self-hosted with unlimited screenshots** — no per-screenshot pricing, no volume limits when you run it on your own infra
 - **Your data never leaves your server** — screenshots stay local, no cloud dependency
 - **MCP server with 29 consolidated tools** — let AI agents (Claude, etc.) run tests, review diffs, heal failures, and suggest app-code fixes autonomously; reachable remotely over OAuth 2.1 with a read/write/full tool policy, and published to in-browser agents via WebMCP
-- **Agents console**: one roster for the QA agent, the Triage agent, and the Explorer — with what each is doing, what it is blocked on, and which browsers it is holding
+- **Agents console**: one roster for the QA agent, the Triage agent, the Healer, and the Explorer — with what each is doing, what it is blocked on, and which browsers it is holding
+- **Self-healing with guardrails**: the Healer fixes only what triage called a test problem, inside a declared budget, and escalates everything else with evidence — a real bug is a valid test result, not something to heal away
 - **QA Agent**: eight-phase autonomous suite builder (discover → plan → human review → generate → run → heal → summary) grounded in a live crawl of your app
 - **Root-cause triage**: failures are clustered by cause with a run-level narrative and a suggested verdict per cluster, not classified one test at a time
 - **Environments + SUT connectors**: run one suite against PROD and UAT with separate baselines, and connect straight to Veeva Vault or Salesforce
@@ -734,6 +736,7 @@ EARLY_ADOPTER_PRICING=            # Default: true — show/charge early-adopter 
 - [x] QA Agent (eight-phase autonomous suite builder with human plan review)
 - [x] Agents console (`/agents` roster, escalations, held-browser capacity read-out, Pro-gated)
 - [x] Triage agent + Run Results screen (root-cause clustering replacing the two per-diff/per-test AI passes)
+- [x] Healer agent (triage-gated heal → verify loop with per-test / per-build budgets; `/healer-agent`)
 - [x] Full-evidence GitHub issues, AI-engineer assignment, confirm-on-green auto-close
 - [x] Per-repo credential store with run-time injection (encrypted, outside the substitution path)
 - [x] Environments as a first-class object (per-environment variables, baselines, promotion, sandbox refresh)

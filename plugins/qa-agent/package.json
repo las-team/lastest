@@ -18,6 +18,7 @@
     "./wiring": "./src/wiring.ts"
   },
   "dependencies": {
+    "@lastest/agent-steps": "workspace:*",
     "@lastest/ai-kit": "workspace:*",
     "@lastest/contracts": "workspace:*",
     "@lastest/core-data": "workspace:*",
