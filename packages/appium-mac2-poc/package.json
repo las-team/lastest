@@ -1,0 +1,15 @@
+{
+  "name": "appium-mac2-poc",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "serve": "APPIUM_HOME=\"$PWD/.appium\" appium --port 4723",
+    "probe": "node probes/03-interact.mjs",
+    "probe:all": "node probes/01-session.mjs && node probes/02-window-and-selectors.mjs && node probes/03-interact.mjs"
+  },
+  "dependencies": {
+    "appium": "3.6.0",
+    "appium-mac2-driver": "4.0.5"
+  }
+}

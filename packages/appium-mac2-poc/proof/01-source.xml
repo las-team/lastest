@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<XCUIElementTypeApplication elementType="2" identifier="" label="" title="WhatsApp" enabled="false" selected="false" x="0" y="0" width="0" height="0">
+    <XCUIElementTypeWindow elementType="4" identifier="SceneWindow" label="" title="‎WhatsApp" enabled="false" selected="false" x="2430" y="-94" width="960" height="1049">
+        <XCUIElementTypeGroup elementType="3" identifier="" label="" title="" enabled="false" selected="false" x="2430" y="-94" width="960" height="1049">
+            <XCUIElementTypeWindow elementType="4" identifier="" label="" title="" enabled="true" selected="false" x="2430" y="-94" width="960" height="1049">
+                <XCUIElementTypeOther elementType="1" identifier="" label="" title="" enabled="true" selected="false" x="2430" y="-94" width="960" height="1049">
+                    <XCUIElementTypeOther elementType="1" identifier="" label="" title="" enabled="true" selected="false" x="2430" y="-94" width="960" height="1049"></XCUIElementTypeOther>
+                </XCUIElementTypeOther>
+                <XCUIElementTypeOther elementType="1" identifier="" label="" title="" enabled="true" selected="false" x="2430" y="-94" width="960" height="1049">
+                    <XCUIElementTypeOther elementType="1" identifier="" label="" title="" enabled="true" selected="false" x="2430" y="-94" width="960" height="1049">
+                        <XCUIElementTypeOther elementType="1" identifier="" label="" title="" enabled="true" selected="false" x="2430" y="-94" width="960" height="1049">
+                            <XCUIElementTypeOther elementType="1" identifier="" label="" title="" enabled="true" selected="false" x="2430" y="-94" width="960" height="1049">
+                                <XCUIElementTypeOther elementType="1" identifier="" label="" title="" enabled="true" selected="false" x="2430" y="-94" width="960" height="1049">
+                                    <XCUIElementTypeOther elementType="1" identifier="" label="" title="" enabled="true" selected="false" x="2454" y="215" width="912" height="432">
+                                        <XCUIElementTypeOther elementType="1" identifier="" label="" title="" enabled="true" selected="false" x="2770" y="215" width="280" height="280"></XCUIElementTypeOther>
+                                        <XCUIElementTypeStaticText elementType="48" identifier="" label="‎Welcome to WhatsApp" title="" enabled="true" selected="false" x="2783" y="535" width="255" height="28"></XCUIElementTypeStaticText>
+                                        <XCUIElementTypeOther elementType="1" identifier="" label="" title="" enabled="true" selected="false" x="2732" y="571" width="357" height="16">
+                                            <XCUIElementTypeStaticText elementType="48" identifier="" label="‎Message privately with friends and family using WhatsApp." title="" enabled="true" selected="false" x="2732" y="571" width="357" height="16"></XCUIElementTypeStaticText>
+                                        </XCUIElementTypeOther>
+                                        <XCUIElementTypeOther elementType="1" identifier="" label="" title="" enabled="true" selected="false" x="2810" y="619" width="200" height="28">
+                                            <XCUIElementTypeButton elementType="9" identifier="" label="‎Continue" title="" enabled="true" selected="false" x="2810" y="619" width="200" height="28">
+                                                <XCUIElementTypeStaticText elementType="48" identifier="" label="‎Continue" title="" enabled="true" selected="false" x="2881" y="625" width="57" height="16"></XCUIElementTypeStaticText>
+                                            </XCUIElementTypeButton>
+                                        </XCUIElementTypeOther>
+                                    </XCUIElementTypeOther>
+                                    <XCUIElementTypeOther elementType="1" identifier="" label="" title="" enabled="true" selected="false" x="2845" y="920" width="130" height="23">
+                                        <XCUIElementTypeButton elementType="9" identifier="" label="‎Terms &amp; Privacy Policy" title="" enabled="true" selected="false" x="2845" y="920" width="130" height="23">
+                                            <XCUIElementTypeStaticText elementType="48" identifier="" label="‎Terms &amp; Privacy Policy" title="" enabled="true" selected="false" x="2855" y="925" width="110" height="13"></XCUIElementTypeStaticText>
+                                        </XCUIElementTypeButton>
+                                    </XCUIElementTypeOther>
+                                </XCUIElementTypeOther>
+                            </XCUIElementTypeOther>
+                        </XCUIElementTypeOther>
+                    </XCUIElementTypeOther>
+                </XCUIElementTypeOther>
+            </XCUIElementTypeWindow>
+        </XCUIElementTypeGroup>
+        <XCUIElementTypeButton elementType="9" identifier="_XCUI:CloseWindow" label="" title="" enabled="true" selected="false" x="2438" y="-87" width="12" height="14"></XCUIElementTypeButton>
+        <XCUIElementTypeButton elementType="9" identifier="_XCUI:FullScreenWindow" label="" title="" enabled="true" selected="false" x="2478" y="-87" width="12" height="14">
+            <XCUIElementTypeGroup elementType="3" identifier="" label="" title="" enabled="false" selected="false" x="2477" y="-88" width="14" height="16"></XCUIElementTypeGroup>
+        </XCUIElementTypeButton>
+        <XCUIElementTypeButton elementType="9" identifier="_XCUI:MinimizeWindow" label="" title="" enabled="true" selected="false" x="2458" y="-87" width="12" height="14"></XCUIElementTypeButton>
+    </XCUIElementTypeWindow>
+  <!-- XCUIElementTypeMenuBar subtree (212 AppKit boilerplate items) trimmed -->
+</XCUIElementTypeApplication>
