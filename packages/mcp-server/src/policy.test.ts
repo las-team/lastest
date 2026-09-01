@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createServer } from "./server.js";
-import { LastestClient } from "./client.js";
-import { TOOL_RULES, decideTool, levelAllows } from "./policy.js";
-import type { ToolAccessLevel } from "./policy.js";
+import { createServer } from "./server";
+import { LastestClient } from "./client";
+import { TOOL_RULES, decideTool, levelAllows } from "./policy";
+import type { ToolAccessLevel } from "./policy";
 
 /**
  * Drift guard for `policy.ts`.

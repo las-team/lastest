@@ -33,9 +33,9 @@
  */
 import { createServer as createHttpServer, type Server } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { LastestClient } from "./client.js";
-import { createServer } from "./server.js";
-import type { ToolAccessLevel } from "./policy.js";
+import { LastestClient } from "./client";
+import { createServer } from "./server";
+import type { ToolAccessLevel } from "./policy";
 
 export interface HttpServerOptions {
   /** Lastest instance the tools call. */

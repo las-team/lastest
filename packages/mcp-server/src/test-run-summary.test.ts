@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { summarizeTestRun, projectResult } from "./test-run-summary.js";
+import { summarizeTestRun, projectResult } from "./test-run-summary";
 
 // The real ~2.9MB payload that overflowed the MCP token limit, captured from
 // `lastest_get_test_run`. Used to prove the changes-only projection stays small.

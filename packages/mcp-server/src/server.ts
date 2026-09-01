@@ -15,17 +15,14 @@ import {
   ResourceTemplate,
 } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { LastestClient, type ToolResponse } from "./client.js";
-import { redactSecrets } from "./redact.js";
-import {
-  AUTHORING_CONTRACT,
-  buildRepoAuthoringGuide,
-} from "./authoring-guide.js";
+import { LastestClient, type ToolResponse } from "./client";
+import { redactSecrets } from "./redact";
+import { AUTHORING_CONTRACT, buildRepoAuthoringGuide } from "./authoring-guide";
 import {
   decideTool,
   deniedActionMessage,
   type ToolAccessLevel,
-} from "./policy.js";
+} from "./policy";
 
 type ToolHandler = (params: Record<string, unknown>) => Promise<{
   content: Array<{ type: "text"; text: string }>;

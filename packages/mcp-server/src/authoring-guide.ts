@@ -1,4 +1,4 @@
-import type { LastestClient } from "./client.js";
+import type { LastestClient } from "./client";
 
 /**
  * The durable "authoring contract" the calling agent must follow to produce a
