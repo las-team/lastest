@@ -26,8 +26,10 @@
 import { revalidatePath } from "next/cache";
 import * as queries from "@/lib/db/queries";
 import { requireRepoCapability } from "@/lib/auth/capabilities";
+import { assertEnvironmentInRepo } from "@/lib/connectors/environment-scope";
 import type { CredentialField } from "@/lib/db/schema";
 import type { MaskedCredential } from "@/lib/db/queries/credentials";
+import { ENV_HANDLE } from "@/lib/execution/run-credentials";
 
 /** The code handle: `credentials.<name>.<field>`. Must be a JS identifier. */
 const NAME_RE = /^[a-z][A-Za-z0-9]*$/;
@@ -38,11 +40,18 @@ export interface CredentialInput {
   name: string;
   label: string;
   description?: string | null;
+  /** NULL/omitted = repo-wide. See `getCredentialsForRun` for how a run picks. */
+  environmentId?: string | null;
   fields: CredentialField[];
 }
 
 function validate(input: CredentialInput): void {
   if (!input.label.trim()) throw new Error("Label is required");
+  if (input.name === ENV_HANDLE) {
+    throw new Error(
+      `"${ENV_HANDLE}" is reserved — credentials.env holds the environment's own variables`,
+    );
+  }
   if (!NAME_RE.test(input.name)) {
     throw new Error(
       "Name must start with a lowercase letter and contain only letters and digits (e.g. vaultAdmin)",
@@ -110,11 +119,27 @@ export async function createCredential(
 ): Promise<{ id: string }> {
   const session = await requireRepoCapability(repositoryId, "repos:settings");
   validate(input);
-  if (await queries.credentialNameTaken(repositoryId, input.name)) {
-    throw new Error(`A credential named "${input.name}" already exists`);
+  // Re-derive the environment's own repo before the name probe uses it as a
+  // scope — the authorized thing is `repositoryId`, not this id.
+  const environmentId = await assertEnvironmentInRepo(
+    input.environmentId ?? null,
+    repositoryId,
+  );
+  if (
+    await queries.credentialNameTaken(
+      repositoryId,
+      input.name,
+      undefined,
+      environmentId,
+    )
+  ) {
+    throw new Error(
+      `A credential named "${input.name}" already exists in this environment`,
+    );
   }
   const result = await queries.createCredential({
     repositoryId,
+    environmentId,
     name: input.name,
     label: input.label.trim(),
     description: input.description ?? null,
@@ -131,10 +156,26 @@ export async function updateCredential(
 ): Promise<{ success: true }> {
   const existing = await guardCredential(id);
   validate(input);
+  // An omitted environmentId means "leave the scope alone", matching how the
+  // rest of this input behaves — only an explicit null moves a credential back
+  // to repo-wide.
+  const environmentId = await assertEnvironmentInRepo(
+    input.environmentId === undefined
+      ? existing.environmentId
+      : input.environmentId,
+    existing.repositoryId,
+  );
   if (
-    await queries.credentialNameTaken(existing.repositoryId, input.name, id)
+    await queries.credentialNameTaken(
+      existing.repositoryId,
+      input.name,
+      id,
+      environmentId,
+    )
   ) {
-    throw new Error(`A credential named "${input.name}" already exists`);
+    throw new Error(
+      `A credential named "${input.name}" already exists in this environment`,
+    );
   }
   // The masked row can't supply the ciphertext to carry forward — re-read the
   // stored fields through the run path, which is the only decrypting read.
@@ -143,6 +184,7 @@ export async function updateCredential(
     name: input.name,
     label: input.label.trim(),
     description: input.description ?? null,
+    environmentId,
     fields: mergeSecretFields(input.fields, stored),
   });
   refresh();

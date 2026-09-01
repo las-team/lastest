@@ -32,7 +32,13 @@ export interface VaultProfilerConfig {
   password: string;
   /** Overrides username/password when a session is already held. */
   sessionId?: string;
-  fetchImpl?: typeof fetch;
+  /**
+   * Injected fetch. Narrower than `typeof fetch` on purpose: this profiler only
+   * ever calls it as `(url, init)`, and the host's SSRF-guarding wrapper cannot
+   * honour a `Request` (it would have to reconstruct method, headers and body
+   * from it, and silently dropping them is worse than refusing the shape).
+   */
+  fetchImpl?: (url: string | URL, init?: RequestInit) => Promise<Response>;
   timeoutMs?: number;
 }
 
@@ -67,7 +73,10 @@ export class VaultProfiler implements SutProfiler {
   readonly kind = "vault" as const;
   readonly label: string;
   private sessionId: string | undefined;
-  private readonly fetchImpl: typeof fetch;
+  private readonly fetchImpl: (
+    url: string | URL,
+    init?: RequestInit,
+  ) => Promise<Response>;
 
   constructor(private readonly config: VaultProfilerConfig) {
     this.label = `Vault ${config.baseUrl}`;

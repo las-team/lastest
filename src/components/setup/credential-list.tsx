@@ -5,17 +5,22 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { KeyRound, Plus, Pencil, Trash2, Loader2 } from "lucide-react";
+import { KeyRound, Plus, Pencil, Trash2, Loader2, Plug } from "lucide-react";
 import { CredentialForm } from "./credential-form";
 import { CopyReference } from "@/components/credentials/copy-reference";
 import { deleteCredential } from "@/server/actions/credentials";
 import { toast } from "sonner";
 import { timeAgo } from "@/lib/utils";
 import type { MaskedCredential } from "@/lib/db/queries/credentials";
+import type { ConnectorWithEnvironment } from "@/lib/db/queries/connectors";
+import type { Environment } from "@/lib/db/schema";
 
 interface CredentialListProps {
   repositoryId: string;
   credentials: MaskedCredential[];
+  environments: Environment[];
+  /** Only to label the credentials a connector owns — never edited from here. */
+  connectors: ConnectorWithEnvironment[];
 }
 
 const SECRET_DISPLAY = "••••••••";
@@ -23,11 +28,23 @@ const SECRET_DISPLAY = "••••••••";
 export function CredentialList({
   repositoryId,
   credentials,
+  environments,
+  connectors,
 }: CredentialListProps) {
   const router = useRouter();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editing, setEditing] = useState<MaskedCredential | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const envById = new Map(environments.map((e) => [e.id, e]));
+  // A credential a connector provisioned is edited from Settings →
+  // Integrations: its name is the connector's handle, and renaming it here
+  // would break the pairing silently.
+  const managedBy = new Map(
+    connectors
+      .filter((c) => c.credentialId)
+      .map((c) => [c.credentialId as string, c]),
+  );
 
   const handleDelete = async (cred: MaskedCredential) => {
     if (
@@ -99,6 +116,18 @@ export function CredentialList({
                       <Badge variant="secondary" className="font-mono text-xs">
                         {cred.name}
                       </Badge>
+                      {cred.environmentId && (
+                        <Badge variant="outline" className="text-xs">
+                          {envById.get(cred.environmentId)?.label ??
+                            "Unknown environment"}
+                        </Badge>
+                      )}
+                      {managedBy.has(cred.id) && (
+                        <Badge variant="outline" className="text-xs gap-1">
+                          <Plug className="h-3 w-3" />
+                          {managedBy.get(cred.id)!.label}
+                        </Badge>
+                      )}
                     </div>
                     {cred.description && (
                       <p className="text-sm text-muted-foreground mt-1">
@@ -127,7 +156,11 @@ export function CredentialList({
                       variant="ghost"
                       size="icon"
                       aria-label={`Delete ${cred.label}`}
-                      disabled={deletingId === cred.id}
+                      // A connector owns its credential's lifecycle; deleting
+                      // it here would leave the connector pointing at nothing.
+                      disabled={
+                        deletingId === cred.id || managedBy.has(cred.id)
+                      }
                       onClick={() => handleDelete(cred)}
                     >
                       {deletingId === cred.id ? (
@@ -175,6 +208,7 @@ export function CredentialList({
         onOpenChange={setIsFormOpen}
         onSaved={() => router.refresh()}
         repositoryId={repositoryId}
+        environments={environments}
         editCredential={editing}
       />
     </div>

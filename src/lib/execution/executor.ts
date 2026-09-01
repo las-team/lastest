@@ -7,6 +7,7 @@
 import type { TestRunResult } from "@/lib/playwright/types";
 import type {
   Test,
+  Environment,
   EnvironmentConfig,
   PlaywrightSettings,
   StabilizationSettings,
@@ -350,6 +351,15 @@ export interface ExecutionOptions {
   teamId?: string;
   headless?: boolean;
   environmentConfig?: EnvironmentConfig | null;
+  /**
+   * B2: which deployment of the system under test this build targets.
+   *
+   * Distinct from `environmentConfig`, which is the managed dev-server launcher.
+   * This one decides the base URL, which credential set the tests receive, and
+   * which baselines they are compared against. Null/absent runs unscoped, which
+   * is every pre-B2 caller.
+   */
+  environment?: Environment | null;
   playwrightSettings?: PlaywrightSettings | null;
   runnerId?: string; // specific runner ID or 'auto' for fallback chain
   maxParallelTests?: number; // Override parallel test setting (used for remote runners)
@@ -376,6 +386,25 @@ export interface ExecutionOptions {
  * Note this only reaches the embedded-browser executor; the remote-runner path
  * has never recorded video.
  */
+/**
+ * The URL a run navigates to.
+ *
+ * One resolver rather than three copies of the same `??` chain: the
+ * environment's base URL wins when there is one, and `environment_configs`
+ * remains the fallback for every repo that has no environments. Adding the
+ * environment model must not mean a build silently keeps using the dev-server
+ * URL because one of the three call sites was missed.
+ */
+export function resolveExecutionBaseUrl(
+  options: Pick<ExecutionOptions, "environment" | "environmentConfig">,
+): string | undefined {
+  return (
+    options.environment?.baseUrl?.trim() ||
+    options.environmentConfig?.baseUrl ||
+    undefined
+  );
+}
+
 export function resolveVideoRecording(options: {
   forceVideoRecording?: boolean;
   playwrightSettings?: Pick<PlaywrightSettings, "enableVideoRecording"> | null;
@@ -418,7 +447,7 @@ async function executeApiTests(
   // runtime having been booted — see `plugins/api-test/src/wiring.ts`.
   const { runApiTest } = await import("@lastest/plugin-api-test/runner");
   const { appApiTestHost } = await import("@/lib/core/api-test-host");
-  const baseUrl = options.environmentConfig?.baseUrl ?? undefined;
+  const baseUrl = resolveExecutionBaseUrl(options);
   const results: TestRunResult[] = [];
 
   // Data sources are only needed when a test actually binds variables, which
@@ -862,7 +891,7 @@ async function executeViaRunner(
 ): Promise<TestRunResult[]> {
   const results: TestRunResult[] = [];
   const baseUrl = (
-    options.environmentConfig?.baseUrl || "http://localhost:3000"
+    resolveExecutionBaseUrl(options) || "http://localhost:3000"
   ).replace(/\/+$/, "");
   const viewport = options.playwrightSettings
     ? {
@@ -874,7 +903,10 @@ async function executeViaRunner(
   // Decrypt-at-dispatch: resolved once for the batch, handed to setup and to
   // every run_test command, and deliberately not stored on `options` (which
   // is copied, logged and spread in several places downstream).
-  const resolvedCredentials = await resolveRunCredentials(options.repositoryId);
+  const resolvedCredentials = await resolveRunCredentials(
+    options.repositoryId,
+    options.environment?.id,
+  );
   const credentials = resolvedCredentials?.credentials;
   const credentialSecretKeys = resolvedCredentials?.secretKeys;
 
@@ -2192,7 +2224,7 @@ async function executeViaPoolWorkers(
     };
 
     const baseUrl = (
-      options.environmentConfig?.baseUrl || "http://localhost:3000"
+      resolveExecutionBaseUrl(options) || "http://localhost:3000"
     ).replace(/\/+$/, "");
     const viewport = options.playwrightSettings
       ? {
@@ -2331,7 +2363,10 @@ async function executeViaPoolWorkers(
             undefined,
             // Broadcast setup is the login every test in this build inherits,
             // so it needs the same credentials the tests get.
-            await resolveRunCredentials(options.repositoryId),
+            await resolveRunCredentials(
+              options.repositoryId,
+              options.environment?.id,
+            ),
           );
           // Prefer `storageStateJson` (portable JSON blob) over `storageState`
           // (may be a `persistent:<setupId>` marker pinned to the setup EB

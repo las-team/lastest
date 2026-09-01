@@ -122,6 +122,16 @@ export const baselines = pgTable("baselines", {
   // the NULL-cell baseline when no cell-specific one exists, so existing tests
   // are unaffected and a matrix test can share one representative baseline.
   dataCell: text("data_cell"),
+  // Environment this baseline belongs to (B2), as `environments.key` — 'uat',
+  // 'prod', 'prerelease'. NULL means "not environment scoped", which is every
+  // pre-B2 baseline and every single-environment repo.
+  //
+  // Without this, a UAT run and a PROD run of the same step fight over one
+  // baseline row and each build flips it back and forth — the branch key this
+  // replaces means nothing to a customer whose releases come from a vendor.
+  // Lookup falls back to the NULL-environment baseline exactly as `dataCell`
+  // does, so adopting an environment does not orphan existing approvals.
+  environmentKey: text("environment_key"),
   // DOM snapshot of the page state this baseline image represents, captured at
   // the same moment as the screenshot. The per-step DOM diff compares the
   // current run's per-step snapshot against this. Set when the baseline is
@@ -589,6 +599,10 @@ export const networkBaselines = pgTable(
       .references(() => tests.id, { onDelete: "cascade" }),
     stepLabel: text("step_label"),
     branch: text("branch").notNull(),
+    // Environment scope (B2) — see the note on `baselines.environmentKey`.
+    // NULL means "applies to every environment"; lookup prefers an exact match
+    // and falls back to NULL.
+    environmentKey: text("environment_key"),
     isActive: boolean("is_active").default(true),
     approvedFromComparisonId: text("approved_from_comparison_id"),
     approvedBy: text("approved_by"),
@@ -608,6 +622,10 @@ export const consoleBaselines = pgTable(
       .references(() => tests.id, { onDelete: "cascade" }),
     stepLabel: text("step_label"),
     branch: text("branch").notNull(),
+    // Environment scope (B2) — see the note on `baselines.environmentKey`.
+    // NULL means "applies to every environment"; lookup prefers an exact match
+    // and falls back to NULL.
+    environmentKey: text("environment_key"),
     isActive: boolean("is_active").default(true),
     approvedFromComparisonId: text("approved_from_comparison_id"),
     approvedBy: text("approved_by"),
@@ -634,6 +652,10 @@ export const perfBaselines = pgTable(
       .references(() => tests.id, { onDelete: "cascade" }),
     stepLabel: text("step_label"),
     branch: text("branch").notNull(),
+    // Environment scope (B2) — see the note on `baselines.environmentKey`.
+    // NULL means "applies to every environment"; lookup prefers an exact match
+    // and falls back to NULL.
+    environmentKey: text("environment_key"),
     isActive: boolean("is_active").default(true),
     approvedFromComparisonId: text("approved_from_comparison_id"),
     approvedBy: text("approved_by"),
@@ -653,6 +675,10 @@ export const variableBaselines = pgTable(
       .references(() => tests.id, { onDelete: "cascade" }),
     stepLabel: text("step_label"),
     branch: text("branch").notNull(),
+    // Environment scope (B2) — see the note on `baselines.environmentKey`.
+    // NULL means "applies to every environment"; lookup prefers an exact match
+    // and falls back to NULL.
+    environmentKey: text("environment_key"),
     isActive: boolean("is_active").default(true),
     approvedFromComparisonId: text("approved_from_comparison_id"),
     approvedBy: text("approved_by"),
@@ -671,6 +697,10 @@ export const urlTrajectoryBaselines = pgTable(
       .notNull()
       .references(() => tests.id, { onDelete: "cascade" }),
     branch: text("branch").notNull(),
+    // Environment scope (B2) — see the note on `baselines.environmentKey`.
+    // NULL means "applies to every environment"; lookup prefers an exact match
+    // and falls back to NULL.
+    environmentKey: text("environment_key"),
     isActive: boolean("is_active").default(true),
     approvedFromComparisonId: text("approved_from_comparison_id"),
     approvedBy: text("approved_by"),
@@ -690,6 +720,10 @@ export const domBaselines = pgTable(
       .references(() => tests.id, { onDelete: "cascade" }),
     stepLabel: text("step_label"),
     branch: text("branch").notNull(),
+    // Environment scope (B2) — see the note on `baselines.environmentKey`.
+    // NULL means "applies to every environment"; lookup prefers an exact match
+    // and falls back to NULL.
+    environmentKey: text("environment_key"),
     isActive: boolean("is_active").default(true),
     approvedFromComparisonId: text("approved_from_comparison_id"),
     approvedBy: text("approved_by"),

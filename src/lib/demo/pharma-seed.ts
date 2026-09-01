@@ -13,6 +13,12 @@
  * could never be satisfied — the blocker `docs/pharma-restricted-scope.md`
  * §2.1 named, closed by `docs/credentials-plan.md`.
  *
+ * Those handles are what a Vault or Salesforce **connector** provisions
+ * (Settings → Integrations): naming a connector `vault` creates the
+ * `credentials.vault.*` fields with exactly these keys, in the environment it
+ * belongs to. A consultant with PROD and UAT connectors runs this same test
+ * against both without editing a line of it.
+ *
  * They stay seeded **quarantined** for a different and smaller reason: the
  * target URL is a placeholder, because pointing a seeded test at a real Vault
  * would be pointing it at somebody else's tenant. Quarantined tests run but
@@ -43,12 +49,16 @@ const VAULT_CODE = `export async function test(page, baseUrl, screenshotPath, st
   // release and diffed against the last known-good run.
   //
   // To run it:
-  //   1. Point this test's target URL at a Vault SANDBOX (never production).
-  //   2. Setup → Credentials → New credential, named \`vault\`, with fields
-  //      username, password and docId. Use a service account with a fixed,
+  //   1. Settings → Environments → add a UAT environment pointing at a Vault
+  //      SANDBOX (never production).
+  //   2. Settings → Integrations → Veeva Vault → Add connector, named
+  //      \`vault\`, in that environment. Use a service account with a fixed,
   //      known role — a permission change should surface as a test failure,
-  //      not as noise — and a fixture document it may move through the
-  //      lifecycle.
+  //      not as noise. Then add a \`docId\` field to the credential it created
+  //      (Setup → Credentials), naming a fixture document it may move through
+  //      the lifecycle. A sandbox refresh changes that id and nothing else:
+  //      re-point it there rather than in this source, so the baselines
+  //      survive.
   //   3. Un-quarantine.
   //
   // The values below are read from that store at run time. They are never
@@ -60,7 +70,7 @@ const VAULT_CODE = `export async function test(page, baseUrl, screenshotPath, st
   const DOC_ID = vault?.docId; // seeded fixture document
 
   if (!vault?.username || !vault?.password) {
-    throw new Error('This test needs a credential named "vault" with username and password fields. Add one under Setup → Credentials, then reference it as credentials.vault.username.');
+    throw new Error('This test needs a credential named "vault" with username and password fields. Add a Veeva Vault connector named "vault" under Settings → Integrations (or a credential under Setup → Credentials), then reference it as credentials.vault.username.');
   }
 
   // ── 1. Authentication ─────────────────────────────────────────────────────
@@ -141,17 +151,21 @@ const SALESFORCE_CODE = `export async function test(page, baseUrl, screenshotPat
   // layouts, LWC rendering, validation rules and Flow screens, none of which
   // unit tests see. This test walks those.
   //
-  // To run it: point the target URL at a Salesforce SANDBOX or Developer org,
-  // add a credential named \`salesforce\` under Setup → Credentials with
-  // username and password fields, and un-quarantine. The values are read from
-  // that store at run time — never written into this source, never hashed into
-  // the baseline, never recorded in run history.
+  // To run it: add an environment pointing at a Salesforce SANDBOX or
+  // Developer org, then Settings → Integrations → Salesforce → Add connector
+  // named \`salesforce\` using \"Browser login\" — the method a regression test
+  // drives. (Salesforce disabled new Connected App creation in Spring '26, and
+  // External Client Apps dropped the username-password grant, so the form
+  // login is the UI path and the OAuth methods are for API work.) Then
+  // un-quarantine. The values are read from the credential store at run time —
+  // never written into this source, never hashed into the baseline, never
+  // recorded in run history.
   // ───────────────────────────────────────────────────────────────────────────
   const shot = (n, slug) => screenshotPath.replace('.png', \`-\${n}-\${slug}.png\`);
   const sf = credentials?.salesforce;
 
   if (!sf?.username || !sf?.password) {
-    throw new Error('This test needs a credential named "salesforce" with username and password fields. Add one under Setup → Credentials, then reference it as credentials.salesforce.username.');
+    throw new Error('This test needs a credential named "salesforce" with username and password fields. Add a Salesforce connector named "salesforce" under Settings → Integrations (or a credential under Setup → Credentials), then reference it as credentials.salesforce.username.');
   }
 
   // ── 1. Login ──────────────────────────────────────────────────────────────

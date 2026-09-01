@@ -803,7 +803,23 @@ async function runBuildAsync(
   // Honor it here so the executor hits the right URL.
   const dbEnvConfig = await queries.getEnvironmentConfig(repositoryId);
   const buildRecord = await queries.getBuild(buildId);
-  const effectiveBaseUrl = buildRecord?.baseUrl || dbEnvConfig?.baseUrl;
+
+  // B2: the environment this build targets. The build's own `environmentId`
+  // wins; otherwise the repo's default, so a repo that HAS environments never
+  // runs unscoped by accident and quietly compares UAT against PROD baselines.
+  // A repo with no environments resolves to undefined and behaves as before.
+  const environment = repositoryId
+    ? ((buildRecord?.environmentId
+        ? await queries.getEnvironment(buildRecord.environmentId)
+        : undefined) ?? (await queries.getDefaultEnvironment(repositoryId)))
+    : undefined;
+  const environmentKey = environment?.key ?? null;
+
+  // Precedence: the per-build override (CI `targetUrl`, comparison
+  // `baselineUrl`/`featureUrl`) beats the environment, which beats the
+  // dev-server config. The override is the most specific statement of intent.
+  const effectiveBaseUrl =
+    buildRecord?.baseUrl || environment?.baseUrl || dbEnvConfig?.baseUrl;
   const envConfig = dbEnvConfig
     ? effectiveBaseUrl && effectiveBaseUrl !== dbEnvConfig.baseUrl
       ? { ...dbEnvConfig, baseUrl: effectiveBaseUrl }
@@ -868,6 +884,8 @@ async function runBuildAsync(
   await queries.updateBuild(buildId, {
     browsers,
     totalTests: totalTestsAcrossBrowsers,
+    environmentId: environment?.id ?? null,
+    environmentKey,
   });
 
   // Current browser being executed (updated in browser loop)
@@ -950,6 +968,7 @@ async function runBuildAsync(
       extractedVariables: result.extractedVariables,
       assignedVariables: result.assignedVariables,
       dataCell: result.dataCell,
+      environmentKey,
       matrixIndex: result.matrixIndex,
       matrixTotal: result.matrixTotal,
       logs: result.logs,
@@ -1036,6 +1055,7 @@ async function runBuildAsync(
               screenshot.domSnapshot,
               domDiffEnabled,
               result.dataCell ?? null,
+              environmentKey,
               baselineWriteCell(result.dataCell, testRecord?.matrixPolicy),
             ),
           ),
@@ -1280,6 +1300,7 @@ async function runBuildAsync(
           teamId,
           runnerId,
           environmentConfig: envConfig,
+          environment,
           playwrightSettings,
           jobId,
         },
@@ -1319,6 +1340,7 @@ async function runBuildAsync(
             teamId,
             runnerId,
             environmentConfig: envConfig,
+            environment,
             playwrightSettings: browserSettings,
             maxParallelTests,
             jobId,
@@ -1483,6 +1505,7 @@ async function runBuildAsync(
               teamId,
               runnerId,
               environmentConfig: envConfig,
+              environment,
               playwrightSettings: playwrightSettings
                 ? { ...playwrightSettings, browser: currentBrowserType }
                 : null,
@@ -2075,6 +2098,10 @@ async function processVisualDiff(
    *  expansion. Baseline resolution prefers a baseline captured for the same
    *  cell and falls back to the shared one. */
   dataCell?: string | null,
+  // B2: which environment's baselines this run is compared against, and which
+  // environment a newly created baseline belongs to. Composes with `dataCell`
+  // — see `getBranchBaseline` for the specific-beats-general order.
+  environmentKey?: string | null,
   /** P2: the cell any baseline WRITE (auto-approve) is scoped to — the
    *  caller computes it from the test's matrix policy via `baselineWriteCell`.
    *  Distinct from `dataCell` because reads and writes differ: a
@@ -2255,6 +2282,7 @@ async function processVisualDiff(
     branch,
     browser,
     dataCell,
+    environmentKey,
   );
   let baselineSourceBranch: string | undefined;
   let baselineExistsOn: { branch: string; createdAt: string } | undefined;
@@ -2265,6 +2293,7 @@ async function processVisualDiff(
       defaultBranch,
       browser,
       dataCell,
+      environmentKey,
     );
     if (fallback) {
       baseline = fallback;
@@ -2322,8 +2351,15 @@ async function processVisualDiff(
       currentHashWithDims,
       stepLabel,
       browser,
+      environmentKey,
     )) ||
-    (await queries.getBaselineByHash(testId, currentHash, stepLabel, browser));
+    (await queries.getBaselineByHash(
+      testId,
+      currentHash,
+      stepLabel,
+      browser,
+      environmentKey,
+    ));
 
   // Get planned screenshot if exists (for design comparison)
   const plannedScreenshot = await queries.getPlannedScreenshotByTest(
@@ -2569,6 +2605,7 @@ async function processVisualDiff(
         branch,
         browser,
         baselineDataCell ?? null,
+        environmentKey,
       );
       await queries.createBaseline({
         testId,
@@ -2577,6 +2614,7 @@ async function processVisualDiff(
         imageHash: autoHash,
         branch,
         browser,
+        environmentKey,
         approvedFromDiffId: diff.id,
         dataCell: baselineDataCell ?? null,
         // Ride the per-step DOM snapshot onto the baseline so later runs can
@@ -2719,6 +2757,7 @@ async function processVisualDiff(
         branch,
         browser,
         baselineDataCell ?? null,
+        environmentKey,
       );
       await queries.createBaseline({
         testId,
@@ -2727,6 +2766,7 @@ async function processVisualDiff(
         imageHash: autoHash,
         branch,
         browser,
+        environmentKey,
         approvedFromDiffId: diff.id,
         dataCell: baselineDataCell ?? null,
         // Ride the per-step DOM snapshot onto the baseline so later runs can

@@ -12,7 +12,11 @@
  * day one — `docs/credentials-plan.md` §3, and §9 for the counter-argument and
  * the smallest fix if it lands wrong.
  */
-import { getCredentialsForRun, markCredentialsUsed } from "@/lib/db/queries";
+import {
+  getCredentialsForRun,
+  getEnvironmentVariableMap,
+  markCredentialsUsed,
+} from "@/lib/db/queries";
 import type {
   RunCredentials,
   RunCredentialSecretKeys,
@@ -20,6 +24,12 @@ import type {
 import { getLogger } from "@/lib/logger";
 
 const log = getLogger("Credentials");
+
+/**
+ * Reserved credential handle for environment variables. A credential row
+ * cannot take this name: `credentials.env` is the environment's own values.
+ */
+export const ENV_HANDLE = "env";
 
 /**
  * Last `lastUsedAt` stamp per repo, in this process.
@@ -75,7 +85,12 @@ export class CredentialResolutionError extends Error {
  * Every credential the repo holds, decrypted and keyed by handle, plus the
  * declared secret keys the EB scrubs on.
  *
- * Returns `undefined` (not `{}`) when the repo holds no credentials, so the
+ * `environmentId` selects which set: the environment's own credentials win, and
+ * anything it does not define falls back to the repo-wide row. The resulting
+ * map has the same SHAPE either way, which is what lets one suite run against
+ * UAT and PROD with different logins and an identical test body.
+ *
+ * Returns `undefined` (not `{}`) when the repo holds nothing to send, so the
  * field stays off the wire entirely — that is the ordinary "nothing to send"
  * case and it is not an error.
  *
@@ -87,6 +102,7 @@ export class CredentialResolutionError extends Error {
  */
 export async function resolveRunCredentials(
   repositoryId: string | null | undefined,
+  environmentId?: string | null,
 ): Promise<
   | { credentials: RunCredentials; secretKeys: RunCredentialSecretKeys }
   | undefined
@@ -94,7 +110,7 @@ export async function resolveRunCredentials(
   if (!repositoryId) return undefined;
   let resolved: Awaited<ReturnType<typeof getCredentialsForRun>>;
   try {
-    resolved = await getCredentialsForRun(repositoryId);
+    resolved = await getCredentialsForRun(repositoryId, environmentId);
   } catch (err) {
     log.warn(
       { err, repositoryId },
@@ -102,11 +118,34 @@ export async function resolveRunCredentials(
     );
     throw new CredentialResolutionError(err);
   }
+  // Names to stamp `lastUsedAt` on — captured BEFORE the reserved `env` handle
+  // is added, since that one is not a credential row.
   const names = Object.keys(resolved.credentials);
-  if (names.length === 0) return undefined;
+
+  // Environment variables ride the same channel, under a reserved handle:
+  // a test reads `credentials.env.docId`.
+  //
+  // Injection rather than substitution is the point. A `{{env:docId}}` in the
+  // source would be textually replaced before dispatch, which puts the value
+  // in `codeHash` — so re-pointing a document id after a sandbox refresh
+  // would invalidate every baseline for that test, destroying exactly the
+  // refresh survival the environment model exists to provide
+  // (`docs/credentials-plan.md` §1 makes the same argument for passwords).
+  //
+  // Env values are not credential fields and carry no `secret` flag, so they
+  // get no entry in `secretKeys` — an env var is a document id, not a
+  // password, and masking every one of them would make failures unreadable.
+  if (environmentId) {
+    const envVars = await getEnvironmentVariableMap(environmentId);
+    if (Object.keys(envVars).length > 0) {
+      resolved.credentials[ENV_HANDLE] = envVars;
+    }
+  }
+
+  if (Object.keys(resolved.credentials).length === 0) return undefined;
   // Fire-and-forget: `lastUsedAt` is a convenience column, and a write
   // failure here must never fail a run.
-  if (shouldStamp(repositoryId)) {
+  if (names.length > 0 && shouldStamp(repositoryId)) {
     void markCredentialsUsed(repositoryId, names).catch((err) => {
       log.warn({ err, repositoryId }, "failed to stamp credential lastUsedAt");
     });

@@ -278,6 +278,39 @@ async function ensureUniqueIndexes() {
   }
 }
 
+// Widen `uq_repo_credentials_repo_name` from a full unique index to a PARTIAL
+// one, so a credential handle can exist once per environment (gap analysis B2).
+//
+// This has to run BEFORE `drizzle-kit push --force`, and push cannot do it
+// itself: the index keeps its NAME and only gains a `WHERE environment_id IS
+// NULL` predicate, which push does not detect as a change. Left alone, the old
+// full index silently keeps enforcing repo-wide uniqueness and every attempt to
+// add a second environment's `vault` login fails with a duplicate-key error.
+//
+// Dropping is safe and idempotent: push recreates the index from the schema in
+// the same run, now with the predicate.
+async function widenCredentialUniqueIndex() {
+  if (!process.env.DATABASE_URL) return;
+  let sql;
+  try {
+    sql = require("postgres")(process.env.DATABASE_URL);
+    const [row] = await sql`
+      SELECT indexdef FROM pg_indexes
+      WHERE indexname = 'uq_repo_credentials_repo_name'
+    `;
+    if (row && !/WHERE/i.test(row.indexdef)) {
+      await sql.unsafe(`DROP INDEX IF EXISTS "uq_repo_credentials_repo_name"`);
+      console.log(
+        "[migrate] dropped non-partial uq_repo_credentials_repo_name; push will recreate it scoped to environment_id IS NULL",
+      );
+    }
+  } catch (e) {
+    console.warn("[migrate] credential unique-index widen skipped:", e.message);
+  } finally {
+    if (sql) await sql.end();
+  }
+}
+
 // `agent_*` → `explorer_*` renames the explorer plugin split needs done BEFORE
 // `drizzle-kit push --force` below, or push reads the vanished/appeared table
 // names as DROP + CREATE and destroys every row — including
@@ -1446,6 +1479,7 @@ async function main() {
   await nullOrphans();
   await bumpPoolDefaults();
   await ensureUniqueIndexes();
+  await widenCredentialUniqueIndex();
 
   console.log("[migrate] Running drizzle-kit push...");
   try {

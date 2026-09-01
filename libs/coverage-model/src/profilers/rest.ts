@@ -32,7 +32,13 @@ export interface RestProfilerConfig {
   };
   /** Hard ceiling on records walked, regardless of paging. */
   maxRecords?: number;
-  fetchImpl?: typeof fetch;
+  /**
+   * Injected fetch. Narrower than `typeof fetch` on purpose: this profiler only
+   * ever calls it as `(url, init)`, and the host's SSRF-guarding wrapper cannot
+   * honour a `Request` (it would have to reconstruct method, headers and body
+   * from it, and silently dropping them is worse than refusing the shape).
+   */
+  fetchImpl?: (url: string | URL, init?: RequestInit) => Promise<Response>;
   timeoutMs?: number;
 }
 
@@ -84,7 +90,10 @@ export function groupRecords(
 export class RestProfiler implements SutProfiler {
   readonly kind = "rest" as const;
   readonly label: string;
-  private readonly fetchImpl: typeof fetch;
+  private readonly fetchImpl: (
+    url: string | URL,
+    init?: RequestInit,
+  ) => Promise<Response>;
 
   constructor(private readonly config: RestProfilerConfig) {
     this.label = `REST ${config.urlTemplate}`;

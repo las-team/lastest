@@ -22,14 +22,26 @@ import {
 import { toast } from "sonner";
 import type { CredentialField } from "@/lib/db/schema";
 import type { MaskedCredential } from "@/lib/db/queries/credentials";
+import type { Environment } from "@/lib/db/schema";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface CredentialFormProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
   repositoryId: string;
+  environments: Environment[];
   editCredential: MaskedCredential | null;
 }
+
+/** Sentinel for "every environment" — a Select cannot carry an empty value. */
+const REPO_WIDE = "__repo_wide__";
 
 /** `Vault sandbox admin` → `vaultAdmin`. Words after the first are capitalised. */
 export function slugToHandle(label: string): string {
@@ -56,6 +68,7 @@ export function CredentialForm({
   onOpenChange,
   onSaved,
   repositoryId,
+  environments,
   editCredential,
 }: CredentialFormProps) {
   const [label, setLabel] = useState("");
@@ -64,6 +77,7 @@ export function CredentialForm({
   const [nameTouched, setNameTouched] = useState(false);
   const [description, setDescription] = useState("");
   const [fields, setFields] = useState<CredentialField[]>(DEFAULT_FIELDS);
+  const [environmentId, setEnvironmentId] = useState<string>(REPO_WIDE);
   const [isSaving, setIsSaving] = useState(false);
 
   const originalName = editCredential?.name ?? null;
@@ -76,6 +90,7 @@ export function CredentialForm({
       setName(editCredential.name);
       setNameTouched(true);
       setDescription(editCredential.description ?? "");
+      setEnvironmentId(editCredential.environmentId ?? REPO_WIDE);
       // Secrets come back masked (""). An untouched secret stays "" and the
       // update action carries the stored ciphertext forward.
       setFields(
@@ -88,6 +103,7 @@ export function CredentialForm({
       setName("");
       setNameTouched(false);
       setDescription("");
+      setEnvironmentId(REPO_WIDE);
       setFields(DEFAULT_FIELDS.map((f) => ({ ...f })));
     }
   }, [open, editCredential]);
@@ -113,6 +129,7 @@ export function CredentialForm({
         name,
         label,
         description: description.trim() || null,
+        environmentId: environmentId === REPO_WIDE ? null : environmentId,
         fields: fields
           .filter((f) => f.key.trim())
           .map((f) => ({ ...f, key: f.key.trim() })),
@@ -190,6 +207,30 @@ export function CredentialForm({
               </div>
             )}
           </div>
+
+          {environments.length > 0 && (
+            <div className="space-y-2">
+              <Label>Environment</Label>
+              <Select value={environmentId} onValueChange={setEnvironmentId}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={REPO_WIDE}>All environments</SelectItem>
+                  {environments.map((env) => (
+                    <SelectItem key={env.id} value={env.id}>
+                      {env.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                The same handle can exist once per environment. A run uses its
+                environment&apos;s value and falls back to the all-environments
+                one, so a test body never changes.
+              </p>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="cred-description">Description (optional)</Label>

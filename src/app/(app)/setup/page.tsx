@@ -15,6 +15,7 @@ import { getDefaultSetupSteps } from "@/server/actions/setup-steps";
 import { getDefaultTeardownSteps } from "@/server/actions/teardown-steps";
 import { listStorageStates } from "@/server/actions/storage-states";
 import { getCredentials } from "@/server/actions/credentials";
+import { listEnvironments, listConnectors } from "@/lib/db/queries";
 
 export default async function SetupPage() {
   const session = await getCurrentSession();
@@ -42,6 +43,8 @@ export default async function SetupPage() {
     storageStates,
     playwrightSettings,
     credentials,
+    environments,
+    connectors,
   ] = await Promise.all([
     getSetupScripts(selectedRepo.id),
     getSetupConfigs(selectedRepo.id),
@@ -53,6 +56,10 @@ export default async function SetupPage() {
     // Masked — the list action never returns a secret's plaintext, so this is
     // safe to hand to a client component.
     getCredentials(selectedRepo.id).catch(() => []),
+    // Labels only: which environment a credential belongs to, and which ones a
+    // connector manages (so nobody renames one out from under its connector).
+    listEnvironments(selectedRepo.id).catch(() => []),
+    listConnectors(selectedRepo.id).catch(() => []),
   ]);
 
   return (
@@ -68,6 +75,8 @@ export default async function SetupPage() {
         designSystem={playwrightSettings?.designSystem ?? null}
         designSystemEnabled={!!playwrightSettings?.enableDesignSystem}
         credentials={credentials}
+        environments={environments}
+        connectors={connectors}
       />
     </div>
   );

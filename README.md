@@ -129,7 +129,13 @@ Create tests (one-time)          Run tests (forever)
 - **Multi-Step Screenshots** — Capture multiple labeled screenshots per test run for multi-page flow testing.
 - **Approval Workflow** — Review visual diffs before they become baselines. Catch regressions, approve intentional changes.
 - **Check Modes** — Unified verification control across 9 layers (visual, text, DOM, network, console, a11y, design, performance, URL), each set to enforce, log, or disable per repo — replacing scattered per-feature toggles.
-- **Verify Board** — Per-step card board for reviewing multi-layer check results: change map, per-layer baselines, and reviewer feedback in one focused view.
+- **Verify Board** — Per-step card board for reviewing multi-layer check results: change map, per-layer baselines, and reviewer feedback in one focused view. Verify is now the **single execution surface**: the old `/run` and `/builds` pages were retired into it, bringing the build-history graph (header drawer), the smart/all/comparison run split-button, "Accept all safe" on unsorted diffs, live EB streaming during a build, and the step-label editor.
+- **Environments** — PROD / UAT / prerelease deployments of the system under test as a first-class object (`key`, `label`, `baseUrl`, `releaseLabel`, `refreshedAt`), with per-environment variables and baselines. Run one suite against UAT and PROD without the two fighting over one set of approvals; promote baselines between environments and survive a vendor sandbox refresh. Fully additive — a repo that never creates an environment behaves exactly as before.
+- **Per-Repo Credential Store** — Named credential sets encrypted at rest (AES-256-GCM) and injected into the test process at run time via a dedicated `credentials` parameter, never through variable substitution — so rotating a password does not change `codeHash`, invalidate a baseline, or land in plaintext run records.
+- **App Map + Explore** — A live map of your app's screens, routes, and flows, built by a multi-EB swarm crawler that explores in parallel. Tree outline, screens gallery, node detail, and flow playback; feeds route discovery and test planning.
+- **Interactive Test Playback** — Replay a recorded run step-by-step in the UI with the captured evidence layer (including storage state) attached to each step.
+- **Run Results (Triage)** — Build-scoped results screen that clusters failures by **root cause** rather than functional area, writes a run-level narrative, and suggests a verdict per cluster with reviewer verdicts tracked separately.
+- **GitHub Issues with Full Evidence** — Open an issue carrying the complete failure evidence (screenshots, diffs, console/network), optionally assign an AI engineer, and auto-close on confirm-when-green.
 - **Design System Verification** — Design-token comparison layer that flags drift from your design system (colors, spacing, typography) as its own check layer.
 - **URL Diff** — Capture and diff URL trajectories across runs to catch unexpected redirects and navigation changes.
 - **API Tests** — Headless HTTP API testing as a first-class test type (`method` / `url` / `headers` / `query` / `body` / `auth` + assertions). Runs in-process with no browser or EB dispatch, feeds the same step-comparison and verdict pipeline as browser tests, and can be generated from captured network calls. Includes a burst/load runner for firing concurrent requests at an endpoint (single up-front SSRF validation, per-connection re-check).
@@ -169,6 +175,9 @@ Create tests (one-time)          Run tests (forever)
 - **Route Discovery** — AI scans your source code to discover routes and suggest tests.
 - **MCP Selector Validation** — Real-time selector validation on live pages via Claude MCP.
 - **Play Agent (Autonomous)** — One-click 11-step pipeline: check settings → select repo → environment setup → scan & template → plan areas → review → generate tests → run → fix failures (up to 3 attempts) → re-run → summary. Uses specialized sub-agents (Orchestrator, Planner, Scout, Diver, Generator, Healer). Pause/resume, approve plans, skip steps.
+- **Agents Console** — `/agents` is the single entry point for agent work: one roster of every agent working the selected repo, what each is doing, what it is blocked on, and which embedded browsers it is holding. Paused (browser released) and blocked-on-a-human (browser still held) are shown as different states, and escalations from parked sessions and pushed-back tasks are merged into one queue. Drill into a row to reach the QA agent, the Triage agent, or the Explorer. Pro-plan gated.
+- **QA Agent** — Autonomous comprehensive-suite builder on an eight-phase pipeline: preflight → discovery (static GitHub-tree route scan + live EB crawl with verified selectors and observed API endpoints) → risk-prioritized plan → human plan review (approve / exclude / send feedback) → generation (one test per plan item over the EB's CDP endpoint) → run → heal → summary. Console shows a live pipeline strip, coverage matrix, direction queue, and activity feed.
+- **Triage Agent** — Replaces the two independent AI passes (per-diff analysis and per-test failure triage) with one build-scoped classifier that groups by root cause, ranks by risk, and suggests verdicts.
 - **Agent Monitoring & Activity Feed** — Real-time tracking of Play Agent sessions with step-by-step progress, SSE streaming, and session history. Monitor active/paused/completed agents from the dashboard.
 - **Codebase Intelligence** — Automatic detection of project context (framework, CSS framework, auth, state management, API layer, key dependencies) to enrich AI prompts. 100+ package database mapping dependencies to testing recommendations.
 
@@ -192,6 +201,7 @@ Create tests (one-time)          Run tests (forever)
 - **GitHub** — OAuth login, repo sync, PR comments, webhook-triggered builds, reusable GitHub Action.
 - **GitLab** — OAuth login (self-hosted supported), MR comments, webhook triggers.
 - **Google OAuth** — Sign in with Google.
+- **SUT Connectors (Veeva Vault, Salesforce)** — Connect directly to the system under test: N connectors per type per repo, each bound to an environment and pointing at a credential set. Profiles the target over its real REST API to ground test generation in the live configuration.
 - **Google Sheets** — Use spreadsheet data as test data sources with per-team OAuth, multi-tab support, custom header rows, fixed ranges, and caching.
 - **Notifications** — Slack, Discord, custom webhooks, and GitHub/GitLab PR comments for build results.
 - **Email** — Team invitation emails via Resend.
@@ -203,7 +213,12 @@ Create tests (one-time)          Run tests (forever)
 - **CI Trigger CLI (`@lastest/runner`)** — Lightweight, browser-free npm client that _triggers_ a build on your Lastest server and polls for results (writes `GITHUB_OUTPUT` / `GITHUB_STEP_SUMMARY`, exits non-zero on failure or `--fail-on-changes`). Execution runs server-side in the EB pool; the old distributed-execution runner daemon has been retired.
 - **Parallel Test Execution** — Configurable max parallel tests bounds the embedded-browser pool per build. CNI burst protection throttles pod creation to avoid networking storms.
 - **Docker Deployment** — Production-ready multi-stage Docker setup based on official Playwright image with persistent volumes.
-- **MCP Server** — Model Context Protocol server (`@lastest/mcp-server`) exposing a consolidated, resource-oriented surface of 24 tools for AI agent integration: run/verify tests, review and decide diffs, approve baselines, create/heal tests, suggest app fixes, publish shares, check coverage. Install via `npx @lastest/mcp-server`.
+- **Core + Plugin Architecture** — The codebase is split into a `core/` kernel (contracts, browser, data, jobs, storage) and 20+ self-contained `plugins/` (explorer, qa-agent, app-map, recorder, share, ci, scheduling, gamification, rca, api-test, design-system, a11y, data-sources, …) that talk to core only through capability contracts, plus pure `libs/` packages. Enforced by an architecture test (`pnpm arch`).
+- **MCP Server** — Model Context Protocol server (`@lastest/mcp-server`) exposing a consolidated, resource-oriented surface of 29 tools for AI agent integration: run/verify tests, review and decide diffs, approve baselines, create/heal tests, suggest app fixes, publish shares, check coverage. Install via `npx @lastest/mcp-server`.
+- **Remote MCP with OAuth 2.1** — `/api/mcp` is an OAuth-protected resource: RFC 8414 metadata, RFC 7591 dynamic client registration, PKCE S256, and RFC 9728 `WWW-Authenticate` on 401, so an agent platform can connect knowing nothing but the URL. A tool-access policy narrows the surface by caller — `read` (observe), `write` (create/update/run/approve), `full` (deletes and anything that makes data public, API keys only) — by rewriting tool schemas rather than rejecting calls after the fact.
+- **WebMCP (browser AI agents)** — Lastest publishes its own typed tools to the page's AI agent via `document.modelContext` (Chrome origin trial, ChatGPT desktop/Work, Codex "site tools"), with a polyfill fallback, a consent dialog, a team-level toggle, and public-share tools. Backed by a cookie-authed `/api/mcp/session` sibling endpoint that reuses the same server, narrowed to 16 agent-facing tools with route ids taken from the page, never from the agent.
+- **OCR Service Container** — Tesseract runs in its own container (`packages/ocr-service`, `pnpm ocr:up`) rather than in-process; set `OCR_SERVICE_URL` to enable OCR selectors and text-region-aware diffing.
+- **EB Priority Classes** — Kubernetes priority classes per tenant class so restricted-tenant browsers cannot be starved by, or starve, the general pool.
 - **VSCode Extension API** — REST + SSE API (`/api/v1/`) for IDE integration.
 - **Accessibility Audits** — Automated axe-core checks on every screenshot capture with WCAG 2.2 AA compliance scoring.
 - **Network & Console Tracking** — Capture network requests and browser console errors during test runs.
@@ -230,6 +245,7 @@ Create tests (one-time)          Run tests (forever)
 - **Role-Based Access** — Owner, admin, member, viewer roles.
 - **Multiple Auth Methods** — Email/password (Argon2 hashing), GitHub OAuth, GitLab OAuth, Google OAuth via better-auth.
 - **Email Invitations** — Send team invitations via Resend with verification and password reset tokens.
+- **Regulated Profile (pharma / life sciences)** — Onboarding forks on segment: the pharma path seeds a project with Veeva Vault and Salesforce release-regression suites, and turns on the regulated profile for the team. One module encodes the restrictions: nothing probabilistic produces a verdict, nothing leaves the tenant without an authenticated identity attached, and nothing on screen suggests the tool is a game. Eval defaults shift accordingly (text and DOM raised to enforce; network and console dropped to log).
 - **Billing (hosted)** — Stripe subscriptions for hosted deployments: Starter / Growth / Pro tiers, monthly + yearly, checkout + customer portal, period-end downgrades, immediate prorated upgrades. Self-hosted instances run free with billing disabled (no Stripe keys needed).
 
 ---
@@ -394,7 +410,12 @@ For CI/CD, the `@lastest/runner` CLI creates a build over HTTP and polls for the
 | **Setup/teardown orchestration**    |               **Yes**                |       No        |     No     |     No     |          No          |      No       |     No     |
 | **Branch baseline management**      |               **Yes**                |       Yes       |    Yes     |    Yes     |          No          |      No       |     No     |
 | **Scheduled test runs**             |            **Yes (cron)**            |      Cloud      |   Cloud    |   Cloud    |        Cloud         |     Cloud     |     No     |
-| **MCP server (AI agent API)**       |          **Yes (24 tools)**          |       No        |     No     |     No     |          No          |      No       |     No     |
+| **MCP server (AI agent API)**       |          **Yes (29 tools)**          |       No        |     No     |     No     |          No          |      No       |     No     |
+| **Remote MCP with OAuth 2.1**       |    **Yes (DCR + scoped tools)**      |       No        |     No     |     No     |          No          |      No       |     No     |
+| **WebMCP (browser agent tools)**    |               **Yes**                |       No        |     No     |     No     |          No          |      No       |     No     |
+| **App map / swarm crawler**         |         **Yes (multi-EB)**           |       No        |     No     |     No     |          No          |    Crawler    |     No     |
+| **Environments (PROD/UAT)**         |    **Yes (per-env baselines)**       |       No        | Enterprise |     No     |          No          |      No       |     No     |
+| **Per-repo secret store**           |        **Yes (encrypted)**           |      Cloud      |   Cloud    |   Cloud    |        Cloud         |     Cloud     |     No     |
 | **WCAG compliance scoring**         |           **Yes (0–100)**            |       No        |     No     |     No     |          No          |      No       |     No     |
 | **AI failure triage**               |               **Yes**                |       No        |     No     |     No     |          No          |      No       |     No     |
 | **Assertion tracking**              |               **Yes**                |       No        |     No     |     No     |          No          |      No       |     No     |
@@ -415,7 +436,12 @@ For CI/CD, the `@lastest/runner` CLI creates a build over HTTP and polls for the
 - **AI auto-fix**: tests break as your UI evolves, Lastest fixes them automatically
 - **Self-hosted with unlimited screenshots** — no per-screenshot pricing, no volume limits when you run it on your own infra
 - **Your data never leaves your server** — screenshots stay local, no cloud dependency
-- **MCP server with 24 consolidated tools** — let AI agents (Claude, etc.) run tests, review diffs, heal failures, and suggest app-code fixes autonomously
+- **MCP server with 29 consolidated tools** — let AI agents (Claude, etc.) run tests, review diffs, heal failures, and suggest app-code fixes autonomously; reachable remotely over OAuth 2.1 with a read/write/full tool policy, and published to in-browser agents via WebMCP
+- **Agents console**: one roster for the QA agent, the Triage agent, and the Explorer — with what each is doing, what it is blocked on, and which browsers it is holding
+- **QA Agent**: eight-phase autonomous suite builder (discover → plan → human review → generate → run → heal → summary) grounded in a live crawl of your app
+- **Root-cause triage**: failures are clustered by cause with a run-level narrative and a suggested verdict per cluster, not classified one test at a time
+- **Environments + SUT connectors**: run one suite against PROD and UAT with separate baselines, and connect straight to Veeva Vault or Salesforce
+- **Core + plugin architecture**: a small enforced kernel with 20+ self-contained plugins, so features ship without widening the core
 - **Scheduled test runs** — cron-based automation with smart failure handling
 - **WCAG 2.2 AA compliance scoring** — automated 0–100 accessibility score per build with trend tracking
 - **6 AI providers including OpenAI and Ollama** — run AI completely locally with zero API costs
@@ -447,6 +473,12 @@ pnpm db:generate  # Generate Drizzle migrations
 pnpm db:reset     # Reset database (drops all tables + removes screenshots/baselines)
 pnpm db:seed      # Seed test data
 pnpm test:visual  # Run visual tests via CLI (see below)
+pnpm test:integration # Integration tests (Vitest, needs a database)
+pnpm arch         # Architecture test — enforce the core/plugin boundary
+
+# OCR service container (required for OCR selectors + text-region-aware diffing)
+pnpm ocr:up       # docker compose up -d --build ocr  (set OCR_SERVICE_URL)
+pnpm ocr:down
 
 # Local k3d cluster — hosts dynamically-provisioned EB Job pods (no app, no db)
 pnpm stack              # create cluster + build/import EB image
@@ -470,7 +502,10 @@ In-depth docs for every integration live on the [Lastest Wiki](https://github.co
 | **Smart Run**                 | Diff-based test selection — only tests affected by changed files run, comparing the feature branch against the default branch via GitHub/GitLab API                                                                                      | [Running Tests](https://github.com/las-team/lastest/wiki/Running-Tests)                                                                                             |
 | **Self-Hosted Deployment**    | `pnpm deploy:zima` (ZimaBoard / CasaOS via docker compose) and `pnpm deploy:olares` (Olares via kubectl); shared multi-stage `Dockerfile`, `GET /api/health`. Required env: `POSTGRES_PASSWORD`, `BETTER_AUTH_SECRET`, `SYSTEM_EB_TOKEN` | [Docker Deployment](https://github.com/las-team/lastest/wiki/Docker-Deployment)                                                                                     |
 | **CI Trigger CLI**            | `@lastest/runner` on npm — `lastest-runner trigger -r <repo> -t <token> -s <url>` creates a build and polls for results (no local browser); execution runs server-side in the Embedded Browser pool                                      | [CI Trigger CLI](https://github.com/las-team/lastest/wiki/CI-Trigger-CLI)                                                                                           |
-| **MCP Server**                | `npx @lastest/mcp-server --url <…> --api-key <…>` exposes 24 consolidated tools (run/verify/heal/approve/decide-diff/suggest-app-fix/publish-share/coverage/…) for Claude and other agents; structured JSON responses                    | [MCP Server](https://github.com/las-team/lastest/wiki/MCP-Server)                                                                                                   |
+| **MCP Server**                | `npx @lastest/mcp-server --url <…> --api-key <…>` exposes 29 consolidated tools (run/verify/heal/approve/decide-diff/suggest-app-fix/publish-share/coverage/…) for Claude and other agents; structured JSON responses                    | [MCP Server](https://github.com/las-team/lastest/wiki/MCP-Server)                                                                                                   |
+| **Remote MCP / WebMCP**       | `/api/mcp` over OAuth 2.1 (dynamic client registration, PKCE, read/write/full tool policy) for agent platforms; `document.modelContext` tools for in-browser agents, behind a consent dialog and a team toggle                                                                          | [MCP Server](https://github.com/las-team/lastest/wiki/MCP-Server)                                                                                                                   |
+| **Environments & Connectors** | PROD / UAT / prerelease environments with per-environment variables and baselines; Veeva Vault and Salesforce connectors bound to an environment and a credential set                                                                                                                    | [Settings Reference](https://github.com/las-team/lastest/wiki/Settings-Reference)                                                                                                   |
+| **QA Agent**                  | Eight-phase autonomous suite builder — preflight, discovery (static route scan + live EB crawl), plan, human plan review, generate, run, heal, summary                                                                                                                                   | [Agent Monitoring](https://github.com/las-team/lastest/wiki/Agent-Monitoring)                                                                                                       |
 | **Scheduled Runs**            | Cron-based automated builds with presets (daily 3am, weekly, hourly, every 15min) or custom expressions; auto-disable after 5 consecutive failures                                                                                       | [Scheduled Runs](https://github.com/las-team/lastest/wiki/Scheduled-Runs)                                                                                           |
 | **Google Sheets Integration** | Spreadsheet-backed test data — per-team OAuth, multi-tab spreadsheets, custom header row, fixed ranges; surfaces values on the test Vars tab                                                                                             | [Google Sheets](https://github.com/las-team/lastest/wiki/Google-Sheets-Integration)                                                                                 |
 | **Custom Webhooks**           | POST `build.completed` payloads (status / counts / git refs / build URL) to any HTTP endpoint, with custom method + headers                                                                                                              | [Custom Webhooks](https://github.com/las-team/lastest/wiki/Custom-Webhooks)                                                                                         |
@@ -504,6 +539,8 @@ All configuration lives under a unified Settings page. Per-section deep dives li
 | **Setup**                | Default repository-wide multi-step setup scripts (Playwright and API types), with per-test overrides                                                                                                                                                                                                          | [Settings Reference](https://github.com/las-team/lastest/wiki/Settings-Reference)   |
 | **Teardown**             | Default repository-wide multi-step teardown scripts with per-test overrides                                                                                                                                                                                                                                   | [Settings Reference](https://github.com/las-team/lastest/wiki/Settings-Reference)   |
 | **Schedules**            | Cron-based automated test runs with presets and custom expressions                                                                                                                                                                                                                                            | [Scheduled Runs](https://github.com/las-team/lastest/wiki/Scheduled-Runs)           |
+| **Environments**         | PROD / UAT / prerelease environments — base URL, release label, per-environment variables and baselines, and the SUT connectors (Veeva Vault, Salesforce) bound to each                                                                                                                                        | [Settings Reference](https://github.com/las-team/lastest/wiki/Settings-Reference)   |
+| **Credentials**          | Per-repo named credential sets, encrypted at rest and injected into the test process at run time (never substituted into test source)                                                                                                                                                                         | [Settings Reference](https://github.com/las-team/lastest/wiki/Settings-Reference)   |
 | **Vars**                 | Test-data variables — static, AI-generated (with presets), and Google Sheets-backed                                                                                                                                                                                                                           | [Google Sheets](https://github.com/las-team/lastest/wiki/Google-Sheets-Integration) |
 | **API Tokens**           | Long-lived Bearer tokens for programmatic + MCP access                                                                                                                                                                                                                                                        | [API Tokens](https://github.com/las-team/lastest/wiki/API-Tokens)                   |
 | **Account**              | Email preferences, unsubscribe, GDPR / self-serve account deletion                                                                                                                                                                                                                                            | —                                                                                   |
@@ -514,6 +551,7 @@ All configuration lives under a unified Settings page. Per-section deep dives li
 
 ## Tech Stack
 
+- **Architecture**: `core/` kernel + 20+ `plugins/` behind capability contracts, plus pure `libs/` packages (enforced by `pnpm arch`)
 - **Framework**: Next.js 16 (App Router)
 - **UI**: React 19, Radix UI, Tailwind CSS 4
 - **Browser Automation**: Playwright
@@ -523,7 +561,7 @@ All configuration lives under a unified Settings page. Per-section deep dives li
 - **Auth**: better-auth (email/password with Argon2, GitHub, GitLab, Google OAuth)
 - **AI**: Claude (Agent SDK, CLI, OpenRouter, direct Anthropic API), OpenAI, Ollama
 - **MCP**: `@lastest/mcp-server` for AI agent integration
-- **OCR Fallback**: Tesseract.js
+- **OCR**: Tesseract in a dedicated `ocr-service` container (`OCR_SERVICE_URL`), with a Tesseract.js fallback
 - **Test Data**: Google Sheets integration
 - **Email**: Resend
 - **Billing**: Stripe via `@better-auth/stripe` (hosted plans; optional)
@@ -559,6 +597,21 @@ GOOGLE_SHEETS_REDIRECT_URI=       # Separate redirect for Sheets OAuth
 # Email (optional, for invitations)
 RESEND_API_KEY=
 EMAIL_FROM=
+
+# Secrets at rest (required) — AES-256-GCM key for OAuth tokens, AI provider
+# keys, and the per-repo credential store. Rotate via scripts/rotate-encryption-key.ts.
+ENCRYPTION_KEY=
+OLD_ENCRYPTION_KEY=               # Only while rotating
+
+# Embedded Browser stack (required for any test run)
+EB_PROVISIONER=kubernetes         # Defaults to 'none' — tests then never provision
+EB_NAMESPACE=lastest
+EB_IMAGE=lastest-embedded-browser:latest
+LASTEST_URL=                      # URL the EB pods call back on
+SYSTEM_EB_TOKEN=                  # openssl rand -hex 32
+
+# OCR service container (needed for ocr-text selectors + text-region-aware diffing)
+OCR_SERVICE_URL=                  # e.g. http://localhost:8891
 
 # Database
 DATABASE_URL=                     # Default: postgresql://lastest:lastest@localhost:5432/lastest
@@ -675,6 +728,22 @@ EARLY_ADOPTER_PRICING=            # Default: true — show/charge early-adopter 
 - [x] Secrets encrypted at rest (OAuth tokens + AI provider keys) and provider keys kept out of the browser
 - [x] EB pod egress restriction (block metadata/link-local) + customer/AI code evaluated only inside EB pods, never the host
 - [x] Server-side run-minute + project quota enforcement (hosted tiers)
+- [x] Core + plugin architecture refactor (enforced kernel boundary, 20+ plugins, `libs/` promotions)
+- [x] App Map + Explore (multi-EB swarm crawler, screens gallery, flow playback)
+- [x] Interactive test playback + storage-state evidence layer
+- [x] QA Agent (eight-phase autonomous suite builder with human plan review)
+- [x] Agents console (`/agents` roster, escalations, held-browser capacity read-out, Pro-gated)
+- [x] Triage agent + Run Results screen (root-cause clustering replacing the two per-diff/per-test AI passes)
+- [x] Full-evidence GitHub issues, AI-engineer assignment, confirm-on-green auto-close
+- [x] Per-repo credential store with run-time injection (encrypted, outside the substitution path)
+- [x] Environments as a first-class object (per-environment variables, baselines, promotion, sandbox refresh)
+- [x] Veeva Vault + Salesforce SUT connectors
+- [x] Regulated profile + pharma segment fork in onboarding
+- [x] Verify as the single execution surface (`/run` and `/builds` retired into it)
+- [x] OAuth 2.1 on the remote MCP endpoint + read/write/full tool-access policy
+- [x] WebMCP — tools published to in-browser AI agents via `document.modelContext` (consent dialog, team toggle)
+- [x] OCR service containerization (`OCR_SERVICE_URL`)
+- [x] EB priority classes per tenant class
 - [ ] Hosted (managed) deployment option — in progress
 
 ---

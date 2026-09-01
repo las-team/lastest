@@ -77,6 +77,11 @@ export const builds = pgTable("builds", {
   designSystemTokenUsage: jsonb(
     "design_system_token_usage",
   ).$type<DesignSystemTokenUsage>(),
+  // Environment this build ran against (B2). `baseUrl` above is the resolved
+  // value — which may come from the environment — while these carry the
+  // identity, so a build stays readable after the environment's URL changes.
+  environmentId: text("environment_id"),
+  environmentKey: text("environment_key"),
   comparisonPairId: text("comparison_pair_id"), // shared ID linking baseline + feature builds
   comparisonRole: text("comparison_role"), // 'baseline' | 'feature' | null
   comparisonMeta: jsonb("comparison_meta").$type<{
