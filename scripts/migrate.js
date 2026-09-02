@@ -1483,12 +1483,19 @@ async function main() {
 
   console.log("[migrate] Running drizzle-kit push...");
   try {
-    execSync("./node_modules/.bin/drizzle-kit push --force 2>&1", {
+    // Output is CAPTURED (pipe), not inherited: drizzle-kit exits 0 even when
+    // its esbuild schema loader crashes before touching the DB ("Cannot find
+    // module", Node's ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING, …) — the
+    // only failure signal is the error text on stdout, so it must be scanned.
+    // Verified in production 2026-09-02: two releases booted "green" on an
+    // unmigrated database exactly this way.
+    const out = execSync("./node_modules/.bin/drizzle-kit push --force 2>&1", {
       // stdin is /dev/null, never the container's. This alone does NOT save us —
       // verified: drizzle-kit's prompt blocks on a closed stdin exactly as it
       // does on an empty one — but it keeps push from ever reading a real tty
       // during an interactive `node scripts/migrate.js`. The timeout is the guard.
-      stdio: ["ignore", "inherit", "inherit"],
+      stdio: ["ignore", "pipe", "inherit"],
+      encoding: "utf8",
       // Backstop for the same class of bug. Without it an unanswerable prompt
       // blocks until the Job's activeDeadlineSeconds kills the pod, and the only
       // signal is a deadline: no failing statement, no exit code, no cause.
@@ -1497,11 +1504,23 @@ async function main() {
       timeout: PUSH_TIMEOUT_MS,
       killSignal: "SIGKILL",
     });
+    process.stdout.write(out);
+    if (/^\s*(?:Error(?::| \[)|error:)/m.test(out)) {
+      console.error(
+        "[migrate] Failed: drizzle-kit push exited 0 but printed an error — " +
+          "its schema-loader crashes are not reflected in the exit code. The " +
+          "schema was NOT pushed; refusing to start on a stale database.",
+      );
+      process.exit(1);
+    }
     console.log("[migrate] Done");
   } catch (e) {
     // `catch` binds `unknown`; execSync surfaces a timeout kill as `killed` /
     // `signal` on the thrown Error, neither of which is on the Error type.
     const err = /** @type {any} */ (e);
+    // stdout is piped now, so on failure the child's output only exists on the
+    // thrown error — print it, or the messages below point at nothing.
+    if (err.stdout) process.stdout.write(String(err.stdout));
     if (err.killed || err.signal === "SIGKILL") {
       console.error(
         `[migrate] Failed: drizzle-kit push was killed after ${PUSH_TIMEOUT_MS}ms. ` +

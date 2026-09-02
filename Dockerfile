@@ -129,6 +129,16 @@ COPY --from=builder --chown=nextjs:nodejs /app/packages/db/src/schema.ts ./packa
 # The barrel `export * from "./schema/<mod>"` is a VALUE re-export that esbuild
 # must resolve, so the split schema modules have to come along with it.
 COPY --from=builder --chown=nextjs:nodejs /app/packages/db/src/schema/ ./packages/db/src/schema/
+# @lastest/coverage-model is the one workspace import esbuild must RESOLVE:
+# schema/coverage.ts and schema/tests.ts re-export its DEFAULT_* policies as
+# VALUES (its "main" points at src/index.ts). It must be a SYMLINK, not a copy:
+# Node 24 refuses to type-strip .ts files whose real path is under
+# node_modules (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING), and the link's
+# realpath resolves to /app/libs/, which is allowed.
+COPY --from=builder --chown=nextjs:nodejs /app/libs/coverage-model/ ./libs/coverage-model/
+RUN mkdir -p ./node_modules/@lastest && \
+    ln -sfn /app/libs/coverage-model ./node_modules/@lastest/coverage-model && \
+    chown -h nextjs:nodejs ./node_modules/@lastest/coverage-model
 # drizzle.config.ts's schema glob also covers ./plugins/*/src/schema.ts (each
 # plugin owns its own tables) — without these, push silently creates none of
 # those tables. Same erasure argument as core's schema.ts above; add a line
