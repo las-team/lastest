@@ -23,8 +23,8 @@
 # The one exception is @lastest/coverage-model: schema/coverage.ts and
 # schema/tests.ts re-export its DEFAULT_* policies as VALUES, so esbuild must
 # resolve it. It is a dependency-free pure-TypeScript lib, so it is dropped in
-# as a bare node_modules entry (its package.json "main" points at src/index.ts,
-# which esbuild loads as TS) rather than dragging in a pnpm workspace install.
+# as a node_modules SYMLINK to ./libs (its package.json "main" points at
+# src/index.ts, loaded as TS) rather than dragging in a pnpm workspace install.
 #
 # NOT traced. scripts/migrate.js talks to `postgres` directly and never loads
 # @lastest/db's instrumented client, so the DB spans in packages/db/src/tracing.ts
@@ -55,8 +55,15 @@ RUN npm install --no-audit --no-fund \
 # files, so the drizzle/ out-dir is intentionally absent.
 COPY packages/db/src/schema.ts ./packages/db/src/schema.ts
 COPY packages/db/src/schema/ ./packages/db/src/schema/
-COPY libs/coverage-model/package.json ./node_modules/@lastest/coverage-model/
-COPY libs/coverage-model/src/ ./node_modules/@lastest/coverage-model/src/
+# Must be a SYMLINK into ./libs, not a copy under node_modules: Node ≥ 24
+# refuses to type-strip .ts files whose real path is under node_modules
+# (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING) — and drizzle-kit swallows
+# that loader crash with exit 0. The link's realpath lands in /app/libs/,
+# which is allowed. Same fixup as the root Dockerfile.
+COPY libs/coverage-model/package.json ./libs/coverage-model/package.json
+COPY libs/coverage-model/src/ ./libs/coverage-model/src/
+RUN mkdir -p ./node_modules/@lastest && \
+    ln -sfn /app/libs/coverage-model ./node_modules/@lastest/coverage-model
 COPY drizzle.config.ts ./
 COPY scripts/migrate.js ./scripts/migrate.js
 
