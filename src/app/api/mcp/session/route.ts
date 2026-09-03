@@ -112,7 +112,13 @@ export async function POST(req: NextRequest): Promise<Response> {
     return json({ ok: false, error: "Missing session cookie." }, 401);
   }
 
-  const baseUrl = new URL(req.url).origin;
+  // Loopback is always plain HTTP: Next builds `req.url` as
+  // `${x-forwarded-proto}://${hostname}:${port}`, so a request that arrived
+  // over TLS (Cloudflare/envoy set `x-forwarded-proto: https`) would otherwise
+  // yield `https://127.0.0.1:3001` and the fetch dies with "fetch failed".
+  const loopback = new URL(req.url);
+  loopback.protocol = "http:";
+  const baseUrl = loopback.origin;
   const server = createServer(
     new LastestClient({ baseUrl, extraHeaders: { cookie } }),
   );

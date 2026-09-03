@@ -121,3 +121,4 @@ appsumo-codes.csv
 docs/olares-deploy-notes.md
 
 docs/screenshots/coverage/coverage*.png
+k8s/olares*
