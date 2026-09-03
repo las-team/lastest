@@ -43,7 +43,12 @@ async function handle(req: NextRequest): Promise<Response> {
   // `publicOrigin` is what we advertise to the client in WWW-Authenticate. It
   // must be the externally reachable host — `req.url` here is the internal
   // 127.0.0.1:3001 address that scripts/front-proxy.js forwards to.
-  const loopbackOrigin = new URL(req.url).origin;
+  // Always plain HTTP: Next derives the scheme of `req.url` from
+  // `x-forwarded-proto`, so a TLS-terminated request would otherwise produce
+  // `https://127.0.0.1:3001` and every loopback call fails with "fetch failed".
+  const loopbackUrl = new URL(req.url);
+  loopbackUrl.protocol = "http:";
+  const loopbackOrigin = loopbackUrl.origin;
   const publicOrigin = getPublicUrl(req);
 
   const result = await authenticateMcpRequest(req);
