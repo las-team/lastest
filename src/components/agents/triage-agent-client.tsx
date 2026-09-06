@@ -14,6 +14,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { McpCtaHint } from "@/components/mcp/mcp-cta-hint";
 import { Switch } from "@/components/ui/switch";
 import {
   Tooltip,
@@ -62,14 +63,21 @@ export interface TriageLatestBuild {
   alreadyTriaged: boolean;
 }
 
-/** Why the auto-triage toggle is locked, or null when it is settable. */
+/**
+ * Why the agent cannot run in-product, or null when it can.
+ *
+ * Only `plan` locks the controls. `ai_off` is the MCP-first state every other
+ * agent surface has: in-product AI is off, so the "run it here" button becomes
+ * the "Use your agent" hint and the work happens over MCP instead. The
+ * auto-triage switch stays settable so the preference is kept for when
+ * in-product AI is switched on — nothing runs in the background until then.
+ */
 export type TriageLockReason = "plan" | "ai_off" | null;
 
-const LOCK_COPY: Record<"plan" | "ai_off", string> = {
-  plan: "Automatic triage is part of the Pro plan. The agent still classifies nothing until your team upgrades.",
-  ai_off:
-    "In-product AI is turned off for this team, so the agent has no model to classify with. Turn it on in Settings → AI.",
-};
+const PLAN_COPY =
+  "Automatic triage is part of the Pro plan. The agent still classifies nothing until your team upgrades.";
+const AI_OFF_COPY =
+  "In-product AI is off for this team, so builds are not triaged in the background. Triage a build from your own agent over MCP, or switch on built-in AI in Settings → AI.";
 
 function LiveState({ session }: { session: AgentSession }) {
   const narration = sessionNarration(session);
@@ -219,7 +227,9 @@ export function TriageAgentClient({
     }
   }, [latestBuild]);
 
-  const locked = lockReason !== null;
+  // Only the plan gate locks the controls; AI-off swaps in the MCP path.
+  const locked = lockReason === "plan";
+  const aiOff = lockReason === "ai_off";
 
   return (
     <div className="space-y-4">
@@ -251,9 +261,9 @@ export function TriageAgentClient({
                       />
                     </span>
                   </TooltipTrigger>
-                  {locked && (
+                  {(locked || aiOff) && (
                     <TooltipContent side="left" className="max-w-xs">
-                      {LOCK_COPY[lockReason]}
+                      {locked ? PLAN_COPY : AI_OFF_COPY}
                     </TooltipContent>
                   )}
                 </Tooltip>
@@ -271,23 +281,35 @@ export function TriageAgentClient({
           {locked && (
             <p className="flex items-start gap-1.5 text-xs text-warning">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              {LOCK_COPY[lockReason]}
+              {PLAN_COPY}
             </p>
           )}
+          {aiOff && (
+            <p className="text-xs text-muted-foreground">{AI_OFF_COPY}</p>
+          )}
           <div className="flex flex-wrap items-center gap-3">
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!latestBuild || triaging || locked}
-              onClick={() => void triageLatest()}
-            >
-              {triaging ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Play className="h-3.5 w-3.5" />
-              )}
-              Triage latest build
-            </Button>
+            {aiOff ? (
+              <McpCtaHint
+                promptKey="triage"
+                label="Triage with your agent"
+                repositoryId={repositoryId}
+                buildId={latestBuild?.id ?? null}
+              />
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!latestBuild || triaging || locked}
+                onClick={() => void triageLatest()}
+              >
+                {triaging ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Play className="h-3.5 w-3.5" />
+                )}
+                Triage latest build
+              </Button>
+            )}
             {latestBuild ? (
               <span className="text-xs text-muted-foreground">
                 {latestBuild.gitBranch && (

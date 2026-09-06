@@ -58,6 +58,10 @@ const PROMPTS: Record<string, (c: McpPromptContext) => string> = {
     `Using the Lastest MCP server, discover the testable routes of ${url(c)} and create functional areas for them${inRepo(c)}.`,
   spec: (c) =>
     `Using the Lastest MCP server, turn this spec into Playwright tests and add them to the right functional areas${inRepo(c)}.`,
+  triage: (c) =>
+    c.buildId
+      ? `Using the Lastest MCP server, triage build ${c.buildId}: group its failed and changed cases by root cause, tell me which are real regressions, flaky runs, environment issues or test problems, and suggest a verdict per group.`
+      : `Using the Lastest MCP server, triage the latest build${inRepo(c)}: group its failed and changed cases by root cause, tell me which are real regressions, flaky runs, environment issues or test problems, and suggest a verdict per group.`,
   diff: (c) =>
     c.buildId
       ? `Using the Lastest MCP server, review build ${c.buildId}'s visual diffs, tell me which are real regressions vs. noise, and approve the safe ones.`

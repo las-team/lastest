@@ -5,7 +5,8 @@ Short narrated feature videos (about 2 to 3 minutes, 1080p, subtitled) for the L
 SRT captions, published to YouTube. Sources for this list: `README.md` (Features), lastest.cloud/features,
 app.lastest.cloud surfaces, and pharma.lastest.cloud (Lastest for Pharma).
 
-Status legend: `todo` · `scripted` (narration + record script exist) · `recorded` · `published`.
+Status legend: `todo` · `scripted` (narration + record script exist) · `recorded` · `scheduled` (uploaded, YouTube
+Scheduled visibility, goes public at the noted date, 15:00 Europe/Budapest, one per day) · `published`.
 
 Recording conventions (from the first video):
 
@@ -27,53 +28,53 @@ Recording conventions (from the first video):
 | 8   | App Map + Explore: multi-EB swarm crawler, screens gallery, flow playback                                    | `/coverage` (App Map)                          | published | https://youtu.be/zdSJmUhzxTo |
 | 9   | Coverage + route discovery + Analyze URL (selector strategy coverage)                                        | `/coverage` (Data / Gaps tabs)                 | published | https://youtu.be/-w82-KZu1WY |
 | 10  | Run Results (Triage): failures clustered by root cause, run narrative, suggested verdicts                    | `/verify` (Board, Focus, Review), `/triage-agent` | published | https://youtu.be/siKWMkkeu_w |
-| 11  | Interactive test playback: step-synced session video, network / perf / URL panes follow the scrubber         | Focus mode, `/tests/<id>`                      | todo      |                              |
-| 12  | GitHub issues with full evidence, assign an AI engineer, auto-close when green                               | Verify (Show issue / Report all)               | todo      |                              |
-| 13  | Public share links (`/r/<slug>`): watermarked report, AI demo notes, session video, social cards             | `/r/<slug>`, share dialog                      | todo      |                              |
-| 14  | API tests as a first-class test type + burst/load runner                                                     | `/tests` (API test)                            | todo      |                              |
-| 15  | Test versioning, composition (pin versions per build) and branch comparison                                  | `/tests/<id>` versions, Compose, Compare       | todo      |                              |
-| 16  | Functional area hierarchy + test suites                                                                      | `/tests`                                       | todo      |                              |
-| 17  | Scheduled runs (cron presets, auto-disable after failures)                                                   | `/settings`                                    | todo      |                              |
-| 18  | WCAG 2.2 AA scoring with trend sparklines and per-test violations                                            | Dashboard, Focus mode A11y tab                 | todo      |                              |
-| 19  | Guided onboarding (8-step setup guide) + testing templates                                                   | `/onboarding`, `/settings`                     | todo      |                              |
-| 20  | Test migration between instances (export / import)                                                          | `/settings`                                    | todo      |                              |
-| 21  | API tokens for MCP, VS Code extension and CI                                                                 | `/settings#account`                            | todo      |                              |
-| 22  | Gamification: Beat the Bot, seasons, leaderboard                                                             | `/leaderboard`, `/settings`                    | todo      |                              |
+| 11 | Interactive test playback: step-synced session video, network / perf / URL panes follow the scrubber | Focus mode, `/tests/<id>` | scheduled | https://youtu.be/K70UAlyBBzw (public 2026-09-05 15:00) |
+| 12 | GitHub issues with full evidence, assign an AI engineer, auto-close when green | Verify (Show issue / Report all) | scheduled | https://youtu.be/c5Xk0CeebWA (public 2026-09-06 15:00) |
+| 13 | Public share links (`/r/<slug>`): watermarked report, AI demo notes, session video, social cards | `/r/<slug>`, share dialog | scheduled | https://youtu.be/1MNPQVhHKAs (public 2026-09-07 15:00) |
+| 14 | API tests as a first-class test type + burst/load runner | `/tests` (API test) | scheduled | https://youtu.be/WB5E3IgCY7o (public 2026-09-08 15:00) |
+| 15 | Test versioning, composition (pin versions per build) and branch comparison | `/tests/<id>` versions, Compose, Compare | scheduled | https://youtu.be/pfWP64DRwJQ (public 2026-09-09 15:00) |
+| 16 | Functional area hierarchy + test suites | `/tests` | scheduled | https://youtu.be/xVhwEVyI_ac (public 2026-09-10 15:00) |
+| 17 | Scheduled runs (cron presets, auto-disable after failures) | `/settings` | scheduled | https://youtu.be/BO4baLLF-wQ (public 2026-09-11 15:00) |
+| 18 | WCAG 2.2 AA scoring with trend sparklines and per-test violations | Dashboard, Focus mode A11y tab | scheduled | https://youtu.be/UA5qJ7oINh0 (public 2026-09-12 15:00) |
+| 19 | Guided onboarding (8-step setup guide) + testing templates | `/onboarding`, `/settings` | scheduled | https://youtu.be/qQMZ2BLdQ1U (public 2026-09-13 15:00) |
+| 20 | Test migration between instances (export / import) | `/settings` | scheduled | https://youtu.be/u-Fo85hLY4A (public 2026-09-14 15:00) |
+| 21 | API tokens for MCP, VS Code extension and CI | `/settings#account` | scheduled | https://youtu.be/wmM_UG_1KZI (public 2026-09-15 15:00) |
+| 22 | Gamification: Beat the Bot, seasons, leaderboard | `/leaderboard`, `/settings` | scheduled | https://youtu.be/cj08HO8cO2c (public 2026-09-16 15:00) |
 
 ## AI and agents
 
 | #   | Feature                                                                                          | Surface                     | Status | Video |
 | --- | ------------------------------------------------------------------------------------------------ | --------------------------- | ------ | ----- |
-| 23  | Play Agent: 11-step autonomous pipeline with pause / approve / skip                              | `/agents`, onboarding       | todo   |       |
-| 24  | Agents Console: roster, blocked-on-human vs paused, escalation queue                              | `/agents`                   | todo   |       |
-| 25  | QA Agent: eight-phase suite builder with coverage matrix and plan review                          | `/agents` (QA)              | todo   |       |
-| 26  | Triage Agent: one build-scoped classifier, grouped by root cause                                  | `/results`                  | todo   |       |
-| 27  | Healer Agent: heal → verify loop, attempt budgets, versioned `ai_fix` edits, Stop button          | `/healer-agent`             | todo   |       |
-| 28  | Fix-the-App Advisor (`suggest_app_fix`) and AI diff analysis (`validate_diff` / `decide_diff`)   | Focus mode, MCP             | todo   |       |
-| 29  | Spec-driven testing: OpenAPI / user stories / markdown → tests                                    | `/tests` (Import)           | todo   |       |
-| 30  | Bring your own AI: Claude CLI, OpenRouter, Anthropic, OpenAI, Ollama; separate diff provider      | `/settings#ai`              | todo   |       |
-| 31  | MCP server (29 tools) + remote MCP with OAuth 2.1 and tool-access policy                         | `npx @lastest/mcp-server`, `/api/mcp` | todo |     |
+| 23 | Play Agent: 11-step autonomous pipeline with pause / approve / skip | `/agents`, onboarding | scheduled | https://youtu.be/W4Hyk8GqZwU (public 2026-09-17 15:00) |
+| 24 | Agents Console: roster, blocked-on-human vs paused, escalation queue | `/agents` | scheduled | https://youtu.be/Us7EAQw9MNE (public 2026-09-18 15:00) |
+| 25 | QA Agent: eight-phase suite builder with coverage matrix and plan review | `/agents` (QA) | scheduled | https://youtu.be/fq5XOzYQuWU (public 2026-09-19 15:00) |
+| 26 | Triage Agent: one build-scoped classifier, grouped by root cause | `/results` | scheduled | https://youtu.be/RznTL4_s3ts (public 2026-09-20 15:00) |
+| 27 | Healer Agent: heal → verify loop, attempt budgets, versioned `ai_fix` edits, Stop button | `/healer-agent` | scheduled | https://youtu.be/MWF546fg7RY (public 2026-09-21 15:00) |
+| 28 | Fix-the-App Advisor (`suggest_app_fix`) and AI diff analysis (`validate_diff` / `decide_diff`) | Focus mode, MCP | scheduled | https://youtu.be/FsO-1Vm2iDg (public 2026-09-22 15:00) |
+| 29 | Spec-driven testing: OpenAPI / user stories / markdown → tests | `/tests` (Import) | scheduled | https://youtu.be/c7TaQWc3yGE (public 2026-09-23 15:00) |
+| 30 | Bring your own AI: Claude CLI, OpenRouter, Anthropic, OpenAI, Ollama; separate diff provider | `/settings#ai` | scheduled | https://youtu.be/9969XjOWwTg (public 2026-09-24 15:00) |
+| 31 | MCP server (29 tools) + remote MCP with OAuth 2.1 and tool-access policy | `npx @lastest/mcp-server`, `/api/mcp` | scheduled | https://youtu.be/1RHDyZTPfJo (public 2026-09-25 15:00) |
 | 32  | WebMCP: page-registered site tools, consent dialog, public-share tools                            | any page, `/r/<slug>`       | published | https://youtu.be/DcLVj_-ORQ4 (WebMCP Challenge cut) |
 
 ## Stabilization
 
 | #   | Feature                                                                                                              | Surface            | Status | Video |
 | --- | -------------------------------------------------------------------------------------------------------------------- | ------------------ | ------ | ----- |
-| 33  | 12 flaky-test guards: text-region OCR diffing, timestamp freeze, random seeding, burst capture, auto-mask, network idle, DOM stability, font wait, spinner hiding, page-shift detection | `/settings#testing` | todo | |
-| 34  | Third-party blocking and console error mode                                                                          | `/settings#testing` | todo   |       |
+| 33 | 12 flaky-test guards: text-region OCR diffing, timestamp freeze, random seeding, burst capture, auto-mask, network idle, DOM stability, font wait, spinner hiding, page-shift detection | `/settings#testing` | scheduled | https://youtu.be/Qb4n4b_tI-s (public 2026-09-26 15:00) |
+| 34 | Third-party blocking and console error mode | `/settings#testing` | scheduled | https://youtu.be/YDm5x9Ixuhs (public 2026-09-27 15:00) |
 
 ## Integrations and infrastructure
 
 | #   | Feature                                                                                         | Surface                    | Status | Video |
 | --- | ----------------------------------------------------------------------------------------------- | -------------------------- | ------ | ----- |
-| 35  | GitHub / GitLab: OAuth, PR / MR comments, webhook builds, reusable Action, `@lastest/runner` CLI | `/settings#integrations`   | todo   |       |
-| 36  | SUT connectors: Veeva Vault and Salesforce profiling over the real REST API                      | `/setup` (Connectors)      | todo   |       |
-| 37  | Google Sheets as a test data source                                                              | `/setup` (Data sources)    | todo   |       |
-| 38  | Notifications: Slack, Discord, webhooks                                                          | `/settings#integrations`   | todo   |       |
-| 39  | Embedded Browser pool: live CDP streaming during a build, system-managed vs BYO                  | Verify (live stream), `/settings` | todo |     |
-| 40  | Smart Run (git-diff-scoped runs) and parallel execution                                          | Verify Run split-button    | todo   |       |
-| 41  | Self-host in Docker in five minutes                                                              | terminal + `/onboarding`   | todo   |       |
-| 42  | VS Code extension                                                                                | IDE                        | todo   |       |
+| 35 | GitHub / GitLab: OAuth, PR / MR comments, webhook builds, reusable Action, `@lastest/runner` CLI | `/settings#integrations` | scheduled | https://youtu.be/B9qFanT4qlw (public 2026-09-28 15:00) |
+| 36 | SUT connectors: Veeva Vault and Salesforce profiling over the real REST API | `/setup` (Connectors) | scheduled | https://youtu.be/YhoARTK3zSs (public 2026-09-29 15:00) |
+| 37 | Google Sheets as a test data source | `/setup` (Data sources) | scheduled | https://youtu.be/SYqvzPo7LkU (public 2026-09-30 15:00) |
+| 38 | Notifications: Slack, Discord, webhooks | `/settings#integrations` | recorded | mp4 in .playwright-mcp/videos/ (upload blocked by YouTube daily limit on 2026-09-05) |
+| 39 | Embedded Browser pool: live CDP streaming during a build, system-managed vs BYO | Verify (live stream), `/settings` | recorded | mp4 in .playwright-mcp/videos/ (upload blocked by YouTube daily limit on 2026-09-05) |
+| 40 | Smart Run (git-diff-scoped runs) and parallel execution | Verify Run split-button | recorded | mp4 in .playwright-mcp/videos/ (upload blocked by YouTube daily limit on 2026-09-05) |
+| 41 | Self-host in Docker in five minutes | terminal + `/onboarding` | recorded | mp4 in .playwright-mcp/videos/ (upload blocked by YouTube daily limit on 2026-09-05) |
+| 42 | VS Code extension | IDE | recorded | mp4 in .playwright-mcp/videos/ (upload blocked by YouTube daily limit on 2026-09-05) |
 
 ## Pharma (pharma.lastest.cloud, Lastest for Pharma)
 
@@ -83,19 +84,19 @@ no public shares).
 
 | #   | Feature                                                                                                                 | Surface                                    | Status | Video |
 | --- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ------ | ----- |
-| P1  | Regulated profile: one toggle sets GxP defaults (text + DOM layers enforce, gamification off, public shares refused, identity on every action) | `/settings` (Regulated mode), `/onboarding` pharma segment | todo | |
-| P2  | Veeva Vault suites: Vault CRM first (auth bridge, object pages, call reporting, samples, consent), then PromoMats, Clinical, RIM | repo `lastest-veeva-starter`, `/tests`  | todo   |       |
-| P3  | Scenario data, one column per country: the same flow replays per market from a spreadsheet you own                     | `/setup` (Data sources, Google Sheets)     | todo   |       |
-| P4  | Coverage matrix flow × layer × market computed from run artifacts, gaps visible before general release                  | `/coverage`                                | todo   |       |
-| P5  | Health score 0–100 per repository (pass 60% / non-flaky 20% / route coverage 20%)                                       | Dashboard                                  | todo   |       |
-| P6  | Deterministic replay, nine layers deep: per-layer approve / reject / snooze on every step                               | Verify Focus mode                          | todo   |       |
-| P7  | Evidence-grade issues: baseline + actual + diff + step context filed on a confirmed regression, auto-closed when green  | Verify (Show issue)                        | todo   |       |
-| P8  | Interactive playback as audit evidence: session video on a step-synced clock                                            | Focus mode playback                        | todo   |       |
-| P9  | Every change carries a reason: test version history, reconstruct the exact suite behind a piece of evidence            | `/tests/<id>` versions, Compose            | todo   |       |
-| P10 | Environments for prerelease Vault: run one suite against UAT and PROD, promote baselines, survive a sandbox refresh      | `/setup` (Environments)                    | todo   |       |
-| P11 | Vault connector: profile the live Vault configuration over its REST API to ground test generation                       | `/setup` (Connectors → Veeva Vault)        | todo   |       |
-| P12 | Bring your own model inside the network + air-gapped self-host (data never leaves the tenant)                          | `/settings#ai`, Docker install             | todo   |       |
-| P13 | Ownership: suites, spreadsheet, baselines and reports as files in your repo; run without Lastest installed              | repo export, `/settings`                   | todo   |       |
+| P1 | Regulated profile: one toggle sets GxP defaults (text + DOM layers enforce, gamification off, public shares refused, identity on every action) | `/settings` (Regulated mode), `/onboarding` pharma segment | recorded | mp4 in .playwright-mcp/videos/ (upload pending, YouTube daily limit) |
+| P2 | Veeva Vault suites: Vault CRM first (auth bridge, object pages, call reporting, samples, consent), then PromoMats, Clinical, RIM | repo `lastest-veeva-starter`, `/tests` | recorded | mp4 in .playwright-mcp/videos/ (upload pending, YouTube daily limit) |
+| P3 | Scenario data, one column per country: the same flow replays per market from a spreadsheet you own | `/setup` (Data sources, Google Sheets) | recorded | mp4 in .playwright-mcp/videos/ (upload pending, YouTube daily limit) |
+| P4 | Coverage matrix flow × layer × market computed from run artifacts, gaps visible before general release | `/coverage` | recorded | mp4 in .playwright-mcp/videos/ (upload pending, YouTube daily limit) |
+| P5 | Health score 0–100 per repository (pass 60% / non-flaky 20% / route coverage 20%) | Dashboard | recorded | mp4 in .playwright-mcp/videos/ (upload pending, YouTube daily limit) |
+| P6 | Deterministic replay, nine layers deep: per-layer approve / reject / snooze on every step | Verify Focus mode | recorded | mp4 in .playwright-mcp/videos/ (upload pending, YouTube daily limit) |
+| P7 | Evidence-grade issues: baseline + actual + diff + step context filed on a confirmed regression, auto-closed when green | Verify (Show issue) | recorded | mp4 in .playwright-mcp/videos/ (upload pending, YouTube daily limit) |
+| P8 | Interactive playback as audit evidence: session video on a step-synced clock | Focus mode playback | recorded | mp4 in .playwright-mcp/videos/ (upload pending, YouTube daily limit) |
+| P9 | Every change carries a reason: test version history, reconstruct the exact suite behind a piece of evidence | `/tests/<id>` versions, Compose | recorded | mp4 in .playwright-mcp/videos/ (upload pending, YouTube daily limit) |
+| P10 | Environments for prerelease Vault: run one suite against UAT and PROD, promote baselines, survive a sandbox refresh | `/setup` (Environments) | recorded | mp4 in .playwright-mcp/videos/ (upload pending, YouTube daily limit) |
+| P11 | Vault connector: profile the live Vault configuration over its REST API to ground test generation | `/setup` (Connectors → Veeva Vault) | recorded | mp4 in .playwright-mcp/videos/ (upload pending, YouTube daily limit) |
+| P12 | Bring your own model inside the network + air-gapped self-host (data never leaves the tenant) | `/settings#ai`, Docker install | recorded | mp4 in .playwright-mcp/videos/ (upload pending, YouTube daily limit) |
+| P13 | Ownership: suites, spreadsheet, baselines and reports as files in your repo; run without Lastest installed | repo export, `/settings` | recorded | mp4 in .playwright-mcp/videos/ (upload pending, YouTube daily limit) |
 
 ## Published
 
@@ -117,20 +118,19 @@ no public shares).
 
 Built by `build-short.py` (session scratch dir 76a5f298, `shorts/`): first ~55 s of the full video cropped to the
 content area, title card above, burned captions below, 2.5 s end card. Source mp4s: `.playwright-mcp/videos/`
-(5-10) and yt-dlp downloads of 1-4 + 32. Uploads stopped at 3 on 2026-09-03: the channel hit YouTube's daily
-upload limit for unverified channels (phone verification lifts it, or wait 24 h). Remaining 8 are rendered in
-`.playwright-mcp/videos/shorts/`.
+(5-10) and yt-dlp downloads of 1-4 + 32. Uploads stopped at 3 on 2026-09-03 (YouTube daily upload limit for unverified channels); the remaining 8 were
+uploaded on 2026-09-04 once the limit reset.
 
 | #   | Short                          | Status    | URL                                        |
 | --- | ------------------------------ | --------- | ------------------------------------------ |
 | 1   | Verify Board                   | published | https://youtube.com/shorts/NRgxrIiAgBA     |
 | 2   | Record a Test                  | published | https://youtube.com/shorts/LS4IR6rmxQ0     |
 | 3   | Check Modes                    | published | https://youtube.com/shorts/nyymrEzS2_I     |
-| 4   | Diff Engines                   | rendered  | v04-diff-engines.short.mp4                 |
-| 5   | Environments                   | rendered  | v05-environments.short.mp4                 |
-| 6   | Credential Store               | rendered  | v06-credentials.short.mp4                  |
-| 7   | Setup and Teardown             | rendered  | v07-setup-teardown.short.mp4               |
-| 8   | App Map and Explore            | rendered  | v08-app-map.short.mp4                      |
-| 9   | Data Coverage                  | rendered  | v09-coverage.short.mp4                     |
-| 10  | Run Results and Triage         | rendered  | v10-run-results.short.mp4                  |
-| 32  | WebMCP Site Tools              | rendered  | v32-webmcp.short.mp4                       |
+| 4   | Diff Engines                   | published | https://youtube.com/shorts/QSfgB89BGu8     |
+| 5   | Environments                   | published | https://youtube.com/shorts/rwPz_lSKwQM     |
+| 6   | Credential Store               | published | https://youtube.com/shorts/zkXums2Tefk     |
+| 7   | Setup and Teardown             | published | https://youtube.com/shorts/s5bteLZx748     |
+| 8   | App Map and Explore            | published | https://youtube.com/shorts/prRMTJP1dWg     |
+| 9   | Data Coverage                  | published | https://youtube.com/shorts/lEeHjUokEAQ     |
+| 10  | Run Results and Triage         | published | https://youtube.com/shorts/WzszUM0RfCI     |
+| 32  | WebMCP Site Tools              | published | https://youtube.com/shorts/eKlisuWuxGE     |
