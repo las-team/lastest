@@ -68,6 +68,18 @@ const PROMPTS: Record<string, (c: McpPromptContext) => string> = {
       : `Using the Lastest MCP server, review the latest build's visual diffs${inRepo(c)}, tell me which are real regressions vs. noise, and approve the safe ones.`,
 };
 
+/**
+ * Pure prompt builder behind the popover. Exported so the copy can be pinned
+ * by a unit test without a browser; unknown keys fall back to `generate`.
+ */
+export function buildMcpPrompt(
+  promptKey: keyof typeof PROMPTS | string,
+  ctx: McpPromptContext,
+): string {
+  const build = PROMPTS[promptKey] ?? PROMPTS.generate;
+  return build(ctx);
+}
+
 export function McpCtaHint({
   promptKey,
   label = "Use your agent",
@@ -87,10 +99,17 @@ export function McpCtaHint({
   className?: string;
 } & McpPromptContext) {
   const [copied, setCopied] = useState(false);
-  const prompt = useMemo(() => {
-    const build = PROMPTS[promptKey] ?? PROMPTS.generate;
-    return build({ testId, testName, targetUrl, repositoryId, buildId });
-  }, [promptKey, testId, testName, targetUrl, repositoryId, buildId]);
+  const prompt = useMemo(
+    () =>
+      buildMcpPrompt(promptKey, {
+        testId,
+        testName,
+        targetUrl,
+        repositoryId,
+        buildId,
+      }),
+    [promptKey, testId, testName, targetUrl, repositoryId, buildId],
+  );
   const copy = useCallback(async () => {
     await navigator.clipboard.writeText(prompt);
     setCopied(true);

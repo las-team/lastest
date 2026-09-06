@@ -70,9 +70,9 @@ Recording conventions (from the first video):
 | 35 | GitHub / GitLab: OAuth, PR / MR comments, webhook builds, reusable Action, `@lastest/runner` CLI | `/settings#integrations` | scheduled | https://youtu.be/B9qFanT4qlw (public 2026-09-28 15:00) |
 | 36 | SUT connectors: Veeva Vault and Salesforce profiling over the real REST API | `/setup` (Connectors) | scheduled | https://youtu.be/YhoARTK3zSs (public 2026-09-29 15:00) |
 | 37 | Google Sheets as a test data source | `/setup` (Data sources) | scheduled | https://youtu.be/SYqvzPo7LkU (public 2026-09-30 15:00) |
-| 38 | Notifications: Slack, Discord, webhooks | `/settings#integrations` | recorded | mp4 in .playwright-mcp/videos/ (upload blocked by YouTube daily limit on 2026-09-05) |
-| 39 | Embedded Browser pool: live CDP streaming during a build, system-managed vs BYO | Verify (live stream), `/settings` | recorded | mp4 in .playwright-mcp/videos/ (upload blocked by YouTube daily limit on 2026-09-05) |
-| 40 | Smart Run (git-diff-scoped runs) and parallel execution | Verify Run split-button | recorded | mp4 in .playwright-mcp/videos/ (upload blocked by YouTube daily limit on 2026-09-05) |
+| 38 | Notifications: Slack, Discord, webhooks | `/settings#integrations` | scheduled | https://youtu.be/PqBxbjqO8vQ (public 2026-10-01 15:00) |
+| 39 | Embedded Browser pool: live CDP streaming during a build, system-managed vs BYO | Verify (live stream), `/settings` | scheduled | https://youtu.be/Em2xXJ-DWu4 (public 2026-10-02 15:00) |
+| 40 | Smart Run (git-diff-scoped runs) and parallel execution | Verify Run split-button | scheduled | https://youtu.be/rzwe5Ld5hFw (public 2026-10-03 15:00) |
 | 41 | Self-host in Docker in five minutes | terminal + `/onboarding` | recorded | mp4 in .playwright-mcp/videos/ (upload blocked by YouTube daily limit on 2026-09-05) |
 | 42 | VS Code extension | IDE | recorded | mp4 in .playwright-mcp/videos/ (upload blocked by YouTube daily limit on 2026-09-05) |
 
