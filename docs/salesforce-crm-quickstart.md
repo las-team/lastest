@@ -22,6 +22,37 @@ meetingLocation, taskSubject, emailSubject, emailBody, noteTitle, noteBody) and
 `leads` (firstName, lastName, company, email, phone, title). Tests reference
 them as `{{var:name}}` from a `DATA` block at the top of the test body.
 
+## Shipped in the product as the "Salesforce CRM" template
+
+The suite is seeded by `src/lib/demo/salesforce-quickstart-seed.ts`, picked
+from the onboarding sandbox picker as the "Salesforce CRM" template (id
+`salesforce-crm`, routed in `createLocalRepo`). Same shape as the pharma seed:
+8 areas, 18 tests, one version row each, quarantined until the user supplies
+what only they can.
+
+What differs from the live repo:
+
+- Login reads `credentials.salesforce.username`, `.password` and
+  `.securityToken` from the Credentials store instead of three constants in
+  the source. A Salesforce connector named `salesforce` with the "Browser
+  login" method provisions all three (the security token field was added to
+  that method for this). A missing credential throws a message that names the
+  UI step, the way the pharma seed does.
+- No per-test target URL. Every test navigates from the injected `baseUrl`,
+  so the org URL typed in the next onboarding step applies to all 18 at once.
+- The seven data-bound tests carry inline defaults. CSV sources and variables
+  live behind the data-sources plugin and are created on a test's Vars tab,
+  not by a seed, so each test's `DATA` block names the sample sheet under
+  `docs/samples/salesforce/` (`leads.csv`, `rep_activities.csv`) and the
+  variables to bind.
+- The Playwright profile the suite was validated under is written to the repo
+  on seed: 1600x900, 60 s navigation timeout, console and network on `log`,
+  video on.
+
+Guards: `salesforce-quickstart-seed.test.ts` (content: no literal credential,
+no org host, no `networkidle`, no unresolved variable token, valid JS) and
+`salesforce-quickstart-seed.integration.test.ts` (insert path).
+
 ## Authentication: what works and what does not
 
 Salesforce challenges every new browser with an emailed verification code and
@@ -132,6 +163,10 @@ exploration did not reproduce the failures.
 
 ## Reusing the repo for another org
 
-Change the repo base URL and the three constants (username, password,
-security token) in each test's sign-in block. Everything else is standard
-Lightning and standard sample data.
+Pick the "Salesforce CRM" template during onboarding, set the org URL as the
+repo base URL, and add a Salesforce connector named `salesforce` (Browser
+login: user name, password, security token). Then un-quarantine the tests.
+Everything else is standard Lightning and standard sample data.
+
+For the original live repo (`salesforce-crm-quickstart`), change the repo base
+URL and the three constants in each test's sign-in block instead.

@@ -75,6 +75,20 @@ beforeAll(async () => {
     branchBaseUrls: { main: TARGET },
   });
   repoId = repo.id;
+  // Pin the Agent SDK model, same fixture as
+  // `src/lib/ai/authoring-ai.integration.test.ts`. Every pipeline step goes
+  // through `ctx.ai.generate` -> `getAIProvider`, which with `agentSdkModel`
+  // unset passes `model: undefined` (intended: let the CLI choose), so the
+  // Claude Code child process falls back to the developer's
+  // ~/.claude/settings.json model alias, which is not guaranteed to be
+  // servable by the SDK's bundled CLI ("There's an issue with the selected
+  // model (...)"). `ai_settings` is the supported per-repo override, so the
+  // fixture uses it. Set QUICKSTART_AI_TEST_MODEL to run against a different
+  // locally available model.
+  await queries.upsertAISettings(repoId, {
+    provider: "claude-agent-sdk",
+    agentSdkModel: process.env.QUICKSTART_AI_TEST_MODEL || "claude-sonnet-4-6",
+  });
 }, 30_000);
 
 afterAll(async () => {

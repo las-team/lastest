@@ -273,14 +273,30 @@ describe("baseline precedence", () => {
   it("applies the same fallback in getBranchBaseline", async () => {
     await seedBaseline({ environmentKey: null, imagePath: "shared.png" });
     expect(
-      (await getBranchBaseline(testId, "step-1", BRANCH, "chromium", "uat"))
-        ?.imagePath,
+      (
+        await getBranchBaseline(
+          testId,
+          "step-1",
+          BRANCH,
+          "chromium",
+          null,
+          "uat",
+        )
+      )?.imagePath,
     ).toBe("shared.png");
 
     await seedBaseline({ environmentKey: "uat", imagePath: "uat.png" });
     expect(
-      (await getBranchBaseline(testId, "step-1", BRANCH, "chromium", "uat"))
-        ?.imagePath,
+      (
+        await getBranchBaseline(
+          testId,
+          "step-1",
+          BRANCH,
+          "chromium",
+          null,
+          "uat",
+        )
+      )?.imagePath,
     ).toBe("uat.png");
   });
 });

@@ -32,7 +32,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { db } from "@/lib/db";
 import * as queries from "@/lib/db/queries";
-import { agentSessions } from "@/lib/db/schema";
+import { agentSessions, teams } from "@/lib/db/schema";
 import { buildAppMap, deriveFlows } from "@lastest/plugin-app-map";
 
 import { appAppMapHost } from "@/lib/core/app-map-host";
@@ -71,6 +71,15 @@ beforeAll(async () => {
 
   const team = await queries.createTeam({ name: "qa-agent-it-team" });
   teamId = team.id;
+  // Triggers respect the same Pro gate as the /qa-agent UI:
+  // `startQaAgentFromTrigger` checks `entitlements.has("qa-agent")`, which
+  // `hasQaAgentAccess` only waves through for free teams when billing is
+  // disabled. With STRIPE_SECRET_KEY in .env.local a freshly created team is
+  // on "free" and both runs would come back `skipped` (the gate is the
+  // product working; qa-agent-billing-gate.integration.test.ts asserts it).
+  // Flip the plan the way a paying team would have it, same as
+  // e2e/agents-ui.integration.test.ts and e2e/triage-ui.integration.test.ts.
+  await db.update(teams).set({ plan: "pro" }).where(eq(teams.id, teamId));
   const repo = await queries.createRepository({
     teamId,
     provider: "local",

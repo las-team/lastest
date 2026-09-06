@@ -36,6 +36,7 @@ import { getPoolStatus } from "@lastest/pool-service/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { db, sql } from "@/lib/db";
+import { teams } from "@/lib/db/schema";
 import * as queries from "@/lib/db/queries";
 import { getPluginRuntime } from "@/lib/core/runtime";
 
@@ -73,6 +74,11 @@ beforeAll(async () => {
 
   const team = await queries.createTeam({ name: "explorer-it-team" });
   teamId = team.id;
+  // Explorer triggers respect the same plan gate as the UI (`actions.ts`
+  // declines non-entitled teams and quietly re-arms them). With
+  // STRIPE_SECRET_KEY set, billing is enabled and a fresh team is "free",
+  // which lacks the "qa-agent" entitlement, so put it on Pro.
+  await db.update(teams).set({ plan: "pro" }).where(eq(teams.id, teamId));
   const repo = await queries.createRepository({
     teamId,
     provider: "local",

@@ -273,7 +273,12 @@ describe("§4 step 16 — per-repo credentials: create, encrypt, edit, delete", 
         throw new Error("credential row was not deleted");
       await new Promise((res) => setTimeout(res, 500));
     }
-    expect(await queries.getCredentialsForRun(repoId)).toEqual({});
+    // Envelope shape since feat(environments): both the plaintext map and
+    // the secret-key map must be empty once the only row is gone.
+    expect(await queries.getCredentialsForRun(repoId)).toEqual({
+      credentials: {},
+      secretKeys: {},
+    });
   });
 
   it("leaves no unexplained client-side errors", async () => {
