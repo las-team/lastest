@@ -221,10 +221,11 @@ export async function migrateVeevaCrmConfig(
         });
         result.applyReport = report;
         await writeJson(path.join(options.outDir, "apply-report.json"), report);
+        const count = (status: ApplyReport["results"][number]["status"]) =>
+          report.results.filter((r) => r.status === status).length;
         log(
-          `${dryRun ? "dry-run" : "apply"} finished: ${report.results.filter((r) => r.status === "applied").length} applied, ` +
-            `${report.results.filter((r) => r.status === "failed").length} failed, ` +
-            `${report.results.filter((r) => r.status === "manual").length} manual`,
+          `${dryRun ? "dry-run" : "apply"} finished: ${count("applied")} applied, ` +
+            `${count("skipped")} skipped, ${count("failed")} failed, ${count("manual")} manual`,
         );
         break;
       }
