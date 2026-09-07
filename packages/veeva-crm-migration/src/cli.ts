@@ -29,10 +29,16 @@ function parseArgs(argv: string[]): {
   command: string;
   flags: Record<string, string | boolean>;
 } {
-  const [command = "help", ...rest] = argv;
+  // A leading flag (`--help`) means no command was given.
+  const [command = "help", ...rest] =
+    argv[0] === undefined || argv[0].startsWith("-") ? ["help", ...argv] : argv;
   const flags: Record<string, string | boolean> = {};
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i]!;
+    if (arg === "-h") {
+      flags.help = true;
+      continue;
+    }
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
     const next = rest[i + 1];
@@ -113,7 +119,8 @@ export async function main(
 ): Promise<number> {
   const { command, flags } = parseArgs(argv);
   const stages = STAGES[command];
-  if (!stages || flags.help) {
+  const wantsHelp = flags.help === true || command === "help";
+  if (!stages || wantsHelp) {
     console.error(
       [
         "usage: veeva-crm-migration <extract|document|plan|apply|all> --out <dir> [options]",
@@ -125,7 +132,7 @@ export async function main(
         "  --execute                  apply for real (default is dry-run)",
       ].join("\n"),
     );
-    return stages ? 0 : 2;
+    return wantsHelp ? 0 : 2;
   }
   const outDir =
     typeof flags.out === "string" ? flags.out : "./veeva-migration-out";
