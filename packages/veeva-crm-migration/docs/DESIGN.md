@@ -29,6 +29,42 @@ by the earlier one, so extraction happens once.
 
 ---
 
+## 0. Implementation status and deviations from this design
+
+This document was written before the code and is kept as the rationale. Where the
+implementation settled differently, the code wins; the differences are:
+
+- **Documentation output** (§5): Markdown only. The CSV twins (`settings.csv`,
+  `vmocs.csv`, `<CC>/delta.csv`, `persona-matrix.csv`) and the `global/objects.md`,
+  `global/settings.md`, `global/vmocs.md`, `global/messages.md`, `global/unmapped.md`
+  pages are not generated; their content lives in `README.md`, `profiles.md`,
+  `global/<category>.md`, `<CC>/README.md`, `<CC>/<category>.md` and
+  `intake-template.md`. Deltas are the "Delta vs global" section of each category page.
+- **Persona naming** (§6.1): one Vault security profile + permission set + application
+  profile per country × rep category, named `sp_<cc>_<category>__c`, `ps_<cc>_<category>__c`,
+  `app_<cc>_<category>__c`. The `one_to_one` / `consolidate` `profileStrategy` option is
+  not implemented. Permissions of several profiles in the same country × category are
+  OR-merged; every flag not shared by all of them is listed in the step notes and in
+  `plan.unmapped`, so the widening is visible.
+- **MDL** (§6.2): generators emit `CREATE` / `ALTER … ADD`, never `RECREATE`, so a
+  component that already exists fails its statement instead of being replaced. `apply`
+  pre-checks existence (derived from the statement head) and skips present components.
+- **Apply** (§6.4): dry-run reports steps as `skipped` with the request that would be
+  sent (not `applied`); only `apply-report.json` is written, no `apply-report.md`.
+  Record-creating API steps look the record up by name with VQL and `PUT` when it exists.
+- **Plan stage** never opens a Vault client; field names of `veeva_settings__v` and
+  `vmobile_object_configuration__v` records are not verified against target metadata
+  (those steps are `review: true`).
+- **Extraction** (§4.2): validation-rule formulas (E1) are not fetched, only names,
+  activity and error messages; `messageFilter` exists on `ExtractOptions` but is not
+  exposed through `migrateVeevaCrmConfig` or the CLI.
+- A page layout referenced by several country × category groups is emitted once, under
+  the first group that references it.
+- CLI flags that exist: `--classification <file>`, `--keep-empty-profiles`,
+  `--allow-review`, `--continue-on-error`, `--async-mdl` (see `src/cli.ts`).
+
+---
+
 ## 1. Scope and non-goals
 
 **In scope — "functional configuration" of a Veeva CRM org on Salesforce:**

@@ -43,10 +43,15 @@ Or from the CLI (credentials come from the environment, never from flags):
 # Vault:      VAULT_DNS + VAULT_SESSION_ID, or VAULT_DNS + VAULT_USERNAME + VAULT_PASSWORD
 pnpm --filter @lastest/veeva-crm-migration cli extract  --out ./out
 pnpm --filter @lastest/veeva-crm-migration cli document --out ./out --countries DE,FR
-pnpm --filter @lastest/veeva-crm-migration cli plan     --out ./out
-pnpm --filter @lastest/veeva-crm-migration cli apply    --out ./out            # dry-run
-pnpm --filter @lastest/veeva-crm-migration cli apply    --out ./out --execute  # for real
+pnpm --filter @lastest/veeva-crm-migration cli plan     --out ./out --classification ./rules.json
+pnpm --filter @lastest/veeva-crm-migration cli apply    --out ./out                 # dry-run
+pnpm --filter @lastest/veeva-crm-migration cli apply    --out ./out --execute --allow-review
 ```
+
+Flags: `--countries`, `--rep-categories`, `--objects`, `--include-managed`,
+`--api-version`, `--classification <file>` (classifier rules and overrides),
+`--keep-empty-profiles`, `--execute`, `--allow-review` (run the steps flagged
+`review`), `--continue-on-error`, `--async-mdl`. Run `--help` for details.
 
 Run `extract` against a **sandbox**: the Salesforce daily API limit is shared
 org-wide, and a full extract of a mid-size org needs a few thousand calls
@@ -123,12 +128,27 @@ order: picklists → custom objects and fields → object types → page layouts
 permission sets → security profiles → application profiles → Veeva Settings
 records → VMOC records → manual steps. Steps are `mdl` (executed through
 `POST /api/mdl/execute`), `api` (Vault REST calls) or `manual` (checklist).
-Steps generated from an unverified MDL grammar or mapping carry `review: true`
-and are skipped by `apply` unless explicitly allowed. Everything with no Vault
-equivalent lands in `unmapped` and in `vault-plan/manual-checklist.md`.
 
-`apply` is idempotent (existence pre-checks before each create), stops on the
-first failure, and is a dry-run unless told otherwise.
+- One security profile, permission set and application profile per country × rep
+  category (`sp_de_sales_rep__c`, `ps_de_sales_rep__c`, `app_de_sales_rep__c`).
+  Permissions of several profiles in the same group are OR-merged, and every flag
+  not shared by all of them is listed in the step notes and in `unmapped.md`.
+- Generated MDL uses `CREATE` / `ALTER … ADD`, never `RECREATE`, so a component
+  that already exists fails its statement instead of being replaced.
+- Steps generated from an unverified MDL grammar or mapping carry `review: true`
+  and are skipped by `apply` unless `--allow-review` is given.
+- Everything with no Vault equivalent (Apex, flows, validation rules, user-level
+  settings, objects outside the extract set) lands in `unmapped.md` and the
+  manual checklist. Customer-modified Veeva Messages become
+  `translations/<lang>.csv` for the Message Catalog import.
+
+`vault-plan/` contains `plan.json`, `steps.md`, `manual-checklist.md`,
+`unmapped.md`, one `<CC>/<category>.mdl` per group plus `GLOBAL/all.mdl`, and
+`translations/` when there are messages to carry over.
+
+`apply` is idempotent (an existence pre-check before every step; records are
+looked up by name and updated instead of duplicated), stops on the first
+failure unless told otherwise, and is a dry-run unless `--execute` is given.
 
 ## Assumptions and open questions
 
@@ -155,14 +175,14 @@ Stated in full in `docs/DESIGN.md` §9. The important ones:
 
 ```
 src/
-  model/    types, classification, baseline/delta computation, country names
+  model/    types, classification, baseline/delta computation, country table
   sfdc/     Salesforce client (OAuth client-credentials / JWT / token), queries, extractor
-  docs/     Markdown renderer and writer
+  docs/     Markdown renderer (index, profiles, country and category pages, intake template)
   vault/    Vault client, mapping table, MDL generators, planner, applier, plan writer
   index.ts  migrateVeevaCrmConfig()
   cli.ts
 docs/
-  DESIGN.md          the implementation design
+  DESIGN.md          the implementation design, with a list of where the code deviates
   research/          research notes with sources and uncertainties
 ```
 
