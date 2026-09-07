@@ -159,7 +159,7 @@ export async function migrateVeevaCrmConfig(
           fetch: fetchImpl,
           log,
         });
-        result.snapshot = await extractOrgSnapshot(client, {
+        const snapshot = await extractOrgSnapshot(client, {
           apiVersion: options.sfdc.apiVersion,
           objects: options.sfdc.objects,
           includeManagedObjects: options.sfdc.includeManagedObjects,
@@ -167,36 +167,39 @@ export async function migrateVeevaCrmConfig(
           log,
           now,
         });
-        await writeJson(snapshotPath, result.snapshot);
+        result.snapshot = snapshot;
+        await writeJson(snapshotPath, snapshot);
         log(
-          `snapshot written to ${snapshotPath} (${result.snapshot.warnings.length} warnings)`,
+          `snapshot written to ${snapshotPath} (${snapshot.warnings.length} warnings)`,
         );
         break;
       }
       case "document": {
         const classified = await needClassified();
         const docs = renderDocs(classified, { now });
-        result.docFiles = await writeDocs(
+        const docFiles = await writeDocs(
           docs,
           path.join(options.outDir, "docs"),
         );
-        log(`wrote ${result.docFiles.length} documentation files`);
+        result.docFiles = docFiles;
+        log(`wrote ${docFiles.length} documentation files`);
         break;
       }
       case "plan": {
         const classified = await needClassified();
-        result.plan = buildVaultPlan(classified, {
+        const plan = buildVaultPlan(classified, {
           apiVersion: options.vault?.apiVersion,
           vaultDns: options.vault?.vaultDns,
           now,
         });
-        await writeJson(planPath, result.plan);
+        result.plan = plan;
+        await writeJson(planPath, plan);
         result.planFiles = await writePlan(
-          result.plan,
+          plan,
           path.join(options.outDir, "vault-plan"),
         );
         log(
-          `plan: ${result.plan.steps.length} steps, ${result.plan.unmapped.length} unmapped components`,
+          `plan: ${plan.steps.length} steps, ${plan.unmapped.length} unmapped components`,
         );
         break;
       }
@@ -211,19 +214,17 @@ export async function migrateVeevaCrmConfig(
           fetch: fetchImpl,
           log,
         });
-        result.applyReport = await applyVaultPlan(client, plan, {
+        const report = await applyVaultPlan(client, plan, {
           dryRun,
           log,
           now,
         });
-        await writeJson(
-          path.join(options.outDir, "apply-report.json"),
-          result.applyReport,
-        );
+        result.applyReport = report;
+        await writeJson(path.join(options.outDir, "apply-report.json"), report);
         log(
-          `${dryRun ? "dry-run" : "apply"} finished: ${result.applyReport.results.filter((r) => r.status === "applied").length} applied, ` +
-            `${result.applyReport.results.filter((r) => r.status === "failed").length} failed, ` +
-            `${result.applyReport.results.filter((r) => r.status === "manual").length} manual`,
+          `${dryRun ? "dry-run" : "apply"} finished: ${report.results.filter((r) => r.status === "applied").length} applied, ` +
+            `${report.results.filter((r) => r.status === "failed").length} failed, ` +
+            `${report.results.filter((r) => r.status === "manual").length} manual`,
         );
         break;
       }

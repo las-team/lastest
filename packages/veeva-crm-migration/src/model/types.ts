@@ -109,6 +109,14 @@ export interface ProfileConfig {
   activeUsersByCountry: Record<CountryCode, number>;
   /** Permission sets assigned to at least one user of this profile. */
   permissionSetNames: string[];
+  /** Names of the `PermissionsXxx` user permissions that are true. */
+  userPermissions?: string[];
+  /** Id of the hidden permission set that backs the profile (`IsOwnedByProfile = true`). */
+  permissionSetId?: string;
+  /** Active users by `User_Type_vod__c` value. */
+  repTypeCounts?: Record<string, number>;
+  /** Set by classification: serves ≥ 2 countries with no dominant one. */
+  shared?: boolean;
 }
 
 export interface PermissionSetConfig {
@@ -154,14 +162,25 @@ export interface RecordTypeConfig {
   name: string;
   active: boolean;
   description?: string;
+  /** Object the record type belongs to. */
+  object?: string;
+  /** Per-record-type picklist value subsets: field API name → allowed values. */
+  picklistValues?: Record<string, string[]>;
 }
 
-/** A page-layout section with its fields, as returned by `describe/layouts`. */
+export interface LayoutItem {
+  field: string;
+  behavior: "Edit" | "Required" | "Readonly";
+}
+
+/** A page-layout section with its fields, as returned by `describe/layouts` / Tooling `Layout.Metadata`. */
 export interface LayoutSection {
   heading: string;
   columns: number;
   /** Field API names in display order. */
   fields: string[];
+  /** Same fields with their edit behaviour, when the source exposes it. */
+  items?: LayoutItem[];
 }
 
 export interface LayoutConfig {
@@ -174,6 +193,10 @@ export interface LayoutConfig {
   relatedLists: string[];
   /** Quick actions / Veeva buttons visible on the layout, when known. */
   actions?: string[];
+  /** Custom buttons on the layout, when known. */
+  buttons?: string[];
+  /** `true` for layouts shipped in the Veeva managed package. */
+  managed?: boolean;
 }
 
 export interface ValidationRuleConfig {
@@ -209,6 +232,10 @@ export interface VmocConfig {
   whereClause: string | null;
   /** Additional raw Veeva fields we keep for the docs (e.g. `Type_vod__c`, `Owner_Filter`). */
   extra: Record<string, unknown>;
+  /** Raw `Profile_ID_vod__c` (18-char expected; 15-char ids are flagged in warnings). */
+  profileId?: string | null;
+  enhancedSync?: boolean;
+  metaDataOnly?: boolean;
 }
 
 /**
@@ -235,6 +262,14 @@ export interface VeevaMessage {
   active: boolean;
 }
 
+export type CountrySource =
+  | "user_country_code_vod"
+  | "user_country"
+  | "country_object"
+  | "picklist"
+  | "profile_name"
+  | "vmoc";
+
 export interface CountryRef {
   code: CountryCode;
   name: string;
@@ -242,6 +277,38 @@ export interface CountryRef {
   id?: string;
   /** Active users with that country. */
   activeUsers: number;
+  /** Which extraction sources produced this country. */
+  sources?: CountrySource[];
+}
+
+/** PII-free aggregate of active users per profile × country × rep type × language. */
+export interface UserSummary {
+  profileId: string;
+  profileName: string;
+  country: CountryCode;
+  /** `User_Type_vod__c`, when the field exists. */
+  userType: string | null;
+  /** `LanguageLocaleKey`. */
+  language: string | null;
+  activeUsers: number;
+}
+
+export interface SettingObjectMeta {
+  apiName: string;
+  label: string;
+  type: "Hierarchy" | "List";
+  fields: string[];
+}
+
+/** Inventory entry for automation that has no Vault CRM equivalent. */
+export interface AutomationItem {
+  kind: "apex_trigger" | "flow" | "workflow_rule";
+  name: string;
+  object: string | null;
+  active: boolean;
+  managed: boolean;
+  /** Body references country fields / literals — needs a manual decision. */
+  countryLogic: boolean;
 }
 
 export interface ExtractionWarning {
@@ -265,6 +332,19 @@ export interface OrgSnapshot {
   veevaSettings: VeevaSettingRecord[];
   messages: VeevaMessage[];
   warnings: ExtractionWarning[];
+  users?: UserSummary[];
+  settingObjects?: SettingObjectMeta[];
+  automation?: AutomationItem[];
+  limits?: {
+    dailyApiRequestsMax: number;
+    dailyApiRequestsRemaining: number;
+    requestsUsed: number;
+  };
+  extract?: {
+    objectsRequested: string[];
+    profileMetadataAvailable: boolean;
+    compositeAvailable: boolean;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -284,6 +364,34 @@ export interface ClassifiedProfile {
   countries: CountryCode[];
   /** How the category / countries were decided; shown in the docs. */
   rationale: string[];
+  /** Serves ≥ 2 countries with no dominant one and no country token in the name. */
+  shared?: boolean;
+}
+
+export type DeltaKind =
+  | "setting"
+  | "vmoc"
+  | "object_perm"
+  | "field_perm"
+  | "record_type"
+  | "layout"
+  | "tab"
+  | "message";
+
+/** One difference between a country × category configuration and the global baseline. */
+export interface DeltaItem {
+  /** e.g. `DE-04`. */
+  id: string;
+  kind: DeltaKind;
+  /** e.g. `Veeva_Settings_vod__c.ENABLE_SAMPLE_OPT_IN_vod__c`. */
+  item: string;
+  globalValue: string;
+  localValue: string;
+  /** e.g. `snapshot 2026-09-07, profile DE Sales Rep`. */
+  evidence: string;
+  /** Filled in by the country business admin. */
+  reasonCode: "" | "REG" | "LANG" | "INTEG" | "PROC" | "LEGACY";
+  status: "proposed";
 }
 
 export interface CountryRepConfig {
@@ -295,6 +403,10 @@ export interface CountryRepConfig {
   vmocs: VmocConfig[];
   settings: VeevaSettingRecord[];
   messages: VeevaMessage[];
+  /** Differences vs the category's global baseline (empty for the baseline itself). */
+  deltas?: DeltaItem[];
+  /** Profile used as baseline for the deltas, `null` when a synthetic majority baseline was used. */
+  baselineProfile?: string | null;
 }
 
 export interface CountryConfig {
@@ -341,6 +453,12 @@ export interface PlanStep {
   /** Human instructions for things that cannot be automated. */
   manual?: string;
   dependsOn: string[];
+  /** Generated from an unverified grammar / mapping: apply skips it unless `allowReview`. */
+  review?: boolean;
+  /** The step creates a record whose id later steps reference as `{{step:<id>.recordId}}`. */
+  captures?: { recordId: string };
+  /** Free-form notes shown in the checklist / summary. */
+  notes?: string;
 }
 
 export interface VaultPlan {
