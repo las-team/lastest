@@ -65,6 +65,16 @@ export interface MigrateOptions {
   classify?: ClassifyOptions;
   /** `apply` executes nothing when true (default true): every step is reported as it would run. */
   dryRun?: boolean;
+  /**
+   * `apply`: run steps flagged `review` (personas, VMOCs, settings, layouts,
+   * object types, picklist values — generated from an unverified grammar /
+   * mapping). Off by default: those steps are reported as skipped.
+   */
+  allowReview?: boolean;
+  /** `apply`: keep going after a failed step (dependants of the failure are still skipped). */
+  continueOnError?: boolean;
+  /** `apply`: use `POST /mdl/execute_async` for MDL steps (high-volume objects). */
+  asyncMdl?: boolean;
   /** Progress / warning sink. Defaults to `console.error`. */
   log?: (message: string) => void;
   /** Injectable fetch for tests. */
@@ -191,6 +201,7 @@ export async function migrateVeevaCrmConfig(
           apiVersion: options.vault?.apiVersion,
           vaultDns: options.vault?.vaultDns,
           now,
+          keepEmptyProfiles: options.classify?.keepEmptyProfiles,
         });
         result.plan = plan;
         await writeJson(planPath, plan);
@@ -216,6 +227,9 @@ export async function migrateVeevaCrmConfig(
         });
         const report = await applyVaultPlan(client, plan, {
           dryRun,
+          allowReview: options.allowReview,
+          continueOnError: options.continueOnError,
+          asyncMdl: options.asyncMdl,
           log,
           now,
         });
