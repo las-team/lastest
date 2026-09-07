@@ -10,8 +10,13 @@
  *   4. customer-added values on Veeva picklists        `picklist-values:<n>`  api  (review)
  *   5. customer record types → object types            `objecttype:<obj>.<t>` mdl  (review)
  *   6. per country × rep category                      `ps:` `sp:` `app:` `layout:` `layout-assign:` `vmoc:` `setting:`
- *   7. per country: messages                           `messages:<CC>`        manual
+ *   7. per country: customer messages                  `messages:<CC>`        manual (+ `plan.translations`)
  *   8. org-level settings, profile-less VMOCs          `settings-org:` `vmoc:GLOBAL.all.…`
+ *
+ * A persona (country × category) merges every in-scope profile of the group
+ * into one permission set. The merge is the OR of the profiles' flags; every
+ * flag that not all profiles granted is listed in the step notes and in
+ * `plan.unmapped`, so the widening is a documented decision, not a silent one.
  *
  * Everything with no Vault CRM equivalent goes to `plan.unmapped` with a
  * reason. The planner never talks to a vault: idempotency lives in `apply`.
@@ -29,6 +34,7 @@ import {
   type ObjectPermission,
   type PlanStep,
   type RepCategory,
+  type TranslationRow,
   type VaultPlan,
   type VeevaMessage,
   type VeevaSettingRecord,
@@ -159,56 +165,111 @@ function byName<T>(key: (t: T) => string): (a: T, b: T) => number {
   return (a, b) => key(a).localeCompare(key(b));
 }
 
+/** OR-merge of several profiles plus the flags not every profile granted. */
+interface Merged<T> {
+  merged: T[];
+  /** `Object.flag: Profile A only` — granted by some, not all, of the profiles. */
+  widened: string[];
+}
+
+/** Records which profile granted a flag so the merge can report where profiles differ. */
+function grant(
+  grantedBy: Map<string, Set<string>>,
+  key: string,
+  profile: string,
+): void {
+  grantedBy.set(key, (grantedBy.get(key) ?? new Set<string>()).add(profile));
+}
+
+function widenedFrom(
+  grantedBy: Map<string, Set<string>>,
+  profiles: readonly ClassifiedProfile[],
+): string[] {
+  if (profiles.length < 2) return [];
+  return [...grantedBy.entries()]
+    .filter(([, g]) => g.size < profiles.length)
+    .map(([k, g]) => `${k}: ${[...g].sort().join(", ")} only`)
+    .sort();
+}
+
+const OBJECT_FLAGS = [
+  "create",
+  "read",
+  "edit",
+  "delete",
+  "viewAll",
+  "modifyAll",
+] as const;
+
 function mergeObjectPermissions(
   profiles: readonly ClassifiedProfile[],
-): ObjectPermission[] {
+): Merged<ObjectPermission> {
   const merged = new Map<string, ObjectPermission>();
+  const grantedBy = new Map<string, Set<string>>();
   for (const cp of profiles) {
     for (const p of cp.profile.objectPermissions) {
-      const cur = merged.get(p.object);
-      merged.set(
-        p.object,
-        cur
-          ? {
-              object: p.object,
-              create: cur.create || p.create,
-              read: cur.read || p.read,
-              edit: cur.edit || p.edit,
-              delete: cur.delete || p.delete,
-              viewAll: cur.viewAll || p.viewAll,
-              modifyAll: cur.modifyAll || p.modifyAll,
-            }
-          : { ...p },
-      );
+      const cur = merged.get(p.object) ?? {
+        object: p.object,
+        create: false,
+        read: false,
+        edit: false,
+        delete: false,
+        viewAll: false,
+        modifyAll: false,
+      };
+      for (const flag of OBJECT_FLAGS) {
+        if (!p[flag]) continue;
+        cur[flag] = true;
+        grant(grantedBy, `${p.object}.${flag}`, cp.profile.name);
+      }
+      merged.set(p.object, cur);
     }
   }
-  return [...merged.values()].sort(byName((p) => p.object));
+  return {
+    merged: [...merged.values()].sort(byName((p) => p.object)),
+    widened: widenedFrom(grantedBy, profiles),
+  };
 }
+
+const FIELD_FLAGS = ["readable", "editable"] as const;
 
 function mergeFieldPermissions(
   profiles: readonly ClassifiedProfile[],
-): FieldPermission[] {
+): Merged<FieldPermission> {
   const merged = new Map<string, FieldPermission>();
+  const grantedBy = new Map<string, Set<string>>();
   for (const cp of profiles) {
     for (const p of cp.profile.fieldPermissions) {
       const key = `${p.object}.${p.field}`;
-      const cur = merged.get(key);
-      merged.set(
-        key,
-        cur
-          ? {
-              ...cur,
-              readable: cur.readable || p.readable,
-              editable: cur.editable || p.editable,
-            }
-          : { ...p },
-      );
+      const cur = merged.get(key) ?? {
+        object: p.object,
+        field: p.field,
+        readable: false,
+        editable: false,
+      };
+      for (const flag of FIELD_FLAGS) {
+        if (!p[flag]) continue;
+        cur[flag] = true;
+        grant(grantedBy, `${key}.${flag}`, cp.profile.name);
+      }
+      merged.set(key, cur);
     }
   }
-  return [...merged.values()].sort(
-    (a, b) =>
-      a.object.localeCompare(b.object) || a.field.localeCompare(b.field),
-  );
+  return {
+    merged: [...merged.values()].sort(
+      (a, b) =>
+        a.object.localeCompare(b.object) || a.field.localeCompare(b.field),
+    ),
+    widened: widenedFrom(grantedBy, profiles),
+  };
+}
+
+const MAX_LISTED = 40;
+
+/** `a; b; c (+N more)` — keeps notes and unmapped reasons bounded. */
+function listSome(items: readonly string[], max = MAX_LISTED): string {
+  const shown = items.slice(0, max);
+  return `${shown.join("; ")}${items.length > shown.length ? ` (+${items.length - shown.length} more)` : ""}`;
 }
 
 function settingValueBody(
@@ -229,7 +290,9 @@ function settingValueBody(
   return out;
 }
 
-function summarizeMessages(messages: readonly VeevaMessage[]): string {
+function summarizeMessages(
+  messages: readonly Pick<VeevaMessage, "name" | "category" | "language">[],
+): string {
   const counts = new Map<string, number>();
   for (const m of messages) {
     const key = `${m.category} / ${m.language}`;
@@ -606,17 +669,39 @@ function planPersona(ctx: Context, rep: CountryRepConfig): void {
     return k === "veeva" || k === "custom";
   };
 
-  // permission set
-  const objectPerms = mergeObjectPermissions(inScope);
-  const fieldPerms = mergeFieldPermissions(inScope);
+  // permission set — OR-merge of the group's profiles, differences reported
+  const { merged: objectPerms, widened: widenedObjects } =
+    mergeObjectPermissions(inScope);
+  const { merged: fieldPerms, widened: widenedFields } =
+    mergeFieldPermissions(inScope);
   const tabMap = new Map<string, boolean>();
+  const tabVisibleBy = new Map<string, Set<string>>();
   for (const p of inScope)
     for (const t of p.profile.tabVisibilities) {
       const object = t.tab.replace(/^standard-/, "");
       if (!known(object)) continue;
       const tab = mapTabName(t.tab);
-      tabMap.set(tab, (tabMap.get(tab) ?? false) || t.visibility !== "Hidden");
+      const visible = t.visibility !== "Hidden";
+      tabMap.set(tab, (tabMap.get(tab) ?? false) || visible);
+      if (visible) grant(tabVisibleBy, `tab ${tab}.visible`, p.profile.name);
     }
+  const objectOf = (key: string): string => key.split(".")[0] ?? key;
+  const widened = [
+    ...widenedObjects.filter((w) => known(objectOf(w))),
+    ...widenedFields.filter((w) => known(objectOf(w))),
+    ...widenedFrom(tabVisibleBy, inScope),
+  ];
+
+  // objects the profiles have permissions on but the snapshot does not carry
+  const referenced = new Set<string>();
+  for (const p of inScope) {
+    for (const o of p.profile.objectPermissions) referenced.add(o.object);
+    for (const f of p.profile.fieldPermissions) referenced.add(f.object);
+    for (const a of p.profile.layoutAssignments) referenced.add(a.object);
+  }
+  const notExtracted = [...referenced]
+    .filter((o) => !ctx.kinds.has(o) && !UNMAPPED_STANDARD_OBJECTS.has(o))
+    .sort();
   const psDeps = new Set<string>();
   for (const p of objectPerms) {
     const s = ctx.objectSteps.get(p.object);
@@ -650,6 +735,23 @@ function planPersona(ctx: Context, rep: CountryRepConfig): void {
     extraNotes.push(
       `Salesforce user permissions to review: ${userPerms.join(", ")}`,
     );
+  const personaSource = `Profile ${profileNames} (${country} ${category})`;
+  if (widened.length) {
+    const summary = `merged ${inScope.length} profiles into ${names.permissionSet}; where they differ the most permissive setting was taken (${widened.length} difference${widened.length === 1 ? "" : "s"}): ${listSome(widened)}`;
+    extraNotes.push(summary);
+    builder.unmap(
+      personaSource,
+      `${summary} — decide per item whether the group really shares it or needs its own persona`,
+    );
+  }
+  if (notExtracted.length) {
+    const summary = `permissions on ${notExtracted.length} object${notExtracted.length === 1 ? "" : "s"} outside the extracted object set were dropped from ${names.permissionSet}: ${listSome(notExtracted)}`;
+    extraNotes.push(summary);
+    builder.unmap(
+      personaSource,
+      `${summary} — re-run extract with --include-managed (Veeva objects) or --objects to carry them`,
+    );
+  }
   builder.add({
     id: psId,
     kind: "mdl",
@@ -713,11 +815,29 @@ function planPersona(ctx: Context, rep: CountryRepConfig): void {
     if (id) layoutIds.push(id);
   }
   const assignments = new Map<string, string>();
+  const assignedBy = new Map<string, Map<string, string[]>>();
   for (const p of inScope)
     for (const a of p.profile.layoutAssignments) {
       if (!known(a.object)) continue;
-      assignments.set(`${a.object}|${a.recordType ?? ""}`, a.layout);
+      const key = `${a.object}|${a.recordType ?? ""}`;
+      assignments.set(key, a.layout);
+      const byLayout = assignedBy.get(key) ?? new Map<string, string[]>();
+      byLayout.set(a.layout, [
+        ...(byLayout.get(a.layout) ?? []),
+        p.profile.name,
+      ]);
+      assignedBy.set(key, byLayout);
     }
+  const layoutConflicts = [...assignedBy.entries()]
+    .filter(([, byLayout]) => byLayout.size > 1)
+    .map(([key, byLayout]) => {
+      const [object = "", rt = ""] = key.split("|");
+      const options = [...byLayout.entries()]
+        .map(([layout, who]) => `${layout} (${who.sort().join(", ")})`)
+        .join(" vs ");
+      return `${object}/${rt || "master"}: ${options}; ${assignments.get(key)} used`;
+    })
+    .sort();
   if (assignments.size) {
     const lines = [...assignments.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
@@ -740,7 +860,15 @@ function planPersona(ctx: Context, rep: CountryRepConfig): void {
         ...lines,
       ].join("\n"),
       dependsOn: [psId, ...layoutIds].sort(),
+      notes: layoutConflicts.length
+        ? `the group's profiles assign different layouts (last profile wins): ${listSome(layoutConflicts)}`
+        : undefined,
     });
+    if (layoutConflicts.length)
+      builder.unmap(
+        personaSource,
+        `profiles in the group assign different page layouts (${layoutConflicts.length}): ${listSome(layoutConflicts)} — pick one per object type or split the persona`,
+      );
   }
 
   // VMOCs
@@ -869,7 +997,96 @@ function planSetting(
 
 // --- 7–8: messages, org settings, profile-less VMOCs --------------------------
 
-function planGlobal(ctx: Context, classified: ClassifiedSnapshot): void {
+/** `MessageName;;Category` pointer values in Veeva Settings (format inferred, research doc 02 §2.1). */
+const MESSAGE_POINTER = /^\s*([^;]+);;([^;]+?)\s*$/;
+
+function messageKey(name: string, category: string): string {
+  return `${name.trim().toLowerCase()}|${category.trim().toLowerCase()}`;
+}
+
+/** Messages referenced from any Veeva Setting value, as `name|category` keys. */
+export function settingsMessagePointers(
+  settings: readonly VeevaSettingRecord[],
+): Set<string> {
+  const out = new Set<string>();
+  for (const s of settings)
+    for (const v of Object.values(s.values)) {
+      if (typeof v !== "string") continue;
+      const m = MESSAGE_POINTER.exec(v);
+      if (m) out.add(messageKey(m[1]!, m[2]!));
+    }
+  return out;
+}
+
+/**
+ * Why a message counts as a customer message (in priority order), or `null`
+ * for a Veeva-shipped one: referenced from a Veeva Setting pointer; last
+ * modified by someone not matching `/veeva/i` (needs `lastModifiedBy` in the
+ * snapshot); scoped to a country.
+ */
+export function customerMessageReason(
+  m: VeevaMessage,
+  pointers: ReadonlySet<string>,
+): TranslationRow["reason"] | null {
+  if (pointers.has(messageKey(m.name, m.category))) return "referenced";
+  if (m.lastModifiedBy && !/veeva/i.test(m.lastModifiedBy))
+    return "customer_modified";
+  if (m.country !== null) return "country_scoped";
+  return null;
+}
+
+export interface CustomerMessages {
+  rows: TranslationRow[];
+  /** Active messages assumed Veeva-shipped and not carried. */
+  skipped: number;
+  /** `lastModifiedBy` was present on at least one message. */
+  lastModifiedByAvailable: boolean;
+}
+
+/** Active messages worth loading into the Message Catalog, sorted by language / category / name. */
+export function selectCustomerMessages(
+  messages: readonly VeevaMessage[],
+  settings: readonly VeevaSettingRecord[],
+): CustomerMessages {
+  const pointers = settingsMessagePointers(settings);
+  const rows: TranslationRow[] = [];
+  let skipped = 0;
+  for (const m of messages) {
+    if (!m.active) continue;
+    const reason = customerMessageReason(m, pointers);
+    if (!reason) {
+      skipped++;
+      continue;
+    }
+    rows.push({
+      language: m.language,
+      name: m.name,
+      category: m.category,
+      text: m.text,
+      country: m.country,
+      reason,
+    });
+  }
+  rows.sort(
+    (a, b) =>
+      a.language.localeCompare(b.language) ||
+      a.category.localeCompare(b.category) ||
+      a.name.localeCompare(b.name) ||
+      (a.country ?? "").localeCompare(b.country ?? ""),
+  );
+  return {
+    rows,
+    skipped,
+    lastModifiedByAvailable: messages.some(
+      (m) => m.lastModifiedBy !== undefined && m.lastModifiedBy !== null,
+    ),
+  };
+}
+
+function planGlobal(
+  ctx: Context,
+  classified: ClassifiedSnapshot,
+): TranslationRow[] {
   const { builder } = ctx;
   const snapshot = classified.snapshot;
   const plannedCountries = new Set<CountryCode>([
@@ -877,33 +1094,58 @@ function planGlobal(ctx: Context, classified: ClassifiedSnapshot): void {
     ...classified.countries.map((c) => c.country.code),
   ]);
 
-  // messages per country
-  const byCountry = new Map<CountryCode, VeevaMessage[]>();
-  for (const m of snapshot.messages) {
-    const c = m.country ?? GLOBAL_COUNTRY;
-    if (!plannedCountries.has(c)) continue;
-    byCountry.set(c, [...(byCountry.get(c) ?? []), m]);
+  // customer messages per country → Bulk Translations CSVs + one manual import step
+  const selected = selectCustomerMessages(
+    snapshot.messages.filter((m) =>
+      plannedCountries.has(m.country ?? GLOBAL_COUNTRY),
+    ),
+    snapshot.veevaSettings,
+  );
+  const byCountry = new Map<CountryCode, TranslationRow[]>();
+  for (const r of selected.rows) {
+    const c = r.country ?? GLOBAL_COUNTRY;
+    byCountry.set(c, [...(byCountry.get(c) ?? []), r]);
   }
-  for (const [country, messages] of [...byCountry.entries()].sort(([a], [b]) =>
+  const heuristicNote = selected.lastModifiedByAvailable
+    ? undefined
+    : `LastModifiedBy was not extracted: Veeva-shipped and customer-modified messages cannot be told apart, so only settings-referenced and country-scoped messages are listed; ${selected.skipped} other active message${selected.skipped === 1 ? " was" : "s were"} assumed Veeva-shipped`;
+  for (const [country, rows] of [...byCountry.entries()].sort(([a], [b]) =>
     a.localeCompare(b),
   )) {
-    const active = messages.filter((m) => m.active);
-    if (!active.length) continue;
+    const languages = [...new Set(rows.map((r) => r.language))].sort();
+    const reasons = new Map<TranslationRow["reason"], number>();
+    for (const r of rows)
+      reasons.set(r.reason, (reasons.get(r.reason) ?? 0) + 1);
     builder.add({
       id: `messages:${country}`,
       kind: "manual",
-      title: `Load ${active.length} Veeva Message${active.length === 1 ? "" : "s"} for ${country}`,
+      title: `Import ${rows.length} customer Veeva Message${rows.length === 1 ? "" : "s"} for ${country} (Message Catalog)`,
       country,
       category: "all",
       source: `Message_vod__c (${country})`,
       target: `Message Catalog / ${VAULT_CRM_CONFIG_OBJECTS.message}`,
       manual: [
-        "Import customer-modified messages through Admin > Settings > Message Catalog (Bulk Translations CSV); the daily copy job populates message__v for the mobile app.",
-        summarizeMessages(active),
+        `Import through Admin > Settings > Message Catalog > Bulk Translations, one file per language: ${languages.map((l) => `translations/${l}.csv`).join(", ")} (rows with country = ${country}). The files are a plain export (message_name, category, language, country, text, reason); map the columns onto the Bulk Translations template exported from the target vault before importing.`,
+        'The daily "Vault Message to Veeva Message Copy" job populates message__v for the mobile app; keep a Full-Sync VMOC for message__v active per platform.',
+        `Why these rows: ${[...reasons.entries()]
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([r, n]) => `${n} ${r.replace(/_/g, " ")}`)
+          .join(", ")}.`,
+        summarizeMessages(rows),
       ].join("\n"),
       dependsOn: [],
+      notes: heuristicNote,
     });
   }
+  if (selected.skipped)
+    builder.unmap(
+      `Message_vod__c (${selected.skipped} active message${selected.skipped === 1 ? "" : "s"})`,
+      `assumed Veeva-shipped and not carried (Vault CRM ships its own Veeva Messages): ${
+        selected.lastModifiedByAvailable
+          ? "last modified by a Veeva user and not referenced from a Veeva Setting"
+          : "LastModifiedBy was not extracted, so only settings-referenced and country-scoped messages were kept — extract it to detect customer overrides"
+      }`,
+    );
 
   // org-level settings → manual (the vault-level record exists; we cannot know its id offline)
   const orgSettings = snapshot.veevaSettings
@@ -955,6 +1197,7 @@ function planGlobal(ctx: Context, classified: ClassifiedSnapshot): void {
     }
     planVmoc(ctx, v, GLOBAL_COUNTRY, "all", null, counters);
   }
+  return selected.rows;
 }
 
 function planUnmapped(ctx: Context, classified: ClassifiedSnapshot): void {
@@ -1017,7 +1260,7 @@ export function buildVaultPlan(
       planPersona(ctx, rep);
   for (const rep of [...classified.global].sort(byName((r) => r.category)))
     planPersona(ctx, rep);
-  planGlobal(ctx, classified);
+  const translations = planGlobal(ctx, classified);
   planUnmapped(ctx, classified);
 
   const steps = orderSteps([...ctx.builder.steps.values()]);
@@ -1030,6 +1273,7 @@ export function buildVaultPlan(
       (a, b) =>
         a.source.localeCompare(b.source) || a.reason.localeCompare(b.reason),
     ),
+    translations,
   };
   if (options.vaultDns) plan.vaultDns = options.vaultDns;
   return plan;

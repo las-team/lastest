@@ -466,6 +466,7 @@ export function fixtureSnapshot(extra: Partial<OrgSnapshot> = {}): OrgSnapshot {
         text: "Hello",
         country: null,
         active: true,
+        lastModifiedBy: "Jane Admin",
       },
       {
         name: "OLD",
@@ -474,6 +475,15 @@ export function fixtureSnapshot(extra: Partial<OrgSnapshot> = {}): OrgSnapshot {
         text: "Old",
         country: null,
         active: false,
+      },
+      {
+        name: "SHIPPED",
+        category: "Common",
+        language: "en_US",
+        text: "Shipped by Veeva",
+        country: null,
+        active: true,
+        lastModifiedBy: "Veeva Systems",
       },
     ],
     warnings: [],

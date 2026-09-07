@@ -7,10 +7,13 @@ import { classifySnapshot } from "../model/classify";
 import { buildVaultPlan } from "./plan";
 import { fixtureSnapshot } from "./test-helpers";
 import {
+  MDL_FILE_HEADER,
   renderManualChecklist,
   renderMdlGroup,
   renderPlanSummary,
+  renderTranslationsCsv,
   renderUnmapped,
+  translationFileName,
   writePlan,
 } from "./write";
 
@@ -36,17 +39,21 @@ describe("writePlan", () => {
       "GLOBAL/all.mdl",
       "manual-checklist.md",
       "steps.md",
+      "translations/de.csv",
+      "translations/en_US.csv",
       "unmapped.md",
     ]);
     expect(files.every((f) => path.isAbsolute(f))).toBe(true);
     expect([...files].sort()).toEqual(files);
 
     const de = await readFile(path.join(target, "DE", "sales_rep.mdl"), "utf8");
+    expect(de.startsWith(MDL_FILE_HEADER)).toBe(true);
     expect(de).toContain("-- step: ps:DE.sales_rep");
     expect(de).toContain("-- REVIEW:");
-    expect(de).toContain("RECREATE Permissionset ps_de_sales_rep__c (");
-    expect(de).toContain("RECREATE Securityprofile sp_de_sales_rep__c (");
-    expect(de).toContain("RECREATE Pagelayout call2__v.call_layout_de__c (");
+    expect(de).toContain("CREATE Permissionset ps_de_sales_rep__c (");
+    expect(de).toContain("CREATE Securityprofile sp_de_sales_rep__c (");
+    expect(de).toContain("CREATE Pagelayout call2__v.call_layout_de__c (");
+    expect(de).not.toMatch(/^RECREATE /m);
     const global = await readFile(
       path.join(target, "GLOBAL", "all.mdl"),
       "utf8",
@@ -55,6 +62,15 @@ describe("writePlan", () => {
       global.indexOf("picklist:speaker_engagement_status__c"),
     ).toBeLessThan(global.indexOf("obj:speaker_engagement__c"));
     expect(global).toContain("ALTER Object call2__v (");
+    expect(global).not.toMatch(/^RECREATE /m);
+
+    const csv = await readFile(
+      path.join(target, "translations", "de.csv"),
+      "utf8",
+    );
+    expect(csv).toBe(
+      "message_name,category,language,country,text,reason\nHELLO,Common,de,DE,Hallo,country_scoped\n",
+    );
 
     const checklist = await readFile(
       path.join(target, "manual-checklist.md"),
@@ -70,6 +86,31 @@ describe("writePlan", () => {
     expect(steps).toContain(`- ${plan.steps.length} steps:`);
     expect(steps).toContain("| DE/sales_rep |");
     expect(steps).toContain("`obj:speaker_engagement__c`");
+    expect(steps).toContain(
+      "- 2 customer Veeva Messages in 2 languages (translations/<lang>.csv)",
+    );
+  });
+});
+
+describe("translations", () => {
+  it("quotes CSV cells and names files by language", () => {
+    expect(
+      renderTranslationsCsv([
+        {
+          language: "en_US",
+          name: "A",
+          category: "C",
+          text: 'Say "hi", then\nleave',
+          country: null,
+          reason: "referenced",
+        },
+      ]),
+    ).toBe(
+      'message_name,category,language,country,text,reason\nA,C,en_US,,"Say ""hi"", then\nleave",referenced\n',
+    );
+    expect(translationFileName("pt-BR/x")).toBe(
+      path.join("translations", "pt-BR_x.csv"),
+    );
   });
 });
 

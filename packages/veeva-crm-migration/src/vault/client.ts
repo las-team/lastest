@@ -115,6 +115,11 @@ export interface VaultClientOptions {
   clientId?: string;
 }
 
+/** A `VaultApiCall` whose JSON body may also be an array (bulk object-record create). */
+export interface VaultRequest extends Omit<VaultApiCall, "body"> {
+  body?: Record<string, unknown> | readonly unknown[];
+}
+
 export interface VaultClient {
   readonly vaultDns: string;
   readonly apiVersion: string;
@@ -123,7 +128,7 @@ export interface VaultClient {
   /** Last `X-VaultAPI-BurstLimitRemaining` seen, if any. */
   readonly burstLimitRemaining?: number;
   /** One call; `path` is relative to `/api/{version}` unless absolute. */
-  request<T = VaultResponse>(call: VaultApiCall): Promise<T>;
+  request<T = VaultResponse>(call: VaultRequest): Promise<T>;
   /** Executes an MDL script (`POST /mdl/execute`), polling async jobs to completion. */
   executeMdl(script: string, opts?: { async?: boolean }): Promise<MdlResult>;
   /** `GET /metadata/vobjects/{name}` → the object definition. */
@@ -345,15 +350,18 @@ export async function createVaultClient(
     return { data: (json ?? text) as T, status: res.status };
   };
 
-  const request = async <T = VaultResponse>(call: VaultApiCall): Promise<T> => {
+  const request = async <T = VaultResponse>(call: VaultRequest): Promise<T> => {
     let body: string | undefined;
     let contentType: string | undefined;
     if (call.body !== undefined) {
       contentType = call.contentType ?? "application/json";
-      body =
-        contentType === "application/x-www-form-urlencoded"
-          ? encodeForm(call.body)
-          : JSON.stringify(call.body);
+      if (contentType === "application/x-www-form-urlencoded") {
+        if (Array.isArray(call.body))
+          throw new Error(
+            `${call.method} ${call.path}: a form-encoded body must be an object`,
+          );
+        body = encodeForm(call.body as Record<string, unknown>);
+      } else body = JSON.stringify(call.body);
     }
     const { data } = await raw<T>(call.method, call.path, {
       body,

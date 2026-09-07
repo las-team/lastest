@@ -2,10 +2,17 @@
  * MDL (Vault Metadata Definition Language) generators — pure string builders.
  *
  * Grammar follows `docs/research/03-vault-crm-api-and-migration.md` §3:
- * `RECREATE Object x ( attr(value), Field f ( … ), Objecttype t ( … ) );`,
- * `ALTER Object x ( ADD Field f ( … ) );`, `RECREATE Picklist p ( … )`,
- * `RECREATE Permissionset ps ( Objectpermission …, Fieldpermission …,
- * Tabpermission … )`, `RECREATE Securityprofile sp ( permission_sets('…') )`.
+ * `CREATE Object x ( attr(value), Field f ( … ), Objecttype t ( … ) );`,
+ * `ALTER Object x ( ADD Field f ( … ) );`, `CREATE Picklist p ( … )`,
+ * `CREATE Permissionset ps ( Objectpermission …, Fieldpermission …,
+ * Tabpermission … )`, `CREATE Securityprofile sp ( permission_sets('…') )`.
+ *
+ * Every new component is emitted with `CREATE`, never `RECREATE`: `RECREATE`
+ * replaces an existing component's definition (fields, entries, hand-made
+ * permission-set edits are lost), so a script run by hand against a vault
+ * that already has the component must fail loudly instead. `apply` skips a
+ * step whose component exists (`precheckStep`); changing an existing
+ * component is an `ALTER` written from `GET /api/mdl/components/{type}.{name}`.
  * Where the research doc marks the attribute / sub-component names as
  * inferred, the generator still emits a best-effort statement but returns
  * `review: true` so the plan step is flagged for a sandbox round-trip
@@ -225,7 +232,7 @@ export interface ObjectStatement extends MdlStatement {
 }
 
 /**
- * `RECREATE Object <name> ( … )` for a customer object. `Name` becomes the
+ * `CREATE Object <name> ( … )` for a customer object. `Name` becomes the
  * mandatory `name__v`; system fields are dropped; fields the caller wants to
  * add later (e.g. lookups to objects created by other steps) can be excluded.
  */
@@ -280,7 +287,7 @@ export function mdlObject(
   );
   return {
     name,
-    mdl: `${block(`RECREATE Object ${name}`, items)};`,
+    mdl: `${block(`CREATE Object ${name}`, items)};`,
     review,
     notes,
     unmapped,
@@ -307,7 +314,7 @@ export function mdlAddField(
 // Picklists, object types
 // ---------------------------------------------------------------------------
 
-/** `RECREATE Picklist <name> ( label, active, Picklistentry … );` */
+/** `CREATE Picklist <name> ( label, active, Picklistentry … );` */
 export function mdlPicklist(
   name: string,
   label: string,
@@ -333,7 +340,7 @@ export function mdlPicklist(
     );
   });
   return {
-    mdl: `${block(`RECREATE Picklist ${pickName}`, [
+    mdl: `${block(`CREATE Picklist ${pickName}`, [
       attr("label", label),
       attr("active", true),
       ...entries,
@@ -378,7 +385,7 @@ export function mdlObjectType(
 // ---------------------------------------------------------------------------
 
 /**
- * `RECREATE Pagelayout <obj>.<layout>__c ( label, active, Section … ( Layoutfield … ) )`.
+ * `CREATE Pagelayout <obj>.<layout>__c ( label, active, Section … ( Layoutfield … ) )`.
  * The `Pagelayout` grammar is not verified — always flagged for review.
  */
 export function mdlPageLayout(
@@ -422,7 +429,7 @@ export function mdlPageLayout(
       `custom buttons have no MDL equivalent: ${layout.buttons.join(", ")}`,
     );
   return {
-    mdl: `${block(`RECREATE Pagelayout ${names.object}.${layoutName}`, items)};`,
+    mdl: `${block(`CREATE Pagelayout ${names.object}.${layoutName}`, items)};`,
     review: true,
     notes,
   };
@@ -446,7 +453,7 @@ export interface PermissionSetInput {
 }
 
 /**
- * `RECREATE Permissionset <name> ( label, active, Objectpermission …,
+ * `CREATE Permissionset <name> ( label, active, Objectpermission …,
  * Fieldpermission …, Tabpermission … );` — sub-component names inferred.
  */
 export function mdlPermissionSet(input: PermissionSetInput): MdlStatement {
@@ -486,7 +493,7 @@ export function mdlPermissionSet(input: PermissionSetInput): MdlStatement {
     items.push(block(`Tabpermission ${t.tab}`, [attr("visible", t.visible)]));
   }
   return {
-    mdl: `${block(`RECREATE Permissionset ${name}`, items)};`,
+    mdl: `${block(`CREATE Permissionset ${name}`, items)};`,
     review: true,
     notes: [
       "Objectpermission / Fieldpermission / Tabpermission sub-component names are inferred: compare with GET /api/mdl/components/Permissionset.<name> on a sandbox",
@@ -495,7 +502,7 @@ export function mdlPermissionSet(input: PermissionSetInput): MdlStatement {
   };
 }
 
-/** `RECREATE Securityprofile <name> ( label, active, permission_sets('a','b') );` */
+/** `CREATE Securityprofile <name> ( label, active, permission_sets('a','b') );` */
 export function mdlSecurityProfile(
   name: string,
   label: string,
@@ -503,7 +510,7 @@ export function mdlSecurityProfile(
 ): MdlStatement {
   const spName = /__c$/.test(name) ? name : sanitizeName(name);
   return {
-    mdl: `${block(`RECREATE Securityprofile ${spName}`, [
+    mdl: `${block(`CREATE Securityprofile ${spName}`, [
       attr("label", label),
       attr("active", true),
       `permission_sets(${permissionSets.map(mdlString).join(", ")})`,

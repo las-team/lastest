@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import { classifySnapshot } from "../model/classify";
-import type { PlanStep } from "../model/types";
+import type { PlanStep, VeevaMessage } from "../model/types";
 import {
   buildVaultPlan,
+  customerMessageReason,
   orderSteps,
   parsePlaceholder,
   recordIdPlaceholder,
+  selectCustomerMessages,
+  settingsMessagePointers,
 } from "./plan";
-import { fixtureSnapshot } from "./test-helpers";
+import { fixtureSnapshot, profile } from "./test-helpers";
 
 const NOW = () => new Date("2026-09-07T12:00:00Z");
 
@@ -98,7 +101,8 @@ describe("buildVaultPlan", () => {
     ]);
     const sp = step(p, "sp:DE.sales_rep");
     expect(sp.dependsOn).toEqual(["ps:DE.sales_rep"]);
-    expect(sp.mdl).toContain("RECREATE Securityprofile sp_de_sales_rep__c");
+    expect(sp.mdl).toContain("CREATE Securityprofile sp_de_sales_rep__c");
+    expect(sp.mdl).not.toContain("RECREATE");
     expect(sp.mdl).toContain("permission_sets('ps_de_sales_rep__c')");
     const ps = step(p, "ps:DE.sales_rep");
     expect(ps.mdl).toContain("Objectpermission call2__v");
@@ -116,6 +120,80 @@ describe("buildVaultPlan", () => {
       reason: "dropped from the plan: 0 active users (country DE, sales_rep)",
     });
     expect(ids(p).some((i) => i.includes("DE Legacy"))).toBe(false);
+    // one profile per persona in the fixture: nothing was merged, nothing widened
+    expect(ps.notes).not.toMatch(/merged/);
+    expect(p.unmapped.some((u) => /merged/.test(u.reason))).toBe(false);
+  });
+
+  it("reports every permission the persona merge widened and which profile granted it", () => {
+    const senior = profile("DE Senior Sales Rep", { DE: 2 });
+    senior.objectPermissions = senior.objectPermissions.map((o) =>
+      o.object === "Call2_vod__c" ? { ...o, delete: true } : o,
+    );
+    senior.fieldPermissions = senior.fieldPermissions.map((f) =>
+      f.field === "Pharmacy_Id__c" ? { ...f, editable: true } : f,
+    );
+    senior.layoutAssignments = senior.layoutAssignments.map((a) =>
+      a.object === "Call2_vod__c"
+        ? { ...a, layout: "Call2_vod__c-Call Layout MSL" }
+        : a,
+    );
+    const base = fixtureSnapshot();
+    const merged = plan({ profiles: [...base.profiles, senior] });
+    const ps = step(merged, "ps:DE.sales_rep");
+    expect(ps.title).toContain("DE Sales Rep, DE Senior Sales Rep");
+    expect(ps.mdl).toContain(
+      "Objectpermission call2__v (\n    create(true),\n    read(true),\n    edit(true),\n    delete(true)",
+    );
+    expect(ps.notes).toContain(
+      "merged 2 profiles into ps_de_sales_rep__c; where they differ the most permissive setting was taken (2 differences): Call2_vod__c.delete: DE Senior Sales Rep only; Account.Pharmacy_Id__c.editable: DE Senior Sales Rep only",
+    );
+    const source = "Profile DE Sales Rep, DE Senior Sales Rep (DE sales_rep)";
+    const reasons = merged.unmapped
+      .filter((u) => u.source === source)
+      .map((u) => u.reason);
+    expect(reasons).toHaveLength(2);
+    expect(reasons[0]).toMatch(
+      /^merged 2 profiles .* Account\.Pharmacy_Id__c\.editable: DE Senior Sales Rep only — decide per item/,
+    );
+    expect(reasons[1]).toBe(
+      "profiles in the group assign different page layouts (1): Call2_vod__c/master: Call2_vod__c-Call Layout DE (DE Sales Rep) vs Call2_vod__c-Call Layout MSL (DE Senior Sales Rep); Call2_vod__c-Call Layout MSL used — pick one per object type or split the persona",
+    );
+    expect(step(merged, "layout-assign:DE.sales_rep").notes).toContain(
+      "last profile wins",
+    );
+  });
+
+  it("surfaces permissions on objects the snapshot does not carry instead of dropping them silently", () => {
+    const rep = profile("DE Sales Rep", { DE: 8 });
+    rep.objectPermissions.push({
+      object: "Remote_Meeting_vod__c",
+      create: true,
+      read: true,
+      edit: true,
+      delete: false,
+      viewAll: false,
+      modifyAll: false,
+    });
+    rep.fieldPermissions.push({
+      object: "Suggestion_vod__c",
+      field: "Title_vod__c",
+      readable: true,
+      editable: false,
+    });
+    const base = fixtureSnapshot();
+    const p2 = plan({
+      profiles: base.profiles.map((x) => (x.name === rep.name ? rep : x)),
+    });
+    const ps = step(p2, "ps:DE.sales_rep");
+    expect(ps.mdl).not.toContain("remote_meeting");
+    const summary =
+      "permissions on 2 objects outside the extracted object set were dropped from ps_de_sales_rep__c: Remote_Meeting_vod__c; Suggestion_vod__c";
+    expect(ps.notes).toContain(summary);
+    expect(p2.unmapped).toContainEqual({
+      source: "Profile DE Sales Rep (DE sales_rep)",
+      reason: `${summary} — re-run extract with --include-managed (Veeva objects) or --objects to carry them`,
+    });
   });
 
   it("keeps empty profiles when asked", () => {
@@ -206,12 +284,88 @@ describe("buildVaultPlan", () => {
     ]);
   });
 
-  it("emits messages per country and org-level settings as manual steps", () => {
+  it("keeps only customer messages: one manual import step per country plus translation rows", () => {
     const de = step(p, "messages:DE");
     expect(de.kind).toBe("manual");
+    expect(de.manual).toContain("translations/de.csv (rows with country = DE)");
+    expect(de.manual).toContain("Why these rows: 1 country scoped.");
     expect(de.manual).toContain("Common / de: 1 message");
+    expect(de.notes).toBeUndefined(); // lastModifiedBy was available
     const global = step(p, "messages:GLOBAL");
-    expect(global.title).toContain("1 Veeva Message"); // inactive dropped
+    expect(global.title).toBe(
+      "Import 1 customer Veeva Message for GLOBAL (Message Catalog)",
+    ); // inactive OLD dropped, Veeva-shipped SHIPPED skipped
+    expect(global.manual).toContain("Why these rows: 1 customer modified.");
+    expect(p.translations).toEqual([
+      {
+        language: "de",
+        name: "HELLO",
+        category: "Common",
+        text: "Hallo",
+        country: "DE",
+        reason: "country_scoped",
+      },
+      {
+        language: "en_US",
+        name: "HELLO",
+        category: "Common",
+        text: "Hello",
+        country: null,
+        reason: "customer_modified",
+      },
+    ]);
+    expect(p.unmapped).toContainEqual({
+      source: "Message_vod__c (1 active message)",
+      reason:
+        "assumed Veeva-shipped and not carried (Vault CRM ships its own Veeva Messages): last modified by a Veeva user and not referenced from a Veeva Setting",
+    });
+  });
+
+  it("falls back to settings pointers and country scope when LastModifiedBy was not extracted", () => {
+    const base = fixtureSnapshot();
+    const messages: VeevaMessage[] = [
+      ...base.messages.map((m) => {
+        const { lastModifiedBy: _dropped, ...rest } = m;
+        return rest;
+      }),
+      {
+        name: "CUSTOM_SUBMIT",
+        category: "CallReport",
+        language: "en_US",
+        text: "Submit now",
+        country: null,
+        active: true,
+      },
+    ];
+    const p2 = plan({
+      messages,
+      veevaSettings: [
+        ...base.veevaSettings,
+        {
+          settingObject: "Veeva_Settings_vod__c",
+          level: "profile",
+          ownerName: "FR Sales Rep",
+          values: { SUBMIT_MESSAGE_vod__c: "CUSTOM_SUBMIT;;CallReport" },
+        },
+      ],
+    });
+    const global = step(p2, "messages:GLOBAL");
+    expect(global.title).toContain("Import 1 customer Veeva Message");
+    expect(global.manual).toContain("Why these rows: 1 referenced.");
+    expect(global.notes).toBe(
+      "LastModifiedBy was not extracted: Veeva-shipped and customer-modified messages cannot be told apart, so only settings-referenced and country-scoped messages are listed; 2 other active messages were assumed Veeva-shipped",
+    );
+    expect(p2.translations?.map((t) => `${t.name}:${t.reason}`)).toEqual([
+      "HELLO:country_scoped",
+      "CUSTOM_SUBMIT:referenced",
+    ]);
+    expect(
+      p2.unmapped.find((u) => u.source === "Message_vod__c (2 active messages)")
+        ?.reason,
+    ).toContain("LastModifiedBy was not extracted");
+  });
+
+  it("emits org-level settings as manual steps", () => {
     const org = step(p, "settings-org:veeva_settings__v");
     expect(org.kind).toBe("manual");
     expect(org.manual).toContain("- enable_sample_opt_in__v = false");
@@ -267,6 +421,75 @@ describe("buildVaultPlan", () => {
       expect("review" in s ? s.review : true).toBe(true);
       if ("notes" in s) expect(typeof s.notes).toBe("string");
     }
+  });
+});
+
+describe("selectCustomerMessages", () => {
+  const msg = (extra: Partial<VeevaMessage>): VeevaMessage => ({
+    name: "M",
+    category: "Common",
+    language: "en_US",
+    text: "t",
+    country: null,
+    active: true,
+    ...extra,
+  });
+
+  it("reads Name;;Category pointers from any settings value", () => {
+    const pointers = settingsMessagePointers([
+      {
+        settingObject: "Veeva_Settings_vod__c",
+        level: "org",
+        ownerName: null,
+        values: {
+          A_vod__c: " Custom Msg;;Common ",
+          B_vod__c: 1,
+          C_vod__c: "x",
+        },
+      },
+    ]);
+    expect([...pointers]).toEqual(["custom msg|common"]);
+    expect(
+      customerMessageReason(
+        msg({ name: "CUSTOM MSG", category: "common" }),
+        pointers,
+      ),
+    ).toBe("referenced");
+  });
+
+  it("classifies by reason priority and skips Veeva-shipped and inactive rows", () => {
+    const none = new Set<string>();
+    expect(
+      customerMessageReason(msg({ lastModifiedBy: "Veeva Systems" }), none),
+    ).toBeNull();
+    expect(
+      customerMessageReason(msg({ lastModifiedBy: "Erika Muster" }), none),
+    ).toBe("customer_modified");
+    expect(
+      customerMessageReason(
+        msg({ country: "DE", lastModifiedBy: "Veeva Systems" }),
+        none,
+      ),
+    ).toBe("country_scoped");
+    expect(customerMessageReason(msg({}), none)).toBeNull();
+    const sel = selectCustomerMessages(
+      [
+        msg({ active: false, country: "DE" }),
+        msg({ name: "Z", language: "de", country: "DE" }),
+        msg({ name: "A", lastModifiedBy: "Someone" }),
+        msg({ name: "S" }),
+      ],
+      [],
+    );
+    expect(sel.rows.map((r) => `${r.language}/${r.name}`)).toEqual([
+      "de/Z",
+      "en_US/A",
+    ]);
+    expect(sel.skipped).toBe(1);
+    expect(sel.lastModifiedByAvailable).toBe(true);
+    expect(selectCustomerMessages([msg({})], []).lastModifiedByAvailable).toBe(
+      false,
+    );
   });
 });
 

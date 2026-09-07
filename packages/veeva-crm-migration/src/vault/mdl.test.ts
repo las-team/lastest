@@ -34,7 +34,7 @@ describe("sanitisation", () => {
 });
 
 describe("mdlObject", () => {
-  it("renders RECREATE Object with name__v, fields and a base object type", () => {
+  it("renders CREATE Object with name__v, fields and a base object type", () => {
     const stmt = mdlObject(
       object("Speaker_Engagement__c", [
         field("Account__c", "reference", {
@@ -51,7 +51,7 @@ describe("mdlObject", () => {
     expect(stmt.name).toBe("speaker_engagement__c");
     expect(stmt.mdl).toBe(
       [
-        "RECREATE Object speaker_engagement__c (",
+        "CREATE Object speaker_engagement__c (",
         "  label('Speaker Engagement'),",
         "  label_plural('Speaker Engagements'),",
         "  active(true),",
@@ -171,7 +171,7 @@ describe("mdlPicklist / mdlObjectType", () => {
     ]);
     expect(stmt.mdl).toBe(
       [
-        "RECREATE Picklist call2_visit_purpose__c (",
+        "CREATE Picklist call2_visit_purpose__c (",
         "  label('Visit Purpose'),",
         "  active(true),",
         "  Picklistentry follow_up__c (",
@@ -244,7 +244,7 @@ describe("mdlPageLayout", () => {
     );
     expect(stmt.mdl).toBe(
       [
-        "RECREATE Pagelayout call2__v.call_layout_de__c (",
+        "CREATE Pagelayout call2__v.call_layout_de__c (",
         "  label('Call Layout DE'),",
         "  active(true),",
         "  Section information__c (",
@@ -312,7 +312,7 @@ describe("permission sets and security profiles", () => {
     });
     expect(stmt.mdl).toBe(
       [
-        "RECREATE Permissionset ps_de_sales_rep__c (",
+        "CREATE Permissionset ps_de_sales_rep__c (",
         "  label('DE Sales Rep'),",
         "  active(true),",
         "  Objectpermission account__v (",
@@ -346,7 +346,7 @@ describe("permission sets and security profiles", () => {
     ]);
     expect(stmt.mdl).toBe(
       [
-        "RECREATE Securityprofile sp_de_sales_rep__c (",
+        "CREATE Securityprofile sp_de_sales_rep__c (",
         "  label('DE Sales Rep'),",
         "  active(true),",
         "  permission_sets('ps_de_sales_rep__c')",

@@ -12,6 +12,7 @@ export {
   type VaultAuth,
   type VaultClient,
   type VaultClientOptions,
+  type VaultRequest,
   type VaultResponse,
   type VaultError,
   type MdlResult,
@@ -31,7 +32,11 @@ export {
   recordIdPlaceholder,
   parsePlaceholder,
   stepGroup,
+  selectCustomerMessages,
+  customerMessageReason,
+  settingsMessagePointers,
   type VaultPlanOptions,
+  type CustomerMessages,
 } from "./plan";
 export {
   applyVaultPlan,
@@ -39,9 +44,14 @@ export {
   resolvePlaceholders,
   extractRecordId,
   mdlFailureMessage,
+  recordFailureMessage,
+  mdlTarget,
+  isNotFoundError,
+  vqlString,
   renderApplyReport,
   type ApplyOptions,
   type Precheck,
+  type MdlTarget,
 } from "./apply";
 export {
   writePlan,
@@ -49,4 +59,8 @@ export {
   renderManualChecklist,
   renderUnmapped,
   renderPlanSummary,
+  renderTranslationsCsv,
+  translationFileName,
+  MDL_FILE_HEADER,
+  TRANSLATION_CSV_COLUMNS,
 } from "./write";

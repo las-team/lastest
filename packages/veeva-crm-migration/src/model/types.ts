@@ -260,6 +260,12 @@ export interface VeevaMessage {
   /** Country code when the message is country-scoped, else `null`. */
   country: CountryCode | null;
   active: boolean;
+  /**
+   * `LastModifiedBy.Name`, kept only for the customer-modified heuristic in
+   * the planner (a name not matching `/veeva/i` marks a customer override);
+   * never rendered in the docs. `undefined` when the extractor did not fetch it.
+   */
+  lastModifiedBy?: string | null;
 }
 
 export type CountrySource =
@@ -461,6 +467,17 @@ export interface PlanStep {
   notes?: string;
 }
 
+/** One Veeva Message kept for the Message Catalog import (`vault-plan/translations/<language>.csv`). */
+export interface TranslationRow {
+  language: string;
+  name: string;
+  category: string;
+  text: string;
+  country: CountryCode | null;
+  /** Why the row is considered a customer message rather than Veeva-shipped. */
+  reason: "referenced" | "customer_modified" | "country_scoped";
+}
+
 export interface VaultPlan {
   schemaVersion: 1;
   createdAt: string;
@@ -469,6 +486,8 @@ export interface VaultPlan {
   steps: PlanStep[];
   /** Salesforce components with no Vault CRM equivalent; listed in the docs. */
   unmapped: { source: string; reason: string }[];
+  /** Customer Veeva Messages to load through Bulk Translations, one file per language. */
+  translations?: TranslationRow[];
 }
 
 export interface ApplyStepResult {
