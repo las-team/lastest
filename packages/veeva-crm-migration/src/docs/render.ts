@@ -56,6 +56,7 @@ import {
   type Ctx,
   type RenderOptions,
 } from "./context";
+import { mapPersonaName } from "../vault/mapping";
 import { renderIntake } from "./intake";
 import {
   bullets,
@@ -1263,14 +1264,21 @@ export function renderRepCategory(rep: CountryRepConfig, ctx: Ctx): string {
       );
   }
 
-  // 11 Vault target (naming convention only; the plan module owns the steps)
-  const suffix = !isGlobal && deltas.length ? `_${cc.toLowerCase()}` : "";
+  // 11 Vault target — the same names the planner uses (vault/plan.ts
+  // `planPersona` → `mapPersonaName(country, category)`), so what the admin
+  // signs off is what the plan creates: one persona per country × category.
+  const persona = mapPersonaName(cc, rep.category);
+  const liveProfiles = rep.profiles.filter((p) => totalUsers(p.profile) > 0);
   parts.push(
     "## 11. Vault CRM target (proposed names)",
+    `One persona per country × rep category${isGlobal ? " (the global bucket is its own persona, not a parent the countries inherit from)" : ""}; the plan stage creates these three objects with exactly these names.`,
     bullets([
-      `Security profile: ${code(`${rep.category}__c`)} (access — shared by every country of the category)`,
-      `Application profile: ${code(`app_${rep.category}${suffix}__c`)}${suffix ? " — country suffix because settings / VMOC deltas exist" : " — no country suffix: no local delta"}`,
-      "Step ids and manual items are in `vault-plan/` once the plan stage has run.",
+      `Security profile: ${code(persona.securityProfile)} (label ${code(persona.label)})`,
+      `Permission set: ${code(persona.permissionSet)} — merged object / field / tab access of the ${rep.profiles.length === 1 ? "profile" : `${rep.profiles.length} profiles`} in section 3`,
+      `Application profile: ${code(persona.applicationProfile)} — Veeva Settings and VMOCs of this persona`,
+      liveProfiles.length
+        ? "Step ids and manual items are in `vault-plan/` once the plan stage has run."
+        : "No profile of this persona has active users: the plan stage skips it unless run with `keepEmptyProfiles`.",
     ]),
   );
 

@@ -5,6 +5,7 @@
  * `[value: source]`; empty cells are for the admin.
  */
 import { GLOBAL_COUNTRY, type CountryConfig } from "../model/types";
+import { mapPersonaName } from "../vault/mapping";
 import {
   categoryLabel,
   disposition,
@@ -151,7 +152,10 @@ function renderCountryIntake(country: CountryConfig, ctx: Ctx): string {
       categoryLabel(r.category),
       String(usersIn(cp.profile, cc)),
       prefilled(esc(disposition(cp)), "classifier"),
-      prefilled(code(`${r.category}__c`), "naming convention"),
+      prefilled(
+        code(mapPersonaName(cc, r.category).securityProfile),
+        "plan naming",
+      ),
       cp.shared
         ? `shared with ${cp.countries
             .filter((c) => c !== cc)
@@ -169,7 +173,7 @@ function renderCountryIntake(country: CountryConfig, ctx: Ctx): string {
         "Category",
         "Active users",
         "Keep / merge / drop",
-        "Target global profile",
+        "Target Vault security profile",
         "Comment",
       ],
       repRows,

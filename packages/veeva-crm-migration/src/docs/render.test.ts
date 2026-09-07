@@ -4,8 +4,11 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { classifySnapshot } from "../model/classify";
+import { totalUsers } from "./context";
 import type { ClassifiedSnapshot } from "../model/types";
 import { code, esc, table } from "./markdown";
+import { VAULT_CRM_CONFIG_OBJECTS, mapPersonaName } from "../vault/mapping";
+import { buildVaultPlan } from "../vault/plan";
 import { renderDocs, type RenderedDoc } from "./render";
 import { fixture } from "./test-fixture";
 import { writeDocs } from "./write";
@@ -182,8 +185,11 @@ describe("renderDocs", () => {
     expect(md).toContain(
       "Profile `Global MSL` has no active users — keep, merge into another profile, or drop?",
     );
+    expect(md).toContain("Security profile: `sp_global_msl__c`");
+    expect(md).toContain("Permission set: `ps_global_msl__c`");
+    expect(md).toContain("Application profile: `app_global_msl__c`");
     expect(md).toContain(
-      "Application profile: `app_msl__c` — no country suffix",
+      "No profile of this persona has active users: the plan stage skips it unless run with `keepEmptyProfiles`.",
     );
   });
 
@@ -330,9 +336,10 @@ describe("renderDocs", () => {
     expect(md).toMatch(
       /\| `DE-\d\d` \| `setting` \| `Veeva_Settings_vod__c\.ENABLE_SAMPLE_OPT_IN_vod__c` \| `false` \| `true` \|   \| snapshot 2026-09-07, profile DE Sales Rep \| proposed \|/,
     );
-    expect(md).toContain(
-      "Application profile: `app_sales_rep_de__c` — country suffix",
-    );
+    expect(md).toContain("Security profile: `sp_de_sales_rep__c`");
+    expect(md).toContain("Permission set: `ps_de_sales_rep__c`");
+    expect(md).toContain("Application profile: `app_de_sales_rep__c`");
+    expect(md).not.toMatch(/sales_rep_de__c|shared by every country/);
 
     // Open questions
     expect(md).toContain(
@@ -404,7 +411,7 @@ describe("renderDocs", () => {
       "| Languages users work in | [`de_DE`, `en_US`: `User.LanguageLocaleKey`] |",
     );
     expect(md).toContain(
-      "| Primary Care Rep (10) | `DE Sales Rep` | Sales rep | 10 | [keep: classifier] | [`sales_rep__c`: naming convention] |",
+      "| Primary Care Rep (10) | `DE Sales Rep` | Sales rep | 10 | [keep: classifier] | [`sp_de_sales_rep__c`: plan naming] |",
     );
     expect(md).toContain(
       "### Section 3 — Sales rep: activities / call reporting",
@@ -506,5 +513,35 @@ describe("writeDocs", () => {
     await expect(
       writeDocs([{ path: "../evil.md", content: "x" }], dir),
     ).rejects.toThrow(/outside/);
+  });
+});
+
+describe("docs and plan agree on Vault persona names", () => {
+  it("section 11 and the intake name exactly the profiles the planner creates", () => {
+    const snap = classified();
+    const docs = renderDocs(snap);
+    const p = buildVaultPlan(snap, { now: FIXED_NOW });
+    const planned = new Set(p.steps.map((s) => s.target));
+    const reps = [
+      ...snap.countries.flatMap((c) => c.repConfigs),
+      ...snap.global,
+    ];
+    expect(reps.length).toBeGreaterThan(2);
+    for (const rep of reps) {
+      if (!rep.profiles.some((x) => totalUsers(x.profile) > 0)) continue;
+      const dir = rep.country === "GLOBAL" ? "global" : rep.country;
+      const md = doc(docs, `${dir}/${rep.category}.md`);
+      const names = mapPersonaName(rep.country, rep.category);
+      expect(md).toContain(`Security profile: \`${names.securityProfile}\``);
+      expect(planned).toContain(`Securityprofile.${names.securityProfile}`);
+      expect(planned).toContain(`Permissionset.${names.permissionSet}`);
+      expect(planned).toContain(
+        `${VAULT_CRM_CONFIG_OBJECTS.applicationProfile}.${names.applicationProfile}`,
+      );
+    }
+    const intake = doc(docs, "intake-template.md");
+    expect(intake).toContain("| Target Vault security profile |");
+    expect(intake).toContain("[`sp_de_sales_rep__c`: plan naming]");
+    expect(intake).not.toMatch(/`sales_rep__c`|Target global profile/);
   });
 });
