@@ -5,6 +5,7 @@
  * snapshots and re-run over a stored snapshot with different rules.
  */
 import {
+  cmp,
   computeBaseline,
   computeDeltas,
   type BaselineConfig,
@@ -128,7 +129,7 @@ export function majorityRepType(
 ): { value: string; count: number } | null {
   const sorted = Object.entries(counts)
     .filter(([v, n]) => v.trim() && n > 0)
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    .sort((a, b) => b[1] - a[1] || cmp(a[0], b[0]));
   const top = sorted[0];
   return top ? { value: top[0], count: top[1] } : null;
 }
@@ -376,10 +377,10 @@ export function classifySnapshot(
   };
 
   for (const [code, cats] of [...byCountry.entries()].sort(([a], [b]) =>
-    a.localeCompare(b),
+    cmp(a, b),
   )) {
     const repConfigs = [...cats.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
+      .sort(([a], [b]) => cmp(a, b))
       .map(([category, ps]) => {
         const rep = buildRepConfig(code, category, ps, snapshot);
         const baseline = baselineFor(category);
@@ -405,7 +406,7 @@ export function classifySnapshot(
       countries.push({ country: ref, repConfigs: [] });
     }
   }
-  countries.sort((a, b) => a.country.code.localeCompare(b.country.code));
+  countries.sort((a, b) => cmp(a.country.code, b.country.code));
 
   return { snapshot, profiles, countries, global };
 }

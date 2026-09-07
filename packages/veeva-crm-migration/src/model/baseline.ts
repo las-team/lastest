@@ -83,6 +83,11 @@ export interface BaselineConfig {
 // ---------------------------------------------------------------------------
 
 /** No access / not present, for CRUD, FLS and similar. */
+/** Locale-independent code-point comparison so ids and orderings do not depend on the process ICU locale. */
+export function cmp(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 export const NONE = "-";
 /** A setting field with no value at any hierarchy level. */
 export const UNSET = "(unset)";
@@ -294,7 +299,7 @@ function majority<T>(
       else votes.set(r, { count: 1, value });
     }
     const winner = [...votes.entries()].sort(
-      (a, b) => b[1].count - a[1].count || a[0].localeCompare(b[0]),
+      (a, b) => b[1].count - a[1].count || cmp(a[0], b[0]),
     )[0];
     if (winner && winner[1].value !== undefined) out[key] = winner[1].value;
   }
@@ -326,7 +331,7 @@ export function computeBaseline(
     .sort(
       (a, b) =>
         activeUsers(b.profile) - activeUsers(a.profile) ||
-        a.profile.name.localeCompare(b.profile.name),
+        cmp(a.profile.name, b.profile.name),
     );
   const chosen = globals[0];
   if (chosen) {
@@ -510,8 +515,8 @@ export function computeDeltas(
   raw.sort(
     (a, b) =>
       KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) ||
-      a.item.localeCompare(b.item) ||
-      a.localValue.localeCompare(b.localValue),
+      cmp(a.item, b.item) ||
+      cmp(a.localValue, b.localValue),
   );
 
   const date = baseline.extractedAt.slice(0, 10);
