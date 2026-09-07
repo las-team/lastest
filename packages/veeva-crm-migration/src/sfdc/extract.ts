@@ -7,8 +7,13 @@
  * users aggregate → VMOCs → Veeva Settings → messages → automation → countries.
  *
  * Every stage is wrapped: a failure records an `ExtractionWarning` and the
- * extraction continues with what it has. Only an exhausted request budget
- * aborts the whole run.
+ * extraction continues with what it has. Only errors that mean *every*
+ * later call would fail too abort the whole run (DESIGN.md §4.1 / §4.3): an
+ * exhausted request budget, a dead session (401 / `INVALID_SESSION_ID` after
+ * the client's single re-auth) and an org over its API limit (429 /
+ * `REQUEST_LIMIT_EXCEEDED`). Everything else — a denied describe, a missing
+ * column, a 5xx on one query — stays a warning so the snapshot is never
+ * silently truncated by a fatal error yet still survives a partial org.
  */
 import {
   countriesFromProfileName,
@@ -243,7 +248,7 @@ class ExtractContext {
     try {
       return await fn();
     } catch (err) {
-      if (isBudgetError(err)) throw err;
+      if (isFatalError(err)) throw err;
       this.warn(name, `failed: ${errorMessage(err)}`, errorDetail(err));
       return fallback;
     }
@@ -297,9 +302,27 @@ class ExtractContext {
   }
 }
 
-function isBudgetError(err: unknown): boolean {
+/** Error codes that cannot be recovered from by continuing with the next stage. */
+const FATAL_ERROR_CODES: ReadonlySet<string> = new Set([
+  "REQUEST_BUDGET_EXCEEDED",
+  "INVALID_SESSION_ID",
+  "REQUEST_LIMIT_EXCEEDED",
+]);
+
+/**
+ * `true` when the failure is not stage-local: the request budget is spent,
+ * the session is gone (the client already retried its one re-auth) or the org
+ * is over its API limit (the client already retried a 429). Such errors abort
+ * `extractOrgSnapshot` so a truncated snapshot is never written; any other
+ * `SfdcApiError` (403 on one describe, 400 on one column, 5xx after retries)
+ * is recorded as a warning by `ExtractContext.stage`.
+ */
+export function isFatalError(err: unknown): boolean {
+  if (!(err instanceof SfdcApiError)) return false;
   return (
-    err instanceof SfdcApiError && err.errorCode === "REQUEST_BUDGET_EXCEEDED"
+    FATAL_ERROR_CODES.has(err.errorCode) ||
+    err.status === 401 ||
+    err.status === 429
   );
 }
 
@@ -996,7 +1019,7 @@ export async function extractOrgSnapshot(
       }
       metaByProfile.set(p.Id, decodeProfileMetadata(meta, objectsInScope));
     } catch (err) {
-      if (isBudgetError(err)) throw err;
+      if (isFatalError(err)) throw err;
       profileMetadataAvailable = false;
       ctx.warn(
         "profile_metadata",
@@ -1338,7 +1361,7 @@ export async function extractOrgSnapshot(
         if (decoded.buttons.length > 0) layout.buttons = decoded.buttons;
         if (decoded.actions.length > 0) layout.actions = decoded.actions;
       } catch (err) {
-        if (isBudgetError(err)) throw err;
+        if (isFatalError(err)) throw err;
         ctx.warn(
           "layout_metadata",
           `could not read layout "${fullName}": ${errorMessage(err)}`,
@@ -1466,12 +1489,13 @@ export async function extractOrgSnapshot(
           | { Name?: string | null }
           | null
           | undefined;
+        // `SetupOwner.Name` is only ever persisted for profiles: for a
+        // user-level row it is the person's full name (PII, DESIGN.md §9.14),
+        // so those rows are kept as an anonymous `level: "user"` anomaly.
         const ownerName =
-          level === "org"
-            ? null
-            : level === "profile"
-              ? (profileName(ownerId) ?? owner?.Name ?? ownerId)
-              : (owner?.Name ?? ownerId);
+          level === "profile"
+            ? (profileName(ownerId) ?? owner?.Name ?? ownerId)
+            : null;
         veevaSettings.push({
           settingObject: setting,
           level,

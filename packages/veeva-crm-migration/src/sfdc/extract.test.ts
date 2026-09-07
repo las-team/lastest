@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { createSfdcClient, type SfdcClient } from "./client";
+import { createSfdcClient, SfdcApiError, type SfdcClient } from "./client";
 import {
   decideObjectSet,
   decodeLayoutMetadata,
   decodeProfileMetadata,
   dropSelectColumn,
   extractOrgSnapshot,
+  isFatalError,
   resolveUserCountry,
 } from "./extract";
 import {
@@ -1466,10 +1467,11 @@ describe("extractOrgSnapshot — mini org with Profile.Metadata available", () =
       {
         settingObject: "Veeva_Settings_vod__c",
         level: "user",
-        ownerName: "Some User",
+        ownerName: null, // never the user's name (PII) — DESIGN §9.14
         values: { ENABLE_SAMPLE_OPT_IN_vod__c: 2 },
       },
     ]);
+    expect(JSON.stringify(snap)).not.toContain("Some User");
     expect(ff.soqls().find((q) => /FROM Veeva_Settings_vod__c/.test(q))).toBe(
       "SELECT Id, SetupOwnerId, SetupOwner.Type, SetupOwner.Name, ENABLE_SAMPLE_OPT_IN_vod__c, CALL_TYPE_vod__c FROM Veeva_Settings_vod__c",
     );
@@ -1779,6 +1781,92 @@ describe("extractOrgSnapshot — Tooling failures are warnings, not aborts", () 
     expect(ff.soqls().find((q) => /FROM Message_vod__c/.test(q))).toContain(
       "IN ('en_US')",
     );
+  });
+});
+
+describe("extractOrgSnapshot — session / API-limit failures abort instead of truncating", () => {
+  /** The mini org with `routes` layered in front of it; retries are instant. */
+  async function brokenClient(routes: Route[]): Promise<SfdcClient> {
+    const { ff } = miniOrg();
+    const broken = fakeFetch([
+      ...routes,
+      {
+        match: "",
+        reply: async (req) => {
+          const res = await ff.fetch(req.url.href, {
+            method: req.method,
+            headers: req.headers,
+          });
+          return {
+            status: res.status,
+            text: await res.text(),
+            headers: Object.fromEntries(res.headers.entries()),
+          };
+        },
+      },
+    ]);
+    return createSfdcClient(
+      { kind: "token", instanceUrl: INSTANCE, accessToken: "t" },
+      { fetch: broken.fetch, sleep: async () => {}, retryDelaysMs: [1, 1, 1] },
+    );
+  }
+
+  it("rejects when the session dies mid-run (401 INVALID_SESSION_ID on a settings query)", async () => {
+    const client = await brokenClient([
+      {
+        match: /FROM(%20|\+| )Veeva_Settings_vod__c/,
+        reply: () =>
+          sfdcError(401, "INVALID_SESSION_ID", "Session expired or invalid"),
+      },
+    ]);
+    await expect(
+      extractOrgSnapshot(client, { now: NOW }),
+    ).rejects.toMatchObject({ status: 401, errorCode: "INVALID_SESSION_ID" });
+  });
+
+  it("rejects on 403 REQUEST_LIMIT_EXCEEDED during field permissions", async () => {
+    const client = await brokenClient([
+      {
+        match: /FROM(%20|\+| )FieldPermissions/,
+        reply: () =>
+          sfdcError(
+            403,
+            "REQUEST_LIMIT_EXCEEDED",
+            "TotalRequests Limit exceeded",
+          ),
+      },
+    ]);
+    await expect(
+      extractOrgSnapshot(client, { now: NOW }),
+    ).rejects.toMatchObject({ errorCode: "REQUEST_LIMIT_EXCEEDED" });
+  });
+
+  it("rejects on a 429 that survives the client's retries", async () => {
+    const client = await brokenClient([
+      {
+        match: /FROM(%20|\+| )Profile(%20|\+| )/,
+        reply: () => ({ status: 429, text: "Too Many Requests" }),
+      },
+    ]);
+    await expect(
+      extractOrgSnapshot(client, { now: NOW }),
+    ).rejects.toMatchObject({ status: 429 });
+  });
+
+  it("isFatalError: budget / session / limit are fatal, per-stage 4xx and 5xx are not", () => {
+    const e = (status: number, errorCode: string) =>
+      new SfdcApiError({ status, errorCode, message: "x", path: "/p" });
+    expect(isFatalError(e(0, "REQUEST_BUDGET_EXCEEDED"))).toBe(true);
+    expect(isFatalError(e(401, "INVALID_SESSION_ID"))).toBe(true);
+    expect(isFatalError(e(401, "HTTP_401"))).toBe(true);
+    expect(isFatalError(e(403, "REQUEST_LIMIT_EXCEEDED"))).toBe(true);
+    expect(isFatalError(e(429, "HTTP_429"))).toBe(true);
+    expect(isFatalError(e(403, "INSUFFICIENT_ACCESS"))).toBe(false);
+    expect(isFatalError(e(400, "INVALID_FIELD"))).toBe(false);
+    expect(isFatalError(e(404, "NOT_FOUND"))).toBe(false);
+    expect(isFatalError(e(500, "HTTP_500"))).toBe(false);
+    expect(isFatalError(e(0, "NETWORK_ERROR"))).toBe(false);
+    expect(isFatalError(new Error("plain"))).toBe(false);
   });
 });
 
