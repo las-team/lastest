@@ -1005,8 +1005,13 @@ export function renderRepCategory(rep: CountryRepConfig, ctx: Ctx): string {
       mark("record_type", k),
     ];
   });
+  const rtCaveat =
+    ctx.snapshot.extract?.profileMetadataAvailable === false
+      ? "> **Caveat:** the Tooling `Profile.Metadata` blob was not available during extraction, so the visibility below is the *extracting user's* view (`describe.recordTypeInfos`) copied to every profile, not each profile's own configuration. Confirm record-type visibility per profile in Salesforce Setup before signing off."
+      : null;
   parts.push(
     "## 4. Record-type visibility",
+    ...(rtCaveat ? [rtCaveat] : []),
     "`?` in *Active* means the record type is not in the object catalogue of the snapshot.",
     table(
       [

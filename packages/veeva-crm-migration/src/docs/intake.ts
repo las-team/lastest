@@ -33,7 +33,7 @@ import {
 /** Multichannel capability → objects whose read access means "on today". */
 const FEATURES: readonly (readonly [string, readonly string[]])[] = [
   ["Approved Email", ["Sent_Email_vod__c", "Approved_Document_vod__c"]],
-  ["CLM", ["Clm_Presentation_vod__c", "Key_Message_vod__c"]],
+  ["CLM", ["CLM_Presentation_vod__c", "Key_Message_vod__c"]],
   ["Engage (meetings / connect)", ["Remote_Meeting_vod__c"]],
   ["Events Management", ["EM_Event_vod__c"]],
   ["Medical Inquiry", ["Medical_Inquiry_vod__c"]],
@@ -231,7 +231,7 @@ function renderCountryIntake(country: CountryConfig, ctx: Ctx): string {
             featureStatus(
               ctx,
               country,
-              ["Key_Message_vod__c", "Clm_Presentation_vod__c"],
+              ["Key_Message_vod__c", "CLM_Presentation_vod__c"],
               r.category,
             ),
             "",

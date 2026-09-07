@@ -1,17 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  COUNTRY_NAMES,
-  countryName,
-  isCountryCode,
-  normalizeCountry,
-} from "./countries";
+import { KNOWN_COUNTRY_CODES } from "../model/countries";
+import { countryName, isCountryCode, normalizeCountry } from "./countries";
 
 describe("countries", () => {
   it("has a full ISO-3166-1 alpha-2 table", () => {
-    expect(Object.keys(COUNTRY_NAMES).length).toBeGreaterThanOrEqual(240);
-    for (const code of Object.keys(COUNTRY_NAMES))
-      expect(code).toMatch(/^[A-Z]{2}$/);
+    expect(KNOWN_COUNTRY_CODES.length).toBeGreaterThanOrEqual(240);
+    for (const code of KNOWN_COUNTRY_CODES) expect(code).toMatch(/^[A-Z]{2}$/);
     expect(isCountryCode("DE")).toBe(true);
     expect(isCountryCode("XX")).toBe(false);
     expect(countryName("DE")).toBe("Germany");
