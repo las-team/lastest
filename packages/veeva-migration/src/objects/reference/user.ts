@@ -143,10 +143,12 @@ export const usernameCreateOnly: CustomTransformFn = (value, row, ctx) => {
   const template = asString(
     ctx.mapping.options.usernameTemplate ?? "{Username}",
   );
-  const rendered = renderUsername(template, {
-    ...row,
-    Username: isEmpty(value) ? row.Username : value,
-  });
+  const username = isEmpty(value) ? row.Username : value;
+  // An empty source must not render the template's literal characters
+  // (`{localPart}@{domain}` → `@`): username__sys is required on create.
+  const rendered = isEmpty(username)
+    ? ""
+    : renderUsername(template, { ...row, Username: username });
   if (!rendered)
     return {
       omit: true,

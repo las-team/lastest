@@ -19,7 +19,7 @@ Read this first. The normative spec is `docs/MIGRATION_SPEC.md` (§ references b
 | Area | Owns (create/overwrite) | Must NOT edit | Consumes |
 |---|---|---|---|
 | **architect (done)** | `package.json`, `tsconfig.json`, `bin/`, `src/types.ts`, `src/logger.ts`, `src/hash.ts`, `src/country-of.ts`, `src/index.ts`, `src/objects/types.ts`, `src/objects/registry.ts`, `src/transform/{ids,rename,spec,registry,apply}.ts`, `src/config/*`, `src/testkit/*`, all `src/<area>/types.ts`, `src/cli.ts` (placeholder) | — | — |
-| **sfdc** | `src/sfdc/*.ts` except `types.ts` (auth.ts, rest.ts, bulk.ts, describe-cache.ts, soql.ts, retry.ts, client.ts, index.ts) | `src/sfdc/types.ts` | `SfdcClient` contract, `getLogger` |
+| **sfdc** | `src/sfdc/*.ts` except `types.ts` (auth.ts, rest.ts — includes the If-Modified-Since describe cache, bulk2.ts, csv.ts, soql.ts, retry.ts, errors.ts, limits.ts, client.ts, index.ts) | `src/sfdc/types.ts` | `SfdcClient` contract, `getLogger` |
 | **vault** | `src/vault/*.ts` except `types.ts` (auth.ts, http.ts, client.ts, vql.ts, metadata.ts, records.ts, mdl.ts, users.ts, index.ts) | `src/vault/types.ts` | `VaultClient` contract |
 | **store** | `src/store/*.ts` except `types.ts` (schema.ts drizzle/SQL, postgres.ts, migrate.ts, index.ts) | `src/store/types.ts`, `src/testkit/memory-store.ts` | `StateStore` contract; re-run `src/testkit/memory-store.test.ts` against postgres by swapping `makeStore` (integration test, `*.integration.test.ts`) |
 | **preflight** | `src/preflight/*.ts` except `types.ts` (source-checks, target-checks, legacy-id, lints, probes, crosswalks, report, index) | `src/preflight/types.ts` | `Preflight`, `PreflightInput/Result`, `ResolvedTarget`, `MaterialisedMapping`, `validateObjectModule`, fakes |

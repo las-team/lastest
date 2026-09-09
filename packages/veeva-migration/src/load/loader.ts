@@ -37,7 +37,13 @@ import {
   writePendingQueue,
   type PendingEntry,
 } from "./pending";
-import { RefIndex, collectRefs, resolvePayload, type RefKey, type UnresolvedRef } from "./resolve-refs";
+import {
+  RefIndex,
+  collectRefs,
+  resolvePayload,
+  type RefKey,
+  type UnresolvedRef,
+} from "./resolve-refs";
 import { LoadCallError, errorMessageOf, errorTypeOf } from "./retry";
 import { runSecondPass } from "./second-pass";
 import type {
@@ -105,7 +111,10 @@ export class DefaultLoader implements Loader {
 
   // ------------------------------------------------------------------ load
 
-  loadBatches(rows: AsyncIterable<PayloadRow>, plan: LoadPlan): Promise<LoadResult> {
+  loadBatches(
+    rows: AsyncIterable<PayloadRow>,
+    plan: LoadPlan,
+  ): Promise<LoadResult> {
     return this.loadRows(rows, plan, { attempt: 1 });
   }
 
@@ -117,10 +126,16 @@ export class DefaultLoader implements Loader {
     const log = this.rt.log(plan);
     const result = emptyResult(plan);
     const initial = plan.mapping.load.batchSize ?? plan.batchSize;
-    const adaptive = new AdaptiveBatchSize(initial, { wallTimeMs: plan.batchWallTimeMs });
+    const adaptive = new AdaptiveBatchSize(initial, {
+      wallTimeMs: plan.batchWallTimeMs,
+    });
     if (plan.mapping.load.strategy === "loader")
-      log.warn("load.strategy = loader is not implemented in v1; using direct /vobjects upserts");
-    const terminal = ctx.fromPending ? new Set<string>() : await this.terminalIds(plan);
+      log.warn(
+        "load.strategy = loader is not implemented in v1; using direct /vobjects upserts",
+      );
+    const terminal = ctx.fromPending
+      ? new Set<string>()
+      : await this.terminalIds(plan);
     let batchNo = result.batches.length;
     for await (const batch of cutBatches(rows, () => adaptive.current())) {
       const live = batch.filter((r) => !terminal.has(r.sfdcId));
@@ -137,7 +152,10 @@ export class DefaultLoader implements Loader {
       result.typeChanged += outcome.typeChanged ?? 0;
       adaptive.record(outcome.elapsedMs);
       if (outcome.structuralError) {
-        result.aborted = { reason: `${outcome.structuralError.type}: ${outcome.structuralError.message}`, batchNo };
+        result.aborted = {
+          reason: `${outcome.structuralError.type}: ${outcome.structuralError.message}`,
+          batchNo,
+        };
         this.findings.push({
           severity: "blocking",
           code: "LOAD_STRUCTURAL_FAILURE",
@@ -145,7 +163,10 @@ export class DefaultLoader implements Loader {
           country: plan.unit.country,
           detail: { batchNo, ...outcome.structuralError },
         });
-        log.error({ batch_no: batchNo, error: outcome.structuralError }, "unit aborted: structural failure");
+        log.error(
+          { batch_no: batchNo, error: outcome.structuralError },
+          "unit aborted: structural failure",
+        );
         break;
       }
     }
@@ -185,7 +206,11 @@ export class DefaultLoader implements Loader {
       typeChanged: 0,
     };
     const results: RowResult[] = [];
-    const rr = (row: PayloadRow, state: RowState, extra: Partial<RowResult> = {}): RowResult => ({
+    const rr = (
+      row: PayloadRow,
+      state: RowState,
+      extra: Partial<RowResult> = {},
+    ): RowResult => ({
       runId: plan.runId,
       objectKey: plan.unit.objectKey,
       country: plan.unit.country,
@@ -197,27 +222,48 @@ export class DefaultLoader implements Loader {
       updatedAt: now,
       ...extra,
     });
-    const fail = (row: PayloadRow, type: string, message: string, vaultId?: string) => {
+    const fail = (
+      row: PayloadRow,
+      type: string,
+      message: string,
+      vaultId?: string,
+    ) => {
       out.failed++;
-      results.push(rr(row, "failed", { errorType: type, errorMessage: message, vaultId: vaultId ?? null }));
+      results.push(
+        rr(row, "failed", {
+          errorType: type,
+          errorMessage: message,
+          vaultId: vaultId ?? null,
+        }),
+      );
     };
 
     // 2. id map
-    const idRows = await rt.deps.store.idMap.bulkGet(plan.unit.objectKey, batch.map((r) => r.sfdcId));
+    const idRows = await rt.deps.store.idMap.bulkGet(
+      plan.unit.objectKey,
+      batch.map((r) => r.sfdcId),
+    );
     const candidates: PayloadRow[] = [];
     const unmapped: PayloadRow[] = [];
     for (const row of batch) {
       const idRow = idRows.get(row.sfdcId);
       if (idRow?.mergedInto) {
         out.skippedRows++;
-        results.push(rr(row, "skipped", { errorType: "merged", errorMessage: `merged into ${idRow.mergedInto}`, vaultId: idRow.vaultId }));
+        results.push(
+          rr(row, "skipped", {
+            errorType: "merged",
+            errorMessage: `merged into ${idRow.mergedInto}`,
+            vaultId: idRow.vaultId,
+          }),
+        );
         continue;
       }
       // 3. hash skip
       if (shouldHashSkip(row, idRow)) {
         out.unchanged++;
         results.push(rr(row, "loaded_unchanged", { vaultId: idRow!.vaultId }));
-        if (!plan.dryRun) await rt.deps.store.idMap.put({ ...idRow!, lastSeenRun: plan.runId });
+        if (!plan.dryRun)
+          await rt.deps.store.idMap.put({ ...idRow!, lastSeenRun: plan.runId });
         continue;
       }
       candidates.push(row);
@@ -227,7 +273,10 @@ export class DefaultLoader implements Loader {
     // 4. match before create
     let hits = new Map<string, MatchHit>();
     if (unmapped.length && plan.mapping.match.length) {
-      const m = await matchRows(unmapped as PayloadRowWithSource[], plan, { vault: rt.deps.vault, store: rt.deps.store });
+      const m = await matchRows(unmapped as PayloadRowWithSource[], plan, {
+        vault: rt.deps.vault,
+        store: rt.deps.store,
+      });
       hits = m.hits;
       this.findings.push(...m.findings);
     }
@@ -247,39 +296,79 @@ export class DefaultLoader implements Loader {
       const hit = hits.get(row.sfdcId);
       if (hit?.mergedInto) {
         out.skippedRows++;
-        results.push(rr(row, "skipped", { errorType: "merged", errorMessage: `matched a record already mapped to ${hit.mergedInto}`, vaultId: hit.vaultId }));
+        results.push(
+          rr(row, "skipped", {
+            errorType: "merged",
+            errorMessage: `matched a record already mapped to ${hit.mergedInto}`,
+            vaultId: hit.vaultId,
+          }),
+        );
         continue;
       }
       if (!mapped && !hit && matchOnly) {
-        fail(row, "MATCH_ONLY_UNMATCHED", `no pre-existing ${plan.target.targetObject} record matched and createPolicy is match-only`);
+        fail(
+          row,
+          "MATCH_ONLY_UNMATCHED",
+          `no pre-existing ${plan.target.targetObject} record matched and createPolicy is match-only`,
+        );
         continue;
       }
       if (!legacyField) {
-        fail(row, "LEGACY_ID_FIELD_MISSING", "no legacy-id field resolved for the object (§3.2)");
+        fail(
+          row,
+          "LEGACY_ID_FIELD_MISSING",
+          "no legacy-id field resolved for the object (§3.2)",
+        );
         continue;
       }
       const resolved = resolvePayload(row.payload, index);
       if (resolved.unresolved.length) {
         const prev = ctx.fromPending?.get(row.sfdcId);
-        pending.push({ row, unresolved: resolved.unresolved, attempts: (prev?.attempts ?? 0) + 1 });
+        pending.push({
+          row,
+          unresolved: resolved.unresolved,
+          attempts: (prev?.attempts ?? 0) + 1,
+        });
         continue;
       }
       const vaultRow = resolved.row;
-      if (vaultRow[legacyField] === undefined || vaultRow[legacyField] === null) {
+      if (
+        vaultRow[legacyField] === undefined ||
+        vaultRow[legacyField] === null
+      ) {
         fail(row, "LEGACY_ID_MISSING", `payload has no ${legacyField} value`);
         continue;
       }
       // undelete of an inactivated row (§4.4): restore the platform status
-      if (mapped?.deletedAt && plan.mapping.options.deletePolicy === "inactivate" && !("status__v" in vaultRow))
+      if (
+        mapped?.deletedAt &&
+        plan.mapping.options.deletePolicy === "inactivate" &&
+        !("status__v" in vaultRow)
+      )
         vaultRow.status__v = "active__v";
 
       // 6. object type change routing (§2.5.6)
-      if (mapped && mapped.objectType && row.objectType && mapped.objectType !== row.objectType) {
+      if (
+        mapped &&
+        mapped.objectType &&
+        row.objectType &&
+        mapped.objectType !== row.objectType
+      ) {
         if (!plan.mapping.options.allowTypeChange) {
-          fail(row, "TYPE_CHANGE_BLOCKED", `object type ${mapped.objectType} → ${row.objectType} blocked by allowTypeChange = false`, mapped.vaultId);
+          fail(
+            row,
+            "TYPE_CHANGE_BLOCKED",
+            `object type ${mapped.objectType} → ${row.objectType} blocked by allowTypeChange = false`,
+            mapped.vaultId,
+          );
           continue;
         }
-        prepared.push({ row, idRow: mapped, vaultRow: { ...vaultRow, id: mapped.vaultId }, op: "changetype" });
+        prepared.push({
+          row,
+          idRow: mapped,
+          vaultRow: { ...vaultRow, id: mapped.vaultId },
+          op: "changetype",
+        });
         continue;
       }
       // 7. route: fresh match (legacy id not yet stamped) → PUT by id; else upsert by idParam
@@ -289,10 +378,20 @@ export class DefaultLoader implements Loader {
           results.push(rr(row, "loaded_unchanged", { vaultId: hit.vaultId }));
           continue;
         }
-        prepared.push({ row, hit, vaultRow: { ...vaultRow, id: hit.vaultId }, op: "update" });
+        prepared.push({
+          row,
+          hit,
+          vaultRow: { ...vaultRow, id: hit.vaultId },
+          op: "update",
+        });
         continue;
       }
-      if (mapped && matchOnly && !updateMatched && mapped.matchMethod !== "created") {
+      if (
+        mapped &&
+        matchOnly &&
+        !updateMatched &&
+        mapped.matchMethod !== "created"
+      ) {
         out.unchanged++;
         results.push(rr(row, "loaded_unchanged", { vaultId: mapped.vaultId }));
         continue;
@@ -303,7 +402,13 @@ export class DefaultLoader implements Loader {
     // pending queue (§8.4)
     if (pending.length) {
       out.pendingFk += pending.length;
-      await enqueuePending(plan, rt.deps.store, pending, (rows) => rt.rowResults(rows), now);
+      await enqueuePending(
+        plan,
+        rt.deps.store,
+        pending,
+        (rows) => rt.rowResults(rows),
+        now,
+      );
     }
 
     // dry run: simulate (§8.9)
@@ -315,14 +420,27 @@ export class DefaultLoader implements Loader {
       }
       out.elapsedMs = Date.now() - started;
       await rt.rowResults(results);
-      log.info({ batch_no: batchNo, rows: batch.length, would_create: out.created, would_update: out.updated, pending_fk: out.pendingFk, failed: out.failed }, "dry-run batch simulated");
+      log.info(
+        {
+          batch_no: batchNo,
+          rows: batch.length,
+          would_create: out.created,
+          would_update: out.updated,
+          pending_fk: out.pendingFk,
+          failed: out.failed,
+        },
+        "dry-run batch simulated",
+      );
       return out;
     }
 
     // 8. send
     const opts = rt.writeOptions(plan, batchNo);
     const groups: Array<{ op: Prepared["op"]; items: Prepared[] }> = [
-      { op: "changetype", items: prepared.filter((p) => p.op === "changetype") },
+      {
+        op: "changetype",
+        items: prepared.filter((p) => p.op === "changetype"),
+      },
       { op: "upsert", items: prepared.filter((p) => p.op === "upsert") },
       { op: "update", items: prepared.filter((p) => p.op === "update") },
     ];
@@ -330,37 +448,78 @@ export class DefaultLoader implements Loader {
     for (const g of groups) {
       if (!g.items.length) continue;
       if (structural) {
-        for (const p of g.items) fail(p.row, structural.type, structural.message);
+        for (const p of g.items)
+          fail(p.row, structural.type, structural.message);
         continue;
       }
       let response: VaultBulkResponse | undefined;
       try {
         if (g.op === "changetype") {
-          if (!rt.deps.vault.changeType) throw new LoadCallError("structural", "CHANGETYPE_UNSUPPORTED", "client has no changeType", 1);
+          if (!rt.deps.vault.changeType)
+            throw new LoadCallError(
+              "structural",
+              "CHANGETYPE_UNSUPPORTED",
+              "client has no changeType",
+              1,
+            );
           const ct = await rt.call(plan, () =>
-            rt.deps.vault.changeType!(plan.target.targetObject, g.items.map((p) => ({ id: p.idRow!.vaultId, objectType: p.row.objectType! }))),
+            rt.deps.vault.changeType!(
+              plan.target.targetObject,
+              g.items.map((p) => ({
+                id: p.idRow!.vaultId,
+                objectType: p.row.objectType!,
+              })),
+            ),
           );
-          const ok = g.items.filter((_, i) => ct.data[i]?.responseStatus !== "FAILURE");
+          const ok = g.items.filter(
+            (_, i) => ct.data[i]?.responseStatus !== "FAILURE",
+          );
           g.items.forEach((p, i) => {
             const r = ct.data[i];
-            if (r?.responseStatus === "FAILURE") fail(p.row, r.errors?.[0]?.type ?? "TYPE_CHANGE_FAILED", r.errors?.[0]?.message ?? "changetype failed", p.idRow!.vaultId);
+            if (r?.responseStatus === "FAILURE")
+              fail(
+                p.row,
+                r.errors?.[0]?.type ?? "TYPE_CHANGE_FAILED",
+                r.errors?.[0]?.message ?? "changetype failed",
+                p.idRow!.vaultId,
+              );
           });
           out.typeChanged += ok.length;
           if (!ok.length) continue;
           const upd = { ...opts };
           delete upd.idParam;
-          response = await rt.call(plan, () => rt.deps.vault.update(plan.target.targetObject, ok.map((p) => p.vaultRow), { ...upd, migrationMode: true }));
+          response = await rt.call(plan, () =>
+            rt.deps.vault.update(
+              plan.target.targetObject,
+              ok.map((p) => p.vaultRow),
+              { ...upd, migrationMode: true },
+            ),
+          );
           g.items = ok;
         } else if (g.op === "upsert") {
-          response = await rt.call(plan, () => rt.deps.vault.upsert(plan.target.targetObject, g.items.map((p) => p.vaultRow), opts));
+          response = await rt.call(plan, () =>
+            rt.deps.vault.upsert(
+              plan.target.targetObject,
+              g.items.map((p) => p.vaultRow),
+              opts,
+            ),
+          );
         } else {
           const upd = { ...opts };
           delete upd.idParam;
-          response = await rt.call(plan, () => rt.deps.vault.update(plan.target.targetObject, g.items.map((p) => p.vaultRow), upd));
+          response = await rt.call(plan, () =>
+            rt.deps.vault.update(
+              plan.target.targetObject,
+              g.items.map((p) => p.vaultRow),
+              upd,
+            ),
+          );
         }
       } catch (e) {
         const cls = e instanceof LoadCallError ? e.errorClass : "fatal";
-        const type = errorTypeOf(e instanceof LoadCallError ? (e.cause ?? e) : e);
+        const type = errorTypeOf(
+          e instanceof LoadCallError ? (e.cause ?? e) : e,
+        );
         const message = errorMessageOf(e);
         if (cls === "retryable") {
           // budget exhausted → unit failed(transport)
@@ -374,11 +533,16 @@ export class DefaultLoader implements Loader {
       }
       if (response.responseStatus === "FAILURE") {
         const err = response.errors?.[0];
-        structural = { type: err?.type ?? "FAILURE", message: err?.message ?? response.responseMessage ?? "bulk call failed" };
-        for (const p of g.items) fail(p.row, structural.type, structural.message);
+        structural = {
+          type: err?.type ?? "FAILURE",
+          message:
+            err?.message ?? response.responseMessage ?? "bulk call failed",
+        };
+        for (const p of g.items)
+          fail(p.row, structural.type, structural.message);
         continue;
       }
-      await this.recordRows(g, response, plan, batchNo, ctx, out, results, rr, fail, now);
+      await this.recordRows(g, response, plan, batchNo, out, results, rr, fail);
     }
 
     out.elapsedMs = Date.now() - started;
@@ -386,11 +550,24 @@ export class DefaultLoader implements Loader {
     if (structural) out.structuralError = structural;
     await rt.rowResults(results);
     if (ctx.fromPending) {
-      const resolvedNow = prepared.filter((p) => ctx.fromPending!.has(p.row.sfdcId)).map((p) => ctx.fromPending!.get(p.row.sfdcId)!);
+      const resolvedNow = prepared
+        .filter((p) => ctx.fromPending!.has(p.row.sfdcId))
+        .map((p) => ctx.fromPending!.get(p.row.sfdcId)!);
       await markPendingResolved(plan, rt.deps.store, resolvedNow, now);
     }
     log.info(
-      { batch_no: batchNo, rows: batch.length, created: out.created, updated: out.updated, unchanged: out.unchanged, failed: out.failed, pending_fk: out.pendingFk, type_changed: out.typeChanged, elapsed_ms: out.elapsedMs, burst_remaining: out.burstRemaining },
+      {
+        batch_no: batchNo,
+        rows: batch.length,
+        created: out.created,
+        updated: out.updated,
+        unchanged: out.unchanged,
+        failed: out.failed,
+        pending_fk: out.pendingFk,
+        type_changed: out.typeChanged,
+        elapsed_ms: out.elapsedMs,
+        burst_remaining: out.burstRemaining,
+      },
       "batch loaded",
     );
     return out;
@@ -401,12 +578,19 @@ export class DefaultLoader implements Loader {
     response: VaultBulkResponse,
     plan: LoadPlan,
     batchNo: number,
-    ctx: LoadContext,
     out: BatchOutcome,
     results: RowResult[],
-    rr: (row: PayloadRow, state: RowState, extra?: Partial<RowResult>) => RowResult,
-    fail: (row: PayloadRow, type: string, message: string, vaultId?: string) => void,
-    now: string,
+    rr: (
+      row: PayloadRow,
+      state: RowState,
+      extra?: Partial<RowResult>,
+    ) => RowResult,
+    fail: (
+      row: PayloadRow,
+      type: string,
+      message: string,
+      vaultId?: string,
+    ) => void,
   ): Promise<void> {
     const rt = this.rt;
     const puts: IdMapRow[] = [];
@@ -414,11 +598,20 @@ export class DefaultLoader implements Loader {
       const p = g.items[i];
       const r = response.data[i];
       if (!r) {
-        fail(p.row, "NO_ROW_RESULT", "response has fewer rows than the request");
+        fail(
+          p.row,
+          "NO_ROW_RESULT",
+          "response has fewer rows than the request",
+        );
         continue;
       }
       if (r.responseStatus === "FAILURE" || r.responseStatus === "EXCEPTION") {
-        fail(p.row, r.errors?.[0]?.type ?? "ROW_FAILED", r.errors?.[0]?.message ?? "row failed", p.idRow?.vaultId ?? p.hit?.vaultId);
+        fail(
+          p.row,
+          r.errors?.[0]?.type ?? "ROW_FAILED",
+          r.errors?.[0]?.message ?? "row failed",
+          p.idRow?.vaultId ?? p.hit?.vaultId,
+        );
         continue;
       }
       const vaultId = r.data?.id ?? p.idRow?.vaultId ?? p.hit?.vaultId;
@@ -430,7 +623,11 @@ export class DefaultLoader implements Loader {
       if (g.op === "upsert") {
         const event = r.data?.event ?? (p.idRow ? "update" : "create");
         state = event === "create" ? "loaded_created" : "loaded_updated";
-      } else state = r.responseStatus === "WARNING" ? "loaded_unchanged" : "loaded_updated";
+      } else
+        state =
+          r.responseStatus === "WARNING"
+            ? "loaded_unchanged"
+            : "loaded_updated";
       if (state === "loaded_created") out.created++;
       else if (state === "loaded_updated") out.updated++;
       else out.unchanged++;
@@ -454,24 +651,31 @@ export class DefaultLoader implements Loader {
       });
     }
     for (const row of puts) await rt.deps.store.idMap.put(row);
-    void ctx;
-    void now;
   }
 
   // ------------------------------------------------------------- pass 2 …
 
-  secondPass(rows: AsyncIterable<PayloadRow>, plan: LoadPlan): Promise<SecondPassResult> {
+  secondPass(
+    rows: AsyncIterable<PayloadRow>,
+    plan: LoadPlan,
+  ): Promise<SecondPassResult> {
     return runSecondPass(this.rt, rows, plan);
   }
 
-  async applyDeletes(req: DeleteRequest, plan: LoadPlan): Promise<DeleteResult> {
+  async applyDeletes(
+    req: DeleteRequest,
+    plan: LoadPlan,
+  ): Promise<DeleteResult> {
     const out = await this.applyDeletesDetailed(req, plan);
     const { ignoredDetail: _d, ...rest } = out;
     return rest;
   }
 
   /** `applyDeletes` plus the per-id ignore reasons for the report. */
-  applyDeletesDetailed(req: DeleteRequest, plan: LoadPlan): Promise<DeleteOutcome> {
+  applyDeletesDetailed(
+    req: DeleteRequest,
+    plan: LoadPlan,
+  ): Promise<DeleteOutcome> {
     return runDeletes(this.rt, req, plan);
   }
 
@@ -479,15 +683,27 @@ export class DefaultLoader implements Loader {
   async retryPending(plan: LoadPlan, round: number): Promise<LoadResult> {
     const entries = await readPendingQueue(plan);
     if (!entries.length) return emptyResult(plan);
-    this.rt.log(plan).info({ round, rows: entries.length }, "pending FK queue re-evaluated");
+    this.rt
+      .log(plan)
+      .info({ round, rows: entries.length }, "pending FK queue re-evaluated");
     await writePendingQueue(plan, []);
     const fromPending = new Map(entries.map((e) => [e.row.sfdcId, e] as const));
-    return this.loadRows(entries.map((e) => e.row), plan, { fromPending, attempt: round + 1 });
+    return this.loadRows(
+      entries.map((e) => e.row),
+      plan,
+      { fromPending, attempt: round + 1 },
+    );
   }
 
   /** §8.4 leftovers → `failed(UNRESOLVED_FK)`; returns the number of rows failed. */
-  async finalisePending(plan: LoadPlan): Promise<{ failed: number; targets: Record<string, string[]> }> {
-    const entries = await failPending(plan, (rows) => this.rt.rowResults(rows), this.rt.now());
+  async finalisePending(
+    plan: LoadPlan,
+  ): Promise<{ failed: number; targets: Record<string, string[]> }> {
+    const entries = await failPending(
+      plan,
+      (rows) => this.rt.rowResults(rows),
+      this.rt.now(),
+    );
     const targets: Record<string, string[]> = {};
     for (const e of entries)
       for (const u of e.unresolved) {

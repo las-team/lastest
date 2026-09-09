@@ -63,7 +63,12 @@ export async function runBlobs(
   };
   const fields = plan.target.metadata.fields;
   let batch: Array<{ sfdcId: string; row: VaultRow; vaultId: string }> = [];
-  let attachments: Array<{ sfdcId: string; vaultId: string; field: string; value: string }> = [];
+  let attachments: Array<{
+    sfdcId: string;
+    vaultId: string;
+    field: string;
+    value: string;
+  }> = [];
   let bytes = 0;
   let batchNo = 0;
   let pendingLookup: BlobRow[] = [];
@@ -88,21 +93,47 @@ export async function runBlobs(
       delete opts.idParam;
       try {
         const res = await rt.call(plan, () =>
-          rt.deps.vault.update(plan.target.targetObject, batch.map((b) => b.row), opts),
+          rt.deps.vault.update(
+            plan.target.targetObject,
+            batch.map((b) => b.row),
+            opts,
+          ),
         );
         res.data.forEach((rr, i) => {
           const b = batch[i];
           if (!b) return;
           if (rr.responseStatus === "FAILURE") {
             outcome.failed++;
-            results.push(rowResult(plan, b.sfdcId, batchNo, "failed", rr.errors?.[0]?.type ?? "BLOB_FAILED", rr.errors?.[0]?.message ?? "blob update failed", rt.now(), b.vaultId));
+            results.push(
+              rowResult(
+                plan,
+                b.sfdcId,
+                batchNo,
+                "failed",
+                rr.errors?.[0]?.type ?? "BLOB_FAILED",
+                rr.errors?.[0]?.message ?? "blob update failed",
+                rt.now(),
+                b.vaultId,
+              ),
+            );
           } else if (rr.responseStatus === "WARNING") outcome.unchanged++;
           else outcome.updated++;
         });
       } catch (e) {
         outcome.failed += batch.length;
         results.push(
-          ...batch.map((b) => rowResult(plan, b.sfdcId, batchNo, "failed", errorTypeOf(e), errorMessageOf(e), rt.now(), b.vaultId)),
+          ...batch.map((b) =>
+            rowResult(
+              plan,
+              b.sfdcId,
+              batchNo,
+              "failed",
+              errorTypeOf(e),
+              errorMessageOf(e),
+              rt.now(),
+              b.vaultId,
+            ),
+          ),
         );
         log.error({ err: e, batch_no: batchNo }, "blob batch failed");
       }
@@ -115,7 +146,18 @@ export async function runBlobs(
       }
       if (!rt.deps.vault.addAttachment) {
         outcome.failed++;
-        results.push(rowResult(plan, a.sfdcId, batchNo, "failed", "ATTACHMENTS_UNSUPPORTED", "client has no addAttachment", rt.now(), a.vaultId));
+        results.push(
+          rowResult(
+            plan,
+            a.sfdcId,
+            batchNo,
+            "failed",
+            "ATTACHMENTS_UNSUPPORTED",
+            "client has no addAttachment",
+            rt.now(),
+            a.vaultId,
+          ),
+        );
         continue;
       }
       try {
@@ -128,7 +170,18 @@ export async function runBlobs(
         outcome.updated++;
       } catch (e) {
         outcome.failed++;
-        results.push(rowResult(plan, a.sfdcId, batchNo, "failed", errorTypeOf(e), errorMessageOf(e), rt.now(), a.vaultId));
+        results.push(
+          rowResult(
+            plan,
+            a.sfdcId,
+            batchNo,
+            "failed",
+            errorTypeOf(e),
+            errorMessageOf(e),
+            rt.now(),
+            a.vaultId,
+          ),
+        );
       }
     }
     outcome.elapsedMs = Date.now() - started;
@@ -138,7 +191,10 @@ export async function runBlobs(
     result.updated += outcome.updated;
     result.unchanged += outcome.unchanged;
     result.failed += outcome.failed;
-    log.info({ batch_no: batchNo, rows: outcome.rows, bytes, failed: outcome.failed }, "blob batch");
+    log.info(
+      { batch_no: batchNo, rows: outcome.rows, bytes, failed: outcome.failed },
+      "blob batch",
+    );
     batch = [];
     attachments = [];
     bytes = 0;
@@ -146,7 +202,10 @@ export async function runBlobs(
 
   const process = async (items: BlobRow[]) => {
     if (!items.length) return;
-    const idRows = await rt.deps.store.idMap.bulkGet(plan.unit.objectKey, items.map((i) => i.sfdcId));
+    const idRows = await rt.deps.store.idMap.bulkGet(
+      plan.unit.objectKey,
+      items.map((i) => i.sfdcId),
+    );
     for (const item of items) {
       const idRow = idRows.get(item.sfdcId);
       if (!idRow || idRow.dryRun || idRow.deletedAt) {
@@ -157,7 +216,8 @@ export async function runBlobs(
       let rowBytes = 0;
       let failed: string | undefined;
       for (const [field, value] of Object.entries(item.blobs)) {
-        if (value === null || value === undefined || typeof value === "object") continue;
+        if (value === null || value === undefined || typeof value === "object")
+          continue;
         const policy = blobPolicyOf(plan, field);
         if (policy === "skip") continue;
         const meta = fields[field];
@@ -167,7 +227,12 @@ export async function runBlobs(
             failed = `BLOB_ATTACHMENTS_DISABLED:${field}`;
             break;
           }
-          attachments.push({ sfdcId: item.sfdcId, vaultId: idRow.vaultId, field, value: text });
+          attachments.push({
+            sfdcId: item.sfdcId,
+            vaultId: idRow.vaultId,
+            field,
+            value: text,
+          });
           continue;
         }
         if (!meta) {
@@ -182,7 +247,10 @@ export async function runBlobs(
             failed = `BLOB_TOO_LONG:${field}`;
             break;
           }
-          log.debug({ sfdc_id: item.sfdcId, field }, "optional blob dropped: too long for target");
+          log.debug(
+            { sfdc_id: item.sfdcId, field },
+            "optional blob dropped: too long for target",
+          );
           continue;
         }
         row[field] = value;
@@ -191,14 +259,30 @@ export async function runBlobs(
       if (failed) {
         const [type, field] = failed.split(":");
         result.failed++;
-        await rt.rowResults([rowResult(plan, item.sfdcId, batchNo + 1, "failed", type, `blob ${field} cannot be loaded under policy required`, rt.now(), idRow.vaultId)]);
+        await rt.rowResults([
+          rowResult(
+            plan,
+            item.sfdcId,
+            batchNo + 1,
+            "failed",
+            type,
+            `blob ${field} cannot be loaded under policy required`,
+            rt.now(),
+            idRow.vaultId,
+          ),
+        ]);
         continue;
       }
       if (Object.keys(row).length <= 1) {
-        if (!attachments.some((a) => a.sfdcId === item.sfdcId)) result.skipped++;
+        if (!attachments.some((a) => a.sfdcId === item.sfdcId))
+          result.skipped++;
         continue;
       }
-      if (batch.length >= VAULT_MAX_BATCH || (bytes + rowBytes > cap && batch.length)) await flush();
+      if (
+        batch.length >= VAULT_MAX_BATCH ||
+        (bytes + rowBytes > cap && batch.length)
+      )
+        await flush();
       batch.push({ sfdcId: item.sfdcId, row, vaultId: idRow.vaultId });
       bytes += rowBytes;
     }

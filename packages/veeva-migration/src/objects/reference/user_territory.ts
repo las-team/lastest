@@ -126,6 +126,10 @@ const shared = {
   createPolicy: "create",
   load: { noTriggers: false },
   custom: { userTerritoryName, userTerritoryStatus },
+  // §3.5: `user__v` is a required business user field → never silently fall back.
+  // Users are matched in wave 0 and never auto-created, so a pending row could
+  // not resolve later; `fail` surfaces UNMAPPED_USER with a count instead.
+  optionDefaults: { unmappedUserPolicy: "fail" },
 } satisfies Partial<ObjectModuleInput>;
 
 function rows(opts: { territoryIdColumn: string }) {

@@ -17,7 +17,9 @@ export interface PendingEntry {
   attempts: number;
 }
 
-export async function readPendingQueue(plan: LoadPlan): Promise<PendingEntry[]> {
+export async function readPendingQueue(
+  plan: LoadPlan,
+): Promise<PendingEntry[]> {
   return readJsonl<PendingEntry>(pendingQueueFile(plan.runDir, plan.unit));
 }
 

@@ -1,0 +1,23 @@
+# countries.NL — Netherlands (§7.4.8, inherits regions.EU)
+# pilot — GDPR; nurse-contact authorisation customer flag; postcode "1234 AB".
+# Picklist crosswalks (specialties, credentials) are filled by the programme.
+region: EU
+defaultTimezone: Europe/Amsterdam
+postalCode: { pattern: "^\\d{4} ?[A-Za-z]{2}$", onMismatch: warn }
+phone: { normalise: true, defaultRegion: NL }
+objects:
+  account:
+    fields:
+      add: [
+          {
+            source: Authorization_talk_to_Nurses_NL__c,
+            target: authorization_talk_to_nurses__c,
+            transform: bool,
+          },
+        ] # customer field (field-mapping.md §5), must pre-exist
+      remove: [npi__v, pdrp_opt_out__v, pdrp_opt_out_date__v]
+  address:
+    required: { state_province__v: false }
+    fields:
+      add: [{ source: Brick_vod__c, target: brick__v, transform: text }]
+      remove: [dea__v, cds__v, license__v, zip_4__v]

@@ -10,3 +10,4 @@ export * from "./transform";
 export * from "./report";
 export * from "./engine";
 export * from "./wiring";
+export * from "./migrate";

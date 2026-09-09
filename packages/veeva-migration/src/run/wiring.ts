@@ -10,7 +10,10 @@ import type { MigrationConfig } from "../config/schema";
 import { createExtractor } from "../extract/index";
 import { getLogger } from "../logger";
 import { createSfdcClient, type SfdcClientHandle } from "../sfdc/client";
-import { createStateStore, type CreateStateStoreOverrides } from "../store/index";
+import {
+  createStateStore,
+  type CreateStateStoreOverrides,
+} from "../store/index";
 import type { StateStore } from "../store/types";
 import { createVaultClient, vaultClientConfigFrom } from "../vault/client";
 import type { VaultClient } from "../vault/types";
@@ -29,7 +32,10 @@ export interface WiredDeps extends EngineDeps {
   close(): Promise<void>;
 }
 
-export async function createEngineDeps(config: MigrationConfig, opts: WiringOptions = {}): Promise<WiredDeps> {
+export async function createEngineDeps(
+  config: MigrationConfig,
+  opts: WiringOptions = {},
+): Promise<WiredDeps> {
   const log = getLogger("Cli");
   const store: StateStore = await createStateStore(config, opts.store);
   const vaults = new Map<string, VaultClient>();
@@ -40,13 +46,37 @@ export async function createEngineDeps(config: MigrationConfig, opts: WiringOpti
     const cc = resolveCountry(config, iso);
     const dns = cc.target.vaultDns ?? mainDns;
     if (vaults.has(dns)) continue;
-    log.warn({ country: iso, vault_dns: dns }, "country targets another vault; the shared state store is bound to the main vault (§2.4)");
-    vaults.set(dns, createVaultClient(vaultClientConfigFrom({ target: { ...config.target, ...cc.target, vaultDns: dns, auth: cc.target.auth ?? config.target.auth }, performance: config.performance })));
+    log.warn(
+      { country: iso, vault_dns: dns },
+      "country targets another vault; the shared state store is bound to the main vault (§2.4)",
+    );
+    vaults.set(
+      dns,
+      createVaultClient(
+        vaultClientConfigFrom({
+          target: {
+            ...config.target,
+            ...cc.target,
+            vaultDns: dns,
+            auth: cc.target.auth ?? config.target.auth,
+          },
+          performance: config.performance,
+        }),
+      ),
+    );
   }
   let sfdc: SfdcClientHandle | undefined;
-  if (!opts.offline) sfdc = await createSfdcClient({ source: config.source, performance: config.performance, extract: config.extract });
+  if (!opts.offline)
+    sfdc = await createSfdcClient({
+      source: config.source,
+      performance: config.performance,
+      extract: config.extract,
+    });
   const sfdcClient = sfdc ?? offlineSfdc();
-  const extractor = createExtractor({ sfdc: sfdcClient, store }, { sortChunkRows: config.performance.sortChunkRows });
+  const extractor = createExtractor(
+    { sfdc: sfdcClient, store },
+    { sortChunkRows: config.performance.sortChunkRows },
+  );
   return {
     sfdc: sfdcClient,
     vaults,

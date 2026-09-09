@@ -9,7 +9,11 @@ import { getLogger } from "../logger";
 import { blobsDir, payloadDir, writePayloadFiles } from "../load/paths";
 import type { PayloadRow } from "../load/types";
 import type { StateStore } from "../store/types";
-import { applyMapping, type ApplyContext, type ApplyResult } from "../transform/apply";
+import {
+  applyMapping,
+  type ApplyContext,
+  type ApplyResult,
+} from "../transform/apply";
 import type {
   CountryContext,
   FkIndexRow,
@@ -67,10 +71,16 @@ export interface TransformUnitResult {
 }
 
 /** Turn an `ApplyResult` into the loader's `PayloadRow`. */
-export function toPayloadRow(r: ApplyResult, row: SourceRow, closure: boolean, keepSource: boolean): PayloadRow {
+export function toPayloadRow(
+  r: ApplyResult,
+  row: SourceRow,
+  closure: boolean,
+  keepSource: boolean,
+): PayloadRow {
   const out: PayloadRow & { source?: Record<string, unknown> } = {
     sfdcId: r.sfdcId,
-    systemModstamp: typeof row.SystemModstamp === "string" ? row.SystemModstamp : undefined,
+    systemModstamp:
+      typeof row.SystemModstamp === "string" ? row.SystemModstamp : undefined,
     payload: r.payload,
     secondPass: Object.keys(r.secondPass).length ? r.secondPass : undefined,
     sourceHash: r.sourceHash,
@@ -82,8 +92,14 @@ export function toPayloadRow(r: ApplyResult, row: SourceRow, closure: boolean, k
   return out;
 }
 
-export async function transformUnit(input: TransformUnitInput): Promise<TransformUnitResult> {
-  const log = getLogger("Transform", { run_id: input.runId, object_key: input.unit.objectKey, country: input.unit.country });
+export async function transformUnit(
+  input: TransformUnitInput,
+): Promise<TransformUnitResult> {
+  const log = getLogger("Transform", {
+    run_id: input.runId,
+    object_key: input.unit.objectKey,
+    country: input.unit.country,
+  });
   const now = input.now ?? (() => new Date());
   const ctx: ApplyContext = {
     country: input.country,
@@ -120,46 +136,106 @@ export async function transformUnit(input: TransformUnitInput): Promise<Transfor
       fkRows = [];
     }
   };
-  const bump = (rec: Record<string, number>, key: string) => (rec[key] = (rec[key] ?? 0) + 1);
+  const bump = (rec: Record<string, number>, key: string) =>
+    (rec[key] = (rec[key] ?? 0) + 1);
   const blobRows: Array<{ sfdcId: string; blobs: PayloadRow["payload"] }> = [];
 
   const payloadRows = (async function* (): AsyncGenerator<PayloadRow> {
     for await (const { row, file } of input.extractor.readRows(input.files)) {
       if (input.onlyIds && !input.onlyIds.has(row.Id)) continue;
       const r = applyMapping(row, input.mapping, ctx);
-      if (typeof row.SystemModstamp === "string") result.seenModstamps.set(r.sfdcId, row.SystemModstamp);
+      if (typeof row.SystemModstamp === "string")
+        result.seenModstamps.set(r.sfdcId, row.SystemModstamp);
       for (const d of r.diagnostics) bump(result.diagnostics, d.code ?? d.kind);
       if (file.closure) result.closureRows++;
-      const base = { runId: input.runId, objectKey: input.unit.objectKey, country: input.unit.country, sfdcId: r.sfdcId, attempt: 1, payloadHash: r.sourceHash, updatedAt: now().toISOString() };
+      const base = {
+        runId: input.runId,
+        objectKey: input.unit.objectKey,
+        country: input.unit.country,
+        sfdcId: r.sfdcId,
+        attempt: 1,
+        payloadHash: r.sourceHash,
+        updatedAt: now().toISOString(),
+      };
       if (r.status === "skipped") {
         result.skipped++;
         bump(result.skippedByReason, r.skipReason ?? "rule");
-        rowResults.push({ ...base, state: "skipped", errorType: r.skipReason ?? "rule", errorMessage: r.diagnostics.find((d) => d.fatal)?.detail ?? null });
+        rowResults.push({
+          ...base,
+          state: "skipped",
+          errorType: r.skipReason ?? "rule",
+          errorMessage: r.diagnostics.find((d) => d.fatal)?.detail ?? null,
+        });
       } else if (r.status === "failed") {
         result.failed++;
         bump(result.failedByCode, r.failure?.code ?? "TRANSFORM_FAILED");
-        rowResults.push({ ...base, state: "failed", errorType: r.failure?.code ?? "TRANSFORM_FAILED", errorMessage: r.failure?.message ?? null });
+        rowResults.push({
+          ...base,
+          state: "failed",
+          errorType: r.failure?.code ?? "TRANSFORM_FAILED",
+          errorMessage: r.failure?.message ?? null,
+        });
       } else {
         result.transformed++;
         if (r.status === "pending_fk") result.pendingFk++;
         if (Object.keys(r.secondPass).length) result.secondPassRows++;
         rowResults.push({ ...base, state: "transformed" });
-        for (const e of r.fkEdges) fkRows.push({ objectKey: input.unit.objectKey, sfdcId: r.sfdcId, field: e.field, targetObjectKey: e.targetObjectKey, targetSfdcId: e.targetSfdcId, runId: input.runId });
-        if (Object.keys(r.blobs).length) blobRows.push({ sfdcId: r.sfdcId, blobs: r.blobs });
-        yield toPayloadRow(r, row, Boolean(file.closure), input.keepSource ?? true);
+        for (const e of r.fkEdges)
+          fkRows.push({
+            objectKey: input.unit.objectKey,
+            sfdcId: r.sfdcId,
+            field: e.field,
+            targetObjectKey: e.targetObjectKey,
+            targetSfdcId: e.targetSfdcId,
+            runId: input.runId,
+          });
+        if (Object.keys(r.blobs).length)
+          blobRows.push({ sfdcId: r.sfdcId, blobs: r.blobs });
+        yield toPayloadRow(
+          r,
+          row,
+          Boolean(file.closure),
+          input.keepSource ?? true,
+        );
       }
       if (rowResults.length >= 500 || fkRows.length >= 2000) await flushStore();
     }
   })();
 
-  result.payloadFiles = await writePayloadFiles(payloadDir(input.runDir, input.unit), payloadRows, undefined, input.filePrefix);
+  result.payloadFiles = await writePayloadFiles(
+    payloadDir(input.runDir, input.unit),
+    payloadRows,
+    undefined,
+    input.filePrefix,
+  );
   await flushStore();
   if (blobRows.length) {
-    const rows = blobRows.map((b) => ({ sfdcId: b.sfdcId, payload: b.blobs, sourceHash: "", diagnostics: [] }) satisfies PayloadRow);
-    result.blobFiles = await writePayloadFiles(blobsDir(input.runDir, input.unit), rows, undefined, input.filePrefix);
+    const rows = blobRows.map(
+      (b) =>
+        ({
+          sfdcId: b.sfdcId,
+          payload: b.blobs,
+          sourceHash: "",
+          diagnostics: [],
+        }) satisfies PayloadRow,
+    );
+    result.blobFiles = await writePayloadFiles(
+      blobsDir(input.runDir, input.unit),
+      rows,
+      undefined,
+      input.filePrefix,
+    );
   }
   log.info(
-    { transformed: result.transformed, skipped: result.skipped, failed: result.failed, pending_fk: result.pendingFk, closure: result.closureRows, files: result.payloadFiles.length, diagnostics: result.diagnostics },
+    {
+      transformed: result.transformed,
+      skipped: result.skipped,
+      failed: result.failed,
+      pending_fk: result.pendingFk,
+      closure: result.closureRows,
+      files: result.payloadFiles.length,
+      diagnostics: result.diagnostics,
+    },
     "unit transformed",
   );
   return result;

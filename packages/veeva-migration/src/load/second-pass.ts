@@ -8,7 +8,12 @@ import type { RowResult } from "../types";
 import type { VaultRow } from "../vault/types";
 import { cutBatches } from "./batcher";
 import type { LoaderRuntime } from "./context";
-import { RefIndex, collectRefs, resolvePayload, type RefKey } from "./resolve-refs";
+import {
+  RefIndex,
+  collectRefs,
+  resolvePayload,
+  type RefKey,
+} from "./resolve-refs";
 import { LoadCallError, errorMessageOf, errorTypeOf } from "./retry";
 import type { LoadPlan, PayloadRow, SecondPassResult } from "./types";
 
@@ -51,7 +56,10 @@ export async function runSecondPass(
       if (resolved.unresolved.length) {
         result.unresolved++;
         log.debug(
-          { sfdc_id: row.sfdcId, fields: resolved.unresolved.map((u) => u.field) },
+          {
+            sfdc_id: row.sfdcId,
+            fields: resolved.unresolved.map((u) => u.field),
+          },
           "second-pass reference unresolved",
         );
       }
@@ -85,7 +93,9 @@ export async function runSecondPass(
       log.error({ err: e, batch_no: batchNo }, "second-pass batch failed");
       result.failed += sent.length;
       await rt.rowResults(
-        sent.map((s) => failedRow(plan, s.row, batchNo, type, errorMessageOf(e), rt.now())),
+        sent.map((s) =>
+          failedRow(plan, s.row, batchNo, type, errorMessageOf(e), rt.now()),
+        ),
       );
       continue;
     }

@@ -1,0 +1,64 @@
+# countries.CA — Canada (§7.4.6, inherits regions.NA)
+# Source specifics: bilingual accounts (Account.Language_vod__c {en_US, fr, …}
+# plus a customer Preferred_Language_* field), Quebec Law 25 (GDPR-like:
+# erasure list, consent history), 2-letter provinces in State_vod__c, postal
+# "A1A 1A1", Canadian specialties in a customer Interest_*_CA picklist.
+# Data residency: PIPEDA / Law 25 permit transfer with safeguards [GEN] — the
+# example keeps the NA vault.
+region: NA
+defaultTimezone: America/Toronto
+scope: { historyMonths: 24 }
+privacy: {
+    erasureListPath: ./privacy/ca-erasures.csv,
+    consentFullHistory: true,
+  } # Quebec Law 25
+phone: { normalise: true, defaultRegion: CA }
+postalCode:
+  { pattern: "^[A-Za-z]\\d[A-Za-z] ?\\d[A-Za-z]\\d$", onMismatch: warn }
+nameTemplates: { person: "{FirstName} {LastName}" }
+objects:
+  account:
+    fields:
+      add:
+        - {
+            source: Language_vod__c,
+            target: language__v,
+            transform: "picklist(account.language)",
+          }
+        - {
+            source: Preferred_Language_CA__c,
+            target: preferred_language__c,
+            transform: "picklist(account.preferredLanguage)",
+          } # customer field, must pre-exist
+        - {
+            source: Interest_Specialty_CA__c,
+            target: spec_1_cda__v,
+            transform: "picklist(account.specialty)",
+          } # customer specialty picklist (264 values) → target specialty
+      remove: [npi__v, pdrp_opt_out__v, pdrp_opt_out_date__v]
+  address:
+    required: { state_province__v: true } # provinces always populated (state picklists exist for CA)
+    fields: { remove: [dea__v, cds__v, license__v, zip_4__v, brick__v] }
+picklists:
+  account.language: { en_US: en__v, fr: fr__v, fr_CA: fr__v } # value names are language-neutral; Vault labels are translated, never encode EN/FR labels in API values
+  account.preferredLanguage: { EN: en__c, FR: fr__c }
+  # 13 provinces/territories, resolved by label at preflight
+  address.state:
+    {
+      AB: ab__v,
+      BC: bc__v,
+      MB: mb__v,
+      NB: nb__v,
+      NL: nl__v,
+      NS: ns__v,
+      NT: nt__v,
+      NU: nu__v,
+      ON: on__v,
+      PE: pe__v,
+      QC: qc__v,
+      SK: sk__v,
+      YT: yt__v,
+    }
+  # bilingual source labels map to one target value — remaining 264 values filled by the programme
+  account.specialty:
+    { "Cardiology": cardiology__c, "Médecine familiale": family_medicine__c }

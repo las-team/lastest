@@ -41,8 +41,14 @@ export interface GateExceptions {
 
 export function loadGateExceptions(path: string): GateExceptions {
   const raw = JSON.parse(readFileSync(path, "utf8")) as GateExceptions;
-  if (!raw || typeof raw !== "object" || (raw.units && typeof raw.units !== "object"))
-    throw new Error(`accept-gate-exceptions file ${path}: expected { units: { "<object:country>": { reason, … } } }`);
+  if (
+    !raw ||
+    typeof raw !== "object" ||
+    (raw.units && typeof raw.units !== "object")
+  )
+    throw new Error(
+      `accept-gate-exceptions file ${path}: expected { units: { "<object:country>": { reason, … } } }`,
+    );
   return raw;
 }
 
@@ -75,7 +81,12 @@ export function evaluateGate(input: GateInput): GateResult {
   const findings: Finding[] = [];
   let pass = true;
   const ctx = { objectKey: unit.objectKey, country: unit.country };
-  const fail = (code: string, detail: Finding["detail"], count?: number, severity: Finding["severity"] = "warning") => {
+  const fail = (
+    code: string,
+    detail: Finding["detail"],
+    count?: number,
+    severity: Finding["severity"] = "warning",
+  ) => {
     findings.push({ severity, code, ...ctx, detail, count });
     if (severity !== "info") pass = false;
   };
@@ -87,40 +98,122 @@ export function evaluateGate(input: GateInput): GateResult {
     const diff = Math.abs(row.sfdcScopeCount - row.extracted);
     if (diff > 0) {
       const allowed = Math.max(tolerance, ex?.allowCountMismatch ?? 0);
-      if (diff <= allowed) note("EXTRACT_COUNT_MISMATCH", { sfdcScopeCount: row.sfdcScopeCount, extracted: row.extracted, tolerated: allowed }, diff);
-      else fail("EXTRACT_COUNT_MISMATCH", { sfdcScopeCount: row.sfdcScopeCount, extracted: row.extracted }, diff);
+      if (diff <= allowed)
+        note(
+          "EXTRACT_COUNT_MISMATCH",
+          {
+            sfdcScopeCount: row.sfdcScopeCount,
+            extracted: row.extracted,
+            tolerated: allowed,
+          },
+          diff,
+        );
+      else
+        fail(
+          "EXTRACT_COUNT_MISMATCH",
+          { sfdcScopeCount: row.sfdcScopeCount, extracted: row.extracted },
+          diff,
+        );
     }
   }
   // (2) load accounting
   const closure = row.closure ?? 0;
   const lhs = row.extracted + closure;
-  const rhs = row.created + row.updated + row.unchanged + row.skipped + row.failed + row.pendingFk;
+  const rhs =
+    row.created +
+    row.updated +
+    row.unchanged +
+    row.skipped +
+    row.failed +
+    row.pendingFk;
   if (lhs !== rhs) {
     const diff = Math.abs(lhs - rhs);
     if (ex?.allowLoadAccountingMismatch || diff <= tolerance)
-      note("RECON_LOAD_ACCOUNTING", { extracted: row.extracted, closure, created: row.created, updated: row.updated, unchanged: row.unchanged, skipped: row.skipped, failed: row.failed, pendingFk: row.pendingFk }, diff);
-    else fail("RECON_LOAD_ACCOUNTING", { extracted: row.extracted, closure, created: row.created, updated: row.updated, unchanged: row.unchanged, skipped: row.skipped, failed: row.failed, pendingFk: row.pendingFk }, diff);
+      note(
+        "RECON_LOAD_ACCOUNTING",
+        {
+          extracted: row.extracted,
+          closure,
+          created: row.created,
+          updated: row.updated,
+          unchanged: row.unchanged,
+          skipped: row.skipped,
+          failed: row.failed,
+          pendingFk: row.pendingFk,
+        },
+        diff,
+      );
+    else
+      fail(
+        "RECON_LOAD_ACCOUNTING",
+        {
+          extracted: row.extracted,
+          closure,
+          created: row.created,
+          updated: row.updated,
+          unchanged: row.unchanged,
+          skipped: row.skipped,
+          failed: row.failed,
+          pendingFk: row.pendingFk,
+        },
+        diff,
+      );
   }
   if (row.failed > 0) {
-    if (row.failed <= (ex?.allowFailed ?? 0)) note("RECON_FAILED_ROWS", { failed: row.failed, byType: row.failedByType, accepted: ex?.reason }, row.failed);
-    else fail("RECON_FAILED_ROWS", { failed: row.failed, byType: row.failedByType }, row.failed);
+    if (row.failed <= (ex?.allowFailed ?? 0))
+      note(
+        "RECON_FAILED_ROWS",
+        { failed: row.failed, byType: row.failedByType, accepted: ex?.reason },
+        row.failed,
+      );
+    else
+      fail(
+        "RECON_FAILED_ROWS",
+        { failed: row.failed, byType: row.failedByType },
+        row.failed,
+      );
   }
   if (row.pendingFk > 0) {
-    if (row.pendingFk <= (ex?.allowPending ?? 0)) note("RECON_PENDING_ROWS", { pendingFk: row.pendingFk, accepted: ex?.reason }, row.pendingFk);
-    else fail("RECON_PENDING_ROWS", { pendingFk: row.pendingFk }, row.pendingFk);
+    if (row.pendingFk <= (ex?.allowPending ?? 0))
+      note(
+        "RECON_PENDING_ROWS",
+        { pendingFk: row.pendingFk, accepted: ex?.reason },
+        row.pendingFk,
+      );
+    else
+      fail("RECON_PENDING_ROWS", { pendingFk: row.pendingFk }, row.pendingFk);
   }
   // skip reasons documented
-  const accepted = new Set([...ACCEPTED_SKIP_REASONS, ...(input.extraSkipReasons ?? []), ...(ex?.skipReasons ?? [])]);
-  const undocumented = Object.entries(row.skippedByReason ?? {}).filter(([r, n]) => n > 0 && !accepted.has(r));
+  const accepted = new Set([
+    ...ACCEPTED_SKIP_REASONS,
+    ...(input.extraSkipReasons ?? []),
+    ...(ex?.skipReasons ?? []),
+  ]);
+  const undocumented = Object.entries(row.skippedByReason ?? {}).filter(
+    ([r, n]) => n > 0 && !accepted.has(r),
+  );
   if (undocumented.length)
-    fail("RECON_SKIP_UNDOCUMENTED", { reasons: Object.fromEntries(undocumented) }, undocumented.reduce((a, [, n]) => a + n, 0));
+    fail(
+      "RECON_SKIP_UNDOCUMENTED",
+      { reasons: Object.fromEntries(undocumented) },
+      undocumented.reduce((a, [, n]) => a + n, 0),
+    );
   // vault count
   if (row.vaultCount !== null && row.vaultCount !== undefined) {
     const loaded = row.created + row.updated + row.unchanged;
     if (row.vaultCount < loaded) {
       if (ex?.allowVaultCountLow || loaded - row.vaultCount <= tolerance)
-        note("RECON_VAULT_COUNT_LOW", { vaultCount: row.vaultCount, loaded }, loaded - row.vaultCount);
-      else fail("RECON_VAULT_COUNT_LOW", { vaultCount: row.vaultCount, loaded }, loaded - row.vaultCount);
+        note(
+          "RECON_VAULT_COUNT_LOW",
+          { vaultCount: row.vaultCount, loaded },
+          loaded - row.vaultCount,
+        );
+      else
+        fail(
+          "RECON_VAULT_COUNT_LOW",
+          { vaultCount: row.vaultCount, loaded },
+          loaded - row.vaultCount,
+        );
     }
   }
   // orphan FKs
@@ -138,15 +231,33 @@ export function evaluateGate(input: GateInput): GateResult {
   if (routed > 0 && routed !== applied + ignored + pending)
     fail("RECON_DELETE_ACCOUNTING", { routed, applied, ignored, pending });
   if (pending > 0) {
-    if (ex?.allowDeletePending) note("RECON_DELETE_PENDING", { pending }, pending);
+    if (ex?.allowDeletePending)
+      note("RECON_DELETE_PENDING", { pending }, pending);
     else fail("RECON_DELETE_PENDING", { pending }, pending);
   }
   // aggregate hashes
   if (row.aggHashSrc && row.aggHashTgt && row.aggHashSrc !== row.aggHashTgt) {
-    if (ex?.allowHashMismatch) note("RECON_AGG_HASH_MISMATCH", { src: row.aggHashSrc, tgt: row.aggHashTgt });
-    else fail("RECON_AGG_HASH_MISMATCH", { src: row.aggHashSrc, tgt: row.aggHashTgt });
+    if (ex?.allowHashMismatch)
+      note("RECON_AGG_HASH_MISMATCH", {
+        src: row.aggHashSrc,
+        tgt: row.aggHashTgt,
+      });
+    else
+      fail("RECON_AGG_HASH_MISMATCH", {
+        src: row.aggHashSrc,
+        tgt: row.aggHashTgt,
+      });
   }
-  if (ex && findings.some((f) => f.severity === "info" && f.detail && typeof f.detail === "object" && "accepted" in f.detail))
+  if (
+    ex &&
+    findings.some(
+      (f) =>
+        f.severity === "info" &&
+        f.detail &&
+        typeof f.detail === "object" &&
+        "accepted" in f.detail,
+    )
+  )
     note("RECON_GATE_EXCEPTION", { reason: ex.reason });
   return { pass, findings };
 }

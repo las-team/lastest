@@ -1,0 +1,95 @@
+# countries.DE — Germany (§7.4.2, inherits regions.EU)
+# Body is the `countries.DE` block itself. Merged beneath the user's
+# `countries.DE` (user wins) by `mergeOverlays()`.
+region: EU
+defaultTimezone: Europe/Berlin
+scope: { historyMonths: 24, tovRetentionMonths: 60 } # EFPIA transfer-of-value: em_*/expense widened to 5y
+privacy:
+  { erasureListPath: ./privacy/de-erasures.csv, consentFullHistory: true }
+phone: { normalise: true, defaultRegion: DE }
+postalCode: { pattern: "^\\d{5}$", onMismatch: warn }
+nameTemplates: { person: "{Salutation} {FirstName} {LastName}" } # titles (Dr. med.) carried in Salutation/credentials
+objects:
+  account:
+    fields:
+      add:
+        - { source: ID_vod__c, target: id__v, transform: text } # LANR
+        - { source: ID2_vod__c, target: id2__v, transform: text } # BSNR
+        - {
+            source: DHG_Type__c,
+            target: dhg_type__c,
+            transform: "picklist(account.dhgType)",
+          } # customer field, must pre-exist
+        - {
+            source: Profiling_Subtype__c,
+            target: profiling_subtype__c,
+            transform: "picklist(account.profilingSubtype)",
+          }
+        - {
+            source: Approved_Email_Opt_Type_vod__c,
+            target: approved_email_opt_type__v,
+            transform: "picklist(account.optType)",
+          }
+        - {
+            source: CLM_Opt_Type_vod__c,
+            target: clm_opt_type__v,
+            transform: "picklist(account.optType)",
+          }
+      remove: [npi__v, pdrp_opt_out__v, pdrp_opt_out_date__v]
+  address:
+    required: { state_province__v: false } # Bundesland rarely maintained — never default it
+    fields:
+      add: [{ source: Brick_vod__c, target: brick__v, transform: text }]
+      remove: [dea__v, cds__v, license__v, zip_4__v]
+  multichannel_consent:
+    scope: { historyMonths: null } # full history, opt-in and opt-out
+    deletePolicy: ignore
+    # configMaps are keyed by the SFDC 18-char Id of the org's consent config
+    # records — never by label (§6.3.42). They are org-specific, so this shipped
+    # overlay leaves them unset; supply them in your own countries.DE block:
+    #
+    # configMaps:
+    #   consentType: { <Consent_Type_vod__c 18-char Id>: "external_id:AE_DE", <Id>: V4V000000001002 }   # value: vault id | external_id:<v> | name:<v>
+    #   consentLine: { <Consent_Line_vod__c 18-char Id>: "name:Marketing E-Mail" }
+  em_event: { scope: { historyMonths: 60 } }
+  em_attendee: { scope: { historyMonths: 60 } }
+  em_event_speaker: { scope: { historyMonths: 60 } }
+  sample_transaction: { enabled: true, scope: { historyMonths: 24 } } # AMG §47 samples exist but no PDMA snapshot fields
+picklists:
+  # remaining specialties filled by the programme
+  account.specialty:
+    {
+      "Allgemeinmedizin": allgemeinmedizin__c,
+      "Innere Medizin": innere_medizin__c,
+    }
+  account.credentials:
+    {
+      "Dr. med.": dr_med__c,
+      "Prof. Dr. med.": prof_dr_med__c,
+      "PD Dr. med.": pd_dr_med__c,
+    }
+  account.optType:
+    {
+      Explicit_Opt_In_vod: explicit_opt_in__v,
+      Implicit_Opt_In_vod: implicit_opt_in__v,
+      Never_vod: never__v,
+    }
+  # 16 Bundesländer completed from ISO 3166-2:DE [GEN]; customer `__c` values must pre-exist
+  address.state:
+    BW: baden_wurttemberg__c
+    BY: bayern__c
+    BE: berlin__c
+    BB: brandenburg__c
+    HB: bremen__c
+    HH: hamburg__c
+    HE: hessen__c
+    MV: mecklenburg_vorpommern__c
+    NI: niedersachsen__c
+    NW: nordrhein_westfalen__c
+    RP: rheinland_pfalz__c
+    SL: saarland__c
+    SN: sachsen__c
+    ST: sachsen_anhalt__c
+    SH: schleswig_holstein__c
+    TH: thuringen__c
+  # (consent config crosswalks belong under objects.multichannel_consent.configMaps — never keyed by label)

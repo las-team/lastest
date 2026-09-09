@@ -105,7 +105,10 @@ export async function readJsonl<T>(file: string): Promise<T[]> {
     .map((l) => JSON.parse(l) as T);
 }
 
-export async function writeJsonl<T>(file: string, rows: readonly T[]): Promise<void> {
+export async function writeJsonl<T>(
+  file: string,
+  rows: readonly T[],
+): Promise<void> {
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(
     file,

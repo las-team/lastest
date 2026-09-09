@@ -42,19 +42,28 @@ export class PlanError extends Error {
 }
 
 export function newRunId(mode: string, now: Date): string {
-  const ts = now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  const ts = now
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}Z$/, "Z");
   const rand = Math.random().toString(36).slice(2, 6);
   return `${mode}-${ts}-${rand}`;
 }
 
 /** Countries of the run: `--country` narrows the wave; without a wave, all configured countries. */
-export function planCountries(opts: RunOptions): { countries: CountryCode[]; wave?: string } {
+export function planCountries(opts: RunOptions): {
+  countries: CountryCode[];
+  wave?: string;
+} {
   const cfg = opts.config;
   let countries: CountryCode[];
   let wave: string | undefined;
   if (opts.wave) {
     const w = cfg.waves.find((x) => x.name === opts.wave);
-    if (!w) throw new PlanError(`CONFIG_WAVE_UNKNOWN: wave "${opts.wave}" is not defined in config.waves`);
+    if (!w)
+      throw new PlanError(
+        `CONFIG_WAVE_UNKNOWN: wave "${opts.wave}" is not defined in config.waves`,
+      );
     countries = [...w.countries];
     wave = w.name;
   } else countries = Object.keys(cfg.countries);
@@ -62,21 +71,32 @@ export function planCountries(opts: RunOptions): { countries: CountryCode[]; wav
     const wanted = opts.countries.map((c) => c.toUpperCase());
     const unknown = wanted.filter((c) => !countries.includes(c));
     if (unknown.length)
-      throw new PlanError(`CONFIG_COUNTRY_NOT_IN_WAVE: ${unknown.join(", ")} not in ${wave ? `wave ${wave}` : "config.countries"}`);
+      throw new PlanError(
+        `CONFIG_COUNTRY_NOT_IN_WAVE: ${unknown.join(", ")} not in ${wave ? `wave ${wave}` : "config.countries"}`,
+      );
     countries = countries.filter((c) => wanted.includes(c));
   }
   return { countries, wave };
 }
 
-export function parseObjectKeys(text: string | undefined): ObjectKey[] | undefined {
+export function parseObjectKeys(
+  text: string | undefined,
+): ObjectKey[] | undefined {
   if (!text) return undefined;
-  const keys = text.split(",").map((s) => s.trim()).filter(Boolean);
+  const keys = text
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   const bad = keys.filter((k) => !isObjectKey(k));
-  if (bad.length) throw new PlanError(`CONFIG_OBJECT_KEY_UNKNOWN: ${bad.join(", ")}`);
+  if (bad.length)
+    throw new PlanError(`CONFIG_OBJECT_KEY_UNKNOWN: ${bad.join(", ")}`);
   return keys as ObjectKey[];
 }
 
-export function isGlobalModule(module: ObjectModule, cc: ResolvedCountryConfig): boolean {
+export function isGlobalModule(
+  module: ObjectModule,
+  cc: ResolvedCountryConfig,
+): boolean {
   const ov = cc.objects[module.key]?.countryOf;
   if (ov !== undefined) {
     const list = Array.isArray(ov) ? ov : [ov];
@@ -85,13 +105,20 @@ export function isGlobalModule(module: ObjectModule, cc: ResolvedCountryConfig):
   return isGlobalCountryOf(module.countryOf);
 }
 
-export async function buildPlan(opts: RunOptions, deps: PlanDeps = {}): Promise<RunPlan> {
+export async function buildPlan(
+  opts: RunOptions,
+  deps: PlanDeps = {},
+): Promise<RunPlan> {
   const now = (deps.now ?? opts.now ?? (() => new Date()))();
   const cfg: MigrationConfig = opts.config;
-  const registry = (deps.modules ?? OBJECT_MODULES) as Record<ObjectKey, ObjectModule>;
+  const registry = (deps.modules ?? OBJECT_MODULES) as Record<
+    ObjectKey,
+    ObjectModule
+  >;
   const { countries, wave } = planCountries(opts);
   const requested = opts.objects;
-  for (const k of requested ?? []) if (!registry[k]) throw new PlanError(`CONFIG_OBJECT_KEY_UNKNOWN: ${k}`);
+  for (const k of requested ?? [])
+    if (!registry[k]) throw new PlanError(`CONFIG_OBJECT_KEY_UNKNOWN: ${k}`);
 
   const ccByCountry = new Map<CountryCode, ResolvedCountryConfig>();
   const ccOf = (c: CountryCode) => {
@@ -104,19 +131,28 @@ export async function buildPlan(opts: RunOptions, deps: PlanDeps = {}): Promise<
   const cutoffDates = new Map<CountryCode, string>();
   for (const c of countries) {
     const cc = ccOf(c);
-    cutoffDates.set(c, cc.scope.cutoffDate ?? computeCutoffDate(now, cc.scope.historyMonths));
+    cutoffDates.set(
+      c,
+      cc.scope.cutoffDate ?? computeCutoffDate(now, cc.scope.historyMonths),
+    );
   }
-  cutoffDates.set(GLOBAL_COUNTRY, globalCc.scope.cutoffDate ?? computeCutoffDate(now, globalCc.scope.historyMonths));
+  cutoffDates.set(
+    GLOBAL_COUNTRY,
+    globalCc.scope.cutoffDate ??
+      computeCutoffDate(now, globalCc.scope.historyMonths),
+  );
 
   const mappings = new Map<string, MaterialisedMapping>();
   const modules = new Map<ObjectKey, ObjectModule>();
   const unitsByKey = new Map<ObjectKey, Unit[]>();
-  const candidateKeys = (requested ?? [...OBJECT_KEYS]).filter((k) => registry[k]);
+  const candidateKeys = (requested ?? [...OBJECT_KEYS]).filter(
+    (k) => registry[k],
+  );
   for (const key of candidateKeys) {
-    const module = registry[key];
+    const mod = registry[key];
     const units: Unit[] = [];
-    if (isGlobalModule(module, globalCc)) {
-      const m = materialise(module, globalCc, cfg, { now });
+    if (isGlobalModule(mod, globalCc)) {
+      const m = materialise(mod, globalCc, cfg, { now });
       if (m.options.enabled || requested?.includes(key)) {
         const unit = { objectKey: key, country: GLOBAL_COUNTRY };
         mappings.set(unitId(unit), m);
@@ -124,7 +160,7 @@ export async function buildPlan(opts: RunOptions, deps: PlanDeps = {}): Promise<
       }
     } else {
       for (const c of countries) {
-        const m = materialise(module, ccOf(c), cfg, { now });
+        const m = materialise(mod, ccOf(c), cfg, { now });
         if (!m.options.enabled && !requested?.includes(key)) continue;
         const unit = { objectKey: key, country: c };
         mappings.set(unitId(unit), m);
@@ -132,7 +168,7 @@ export async function buildPlan(opts: RunOptions, deps: PlanDeps = {}): Promise<
       }
     }
     if (units.length) {
-      modules.set(key, module);
+      modules.set(key, mod);
       unitsByKey.set(key, units);
     }
   }
@@ -147,7 +183,10 @@ export async function buildPlan(opts: RunOptions, deps: PlanDeps = {}): Promise<
   const blobs = [...mappings.values()].some((m) =>
     m.fields.some((f) => f.transform.kind === "deferredBlob"),
   );
-  const runId = opts.mode === "report" && opts.runId ? opts.runId : newRunId(opts.mode, now);
+  const runId =
+    opts.mode === "report" && opts.runId
+      ? opts.runId
+      : newRunId(opts.mode, now);
   return {
     runId,
     mode: opts.mode,
@@ -167,7 +206,9 @@ export async function buildPlan(opts: RunOptions, deps: PlanDeps = {}): Promise<
 
 /** Hash over every unit mapping hash (`runs.mapping_hash`). */
 export function planMappingHash(plan: RunPlan): string {
-  const entries = [...plan.mappings.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, m]) => [k, m.mappingHash]);
+  const entries = [...plan.mappings.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, m]) => [k, m.mappingHash]);
   return hashObject(entries);
 }
 

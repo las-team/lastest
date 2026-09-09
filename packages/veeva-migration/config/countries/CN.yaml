@@ -1,0 +1,96 @@
+# countries.CN — China (§7.4.4)
+# Body is the `countries.CN` block itself. Merged beneath the user's
+# `countries.CN` (user wins) by `mergeOverlays()`. No region: CN targets a
+# separate China-hosted vault (PIPL) and never inherits APAC's `jp` residency.
+#
+# `${VAULT_CN_USER}`, `${VAULT_CN_PASSWORD}` and `${MIG_DATABASE_URL_CN}` are
+# resolved from the environment only when your config references CN and does
+# not override the key itself (CONFIG_ENV_MISSING otherwise).
+dataResidency: cn
+target: # separate China-hosted vault
+  vaultDns: acme-crm-cn.veevavault.cn
+  apiVersion: v26.2
+  auth:
+    {
+      kind: password,
+      username: "${VAULT_CN_USER}",
+      password: "${VAULT_CN_PASSWORD}",
+    }
+staging: { databaseUrl: "${MIG_DATABASE_URL_CN}", runDir: /data/cn/runs } # staging never leaves CN
+defaultTimezone: Asia/Shanghai
+scope: { historyMonths: 24 }
+nameTemplates: { person: "{LastName}{FirstName}", separator: "" } # single-field Chinese names; LastName may hold the full name
+phone: { normalise: true, defaultRegion: CN }
+postalCode: { pattern: "^\\d{6}$", onMismatch: warn }
+privacy: {
+    erasureListPath: /data/cn/privacy/erasures.csv,
+    crossBorderTransfer: forbidden,
+  } # PIPL: tool refuses to write CN rows to a non-CN vault
+objects:
+  account:
+    fields:
+      add:
+        - {
+            source: Hospital_Type_vod__c,
+            target: hospital_type__v,
+            transform: "picklist(account.hospitalType)",
+          }
+        - {
+            source: Administrative_Title_CN__c,
+            target: administrative_title__c,
+            transform: "picklist(account.adminTitle)",
+          } # customer fields (must pre-exist via MDL)
+        - {
+            source: Technical_Title_CN__c,
+            target: technical_title__c,
+            transform: "picklist(account.techTitle)",
+          }
+        - { source: Department_CN__c, target: department__c, transform: text }
+        - {
+            source: Hospital_Rank_CN__c,
+            target: hospital_rank__c,
+            transform: "picklist(account.hospitalRank)",
+          }
+      remove: [npi__v, pdrp_opt_out__v, pdrp_opt_out_date__v]
+  address:
+    { fields: { remove: [dea__v, cds__v, license__v, zip_4__v, brick__v] } }
+  sample_transaction: { enabled: false } # no sample programme in CN org (example)
+  call2_sample: { enabled: false }
+  sample_lot: { enabled: false }
+  sample_inventory: { enabled: false }
+picklists:
+  account.hospitalType: { GP: gp__v, HP: hp__v }
+  account.adminTitle: { A001: a001__c, A002: a002__c } # code-valued picklists crosswalk 1:1 — remaining codes filled by the programme
+  # 31 provincial-level divisions completed from GB/T 2260 [GEN]; customer `__c` values must pre-exist
+  address.state:
+    "北京市": beijing__c
+    "天津市": tianjin__c
+    "河北省": hebei__c
+    "山西省": shanxi__c
+    "内蒙古自治区": neimenggu__c
+    "辽宁省": liaoning__c
+    "吉林省": jilin__c
+    "黑龙江省": heilongjiang__c
+    "上海市": shanghai__c
+    "江苏省": jiangsu__c
+    "浙江省": zhejiang__c
+    "安徽省": anhui__c
+    "福建省": fujian__c
+    "江西省": jiangxi__c
+    "山东省": shandong__c
+    "河南省": henan__c
+    "湖北省": hubei__c
+    "湖南省": hunan__c
+    "广东省": guangdong__c
+    "广西壮族自治区": guangxi__c
+    "海南省": hainan__c
+    "重庆市": chongqing__c
+    "四川省": sichuan__c
+    "贵州省": guizhou__c
+    "云南省": yunnan__c
+    "西藏自治区": xizang__c
+    "陕西省": shaanxi__c
+    "甘肃省": gansu__c
+    "青海省": qinghai__c
+    "宁夏回族自治区": ningxia__c
+    "新疆维吾尔自治区": xinjiang__c

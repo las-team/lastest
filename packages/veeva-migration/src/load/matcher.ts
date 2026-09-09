@@ -27,7 +27,12 @@ import {
 } from "../types";
 import type { VaultClient } from "../vault/types";
 import { vqlInClauses } from "../vault/vql";
-import { RefIndex, collectRefs, resolvePayload, type RefKey } from "./resolve-refs";
+import {
+  RefIndex,
+  collectRefs,
+  resolvePayload,
+  type RefKey,
+} from "./resolve-refs";
 import type { LoadPlan, PayloadRow } from "./types";
 
 /** `PayloadRow` as produced by the transform runner: may carry the raw source row for match keys. */
@@ -171,11 +176,15 @@ export async function matchRows(
         usable = found.filter((c) => scalar(c.status__v) !== "inactive__v");
       if (rule.sameObjectType && r.objectType && hasType)
         usable = usable.filter(
-          (c) => scalar(c.object_type__v) === undefined ||
+          (c) =>
+            scalar(c.object_type__v) === undefined ||
             scalar(c.object_type__v) === r.objectType,
         );
       if (!usable.length) continue;
-      if (usable.length > 1 && (rule.requireUnique || rule.method !== "natural_key")) {
+      if (
+        usable.length > 1 &&
+        (rule.requireUnique || rule.method !== "natural_key")
+      ) {
         ambiguous++;
         continue;
       }

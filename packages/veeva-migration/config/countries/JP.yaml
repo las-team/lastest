@@ -1,0 +1,101 @@
+# countries.JP — Japan (§7.4.3)
+# Body is the `countries.JP` block itself. Merged beneath the user's
+# `countries.JP` (user wins) by `mergeOverlays()`.
+region: APAC
+dataResidency: jp
+defaultTimezone: Asia/Tokyo
+scope: { historyMonths: 24 }
+nameTemplates: { person: "{LastName}{separator}{FirstName}", separator: "　" } # full-width space; never transliterate; kanji + kana kept separately
+phone: { normalise: false }
+postalCode: { pattern: "^\\d{3}-\\d{4}$", onMismatch: warn }
+objects:
+  account:
+    required: { furigana__v: true }
+    fields:
+      add:
+        - { source: Furigana_vod__c, target: furigana__v, transform: text }
+        - {
+            source: Language_vod__c,
+            target: language__v,
+            transform: "picklist(account.language)",
+          }
+      remove: [npi__v, pdrp_opt_out__v, pdrp_opt_out_date__v, salutation__v]
+  address:
+    line1Overflow: fail # Japanese address line 1 must not be truncated silently
+    fields: { remove: [dea__v, cds__v, license__v, zip_4__v, brick__v] }
+  em_attendee:
+    {
+      fields:
+        {
+          add:
+            [{ source: Furigana_vod__c, target: furigana__v, transform: text }],
+        },
+    }
+  child_account:
+    {
+      fields:
+        {
+          add:
+            [
+              {
+                source: Alternate_Name_vod__c,
+                target: alternate_name__v,
+                transform: text,
+              },
+            ],
+        },
+    }
+  sample_transaction: { enabled: true, scope: { historyMonths: 36 } } # JP sample-limit rules — retention per counsel
+picklists:
+  # 47 prefectures, completed from JIS X 0401 [GEN]; customer `__c` values must pre-exist
+  address.state:
+    "北海道": hokkaido__c
+    "青森県": aomori__c
+    "岩手県": iwate__c
+    "宮城県": miyagi__c
+    "秋田県": akita__c
+    "山形県": yamagata__c
+    "福島県": fukushima__c
+    "茨城県": ibaraki__c
+    "栃木県": tochigi__c
+    "群馬県": gunma__c
+    "埼玉県": saitama__c
+    "千葉県": chiba__c
+    "東京都": tokyo__c
+    "神奈川県": kanagawa__c
+    "新潟県": niigata__c
+    "富山県": toyama__c
+    "石川県": ishikawa__c
+    "福井県": fukui__c
+    "山梨県": yamanashi__c
+    "長野県": nagano__c
+    "岐阜県": gifu__c
+    "静岡県": shizuoka__c
+    "愛知県": aichi__c
+    "三重県": mie__c
+    "滋賀県": shiga__c
+    "京都府": kyoto__c
+    "大阪府": osaka__c
+    "兵庫県": hyogo__c
+    "奈良県": nara__c
+    "和歌山県": wakayama__c
+    "鳥取県": tottori__c
+    "島根県": shimane__c
+    "岡山県": okayama__c
+    "広島県": hiroshima__c
+    "山口県": yamaguchi__c
+    "徳島県": tokushima__c
+    "香川県": kagawa__c
+    "愛媛県": ehime__c
+    "高知県": kochi__c
+    "福岡県": fukuoka__c
+    "佐賀県": saga__c
+    "長崎県": nagasaki__c
+    "熊本県": kumamoto__c
+    "大分県": oita__c
+    "宮崎県": miyazaki__c
+    "鹿児島県": kagoshima__c
+    "沖縄県": okinawa__c
+  # remaining specialties filled by the programme
+  account.specialty: { "内科": naika__c, "循環器内科": junkanki_naika__c }
+  account.language: { ja: ja__v, en_US: en__v }

@@ -1,0 +1,28 @@
+# countries.AU — Australia (§7.4.8, inherits regions.APAC)
+# Privacy Act; state picklist exists (best-practices.md §6.2); 4-digit
+# postcodes; ID_vod__c carries the AHPRA number.
+region: APAC
+dataResidency: jp
+defaultTimezone: Australia/Sydney
+postalCode: { pattern: "^\\d{4}$", onMismatch: warn }
+phone: { normalise: true, defaultRegion: AU }
+objects:
+  account:
+    fields:
+      add: [{ source: ID_vod__c, target: id__v, transform: text }] # AHPRA
+      remove: [npi__v, pdrp_opt_out__v, pdrp_opt_out_date__v]
+  address:
+    required: { state_province__v: true }
+    fields: { remove: [dea__v, cds__v, license__v, zip_4__v, brick__v] }
+picklists:
+  address.state:
+    {
+      NSW: nsw__v,
+      VIC: vic__v,
+      QLD: qld__v,
+      WA: wa__v,
+      SA: sa__v,
+      TAS: tas__v,
+      ACT: act__v,
+      NT: nt__v,
+    }

@@ -19,10 +19,21 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { configHash } from "../config/load";
 import { resolveCountry, type ResolvedCountryConfig } from "../config/resolve";
-import type { ExtractFile, ExtractManifest, ExtractPlan, Extractor, FkIdSets } from "../extract/types";
+import type {
+  ExtractFile,
+  ExtractManifest,
+  ExtractPlan,
+  Extractor,
+  FkIdSets,
+} from "../extract/types";
 import { getLogger } from "../logger";
 import { DefaultLoader } from "../load/loader";
-import { listPayloadFiles, blobsDir, readPayloadFiles, readUnitPayloads } from "../load/paths";
+import {
+  listPayloadFiles,
+  blobsDir,
+  readPayloadFiles,
+  readUnitPayloads,
+} from "../load/paths";
 import { isRetryableRowErrorType } from "../load/retry";
 import type { DeleteResult, LoadPlan, LoadResult } from "../load/types";
 import type { LoaderOptions } from "../load/context";
@@ -30,9 +41,21 @@ import type { DeleteOutcome } from "../load/deletes";
 import { orderedKeys } from "../objects/registry";
 import type { ObjectModule } from "../objects/types";
 import { DefaultPreflight } from "../preflight/index";
-import { FindingCollector, loadCurrencies, unitVaultDns } from "../preflight/index";
-import type { Preflight, PreflightResult, ResolvedTarget } from "../preflight/types";
-import { DefaultReconciler, loadGateExceptions, type GateExceptions } from "../reconcile/index";
+import {
+  FindingCollector,
+  loadCurrencies,
+  unitVaultDns,
+} from "../preflight/index";
+import type {
+  Preflight,
+  PreflightResult,
+  ResolvedTarget,
+} from "../preflight/types";
+import {
+  DefaultReconciler,
+  loadGateExceptions,
+  type GateExceptions,
+} from "../reconcile/index";
 import type { ReconcileInput, ReconcileResult } from "../reconcile/types";
 import type { SfdcClient } from "../sfdc/types";
 import type { StateStore } from "../store/types";
@@ -49,13 +72,30 @@ import {
   type Unit,
 } from "../types";
 import type { VaultClient } from "../vault/types";
-import { buildUnitResolver, loadErasureList, makeCountryContext } from "./context";
+import {
+  buildUnitResolver,
+  loadErasureList,
+  makeCountryContext,
+} from "./context";
 import { mapLimit, pLimit, type Limit } from "./p-limit";
 import { buildPlan, planMappingHash, unitsOf, type PlanDeps } from "./plan";
-import { renderReport, reportFromStore, writeReport, type RunReportInput, type UnitTiming } from "./report";
+import {
+  renderReport,
+  reportFromStore,
+  writeReport,
+  type RunReportInput,
+  type UnitTiming,
+} from "./report";
 import { SimpleExtractor } from "./simple-extractor";
 import { transformUnit, type TransformUnitResult } from "./transform";
-import { EXIT_CODES, type ExitCode, type RunEngine, type RunOptions, type RunPlan, type RunSummary } from "./types";
+import {
+  EXIT_CODES,
+  type ExitCode,
+  type RunEngine,
+  type RunOptions,
+  type RunPlan,
+  type RunSummary,
+} from "./types";
 
 export const TOOL_VERSION = "0.1.0";
 const KEEP_ALIVE_MS = 10 * 60 * 1000;
@@ -138,7 +178,10 @@ export class DefaultRunEngine implements RunEngine {
   }
 
   plan(opts: RunOptions): Promise<RunPlan> {
-    return buildPlan(opts, { modules: this.deps.modules, now: opts.now ?? this.now });
+    return buildPlan(opts, {
+      modules: this.deps.modules,
+      now: opts.now ?? this.now,
+    });
   }
 
   async execute(opts: RunOptions): Promise<RunSummary> {
@@ -178,7 +221,11 @@ class RunExecution {
   ) {
     this.runId = plan.runId;
     this.dryRun = Boolean(opts.dryRun);
-    this.writes = !this.dryRun && ["init", "delta", "final-delta", "retry-failed", "blobs"].includes(opts.mode);
+    this.writes =
+      !this.dryRun &&
+      ["init", "delta", "final-delta", "retry-failed", "blobs"].includes(
+        opts.mode,
+      );
     this.baseRunDir = deps.runDir ?? opts.config.staging?.runDir ?? "./runs";
     this.runDir = path.join(this.baseRunDir, this.runId);
     this.log = getLogger("Run", { run_id: this.runId, mode: opts.mode });
@@ -186,7 +233,11 @@ class RunExecution {
 
   private cc(country: CountryCode): ResolvedCountryConfig {
     let cc = this.ccCache.get(country);
-    if (!cc) this.ccCache.set(country, (cc = resolveCountry(this.opts.config, country)));
+    if (!cc)
+      this.ccCache.set(
+        country,
+        (cc = resolveCountry(this.opts.config, country)),
+      );
     return cc;
   }
   private dnsOf(unit: Unit): string {
@@ -194,21 +245,38 @@ class RunExecution {
   }
   private vaultOf(dns: string): VaultClient {
     const v = this.deps.vaults.get(dns);
-    if (!v) throw new RunAbort(EXIT_CODES.configError, `no Vault client for ${dns}`);
+    if (!v)
+      throw new RunAbort(EXIT_CODES.configError, `no Vault client for ${dns}`);
     return v;
   }
   private out(text: string): void {
     (this.deps.out ?? ((t: string) => process.stdout.write(t + "\n")))(text);
   }
   private mainVault(): VaultClient | undefined {
-    return this.deps.vaults.get(this.opts.config.target.vaultDns) ?? [...this.deps.vaults.values()][0];
+    return (
+      this.deps.vaults.get(this.opts.config.target.vaultDns) ??
+      [...this.deps.vaults.values()][0]
+    );
   }
-  private async audit(event: string, detail?: Record<string, unknown>): Promise<void> {
-    const entry = { runId: this.runId, at: this.now().toISOString(), actor: process.env.USER ?? "veeva-migration", event, detail };
+  private async audit(
+    event: string,
+    detail?: Record<string, unknown>,
+  ): Promise<void> {
+    const entry = {
+      runId: this.runId,
+      at: this.now().toISOString(),
+      actor: process.env.USER ?? "veeva-migration",
+      event,
+      detail,
+    };
     try {
       await this.deps.store.auditLog.append(entry);
       await fs.mkdir(this.runDir, { recursive: true });
-      await fs.appendFile(path.join(this.runDir, "audit.jsonl"), JSON.stringify(entry) + "\n", "utf8");
+      await fs.appendFile(
+        path.join(this.runDir, "audit.jsonl"),
+        JSON.stringify(entry) + "\n",
+        "utf8",
+      );
     } catch (e) {
       this.log.warn({ err: e }, "audit append failed");
     }
@@ -240,18 +308,40 @@ class RunExecution {
     };
     await fs.mkdir(this.runDir, { recursive: true });
     await store.runs.create(record);
-    await this.audit("run.start", { mode: opts.mode, wave: plan.wave, countries: plan.countries, dryRun: this.dryRun, configHash: record.configHash, mappingHash: record.mappingHash, justification: opts.justification });
+    await this.audit("run.start", {
+      mode: opts.mode,
+      wave: plan.wave,
+      countries: plan.countries,
+      dryRun: this.dryRun,
+      configHash: record.configHash,
+      mappingHash: record.mappingHash,
+      justification: opts.justification,
+    });
     let exitCode: ExitCode = EXIT_CODES.success;
     let status: RunRecord["status"] = "succeeded";
     try {
       await this.openSessions();
       if (opts.acceptGateExceptions) {
         this.exceptions = loadGateExceptions(opts.acceptGateExceptions);
-        await this.audit("override.accept-gate-exceptions", { file: opts.acceptGateExceptions, justification: opts.justification });
+        await this.audit("override.accept-gate-exceptions", {
+          file: opts.acceptGateExceptions,
+          justification: opts.justification,
+        });
       }
-      if (opts.acceptMappingChange) await this.audit("override.accept-mapping-change", { justification: opts.justification });
-      if (opts.allowMdl) await this.audit("override.allow-mdl", { justification: opts.justification });
-      this.extractor = this.deps.extractor ?? new SimpleExtractor({ sfdc: this.deps.sfdc, store }, { mappings: this.mappingsByKey() });
+      if (opts.acceptMappingChange)
+        await this.audit("override.accept-mapping-change", {
+          justification: opts.justification,
+        });
+      if (opts.allowMdl)
+        await this.audit("override.allow-mdl", {
+          justification: opts.justification,
+        });
+      this.extractor =
+        this.deps.extractor ??
+        new SimpleExtractor(
+          { sfdc: this.deps.sfdc, store },
+          { mappings: this.mappingsByKey() },
+        );
       if (this.writes) {
         const purged = await store.idMap.purgeDryRun();
         if (purged) this.log.info({ purged }, "dry-run id-map rows purged");
@@ -264,11 +354,18 @@ class RunExecution {
       } else if (pre.blocking) {
         exitCode = EXIT_CODES.blockingFindings;
         status = "blocked";
-        this.log.error({ blocking: pre.findings.filter((f) => f.severity === "blocking").length }, "preflight blocking findings — run stopped");
+        this.log.error(
+          {
+            blocking: pre.findings.filter((f) => f.severity === "blocking")
+              .length,
+          },
+          "preflight blocking findings — run stopped",
+        );
       } else {
         await this.prepareClocks();
         await this.snapshotMappings();
-        for (const unit of unitsOf(plan)) this.units.set(unitId(unit), this.newUnitState(unit));
+        for (const unit of unitsOf(plan))
+          this.units.set(unitId(unit), this.newUnitState(unit));
         for (const u of pre.blockedUnits) {
           const s = this.units.get(unitId(u));
           if (s) {
@@ -296,18 +393,32 @@ class RunExecution {
             break;
         }
         exitCode = this.computeExitCode();
-        status = exitCode === EXIT_CODES.success ? "succeeded" : exitCode === EXIT_CODES.blockingFindings ? "blocked" : "failed";
+        status =
+          exitCode === EXIT_CODES.success
+            ? "succeeded"
+            : exitCode === EXIT_CODES.blockingFindings
+              ? "blocked"
+              : "failed";
       }
     } catch (e) {
       if (e instanceof RunAbort) {
         exitCode = e.exitCode;
-        status = exitCode === EXIT_CODES.blockingFindings ? "blocked" : "failed";
-        this.findings.push({ severity: "blocking", code: "RUN_ABORTED", detail: e.message });
+        status =
+          exitCode === EXIT_CODES.blockingFindings ? "blocked" : "failed";
+        this.findings.push({
+          severity: "blocking",
+          code: "RUN_ABORTED",
+          detail: e.message,
+        });
         this.log.error({ err: e }, "run aborted");
       } else {
         exitCode = EXIT_CODES.unitFailures;
         status = "failed";
-        this.findings.push({ severity: "blocking", code: "RUN_ERROR", detail: (e as Error).message });
+        this.findings.push({
+          severity: "blocking",
+          code: "RUN_ERROR",
+          detail: (e as Error).message,
+        });
         this.log.error({ err: e }, "run failed");
       }
     } finally {
@@ -315,29 +426,52 @@ class RunExecution {
     }
     const finishedAt = this.now().toISOString();
     try {
-      if (this.findings.length) await store.findings.add(this.runId, this.findings);
-      await store.runs.update(this.runId, { status, finishedAt, sfdcNowAtStart: this.sfdcNow || null });
+      if (this.findings.length)
+        await store.findings.add(this.runId, this.findings);
+      await store.runs.update(this.runId, {
+        status,
+        finishedAt,
+        sfdcNowAtStart: this.sfdcNow || null,
+      });
     } catch (e) {
       this.log.warn({ err: e }, "cannot finalise run record");
     }
     await this.audit("run.end", { status, exitCode });
-    const reportPath = await this.writeRunReport({ ...record, status, finishedAt, sfdcNowAtStart: this.sfdcNow || null }, exitCode);
+    const reportPath = await this.writeRunReport(
+      { ...record, status, finishedAt, sfdcNowAtStart: this.sfdcNow || null },
+      exitCode,
+    );
     const summary: RunSummary = {
       runId: this.runId,
       mode: opts.mode,
       exitCode,
-      units: [...this.units.values()].map((u) => ({ unit: u.unit, status: u.status, reason: u.reason })),
+      units: [...this.units.values()].map((u) => ({
+        unit: u.unit,
+        status: u.status,
+        reason: u.reason,
+      })),
       reportPath,
     };
-    this.out(`run ${this.runId} ${status} (exit ${exitCode}) — report: ${reportPath}`);
+    this.out(
+      `run ${this.runId} ${status} (exit ${exitCode}) — report: ${reportPath}`,
+    );
     return summary;
   }
 
   private computeExitCode(): ExitCode {
     const states = [...this.units.values()];
-    if (states.some((u) => u.status === "failed")) return EXIT_CODES.unitFailures;
-    if (this.opts.mode === "final-delta" && states.some((u) => u.reconcile && !u.reconcile.pass)) return EXIT_CODES.gateFailed;
-    if (this.opts.mode === "verify" && states.some((u) => u.reconcile && !u.reconcile.pass)) return EXIT_CODES.gateFailed;
+    if (states.some((u) => u.status === "failed"))
+      return EXIT_CODES.unitFailures;
+    if (
+      this.opts.mode === "final-delta" &&
+      states.some((u) => u.reconcile && !u.reconcile.pass)
+    )
+      return EXIT_CODES.gateFailed;
+    if (
+      this.opts.mode === "verify" &&
+      states.some((u) => u.reconcile && !u.reconcile.pass)
+    )
+      return EXIT_CODES.gateFailed;
     return EXIT_CODES.success;
   }
 
@@ -360,14 +494,24 @@ class RunExecution {
       try {
         await vault.authenticate();
       } catch (e) {
-        this.findings.push({ severity: "blocking", code: "VT_AUTH_FAILED", detail: `${dns}: ${(e as Error).message}` });
-        throw new RunAbort(EXIT_CODES.blockingFindings, `Vault authentication failed for ${dns}`);
+        this.findings.push({
+          severity: "blocking",
+          code: "VT_AUTH_FAILED",
+          detail: `${dns}: ${(e as Error).message}`,
+        });
+        throw new RunAbort(
+          EXIT_CODES.blockingFindings,
+          `Vault authentication failed for ${dns}`,
+        );
       }
     }
     const ms = this.deps.keepAliveMs ?? KEEP_ALIVE_MS;
     if (ms > 0) {
       this.keepAlive = setInterval(() => {
-        for (const v of this.deps.vaults.values()) v.keepAlive().catch((e) => this.log.warn({ err: e }, "keep-alive failed"));
+        for (const v of this.deps.vaults.values())
+          v.keepAlive().catch((e) =>
+            this.log.warn({ err: e }, "keep-alive failed"),
+          );
       }, ms);
       this.keepAlive.unref?.();
     }
@@ -387,7 +531,8 @@ class RunExecution {
   // ------------------------------------------------------------- preflight
 
   private async runPreflight(): Promise<PreflightResult> {
-    const preflight = this.deps.preflight ?? new DefaultPreflight({ now: this.now });
+    const preflight =
+      this.deps.preflight ?? new DefaultPreflight({ now: this.now });
     const result = await preflight.run({
       runId: this.runId,
       mode: this.opts.mode,
@@ -409,12 +554,22 @@ class RunExecution {
     this.preflight = result;
     // pruned mappings replace the planned ones
     for (const [id, m] of result.mappings) this.plan.mappings.set(id, m);
-    for (const [dns, entries] of result.countries) {
+    for (const dns of result.countries.keys()) {
       const vault = this.deps.vaults.get(dns);
-      if (vault && !this.currencies.has(dns) && result.source.multiCurrency) this.currencies.set(dns, await loadCurrencies(vault, new FindingCollector()));
-      void entries;
+      if (vault && !this.currencies.has(dns) && result.source.multiCurrency)
+        this.currencies.set(
+          dns,
+          await loadCurrencies(vault, new FindingCollector()),
+        );
     }
-    this.log.info({ findings: result.findings.length, blocking: result.blocking, blocked_units: result.blockedUnits.length }, "preflight done");
+    this.log.info(
+      {
+        findings: result.findings.length,
+        blocking: result.blocking,
+        blocked_units: result.blockedUnits.length,
+      },
+      "preflight done",
+    );
     return result;
   }
 
@@ -423,14 +578,25 @@ class RunExecution {
     this.sfdcNow = await this.deps.sfdc.serverNow();
     let wmHi = shiftMinutes(this.sfdcNow, -cfg.delta.safetyLagMinutes);
     if (this.opts.mode === "final-delta") {
-      const freezeAt = this.opts.freezeAt ?? cfg.waves.find((w) => w.name === this.plan.wave)?.freezeAt;
-      if (!freezeAt) throw new RunAbort(EXIT_CODES.configError, "final-delta requires --freeze-at (or waves[].freezeAt)");
+      const freezeAt =
+        this.opts.freezeAt ??
+        cfg.waves.find((w) => w.name === this.plan.wave)?.freezeAt;
+      if (!freezeAt)
+        throw new RunAbort(
+          EXIT_CODES.configError,
+          "final-delta requires --freeze-at (or waves[].freezeAt)",
+        );
       wmHi = minIso(wmHi, new Date(freezeAt).toISOString());
       await this.deps.store.runs.update(this.runId, { freezeAt: wmHi });
     }
     this.wmHi = wmHi;
-    await this.deps.store.runs.update(this.runId, { sfdcNowAtStart: this.sfdcNow });
-    this.log.info({ sfdc_now: this.sfdcNow, wm_hi: wmHi }, "clocks fixed for the run");
+    await this.deps.store.runs.update(this.runId, {
+      sfdcNowAtStart: this.sfdcNow,
+    });
+    this.log.info(
+      { sfdc_now: this.sfdcNow, wm_hi: wmHi },
+      "clocks fixed for the run",
+    );
   }
 
   private async snapshotMappings(): Promise<void> {
@@ -438,7 +604,13 @@ class RunExecution {
     const createdAt = this.now().toISOString();
     for (const [id, m] of this.plan.mappings) {
       try {
-        await this.deps.store.mappingSnapshots.put({ mappingHash: m.mappingHash, objectKey: m.objectKey, country: m.country, materialised: m, createdAt });
+        await this.deps.store.mappingSnapshots.put({
+          mappingHash: m.mappingHash,
+          objectKey: m.objectKey,
+          country: m.country,
+          materialised: m,
+          createdAt,
+        });
       } catch (e) {
         this.log.warn({ unit: id, err: e }, "mapping snapshot not stored");
       }
@@ -456,15 +628,24 @@ class RunExecution {
           s.timing.status = "skipped";
           s.timing.reason = s.reason;
         }
-      this.findings.push({ severity: "info", code: "COUNTRY_FROZEN", country: c, detail: "frozen country skipped" });
+      this.findings.push({
+        severity: "info",
+        code: "COUNTRY_FROZEN",
+        country: c,
+        detail: "frozen country skipped",
+      });
     }
   }
 
   // ------------------------------------------------------------- contexts
 
-  private mappingsByKey(country?: CountryCode): Map<ObjectKey, MaterialisedMapping> {
+  private mappingsByKey(
+    country?: CountryCode,
+  ): Map<ObjectKey, MaterialisedMapping> {
     const out = new Map<ObjectKey, MaterialisedMapping>();
-    for (const m of this.plan.mappings.values()) if (!country || m.country === country || m.country === GLOBAL_COUNTRY) out.set(m.objectKey, m);
+    for (const m of this.plan.mappings.values())
+      if (!country || m.country === country || m.country === GLOBAL_COUNTRY)
+        out.set(m.objectKey, m);
     return out;
   }
 
@@ -500,9 +681,17 @@ class RunExecution {
           vault: this.vaultOf(dns),
           store: this.deps.store,
           country: unit.country,
-          targetObjectOf: (key) => this.targetOf({ objectKey: key, country: unit.country })?.targetObject,
+          targetObjectOf: (key) =>
+            this.targetOf({ objectKey: key, country: unit.country })
+              ?.targetObject,
         },
-        { ...this.deps.loader, now: this.now, blobBatchBytes: this.deps.loader?.blobBatchBytes ?? this.opts.config.performance.blobBatchBytes },
+        {
+          ...this.deps.loader,
+          now: this.now,
+          blobBatchBytes:
+            this.deps.loader?.blobBatchBytes ??
+            this.opts.config.performance.blobBatchBytes,
+        },
       );
       this.loaders.set(dns, l);
     }
@@ -514,11 +703,17 @@ class RunExecution {
     const id = unitId(unit);
     const cached = this.contexts.get(id);
     if (cached) return cached;
-    let mapping = this.plan.mappings.get(id);
-    const module = this.plan.modules.get(unit.objectKey);
+    const mapping = this.plan.mappings.get(id);
+    const mod = this.plan.modules.get(unit.objectKey);
     if (!mapping) {
-      const globalMapping = this.plan.mappings.get(unitId({ objectKey: unit.objectKey, country: GLOBAL_COUNTRY }));
-      if (globalMapping) return this.unitContext({ objectKey: unit.objectKey, country: GLOBAL_COUNTRY });
+      const globalMapping = this.plan.mappings.get(
+        unitId({ objectKey: unit.objectKey, country: GLOBAL_COUNTRY }),
+      );
+      if (globalMapping)
+        return this.unitContext({
+          objectKey: unit.objectKey,
+          country: GLOBAL_COUNTRY,
+        });
       return undefined;
     }
     const target = this.targetOf(unit);
@@ -536,12 +731,24 @@ class RunExecution {
       runDir: this.runDir,
       dryRun: this.dryRun,
       migrationMode: cc.target.migrationMode ?? cfg.target.migrationMode,
-      unchangedFieldBehavior: cc.target.unchangedFieldBehavior ?? cfg.target.unchangedFieldBehavior,
+      unchangedFieldBehavior:
+        cc.target.unchangedFieldBehavior ?? cfg.target.unchangedFieldBehavior,
       migrationUserId: cc.target.migrationUserId ?? cfg.target.migrationUserId,
       batchSize: cfg.performance.vaultBatch,
       batchWallTimeMs: cfg.performance.batchWallTimeMs,
     };
-    const ctx: UnitContext = { unit, mapping, target, module, cc, dns, vault, loader, loadPlan, country: this.countryContext(unit) };
+    const ctx: UnitContext = {
+      unit,
+      mapping,
+      target,
+      module: mod,
+      cc,
+      dns,
+      vault,
+      loader,
+      loadPlan,
+      country: this.countryContext(unit),
+    };
     this.contexts.set(id, ctx);
     return ctx;
   }
@@ -563,7 +770,10 @@ class RunExecution {
         const s = this.state(u);
         return s.status !== "blocked" && !(s.status === "skipped" && s.reason);
       });
-      this.log.info({ step: step.index, keys: step.keys, units: runnable.length }, "step start");
+      this.log.info(
+        { step: step.index, keys: step.keys, units: runnable.length },
+        "step start",
+      );
       await mapLimit(runnable, concurrency, (u) => this.runUnit(u));
       // pass 2 after the step (§6.1)
       for (const p of step.pass2) {
@@ -572,9 +782,30 @@ class RunExecution {
           if (s.status !== "succeeded") continue;
           const ctx = this.unitContext(u)!;
           try {
-            const r = await ctx.loader.secondPass(readUnitPayloads(this.runDir, u), ctx.loadPlan);
-            if (r.unresolved) this.findings.push({ severity: "warning", code: "SECOND_PASS_UNRESOLVED", objectKey: u.objectKey, country: u.country, field: p.target, detail: { unresolved: r.unresolved, patched: r.patched }, count: r.unresolved });
-            if (r.failed) this.findings.push({ severity: "warning", code: "SECOND_PASS_FAILED", objectKey: u.objectKey, country: u.country, field: p.target, detail: { failed: r.failed }, count: r.failed });
+            const r = await ctx.loader.secondPass(
+              readUnitPayloads(this.runDir, u),
+              ctx.loadPlan,
+            );
+            if (r.unresolved)
+              this.findings.push({
+                severity: "warning",
+                code: "SECOND_PASS_UNRESOLVED",
+                objectKey: u.objectKey,
+                country: u.country,
+                field: p.target,
+                detail: { unresolved: r.unresolved, patched: r.patched },
+                count: r.unresolved,
+              });
+            if (r.failed)
+              this.findings.push({
+                severity: "warning",
+                code: "SECOND_PASS_FAILED",
+                objectKey: u.objectKey,
+                country: u.country,
+                field: p.target,
+                detail: { failed: r.failed },
+                count: r.failed,
+              });
           } catch (e) {
             this.failUnit(s, `second pass: ${(e as Error).message}`);
           }
@@ -584,12 +815,16 @@ class RunExecution {
       await this.pendingRound();
     }
     await this.pendingRound(true);
-    for (const s of this.units.values()) if (s.status === "succeeded") await this.applyUnitDeletes(s);
-    for (const s of this.units.values()) if (s.status === "succeeded" || s.status === "failed") await this.reconcileUnit(s);
+    for (const s of this.units.values())
+      if (s.status === "succeeded") await this.applyUnitDeletes(s);
+    for (const s of this.units.values())
+      if (s.status === "succeeded" || s.status === "failed")
+        await this.reconcileUnit(s);
     await this.advanceWatermarks();
     await this.blobPass();
     await this.postLoad();
-    for (const l of this.loaders.values()) this.findings.push(...l.drainFindings());
+    for (const l of this.loaders.values())
+      this.findings.push(...l.drainFindings());
   }
 
   private failUnit(s: UnitState, reason: string): void {
@@ -597,14 +832,24 @@ class RunExecution {
     s.reason = reason;
     s.timing.status = "failed";
     s.timing.reason = reason;
-    this.findings.push({ severity: "warning", code: "LOAD_UNIT_FAILED", objectKey: s.unit.objectKey, country: s.unit.country, detail: reason });
+    this.findings.push({
+      severity: "warning",
+      code: "LOAD_UNIT_FAILED",
+      objectKey: s.unit.objectKey,
+      country: s.unit.country,
+      detail: reason,
+    });
   }
 
   private async runUnit(unit: Unit): Promise<void> {
     const s = this.state(unit);
     const ctx = this.unitContext(unit);
     const started = Date.now();
-    const log = getLogger("Run", { run_id: this.runId, object_key: unit.objectKey, country: unit.country });
+    const log = getLogger("Run", {
+      run_id: this.runId,
+      object_key: unit.objectKey,
+      country: unit.country,
+    });
     if (!ctx) {
       this.failUnit(s, "no resolved target for the unit");
       return;
@@ -617,23 +862,53 @@ class RunExecution {
       const manifest = await this.extractor.extractUnit(unit, extractPlan);
       s.manifest = manifest;
       s.timing.extractMs = Date.now() - t0;
-      s.deletedIds.push(...manifest.deletedIds.map((d) => ({ sfdcId: d.id, deletedDate: d.deletedDate })));
+      s.deletedIds.push(
+        ...manifest.deletedIds.map((d) => ({
+          sfdcId: d.id,
+          deletedDate: d.deletedDate,
+        })),
+      );
       s.deletedLatestCovered = manifest.deletedLatestCovered;
-      for (const q of manifest.queueOwners) void q;
       if (manifest.queueOwners.size)
-        this.findings.push({ severity: "info", code: "QUEUE_OWNER_REPLACED", objectKey: unit.objectKey, country: unit.country, detail: { queues: manifest.queueOwners.size }, count: manifest.queueOwners.size });
-      if (manifest.sfdcScopeCount !== undefined && manifest.sfdcScopeCount !== manifest.extractedLive && !extractPlan.limit)
-        this.findings.push({ severity: "warning", code: "EXTRACT_COUNT_MISMATCH", objectKey: unit.objectKey, country: unit.country, detail: { sfdcScopeCount: manifest.sfdcScopeCount, extractedLive: manifest.extractedLive } });
+        this.findings.push({
+          severity: "info",
+          code: "QUEUE_OWNER_REPLACED",
+          objectKey: unit.objectKey,
+          country: unit.country,
+          detail: { queues: manifest.queueOwners.size },
+          count: manifest.queueOwners.size,
+        });
+      if (
+        manifest.sfdcScopeCount !== undefined &&
+        manifest.sfdcScopeCount !== manifest.extractedLive &&
+        !extractPlan.limit
+      )
+        this.findings.push({
+          severity: "warning",
+          code: "EXTRACT_COUNT_MISMATCH",
+          objectKey: unit.objectKey,
+          country: unit.country,
+          detail: {
+            sfdcScopeCount: manifest.sfdcScopeCount,
+            extractedLive: manifest.extractedLive,
+          },
+        });
       // §2.2 step 5 closure
-      await this.closure(ctx, manifest, s);
+      await this.closure(ctx, manifest);
       // transform + load (partition by partition, §2.2 step 9)
       const groups = new Map<number, ExtractFile[]>();
-      for (const f of manifest.files) (groups.get(f.partition ?? 0) ?? groups.set(f.partition ?? 0, []).get(f.partition ?? 0)!).push(f);
+      for (const f of manifest.files)
+        (
+          groups.get(f.partition ?? 0) ??
+          groups.set(f.partition ?? 0, []).get(f.partition ?? 0)!
+        ).push(f);
       const partitions = [...groups.keys()].sort((a, b) => a - b);
       let load: LoadResult | undefined;
       for (const p of partitions.length ? partitions : [0]) {
         const files = groups.get(p) ?? [];
-        const r = await this.transformAndLoad(ctx, s, files, { prefix: p ? `p${p}-` : "" });
+        const r = await this.transformAndLoad(ctx, s, files, {
+          prefix: p ? `p${p}-` : "",
+        });
         load = load ? mergeLoad(load, r.load) : r.load;
         if (r.load.aborted) break;
       }
@@ -653,19 +928,54 @@ class RunExecution {
     }
   }
 
-  private async extractPlan(ctx: UnitContext, s: UnitState): Promise<ExtractPlan | undefined> {
+  private async extractPlan(
+    ctx: UnitContext,
+    s: UnitState,
+  ): Promise<ExtractPlan | undefined> {
     const { unit, mapping, target } = ctx;
     const cfg = this.opts.config;
     const mode = this.opts.mode as ExtractPlan["mode"];
-    const cutoffDate = mapping.scope.cutoffDate ?? this.plan.cutoffDates.get(unit.country) ?? this.plan.cutoffDates.get(GLOBAL_COUNTRY);
-    const plan: ExtractPlan = { runId: this.runId, mode, runDir: this.runDir, mapping, target, cutoffDate, limit: this.dryRun ? this.opts.limit : undefined };
+    const cutoffDate =
+      mapping.scope.cutoffDate ??
+      this.plan.cutoffDates.get(unit.country) ??
+      this.plan.cutoffDates.get(GLOBAL_COUNTRY);
+    const plan: ExtractPlan = {
+      runId: this.runId,
+      mode,
+      runDir: this.runDir,
+      mapping,
+      target,
+      cutoffDate,
+      limit: this.dryRun ? this.opts.limit : undefined,
+    };
     if (mode === "delta" || mode === "final-delta") {
-      const wm = await this.deps.store.watermarks.get(unit.objectKey, unit.country, "modstamp");
+      const wm = await this.deps.store.watermarks.get(
+        unit.objectKey,
+        unit.country,
+        "modstamp",
+      );
       if (!wm) {
-        this.findings.push({ severity: "warning", code: "DELTA_NO_WATERMARK", objectKey: unit.objectKey, country: unit.country, detail: "no modstamp watermark — unit extracted in full (init semantics)" });
+        this.findings.push({
+          severity: "warning",
+          code: "DELTA_NO_WATERMARK",
+          objectKey: unit.objectKey,
+          country: unit.country,
+          detail:
+            "no modstamp watermark — unit extracted in full (init semantics)",
+        });
       } else if (wm.cutoffDate && cutoffDate && cutoffDate < wm.cutoffDate) {
         // wider scope than the last run (§4.1): rows that aged into scope are only found by a full re-extract
-        this.findings.push({ severity: "warning", code: "SCOPE_CUTOFF_CHANGED", objectKey: unit.objectKey, country: unit.country, detail: { previous: wm.cutoffDate, current: cutoffDate, action: "full re-extract" } });
+        this.findings.push({
+          severity: "warning",
+          code: "SCOPE_CUTOFF_CHANGED",
+          objectKey: unit.objectKey,
+          country: unit.country,
+          detail: {
+            previous: wm.cutoffDate,
+            current: cutoffDate,
+            action: "full re-extract",
+          },
+        });
       } else {
         const wmLo = shiftMinutes(wm.value, -cfg.delta.overlapMinutes);
         if (wmLo >= this.wmHi) {
@@ -673,20 +983,42 @@ class RunExecution {
         }
         plan.window = { wmLo, wmHi: this.wmHi };
         s.window = plan.window;
-        const del = await this.deps.store.watermarks.get(unit.objectKey, unit.country, "deleted");
+        const del = await this.deps.store.watermarks.get(
+          unit.objectKey,
+          unit.country,
+          "deleted",
+        );
         const deletedSince = del?.value ?? wmLo;
-        const ageDays = (new Date(this.wmHi).getTime() - new Date(deletedSince).getTime()) / 86_400_000;
+        const ageDays =
+          (new Date(this.wmHi).getTime() - new Date(deletedSince).getTime()) /
+          86_400_000;
         if (target.replicateable && ageDays > DELETE_WINDOW_DAYS) {
-          const detail = { deletedSince, wmHi: this.wmHi, days: Math.floor(ageDays) };
+          const detail = {
+            deletedSince,
+            wmHi: this.wmHi,
+            days: Math.floor(ageDays),
+          };
           if (mode === "delta") {
-            this.findings.push({ severity: "blocking", code: "DELETE_WINDOW_EXCEEDED", objectKey: unit.objectKey, country: unit.country, detail });
+            this.findings.push({
+              severity: "blocking",
+              code: "DELETE_WINDOW_EXCEEDED",
+              objectKey: unit.objectKey,
+              country: unit.country,
+              detail,
+            });
             s.status = "blocked";
             s.reason = "DELETE_WINDOW_EXCEEDED: run verify first";
             s.timing.status = "blocked";
             s.timing.reason = s.reason;
             return undefined;
           }
-          this.findings.push({ severity: "warning", code: "DELETE_WINDOW_EXCEEDED", objectKey: unit.objectKey, country: unit.country, detail });
+          this.findings.push({
+            severity: "warning",
+            code: "DELETE_WINDOW_EXCEEDED",
+            objectKey: unit.objectKey,
+            country: unit.country,
+            detail,
+          });
         }
         plan.deletedSince = deletedSince;
       }
@@ -694,7 +1026,10 @@ class RunExecution {
     return plan;
   }
 
-  private async closure(ctx: UnitContext, manifest: ExtractManifest, s: UnitState): Promise<void> {
+  private async closure(
+    ctx: UnitContext,
+    manifest: ExtractManifest,
+  ): Promise<void> {
     const cfg = this.opts.config;
     const needed: FkIdSets = new Map();
     for (const [key, ids] of manifest.fkSets) {
@@ -705,7 +1040,8 @@ class RunExecution {
     // subtract this unit's own extract (self references)
     const own = needed.get(ctx.unit.objectKey);
     if (own?.size) {
-      for await (const { row } of this.extractor.readRows(manifest.files)) own.delete(row.Id);
+      for await (const { row } of this.extractor.readRows(manifest.files))
+        own.delete(row.Id);
     }
     const country = ctx.unit.country;
     const mappings = this.mappingsByKey(country);
@@ -714,38 +1050,96 @@ class RunExecution {
       const t = this.targetOf({ objectKey: key, country });
       if (t) targets.set(key, t);
     }
-    const result = await this.extractor.closure({ runId: this.runId, country, runDir: this.runDir, needed, mappings, targets, maxRounds: cfg.extract.closureMaxRounds, strategy: cfg.extract.closureStrategy });
-    if (result.rounds >= cfg.extract.closureMaxRounds && [...result.dangling.values()].some((d) => d.size))
-      this.findings.push({ severity: "warning", code: "CLOSURE_MAX_ROUNDS", objectKey: ctx.unit.objectKey, country, detail: { rounds: result.rounds } });
+    const result = await this.extractor.closure({
+      runId: this.runId,
+      country,
+      runDir: this.runDir,
+      needed,
+      mappings,
+      targets,
+      maxRounds: cfg.extract.closureMaxRounds,
+      strategy: cfg.extract.closureStrategy,
+    });
+    if (
+      result.rounds >= cfg.extract.closureMaxRounds &&
+      [...result.dangling.values()].some((d) => d.size)
+    )
+      this.findings.push({
+        severity: "warning",
+        code: "CLOSURE_MAX_ROUNDS",
+        objectKey: ctx.unit.objectKey,
+        country,
+        detail: { rounds: result.rounds },
+      });
     for (const [key, ids] of result.dangling)
-      if (ids.size) this.findings.push({ severity: "info", code: "CLOSURE_DANGLING", objectKey: key, country, detail: { referencedBy: ctx.unit.objectKey, sample: [...ids].slice(0, 10) }, count: ids.size });
+      if (ids.size)
+        this.findings.push({
+          severity: "info",
+          code: "CLOSURE_DANGLING",
+          objectKey: key,
+          country,
+          detail: {
+            referencedBy: ctx.unit.objectKey,
+            sample: [...ids].slice(0, 10),
+          },
+          count: ids.size,
+        });
     if (!result.files.size) return;
     // load closure rows parents-first (their own dependencies landed in earlier steps)
-    const order = orderedKeys(Object.fromEntries([...this.plan.modules].map(([k, m]) => [k, m])), [...this.plan.modules.keys()]);
-    const keys = [...result.files.keys()].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+    const order = orderedKeys(
+      Object.fromEntries([...this.plan.modules].map(([k, m]) => [k, m])),
+      [...this.plan.modules.keys()],
+    );
+    const keys = [...result.files.keys()].sort(
+      (a, b) => order.indexOf(a) - order.indexOf(b),
+    );
     for (const key of keys) {
       const files = result.files.get(key)!;
-      const parentUnit: Unit = { objectKey: key, country: this.plan.mappings.has(unitId({ objectKey: key, country })) ? country : GLOBAL_COUNTRY };
+      const parentUnit: Unit = {
+        objectKey: key,
+        country: this.plan.mappings.has(unitId({ objectKey: key, country }))
+          ? country
+          : GLOBAL_COUNTRY,
+      };
       const pctx = this.unitContext(parentUnit);
       if (!pctx) {
-        this.findings.push({ severity: "warning", code: "CLOSURE_PARENT_UNAVAILABLE", objectKey: key, country, detail: { referencedBy: ctx.unit.objectKey, rows: files.reduce((a, f) => a + f.rows, 0) } });
+        this.findings.push({
+          severity: "warning",
+          code: "CLOSURE_PARENT_UNAVAILABLE",
+          objectKey: key,
+          country,
+          detail: {
+            referencedBy: ctx.unit.objectKey,
+            rows: files.reduce((a, f) => a + f.rows, 0),
+          },
+        });
         continue;
       }
-      const lock = this.closureLocks.get(unitId(parentUnit)) ?? this.closureLocks.set(unitId(parentUnit), pLimit(1)).get(unitId(parentUnit))!;
+      const lock =
+        this.closureLocks.get(unitId(parentUnit)) ??
+        this.closureLocks
+          .set(unitId(parentUnit), pLimit(1))
+          .get(unitId(parentUnit))!;
       await lock(async () => {
         const ps = this.state(parentUnit);
-        const r = await this.transformAndLoad(pctx, ps, files, { prefix: `closure-${ctx.unit.objectKey}-${result.rounds}-${Date.now().toString(36)}-` });
+        const r = await this.transformAndLoad(pctx, ps, files, {
+          prefix: `closure-${ctx.unit.objectKey}-${result.rounds}-${Date.now().toString(36)}-`,
+        });
         ps.load = ps.load ? mergeLoad(ps.load, r.load) : r.load;
         if (ps.manifest) ps.manifest.closureRows += r.transform.closureRows;
-        else ps.manifest = { ...emptyManifest(parentUnit), closureRows: r.transform.closureRows };
+        else
+          ps.manifest = {
+            ...emptyManifest(parentUnit),
+            closureRows: r.transform.closureRows,
+          };
         if (ps.status === "skipped" && !ps.reason) {
           ps.status = "succeeded";
           ps.timing.status = "succeeded";
         }
-        if (r.load.aborted) this.failUnit(ps, `closure load aborted: ${r.load.aborted.reason}`);
+        if (r.load.aborted)
+          this.failUnit(ps, `closure load aborted: ${r.load.aborted.reason}`);
       });
     }
-    void s;
   }
 
   private async transformAndLoad(
@@ -756,7 +1150,12 @@ class RunExecution {
   ): Promise<{ transform: TransformUnitResult; load: LoadResult }> {
     const { unit, mapping, target } = ctx;
     const t1 = Date.now();
-    const ids = await buildUnitResolver(this.deps.store, mapping, files, this.extractor);
+    const ids = await buildUnitResolver(
+      this.deps.store,
+      mapping,
+      files,
+      this.extractor,
+    );
     const transform = await transformUnit({
       runId: this.runId,
       unit,
@@ -777,15 +1176,36 @@ class RunExecution {
       filePrefix: o.prefix,
       now: this.now,
     });
-    s.transform = s.transform ? mergeTransform(s.transform, transform) : transform;
+    s.transform = s.transform
+      ? mergeTransform(s.transform, transform)
+      : transform;
     for (const [k, v] of transform.seenModstamps) s.seenModstamps.set(k, v);
     s.blobFiles.push(...transform.blobFiles);
     s.timing.transformMs = (s.timing.transformMs ?? 0) + (Date.now() - t1);
     for (const [code, n] of Object.entries(transform.diagnostics))
-      if (["CONTACT_REF_DROPPED", "QUEUE_OWNER_REPLACED", "AUDIT_USER_FALLBACK", "UNMAPPED_USER", "SF_DATETIME_RANGE", "TRUNCATED"].includes(code))
-        this.findings.push({ severity: "info", code, objectKey: unit.objectKey, country: unit.country, detail: { rows: n }, count: n });
+      if (
+        [
+          "CONTACT_REF_DROPPED",
+          "QUEUE_OWNER_REPLACED",
+          "AUDIT_USER_FALLBACK",
+          "UNMAPPED_USER",
+          "SF_DATETIME_RANGE",
+          "TRUNCATED",
+        ].includes(code)
+      )
+        this.findings.push({
+          severity: "info",
+          code,
+          objectKey: unit.objectKey,
+          country: unit.country,
+          detail: { rows: n },
+          count: n,
+        });
     const t2 = Date.now();
-    const load = await ctx.loader.loadBatches(readPayloadFiles(transform.payloadFiles), ctx.loadPlan);
+    const load = await ctx.loader.loadBatches(
+      readPayloadFiles(transform.payloadFiles),
+      ctx.loadPlan,
+    );
     s.timing.loadMs = (s.timing.loadMs ?? 0) + (Date.now() - t2);
     return { transform, load };
   }
@@ -796,13 +1216,16 @@ class RunExecution {
       if (s.status !== "succeeded") continue;
       const ctx = this.unitContext(s.unit);
       if (!ctx) continue;
-      const pending = await this.deps.store.pendingFk.countUnresolved(this.runId, s.unit.objectKey, s.unit.country).catch(() => 0);
+      const pending = await this.deps.store.pendingFk
+        .countUnresolved(this.runId, s.unit.objectKey, s.unit.country)
+        .catch(() => 0);
       const queued = pending > 0 || (s.load?.pendingFk ?? 0) > 0;
       if (queued && s.pendingRounds < max) {
         s.pendingRounds++;
         const r = await ctx.loader.retryPending(ctx.loadPlan, s.pendingRounds);
         if (s.load) s.load = mergeLoad(s.load, { ...r, pendingFk: 0 });
-        if (r.aborted) this.failUnit(s, `pending retry aborted: ${r.aborted.reason}`);
+        if (r.aborted)
+          this.failUnit(s, `pending retry aborted: ${r.aborted.reason}`);
       }
       if (final) {
         const fin = await ctx.loader.finalisePending(ctx.loadPlan);
@@ -816,17 +1239,43 @@ class RunExecution {
     if (!ctx || !s.deletedIds.length) return;
     const policy = ctx.mapping.options.deletePolicy;
     try {
-      s.deletes = await ctx.loader.applyDeletesDetailed({ unit: s.unit, policy, ids: s.deletedIds, seenModstamps: s.seenModstamps }, ctx.loadPlan);
+      s.deletes = await ctx.loader.applyDeletesDetailed(
+        {
+          unit: s.unit,
+          policy,
+          ids: s.deletedIds,
+          seenModstamps: s.seenModstamps,
+        },
+        ctx.loadPlan,
+      );
       if (s.deletes.ignored)
-        this.findings.push({ severity: "info", code: policy === "ignore" ? "DELETE_IGNORED" : "DELETE_NOT_APPLIED", objectKey: s.unit.objectKey, country: s.unit.country, detail: countBy(s.deletes.ignoredDetail.map((d) => d.reason)), count: s.deletes.ignored });
+        this.findings.push({
+          severity: "info",
+          code: policy === "ignore" ? "DELETE_IGNORED" : "DELETE_NOT_APPLIED",
+          objectKey: s.unit.objectKey,
+          country: s.unit.country,
+          detail: countBy(s.deletes.ignoredDetail.map((d) => d.reason)),
+          count: s.deletes.ignored,
+        });
     } catch (e) {
       this.failUnit(s, `deletes: ${(e as Error).message}`);
     }
   }
 
-  private reconcileInput(ctx: UnitContext, s: UnitState, tolerance: number, sampleSize: number): ReconcileInput {
-    const crosswalk = this.preflight?.countries.get(ctx.dns)?.find((c) => c.iso2 === ctx.unit.country);
-    const pred = crosswalk?.vaultId && ctx.target.metadata.fields.country__v?.type === "object" ? `country__v = '${crosswalk.vaultId}'` : undefined;
+  private reconcileInput(
+    ctx: UnitContext,
+    s: UnitState,
+    tolerance: number,
+    sampleSize: number,
+  ): ReconcileInput {
+    const crosswalk = this.preflight?.countries
+      .get(ctx.dns)
+      ?.find((c) => c.iso2 === ctx.unit.country);
+    const pred =
+      crosswalk?.vaultId &&
+      ctx.target.metadata.fields.country__v?.type === "object"
+        ? `country__v = '${crosswalk.vaultId}'`
+        : undefined;
     return {
       runId: this.runId,
       unit: ctx.unit,
@@ -843,39 +1292,81 @@ class RunExecution {
   }
 
   private reconcilerFor(ctx: UnitContext): DefaultReconciler {
-    return new DefaultReconciler({ sfdc: this.deps.sfdc, vault: ctx.vault, store: this.deps.store }, { now: this.now, runDir: this.runDir, exceptions: this.exceptions });
+    return new DefaultReconciler(
+      { sfdc: this.deps.sfdc, vault: ctx.vault, store: this.deps.store },
+      { now: this.now, runDir: this.runDir, exceptions: this.exceptions },
+    );
   }
 
   private async reconcileUnit(s: UnitState): Promise<void> {
     const ctx = this.unitContext(s.unit);
     if (!ctx) return;
-    const tolerance = this.opts.mode === "final-delta" ? 0 : ctx.cc.reconcile.tolerance;
+    const tolerance =
+      this.opts.mode === "final-delta" ? 0 : ctx.cc.reconcile.tolerance;
     const reconciler = this.reconcilerFor(ctx);
     try {
-      s.reconcile = await reconciler.reconcileUnit(this.reconcileInput(ctx, s, tolerance, ctx.cc.reconcile.sampleSize));
+      s.reconcile = await reconciler.reconcileUnit(
+        this.reconcileInput(ctx, s, tolerance, ctx.cc.reconcile.sampleSize),
+      );
       this.findings.push(...s.reconcile.findings);
       if (this.opts.mode === "final-delta" && !this.dryRun) {
-        const diffs = await reconciler.sample(this.reconcileInput(ctx, s, tolerance, ctx.cc.reconcile.sampleSize));
+        const diffs = await reconciler.sample(
+          this.reconcileInput(ctx, s, tolerance, ctx.cc.reconcile.sampleSize),
+        );
         s.sampleDiffs = diffs.length;
         if (diffs.length && s.reconcile) s.reconcile.pass = false;
       }
     } catch (e) {
-      this.findings.push({ severity: "warning", code: "RECON_FAILED", objectKey: s.unit.objectKey, country: s.unit.country, detail: (e as Error).message });
+      this.findings.push({
+        severity: "warning",
+        code: "RECON_FAILED",
+        objectKey: s.unit.objectKey,
+        country: s.unit.country,
+        detail: (e as Error).message,
+      });
     }
   }
 
   private async advanceWatermarks(): Promise<void> {
-    if (!this.writes || !["init", "delta", "final-delta"].includes(this.opts.mode)) return;
+    if (
+      !this.writes ||
+      !["init", "delta", "final-delta"].includes(this.opts.mode)
+    )
+      return;
     const updatedAt = this.now().toISOString();
     const passedByCountry = new Map<CountryCode, boolean>();
     for (const s of this.units.values()) {
       const { unit } = s;
-      const gateOk = this.opts.mode !== "final-delta" || (s.reconcile?.pass ?? false);
-      passedByCountry.set(unit.country, (passedByCountry.get(unit.country) ?? true) && s.status === "succeeded" && gateOk);
+      const gateOk =
+        this.opts.mode !== "final-delta" || (s.reconcile?.pass ?? false);
+      passedByCountry.set(
+        unit.country,
+        (passedByCountry.get(unit.country) ?? true) &&
+          s.status === "succeeded" &&
+          gateOk,
+      );
       if (s.status !== "succeeded" || !gateOk) continue;
-      const cutoffDate = this.unitContext(unit)?.mapping.scope.cutoffDate ?? this.plan.cutoffDates.get(unit.country);
-      await this.deps.store.watermarks.set({ objectKey: unit.objectKey, country: unit.country, kind: "modstamp", value: this.wmHi, cutoffDate, runId: this.runId, updatedAt });
-      await this.deps.store.watermarks.set({ objectKey: unit.objectKey, country: unit.country, kind: "deleted", value: s.deletedLatestCovered ?? this.wmHi, cutoffDate, runId: this.runId, updatedAt });
+      const cutoffDate =
+        this.unitContext(unit)?.mapping.scope.cutoffDate ??
+        this.plan.cutoffDates.get(unit.country);
+      await this.deps.store.watermarks.set({
+        objectKey: unit.objectKey,
+        country: unit.country,
+        kind: "modstamp",
+        value: this.wmHi,
+        cutoffDate,
+        runId: this.runId,
+        updatedAt,
+      });
+      await this.deps.store.watermarks.set({
+        objectKey: unit.objectKey,
+        country: unit.country,
+        kind: "deleted",
+        value: s.deletedLatestCovered ?? this.wmHi,
+        cutoffDate,
+        runId: this.runId,
+        updatedAt,
+      });
     }
     if (this.opts.mode === "final-delta")
       for (const [country, ok] of passedByCountry)
@@ -892,10 +1383,19 @@ class RunExecution {
       const ctx = this.unitContext(s.unit);
       if (!ctx?.loader.loadBlobs) continue;
       const rows = (async function* () {
-        for await (const r of readPayloadFiles(s.blobFiles)) yield { sfdcId: r.sfdcId, blobs: r.payload };
+        for await (const r of readPayloadFiles(s.blobFiles))
+          yield { sfdcId: r.sfdcId, blobs: r.payload };
       })();
       const r = await ctx.loader.loadBlobs(rows, ctx.loadPlan);
-      if (r.failed) this.findings.push({ severity: "warning", code: "BLOB_ROWS_FAILED", objectKey: s.unit.objectKey, country: s.unit.country, detail: { failed: r.failed, updated: r.updated }, count: r.failed });
+      if (r.failed)
+        this.findings.push({
+          severity: "warning",
+          code: "BLOB_ROWS_FAILED",
+          objectKey: s.unit.objectKey,
+          country: s.unit.country,
+          detail: { failed: r.failed, updated: r.updated },
+          count: r.failed,
+        });
     }
   }
 
@@ -904,23 +1404,61 @@ class RunExecution {
     const { recalculateRollups, updateCorporateCurrency } = this.plan.postLoad;
     const done = new Set<string>();
     for (const s of this.units.values()) {
-      if (s.status !== "succeeded" || !(s.load && s.load.created + s.load.updated > 0)) continue;
+      if (
+        s.status !== "succeeded" ||
+        !(s.load && s.load.created + s.load.updated > 0)
+      )
+        continue;
       const ctx = this.unitContext(s.unit);
       if (!ctx) continue;
       const key = `${ctx.dns}/${ctx.target.targetObject}`;
       if (done.has(key)) continue;
       done.add(key);
       const action = ctx.vault.objectAction?.bind(ctx.vault);
-      if (recalculateRollups !== "off" && ctx.target.rawMetadata.urls && Object.keys(ctx.target.rawMetadata.urls).some((u) => /rollup/i.test(u))) {
-        const name = Object.keys(ctx.target.rawMetadata.urls).find((u) => /rollup/i.test(u))!;
-        const r = action ? await action(ctx.target.targetObject, name).catch((e: Error) => ({ ok: false, message: e.message })) : { ok: false, message: "objectAction unsupported" };
-        if (!r.ok) this.findings.push({ severity: recalculateRollups === "required" ? "blocking" : "warning", code: "VT_ROLLUP_RECALC_UNAVAILABLE", objectKey: s.unit.objectKey, detail: r.message ?? "action failed" });
+      if (
+        recalculateRollups !== "off" &&
+        ctx.target.rawMetadata.urls &&
+        Object.keys(ctx.target.rawMetadata.urls).some((u) => /rollup/i.test(u))
+      ) {
+        const name = Object.keys(ctx.target.rawMetadata.urls).find((u) =>
+          /rollup/i.test(u),
+        )!;
+        const r = action
+          ? await action(ctx.target.targetObject, name).catch((e: Error) => ({
+              ok: false,
+              message: e.message,
+            }))
+          : { ok: false, message: "objectAction unsupported" };
+        if (!r.ok)
+          this.findings.push({
+            severity:
+              recalculateRollups === "required" ? "blocking" : "warning",
+            code: "VT_ROLLUP_RECALC_UNAVAILABLE",
+            objectKey: s.unit.objectKey,
+            detail: r.message ?? "action failed",
+          });
       } else if (recalculateRollups === "required")
-        this.findings.push({ severity: "blocking", code: "VT_ROLLUP_RECALC_UNAVAILABLE", objectKey: s.unit.objectKey, detail: "no roll-up recalculation action on the object" });
-      const hasCurrency = Object.values(ctx.target.metadata.fields).some((f) => f.type === "currency");
+        this.findings.push({
+          severity: "blocking",
+          code: "VT_ROLLUP_RECALC_UNAVAILABLE",
+          objectKey: s.unit.objectKey,
+          detail: "no roll-up recalculation action on the object",
+        });
+      const hasCurrency = Object.values(ctx.target.metadata.fields).some(
+        (f) => f.type === "currency",
+      );
       if (updateCorporateCurrency && hasCurrency && action) {
-        const r = await action(ctx.target.targetObject, "updatecorporatecurrency").catch((e: Error) => ({ ok: false, message: e.message }));
-        if (!r.ok) this.findings.push({ severity: "warning", code: "VT_CORP_CURRENCY_UNAVAILABLE", objectKey: s.unit.objectKey, detail: r.message ?? "action failed" });
+        const r = await action(
+          ctx.target.targetObject,
+          "updatecorporatecurrency",
+        ).catch((e: Error) => ({ ok: false, message: e.message }));
+        if (!r.ok)
+          this.findings.push({
+            severity: "warning",
+            code: "VT_CORP_CURRENCY_UNAVAILABLE",
+            objectKey: s.unit.objectKey,
+            detail: r.message ?? "action failed",
+          });
       }
     }
   }
@@ -930,7 +1468,8 @@ class RunExecution {
   private async runVerify(): Promise<void> {
     const v = this.opts.verify ?? {};
     for (const s of this.units.values()) {
-      if (s.status === "blocked" || (s.status === "skipped" && s.reason)) continue;
+      if (s.status === "blocked" || (s.status === "skipped" && s.reason))
+        continue;
       const ctx = this.unitContext(s.unit);
       if (!ctx) {
         this.failUnit(s, "no resolved target for the unit");
@@ -938,26 +1477,61 @@ class RunExecution {
       }
       const started = Date.now();
       try {
-        const sampleSize = v.sample ?? (v.samples ? ctx.cc.reconcile.sampleSize : 0);
+        const sampleSize =
+          v.sample ?? (v.samples ? ctx.cc.reconcile.sampleSize : 0);
         const reconciler = this.reconcilerFor(ctx);
         let manifest: ExtractManifest | undefined;
         if (sampleSize > 0) {
           const extractPlan = await this.extractPlan(ctx, s);
           if (extractPlan) {
             manifest = await this.extractor.extractUnit(s.unit, extractPlan);
-            const ids = await buildUnitResolver(this.deps.store, ctx.mapping, manifest.files, this.extractor);
-            const t = await transformUnit({ runId: this.runId, unit: s.unit, mapping: ctx.mapping, metadata: ctx.target.metadata, module: ctx.module, runDir: this.runDir, runMode: "verify", files: manifest.files, extractor: this.extractor, store: this.deps.store, country: ctx.country, ids, migrationUserId: ctx.loadPlan.migrationUserId, orgId15: to15(this.deps.sfdc.orgId), dryRun: true, now: this.now });
+            const ids = await buildUnitResolver(
+              this.deps.store,
+              ctx.mapping,
+              manifest.files,
+              this.extractor,
+            );
+            const t = await transformUnit({
+              runId: this.runId,
+              unit: s.unit,
+              mapping: ctx.mapping,
+              metadata: ctx.target.metadata,
+              module: ctx.module,
+              runDir: this.runDir,
+              runMode: "verify",
+              files: manifest.files,
+              extractor: this.extractor,
+              store: this.deps.store,
+              country: ctx.country,
+              ids,
+              migrationUserId: ctx.loadPlan.migrationUserId,
+              orgId15: to15(this.deps.sfdc.orgId),
+              dryRun: true,
+              now: this.now,
+            });
             s.transform = t;
             // rows to sample are those already loaded by earlier runs: mark them as such for the reconciler
             await this.markLoadedFromIdMap(s.unit, t.payloadFiles);
           }
         }
-        const input = this.reconcileInput(ctx, s, ctx.cc.reconcile.tolerance, sampleSize);
+        const input = this.reconcileInput(
+          ctx,
+          s,
+          ctx.cc.reconcile.tolerance,
+          sampleSize,
+        );
         input.manifest = manifest;
         const orphan = await reconciler.orphanFks(input);
         let pass = !orphan.some((o) => o.count > 0);
         const findings: Finding[] = [];
-        if (!pass) findings.push({ severity: "warning", code: "RECON_ORPHAN_FK", objectKey: s.unit.objectKey, country: s.unit.country, detail: { fields: orphan.filter((o) => o.count > 0) } });
+        if (!pass)
+          findings.push({
+            severity: "warning",
+            code: "RECON_ORPHAN_FK",
+            objectKey: s.unit.objectKey,
+            country: s.unit.country,
+            detail: { fields: orphan.filter((o) => o.count > 0) },
+          });
         let diffs = 0;
         if (sampleSize > 0) {
           diffs = (await reconciler.sample(input)).length;
@@ -971,11 +1545,42 @@ class RunExecution {
           const fk = await reconciler.fkConsistency(input);
           if (fk.length) pass = false;
         }
-        const vaultCount = await ctx.vault.vqlCount(`SELECT id FROM ${ctx.target.targetObject} WHERE ${ctx.target.legacyIdField ?? ctx.mapping.legacyIdField ?? "id"} != null PAGESIZE 0`).catch(() => null);
-        const mapped = await this.deps.store.idMap.count(s.unit.objectKey, s.unit.country === GLOBAL_COUNTRY ? undefined : s.unit.country);
-        const row = { runId: this.runId, objectKey: s.unit.objectKey, country: s.unit.country, sfdcScopeCount: manifest?.sfdcScopeCount ?? null, extracted: manifest?.extractedLive ?? 0, closure: 0, transformed: s.transform?.transformed ?? 0, skipped: s.transform?.skipped ?? 0, pendingFk: 0, created: 0, updated: 0, unchanged: mapped, failed: 0, deleted: 0, vaultCount, aggHashSrc: null, aggHashTgt: null, status: pass ? ("pass" as const) : ("fail" as const) };
+        const vaultCount = await ctx.vault
+          .vqlCount(
+            `SELECT id FROM ${ctx.target.targetObject} WHERE ${ctx.target.legacyIdField ?? ctx.mapping.legacyIdField ?? "id"} != null PAGESIZE 0`,
+          )
+          .catch(() => null);
+        const mapped = await this.deps.store.idMap.count(
+          s.unit.objectKey,
+          s.unit.country === GLOBAL_COUNTRY ? undefined : s.unit.country,
+        );
+        const row = {
+          runId: this.runId,
+          objectKey: s.unit.objectKey,
+          country: s.unit.country,
+          sfdcScopeCount: manifest?.sfdcScopeCount ?? null,
+          extracted: manifest?.extractedLive ?? 0,
+          closure: 0,
+          transformed: s.transform?.transformed ?? 0,
+          skipped: s.transform?.skipped ?? 0,
+          pendingFk: 0,
+          created: 0,
+          updated: 0,
+          unchanged: mapped,
+          failed: 0,
+          deleted: 0,
+          vaultCount,
+          aggHashSrc: null,
+          aggHashTgt: null,
+          status: pass ? ("pass" as const) : ("fail" as const),
+        };
         await this.deps.store.reconciliation.upsert(row);
-        s.reconcile = { row, findings, pass, orphanFks: orphan.filter((o) => o.count > 0) };
+        s.reconcile = {
+          row,
+          findings,
+          pass,
+          orphanFks: orphan.filter((o) => o.count > 0),
+        };
         s.sampleDiffs = diffs;
         this.findings.push(...findings);
         s.status = "succeeded";
@@ -989,14 +1594,28 @@ class RunExecution {
   }
 
   /** verify: rows present in the id map count as loaded for the sample read-back. */
-  private async markLoadedFromIdMap(unit: Unit, files: string[]): Promise<void> {
+  private async markLoadedFromIdMap(
+    unit: Unit,
+    files: string[],
+  ): Promise<void> {
     const now = this.now().toISOString();
     let buf: string[] = [];
     const flush = async () => {
       if (!buf.length) return;
       const got = await this.deps.store.idMap.bulkGet(unit.objectKey, buf);
       await this.deps.store.rowResults.upsert(
-        [...got.values()].filter((r) => !r.deletedAt && !r.dryRun && !r.mergedInto).map((r) => ({ runId: this.runId, objectKey: unit.objectKey, country: unit.country, sfdcId: r.sfdcId, state: "loaded_unchanged" as const, attempt: 1, vaultId: r.vaultId, updatedAt: now })),
+        [...got.values()]
+          .filter((r) => !r.deletedAt && !r.dryRun && !r.mergedInto)
+          .map((r) => ({
+            runId: this.runId,
+            objectKey: unit.objectKey,
+            country: unit.country,
+            sfdcId: r.sfdcId,
+            state: "loaded_unchanged" as const,
+            attempt: 1,
+            vaultId: r.vaultId,
+            updatedAt: now,
+          })),
       );
       buf = [];
     };
@@ -1011,17 +1630,34 @@ class RunExecution {
 
   private async runRetryFailed(): Promise<void> {
     const source = this.opts.runId;
-    if (!source) throw new RunAbort(EXIT_CODES.configError, "retry-failed requires --run <runId>");
+    if (!source)
+      throw new RunAbort(
+        EXIT_CODES.configError,
+        "retry-failed requires --run <runId>",
+      );
     const src = await this.deps.store.runs.get(source);
-    if (!src) throw new RunAbort(EXIT_CODES.configError, `run ${source} not found`);
-    const failed = await this.deps.store.rowResults.query({ runId: source, state: "failed", errorType: this.opts.errorType });
+    if (!src)
+      throw new RunAbort(EXIT_CODES.configError, `run ${source} not found`);
+    const failed = await this.deps.store.rowResults.query({
+      runId: source,
+      state: "failed",
+      errorType: this.opts.errorType,
+    });
     const byUnit = new Map<string, Set<string>>();
     for (const r of failed) {
-      if (!this.opts.errorType && !isRetryableRowErrorType(r.errorType ?? undefined)) continue;
+      if (
+        !this.opts.errorType &&
+        !isRetryableRowErrorType(r.errorType ?? undefined)
+      )
+        continue;
       const id = unitId({ objectKey: r.objectKey, country: r.country });
       (byUnit.get(id) ?? byUnit.set(id, new Set()).get(id)!).add(r.sfdcId);
     }
-    await this.audit("retry-failed", { sourceRun: source, rows: failed.length, errorType: this.opts.errorType });
+    await this.audit("retry-failed", {
+      sourceRun: source,
+      rows: failed.length,
+      errorType: this.opts.errorType,
+    });
     const sourceDir = path.join(this.baseRunDir, source);
     for (const [id, ids] of byUnit) {
       const s = [...this.units.values()].find((u) => unitId(u.unit) === id);
@@ -1033,16 +1669,37 @@ class RunExecution {
       }
       const started = Date.now();
       try {
-        const cps = await this.deps.store.checkpoints.list(source, s.unit.objectKey, s.unit.country);
-        const files: ExtractFile[] = cps.map((cp) => ({ path: path.isAbsolute(cp.file) ? cp.file : path.join(sourceDir, cp.file), jobId: cp.jobId, pageNo: cp.pageNo, rows: cp.rows, closure: /closure/.test(cp.file) }));
+        const cps = await this.deps.store.checkpoints.list(
+          source,
+          s.unit.objectKey,
+          s.unit.country,
+        );
+        const files: ExtractFile[] = cps.map((cp) => ({
+          path: path.isAbsolute(cp.file)
+            ? cp.file
+            : path.join(sourceDir, cp.file),
+          jobId: cp.jobId,
+          pageNo: cp.pageNo,
+          rows: cp.rows,
+          closure: /closure/.test(cp.file),
+        }));
         if (!files.length) {
           this.failUnit(s, `no extract checkpoints for ${id} in run ${source}`);
           continue;
         }
-        const r = await this.transformAndLoad(ctx, s, files, { prefix: "retry-", onlyIds: ids });
+        const r = await this.transformAndLoad(ctx, s, files, {
+          prefix: "retry-",
+          onlyIds: ids,
+        });
         s.load = r.load;
-        s.manifest = { ...emptyManifest(s.unit), extractedLive: r.transform.transformed + r.transform.skipped + r.transform.failed, files };
-        if (r.load.aborted) this.failUnit(s, `load aborted: ${r.load.aborted.reason}`);
+        s.manifest = {
+          ...emptyManifest(s.unit),
+          extractedLive:
+            r.transform.transformed + r.transform.skipped + r.transform.failed,
+          files,
+        };
+        if (r.load.aborted)
+          this.failUnit(s, `load aborted: ${r.load.aborted.reason}`);
         else {
           s.status = "succeeded";
           s.timing.status = "succeeded";
@@ -1054,15 +1711,21 @@ class RunExecution {
       }
     }
     await this.pendingRound(true);
-    for (const s of this.units.values()) if (s.status === "succeeded") await this.reconcileUnit(s);
-    for (const l of this.loaders.values()) this.findings.push(...l.drainFindings());
+    for (const s of this.units.values())
+      if (s.status === "succeeded") await this.reconcileUnit(s);
+    for (const l of this.loaders.values())
+      this.findings.push(...l.drainFindings());
   }
 
   // ---------------------------------------------------------------- blobs
 
   private async runBlobsMode(): Promise<void> {
     const source = this.opts.runId;
-    if (!source) throw new RunAbort(EXIT_CODES.configError, "blobs requires --run <runId>");
+    if (!source)
+      throw new RunAbort(
+        EXIT_CODES.configError,
+        "blobs requires --run <runId>",
+      );
     const sourceDir = path.join(this.baseRunDir, source);
     for (const s of this.units.values()) {
       if (s.status === "blocked") continue;
@@ -1073,7 +1736,8 @@ class RunExecution {
       const started = Date.now();
       try {
         const rows = (async function* () {
-          for await (const r of readPayloadFiles(files)) yield { sfdcId: r.sfdcId, blobs: r.payload };
+          for await (const r of readPayloadFiles(files))
+            yield { sfdcId: r.sfdcId, blobs: r.payload };
         })();
         const r = await ctx.loader.loadBlobs(rows, ctx.loadPlan);
         s.load = r;
@@ -1086,25 +1750,74 @@ class RunExecution {
         s.timing.elapsedMs = Date.now() - started;
       }
     }
-    for (const l of this.loaders.values()) this.findings.push(...l.drainFindings());
+    for (const l of this.loaders.values())
+      this.findings.push(...l.drainFindings());
   }
 
   // --------------------------------------------------------------- report
 
-  private async writeRunReport(record: RunRecord, exitCode: ExitCode): Promise<string> {
-    const stored = await this.deps.store.findings.list(this.runId).catch(() => [] as Finding[]);
-    const seen = new Set(stored.map((f) => JSON.stringify([f.code, f.objectKey, f.country, f.field, typeof f.detail === "string" ? f.detail : JSON.stringify(f.detail)])));
-    const findings = [...stored, ...this.findings.filter((f) => !seen.has(JSON.stringify([f.code, f.objectKey, f.country, f.field, typeof f.detail === "string" ? f.detail : JSON.stringify(f.detail)])))];
-    const reconciliation = await this.deps.store.reconciliation.list(this.runId).catch(() => []);
+  private async writeRunReport(
+    record: RunRecord,
+    exitCode: ExitCode,
+  ): Promise<string> {
+    const stored = await this.deps.store.findings
+      .list(this.runId)
+      .catch(() => [] as Finding[]);
+    const seen = new Set(
+      stored.map((f) =>
+        JSON.stringify([
+          f.code,
+          f.objectKey,
+          f.country,
+          f.field,
+          typeof f.detail === "string" ? f.detail : JSON.stringify(f.detail),
+        ]),
+      ),
+    );
+    const findings = [
+      ...stored,
+      ...this.findings.filter(
+        (f) =>
+          !seen.has(
+            JSON.stringify([
+              f.code,
+              f.objectKey,
+              f.country,
+              f.field,
+              typeof f.detail === "string"
+                ? f.detail
+                : JSON.stringify(f.detail),
+            ]),
+          ),
+      ),
+    ];
+    const reconciliation = await this.deps.store.reconciliation
+      .list(this.runId)
+      .catch(() => []);
     const input: RunReportInput = {
       run: record,
       exitCode,
       units: [...this.units.values()].map((u) => u.timing),
       findings,
       reconciliation,
-      ignoredDeletes: Object.fromEntries([...this.units.values()].filter((u) => u.deletes?.ignoredDetail.length).map((u) => [unitId(u.unit), countBy(u.deletes!.ignoredDetail.map((d) => d.reason))])),
-      pendingTargets: Object.fromEntries([...this.units.values()].filter((u) => u.pendingTargets).map((u) => [unitId(u.unit), u.pendingTargets!])),
-      sampleDiffs: Object.fromEntries([...this.units.values()].filter((u) => u.sampleDiffs).map((u) => [unitId(u.unit), u.sampleDiffs!])),
+      ignoredDeletes: Object.fromEntries(
+        [...this.units.values()]
+          .filter((u) => u.deletes?.ignoredDetail.length)
+          .map((u) => [
+            unitId(u.unit),
+            countBy(u.deletes!.ignoredDetail.map((d) => d.reason)),
+          ]),
+      ),
+      pendingTargets: Object.fromEntries(
+        [...this.units.values()]
+          .filter((u) => u.pendingTargets)
+          .map((u) => [unitId(u.unit), u.pendingTargets!]),
+      ),
+      sampleDiffs: Object.fromEntries(
+        [...this.units.values()]
+          .filter((u) => u.sampleDiffs)
+          .map((u) => [unitId(u.unit), u.sampleDiffs!]),
+      ),
       generatedAt: this.now().toISOString(),
     };
     const paths = await writeReport(this.runDir, renderReport(input));
@@ -1116,13 +1829,24 @@ class RunExecution {
     const input = await reportFromStore(this.deps.store, runId, this.now());
     if (!input) {
       this.out(`run ${runId} not found`);
-      return { runId, mode: "report", exitCode: EXIT_CODES.configError, units: [] };
+      return {
+        runId,
+        mode: "report",
+        exitCode: EXIT_CODES.configError,
+        units: [],
+      };
     }
     const report = renderReport(input);
     const dir = path.join(this.baseRunDir, runId);
     const paths = await writeReport(dir, report);
     this.out(report.markdown);
-    return { runId, mode: "report", exitCode: EXIT_CODES.success, units: input.units.map((u) => ({ unit: u.unit, status: u.status })), reportPath: paths.markdown };
+    return {
+      runId,
+      mode: "report",
+      exitCode: EXIT_CODES.success,
+      units: input.units.map((u) => ({ unit: u.unit, status: u.status })),
+      reportPath: paths.markdown,
+    };
   }
 }
 
@@ -1143,7 +1867,10 @@ function mergeLoad(a: LoadResult, b: LoadResult): LoadResult {
   };
 }
 
-function mergeTransform(a: TransformUnitResult, b: TransformUnitResult): TransformUnitResult {
+function mergeTransform(
+  a: TransformUnitResult,
+  b: TransformUnitResult,
+): TransformUnitResult {
   const sum = (x: Record<string, number>, y: Record<string, number>) => {
     const o = { ...x };
     for (const [k, v] of Object.entries(y)) o[k] = (o[k] ?? 0) + v;
@@ -1166,7 +1893,18 @@ function mergeTransform(a: TransformUnitResult, b: TransformUnitResult): Transfo
 }
 
 function emptyManifest(unit: Unit): ExtractManifest {
-  return { unit, files: [], fkSets: new Map(), extractedLive: 0, extractedDeleted: 0, closureRows: 0, deletedIds: [], predicate: "", columns: [], queueOwners: new Set() };
+  return {
+    unit,
+    files: [],
+    fkSets: new Map(),
+    extractedLive: 0,
+    extractedDeleted: 0,
+    closureRows: 0,
+    deletedIds: [],
+    predicate: "",
+    columns: [],
+    queueOwners: new Set(),
+  };
 }
 
 function stripDeletes(d: DeleteOutcome): DeleteResult {
@@ -1179,4 +1917,3 @@ function countBy(items: readonly string[]): Record<string, number> {
   for (const i of items) out[i] = (out[i] ?? 0) + 1;
   return out;
 }
-

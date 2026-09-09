@@ -1,0 +1,21 @@
+# countries.GB — United Kingdom (§7.4.8, inherits regions.EU)
+# UK GDPR; alphanumeric postcodes; no state. ID_vod__c carries the GMC number.
+region: EU
+dataResidency: eu
+defaultTimezone: Europe/London
+postalCode:
+  {
+    pattern: "^[A-Za-z]{1,2}\\d[A-Za-z\\d]? ?\\d[A-Za-z]{2}$",
+    onMismatch: warn,
+  }
+phone: { normalise: true, defaultRegion: GB }
+objects:
+  account:
+    fields:
+      add: [{ source: ID_vod__c, target: id__v, transform: text }] # GMC number
+      remove: [npi__v, pdrp_opt_out__v, pdrp_opt_out_date__v]
+  address:
+    required: { state_province__v: false }
+    fields:
+      add: [{ source: Brick_vod__c, target: brick__v, transform: text }]
+      remove: [dea__v, cds__v, license__v, zip_4__v]

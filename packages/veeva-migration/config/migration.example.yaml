@@ -1,0 +1,228 @@
+# migration.example.yaml — complete configuration reference for
+# @lastest/veeva-migration (spec §7.3, key reference §7.2.1).
+#
+# Copy this file, replace the acme values, export the ${ENV} variables and run
+#   veeva-migration preflight --config migration.yaml
+#
+# Layering (§7.1):  defaults ← this file (global) ← regions.<R> ← countries.<ISO>
+# The shipped overlays under config/regions/*.yaml and config/countries/*.yaml
+# are merged BENEATH the matching blocks of this file (mergeOverlays(); your
+# values win), so a one-line `countries.DE: {}` already carries the §7.4.2
+# Germany overlay.
+#
+# ${VAR} / ${VAR:-default} are resolved from the environment after YAML
+# parsing. Inside a flow map (`{ a: b }`) the reference MUST be quoted.
+#
+# Env used here: SF_CLIENT_ID, VAULT_USER, VAULT_PASSWORD, MIG_DATABASE_URL
+# and — only because the `cn` wave references CN — VAULT_CN_USER,
+# VAULT_CN_PASSWORD, MIG_DATABASE_URL_CN (see config/countries/CN.yaml).
+
+version: 1
+
+# --- Salesforce source (§2.1) ---------------------------------------------
+source:
+  apiVersion: "67.0"
+  loginUrl: https://acme.my.salesforce.com
+  auth:
+    kind: jwt # jwt | clientCredentials
+    clientId: "${SF_CLIENT_ID}"
+    username: migration@acme.com
+    aud: https://login.salesforce.com # login / test / My Domain URL (§2.1.1)
+    privateKeyPath: ./sf.key # or privateKey: "${SF_PRIVATE_KEY}"
+    # clientCredentials form:
+    # auth: { kind: clientCredentials, clientId: "${SF_CLIENT_ID}", clientSecret: "${SF_CLIENT_SECRET}" }
+  timezone: UTC
+
+# --- Vault CRM target (§2.5, §3.5) — overridable per region/country ---------
+target:
+  vaultDns: acme-crm.veevavault.com
+  apiVersion: v26.2
+  auth:
+    { kind: password, username: "${VAULT_USER}", password: "${VAULT_PASSWORD}" }
+  # or: auth: { kind: accessToken, token: "${VAULT_TOKEN}" }
+  # or: auth: { kind: oauth, profileId: "${VAULT_OIDC_PROFILE}", idpToken: "${VAULT_IDP_TOKEN}", clientId: acme-oidc }
+  clientId: acme-commercial-veeva-migration-client-crm # X-VaultAPI-ClientID
+  migrationMode: true # X-VaultAPI-MigrationMode: audit fields, state, inactive status loadable
+  unchangedFieldBehavior: AlwaysIgnore # AlwaysIgnore | IgnoreSetOnCreateOnly | NeverIgnore
+  migrationUserId: 12345 # numeric Vault user id: audit fallback + unmappedUserPolicy = migrationUser
+  # vaultId: derived from auth at login — read-only, never set it here
+
+# --- Staging / residency (§7.5) — overridable per region/country ------------
+staging: { databaseUrl: "${MIG_DATABASE_URL}", runDir: ./runs }
+dataResidency: us # eu | us | cn | jp — host region for countries without an overlay
+
+# --- Legacy id (§3.2) --------------------------------------------------------
+legacyId:
+  preferred: [legacy_crm_id__v, external_id__v, legacy_crm_id__c]
+  format: "{id18}" # {id18} | {id15}
+  externalIdFormat: "SF:{orgId15}:{id18}"
+  allowMdl: false # let preflight create legacy_crm_id__c via MDL when no candidate exists
+
+# --- Scope window (§1.1, §7.2) — overridable per region/country -------------
+scope:
+  historyMonths: 24
+  samplesIncludeCalls: false # US overlay sets true (call2 joins the `samples` family)
+  # cutoffDate: 2024-09-01          # explicit ISO date wins over historyMonths
+  # sampleRetentionMonths: 36       # family `samples` — widen only
+  # tovRetentionMonths: 60          # family `tov` (em_*, expense_*) — widen only
+  # objects: { multichannel_consent: { historyMonths: null } }   # null = unscoped
+
+# --- Delta (§4.1) ------------------------------------------------------------
+delta: { overlapMinutes: 10, safetyLagMinutes: 5 }
+
+# --- Throughput (§2.1.7, §2.5.2, §8.1, §2.2) --------------------------------
+performance:
+  sfdcBulkConcurrency: 4
+  sfdcRestConcurrency: 2
+  vaultConcurrency: 4
+  vaultBatch: 500
+  burstFloor: 200
+  sfdcApiFloorPct: 20
+  batchWallTimeMs: 60000
+  sortChunkRows: 500000
+  blobBatchBytes: 67108864 # §8.6 blob batch cap (64 MiB)
+
+# --- Extract / load / pending FKs (§2.1.4, §2.2, §2.5.4, §8.4) ---------------
+extract: { closureStrategy: soqlIn, closureMaxRounds: 20 } # soqlIn | composite
+load: { strategy: vobjects } # vobjects | loader
+pendingFk: { maxRounds: 3 }
+
+# --- Reconciliation (§8.8) — overridable per region/country -----------------
+reconcile: { sampleSize: 200, tolerance: 0 } # final-delta forces tolerance 0
+
+# --- Preflight (§2.6, §3.3, §5.3) ----------------------------------------------
+preflight:
+  probeWrites: false
+  probeObject: migration_probe__c
+  naturalKeyReview: true
+  reprobe: false
+
+# --- Post-load (§2.5.6) — overridable per region/country --------------------
+postLoad: { recalculateRollups: auto, updateCorporateCurrency: true } # auto | required | off
+
+# --- Picklists (§2.5.6, §7.1) — overridable per region/country --------------
+picklists:
+  derive: strip_vod_lowercase_v # strip_vod_lowercase_v | none
+  onUnmapped: error # error | skip | createValue (needs --allow-picklist-create)
+  leaveReactivated: false
+  # value maps: picklists.<object>.<field>: { <sourceValue>: <targetName> | null }   (null = skip value)
+  # account.specialty: { CD: cardiovascular_disease__v }
+
+# --- Locale crosswalk (§6.0.3) ----------------------------------------------
+locales:
+  language: { en_US: English, de: German, fr: French, ja: Japanese }
+  locale: { en_US: United States, de_DE: Germany }
+
+# --- Name templates / formats / phone / postal / tz / privacy (§7.2) --------
+# All overridable per region/country; the values below are the tool defaults.
+nameTemplates:
+  person: "{FirstName} {LastName}" # tokens {FirstName} {MiddleName} {LastName} {Suffix} {Salutation} {Furigana} {separator}
+  speaker: "{LastName}, {FirstName}"
+  userTerritory: "{username}:{territory}"
+  separator: " " # " " | "　" (full-width) | ""
+formats: # CSV/SQL staging inputs only (§8.6) — the API side is never localised
+  date: "YYYY-MM-DD"
+  datetime: "YYYY-MM-DDTHH:mm:ssZ"
+  decimalSeparator: "."
+  thousandsSeparator: ","
+phone: { normalise: false } # + defaultRegion: DE  (E.164 when unambiguous)
+postalCode: { onMismatch: warn } # + pattern: "^\\d{5}$"   (validation only; warn | fail)
+defaultTimezone: UTC # IANA; used by emEventLocalTimes when the source has no tz
+privacy:
+  consentFullHistory: false
+  crossBorderTransfer: allowed # allowed | forbidden
+  # erasureListPath: ./privacy/erasures.csv   # SFDC ids skipped with ERASED_SKIPPED, never resurrected
+
+# --- Object overrides (§6, §7.2.1) — overridable per region/country ---------
+# Generic keys accepted under every objects.<key> (defaults from §6.2 / the module):
+#   enabled, optional, countryOf, deletePolicy (delete|inactivate|ignore), inactivateBy[],
+#   createPolicy (create|match-only), statusFromFlag, inactiveStatuses[], preserveName,
+#   preserveAutoNumberName, loadUnlockFlag, allowTypeChange, dateRange (omit|fail),
+#   unmappedUserPolicy (fail|migrationUser|skipRow|omit), legacyIdField,
+#   externalIdOwnedBy (integration|migration), rewriteCompositeExternalId,
+#   customFields{mode: none|listed|allMatching, include[], exclude[]}, required{field: bool},
+#   fields{add[], override[], remove[]}, objectType{DeveloperName: api_name},
+#   state{status: state_api_name}, scope{historyMonths}, load{noTriggers, migrationMode,
+#   batchSize, partitionBy{field, order}, orderBy[], depthOrderBy, sampleStrategy,
+#   fallbackStrategy, sampleTriggerRejectFallback, strategy},
+#   blobs{<name>: required|optional|attachment|skip}
+# Module-specific flags (loadCallType, vidField, …) pass through to mapping.options.
+objects:
+  user: { mode: match } # create mode adds securityPolicyId, licenseType, securityProfile map:
+  # user: { mode: create, usernameTemplate: "{Username}", securityPolicyId: 1, licenseType: full__v, securityProfile: { "Standard User": business_admin__v } }
+  account:
+    countryOf: "field:Country_vod__r.Alpha_2_Code_vod__c"
+    deletePolicy: inactivate
+    externalIdOwnedBy: integration
+    useParentIdFallback: false
+    vidField: VeevaID_vod__c
+    contactToPersonAccount: false
+    loadFormattedName: false
+    depthOrder: false
+  address: { line1Overflow: truncate } # truncate | spillToLine2 | fail
+  approved_document: { htmlOverflow: truncate } # + publishMethod
+  sent_email: { contentOverflow: truncate }
+  call2:
+    countryOf: [account, "user:User_vod__c", "user:OwnerId"]
+    deletePolicy: ignore
+    load:
+      noTriggers: true
+      partitionBy: { field: Parent_Call_vod__c, order: ["null", notNull] } # quote "null" — a bare YAML null is not the literal
+    loadCallType: false
+    loadDeviceFields: false
+  country: { targetKeyField: abbreviation__v }
+  territory: { createPolicy: match-only, countryOf: fromUsers } # field:<f> | prefixMap | fromUsers | const:<ISO>; + countryPrefixMap: { "DE-": DE }
+  em_event: {} # + configurationMap: { <Event_Configuration_vod__c id>: <em_event_configuration__v id> }, stageMap: { <stage>: <state> }
+  multichannel_consent:
+    load: { orderBy: [Capture_Datetime_vod__c, Id] }
+    # configMaps: { consentType: {}, consentLine: {}, contentType: {}, consentTemplate: {} }   # keyed by SFDC 18-char Id (§6.3.42)
+  email_activity: { loadIpAddress: true }
+  sample_transaction: { load: { sampleStrategy: noTriggersRecalc } }
+  expense_header: { optional: true }
+  expense_line: { optional: true }
+  key_message: { createPolicy: match-only }
+  account_territory: { enabled: false }
+
+# --- Regions (§7.3) ------------------------------------------------------------
+# Identical to config/regions/*.yaml (merged beneath these; listed for clarity).
+regions:
+  EU:
+    dataResidency: eu
+    scope: { tovRetentionMonths: 60 }
+    privacy: { consentFullHistory: true }
+    objects: { email_activity: { loadIpAddress: false } }
+  APAC: { dataResidency: jp }
+  NA: { dataResidency: us }
+  LATAM: { dataResidency: us }
+
+# --- Countries (§7.4) ----------------------------------------------------------
+# Every wave country MUST appear here (CONFIG_COUNTRY_NO_OVERLAY, exit 5). The
+# shipped overlay config/countries/<ISO>.yaml is merged beneath each entry, so
+# an empty block is enough; add keys to override (yours win, arrays of field
+# rows merge by target, `remove` lists are unioned).
+countries:
+  NL: {}
+  DE: {}
+  FR: {}
+  IT: {}
+  ES: {}
+  GB: {}
+  US: {}
+  CA: {}
+  JP: {}
+  AU: {}
+  KR: {}
+  CN: {} # separate CN vault — needs VAULT_CN_USER / VAULT_CN_PASSWORD / MIG_DATABASE_URL_CN
+  BR: {}
+  MX: {}
+  # Example of a country without a shipped overlay:
+  # AT: { region: EU, defaultTimezone: Europe/Vienna }
+
+# --- Waves (§7.1) --------------------------------------------------------------
+waves:
+  - { name: pilot, countries: [NL] }
+  - { name: eu1, countries: [DE, FR, IT, ES, GB] }
+  - { name: na, countries: [US, CA] }
+  - { name: apac, countries: [JP, AU, KR] }
+  - { name: cn, countries: [CN] }
+  - { name: latam, countries: [BR, MX], freezeAt: "2027-03-01T00:00:00Z" }

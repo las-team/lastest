@@ -112,7 +112,8 @@ export async function runDeletes(
 
   const inactivateFields: VaultRow = { status__v: "inactive__v" };
   for (const f of plan.mapping.options.inactivateBy)
-    if (plan.target.metadata.fields[f.field]) inactivateFields[f.field] = f.value;
+    if (plan.target.metadata.fields[f.field])
+      inactivateFields[f.field] = f.value;
   const state = req.policy === "delete" ? "deleted" : "inactivated";
 
   let batchNo = 0;
@@ -127,7 +128,10 @@ export async function runDeletes(
           ? rt.deps.vault.deleteRecords(
               plan.target.targetObject,
               batch.map((c) => c.idRow.vaultId),
-              { referenceId: opts.referenceId, migrationMode: opts.migrationMode },
+              {
+                referenceId: opts.referenceId,
+                migrationMode: opts.migrationMode,
+              },
             )
           : rt.deps.vault.update(
               plan.target.targetObject,
@@ -144,7 +148,15 @@ export async function runDeletes(
       out.failed += batch.length;
       await rt.rowResults(
         batch.map((c) =>
-          rowResult(plan, c.sfdcId, batchNo, "failed", errorTypeOf(e), errorMessageOf(e), rt.now()),
+          rowResult(
+            plan,
+            c.sfdcId,
+            batchNo,
+            "failed",
+            errorTypeOf(e),
+            errorMessageOf(e),
+            rt.now(),
+          ),
         ),
       );
       continue;
@@ -160,8 +172,23 @@ export async function runDeletes(
         if (notFound && req.policy === "delete") {
           // already gone in Vault: the delete is effectively applied
           out.applied++;
-          await rt.deps.store.idMap.markDeleted(plan.unit.objectKey, c.sfdcId, c.deletedDate);
-          results.push(rowResult(plan, c.sfdcId, batchNo, state, null, null, rt.now(), c.idRow.vaultId));
+          await rt.deps.store.idMap.markDeleted(
+            plan.unit.objectKey,
+            c.sfdcId,
+            c.deletedDate,
+          );
+          results.push(
+            rowResult(
+              plan,
+              c.sfdcId,
+              batchNo,
+              state,
+              null,
+              null,
+              rt.now(),
+              c.idRow.vaultId,
+            ),
+          );
           continue;
         }
         out.failed++;
@@ -180,13 +207,34 @@ export async function runDeletes(
         continue;
       }
       out.applied++;
-      await rt.deps.store.idMap.markDeleted(plan.unit.objectKey, c.sfdcId, c.deletedDate);
-      results.push(rowResult(plan, c.sfdcId, batchNo, state, null, null, rt.now(), c.idRow.vaultId));
+      await rt.deps.store.idMap.markDeleted(
+        plan.unit.objectKey,
+        c.sfdcId,
+        c.deletedDate,
+      );
+      results.push(
+        rowResult(
+          plan,
+          c.sfdcId,
+          batchNo,
+          state,
+          null,
+          null,
+          rt.now(),
+          c.idRow.vaultId,
+        ),
+      );
     }
     await rt.rowResults(results);
     rt.noteBurst(plan);
     log.info(
-      { batch_no: batchNo, rows: batch.length, policy: req.policy, applied: out.applied, failed: out.failed },
+      {
+        batch_no: batchNo,
+        rows: batch.length,
+        policy: req.policy,
+        applied: out.applied,
+        failed: out.failed,
+      },
       "delete batch",
     );
   }
