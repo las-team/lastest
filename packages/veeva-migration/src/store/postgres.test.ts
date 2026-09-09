@@ -309,6 +309,28 @@ describe("PostgresStateStore (fake executor)", () => {
     expect(db.calls[1].text).not.toContain("on conflict");
   });
 
+  it("runs.update drops undefined patch values (never writes them as NULL)", async () => {
+    const { db, store } = make();
+    db.responses.push([{ run_id: "r1" }]);
+    await store.runs.update("r1", {
+      status: "failed",
+      mappingHash: undefined,
+      sfdcNowAtStart: undefined,
+      freezeAt: null,
+    });
+    const upd = db.calls[0];
+    expect(upd.text).toContain('"status" = $1');
+    expect(upd.text).toContain('"freeze_at" = $2');
+    expect(upd.text).not.toContain("mapping_hash");
+    expect(upd.text).not.toContain("sfdc_now_at_start");
+    expect(upd.params.slice(0, 2)).toEqual(["failed", null]);
+    // an all-undefined patch issues no update at all (existence check only)
+    db.responses.push([{ run_id: "r1" }]);
+    await store.runs.update("r1", { mappingHash: undefined });
+    expect(db.calls).toHaveLength(2);
+    expect(db.calls[1].text).toMatch(/^select/);
+  });
+
   it("rowResults.query builds state any() and pagination; counts use group by", async () => {
     const { db, store } = make();
     await store.rowResults.query({

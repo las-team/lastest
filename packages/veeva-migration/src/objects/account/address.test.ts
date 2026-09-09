@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  CITY_TARGETS,
   DEFAULT_LINE1_MAX,
+  POSTAL_CODE_TARGETS,
   address,
   addressLine1,
   addressLine2,
+  hasLine2Target,
   line1Policy,
+  naturalKeyRules,
   postalCode,
   splitLine1,
 } from "./address";
@@ -46,58 +50,63 @@ function makeConfig(addressOverrides: Record<string, unknown> = {}) {
   });
 }
 
-function metadata() {
+const ADDRESS_FIELDS: Parameters<typeof buildVaultMetadata>[1] = [
+  {
+    name: "account__v",
+    type: "Object",
+    object: { name: "account__v" },
+    required: true,
+    relationship_type: "parent",
+  },
+  { name: "street_address_2_cda__v", type: "String", max_length: 100 },
+  { name: "city_cda__v", type: "String", max_length: 40 },
+  {
+    name: "state_province__v",
+    type: "Picklist",
+    picklist: "state_province__v",
+  },
+  { name: "postal_code_cda__v", type: "String", max_length: 20 },
+  { name: "zip_4__v", type: "String", max_length: 4 },
+  { name: "country__v", type: "Picklist", picklist: "country__v" },
+  {
+    name: "external_id__v",
+    type: "String",
+    max_length: 120,
+    unique: true,
+  },
+  { name: "mobile_id__v", type: "String", max_length: 100 },
+  { name: "primary__v", type: "Boolean" },
+  { name: "inactive__v", type: "Boolean" },
+  { name: "business__v", type: "Boolean" },
+  { name: "phone__v", type: "String", max_length: 40 },
+  { name: "latitude__v", type: "Number", scale: 6 },
+  { name: "license__v", type: "String", max_length: 25 },
+  {
+    name: "license_status__v",
+    type: "Picklist",
+    picklist: "license_status__v",
+  },
+  { name: "license_expiration_date__v", type: "Date" },
+  {
+    name: "dea_schedule__v",
+    type: "Picklist",
+    picklist: "dea_schedule__v",
+    multi_value: true,
+  },
+  {
+    name: "controlling_address__v",
+    type: "Object",
+    object: { name: "address__v" },
+  },
+  { name: "office_notes__v", type: "LongText" },
+];
+
+function metadata(exclude: string[] = []) {
   return resolveMetadata(
-    buildVaultMetadata("address__v", [
-      {
-        name: "account__v",
-        type: "Object",
-        object: { name: "account__v" },
-        required: true,
-        relationship_type: "parent",
-      },
-      { name: "street_address_2_cda__v", type: "String", max_length: 100 },
-      { name: "city_cda__v", type: "String", max_length: 40 },
-      {
-        name: "state_province__v",
-        type: "Picklist",
-        picklist: "state_province__v",
-      },
-      { name: "postal_code_cda__v", type: "String", max_length: 20 },
-      { name: "zip_4__v", type: "String", max_length: 4 },
-      { name: "country__v", type: "Picklist", picklist: "country__v" },
-      {
-        name: "external_id__v",
-        type: "String",
-        max_length: 120,
-        unique: true,
-      },
-      { name: "mobile_id__v", type: "String", max_length: 100 },
-      { name: "primary__v", type: "Boolean" },
-      { name: "inactive__v", type: "Boolean" },
-      { name: "business__v", type: "Boolean" },
-      { name: "phone__v", type: "String", max_length: 40 },
-      { name: "latitude__v", type: "Number", scale: 6 },
-      { name: "license__v", type: "String", max_length: 25 },
-      {
-        name: "license_status__v",
-        type: "Picklist",
-        picklist: "license_status__v",
-      },
-      { name: "license_expiration_date__v", type: "Date" },
-      {
-        name: "dea_schedule__v",
-        type: "Picklist",
-        picklist: "dea_schedule__v",
-        multi_value: true,
-      },
-      {
-        name: "controlling_address__v",
-        type: "Object",
-        object: { name: "address__v" },
-      },
-      { name: "office_notes__v", type: "LongText" },
-    ]),
+    buildVaultMetadata(
+      "address__v",
+      ADDRESS_FIELDS.filter((f) => !exclude.includes(f.name)),
+    ),
     {
       picklists: {
         state_province__v: ["california__v", "new_york__v"],
@@ -319,7 +328,7 @@ describe("address module", () => {
       "legacy_id",
       "external_id",
       "mobile_id",
-      "natural_key",
+      ...naturalKeyRules().map(() => "natural_key"),
     ]);
     const natural = address.match[3];
     expect(natural.keys?.map((k) => k.target)).toEqual([
@@ -330,6 +339,27 @@ describe("address module", () => {
       "country__v",
     ]);
     expect(natural.keys?.[1].caseInsensitive).toBe(true);
+    expect(natural.evidence).toBe("OBS");
+    // one natural-key rule per city / postal-code spelling pair, OBS pair first,
+    // so the matcher (which skips a rule whose key target is missing) always
+    // finds the variant the vault has
+    const naturals = address.match.filter((m) => m.method === "natural_key");
+    expect(naturals).toHaveLength(
+      CITY_TARGETS.length * POSTAL_CODE_TARGETS.length,
+    );
+    const pairs = naturals.map((m) => [m.keys![2].target, m.keys![3].target]);
+    for (const city of CITY_TARGETS)
+      for (const postal of POSTAL_CODE_TARGETS)
+        expect(pairs).toContainEqual([city, postal]);
+    expect(new Set(pairs.map((p) => p.join("/"))).size).toBe(naturals.length);
+    for (const m of naturals.slice(1)) {
+      expect(m.evidence).toBe("UNV");
+      expect(m.sameCountry).toBe(true);
+      expect(m.keys!.map((k) => k.source)).toEqual(
+        natural.keys!.map((k) => k.source),
+      );
+      expect(m.keys![2].caseInsensitive).toBe(true);
+    }
   });
 
   it("is full scope (no predicate) and materialises with the line-1 policy default", () => {
@@ -465,6 +495,53 @@ describe("address module", () => {
     );
     expect(failed.status).toBe("failed");
     expect(failed.failure?.code).toBe("TRUNCATION_FAIL");
+
+    // spillToLine2 on a vault without any line-2 field (both spellings pruned
+    // by preflight): the overflow has nowhere to go, so line 1 is truncated
+    // with a diagnostic that names the missing target — never a silent cut
+    const noLine2 = applyMapping(
+      row({ Name: LONG_LINE_1 }),
+      mappingFor({
+        line1Overflow: "spillToLine2",
+        fields: { remove: ["street_address_2_cda__v", "address_line_2__v"] },
+      }),
+      applyCtx({ metadata: metadata(["street_address_2_cda__v"]) }),
+    );
+    expect(noLine2.status).toBe("ok");
+    expect(noLine2.payload.name__v).toBe(LONG_LINE_1.slice(0, 128));
+    expect(noLine2.payload.street_address_2_cda__v).toBeUndefined();
+    expect(noLine2.payload.address_line_2__v).toBeUndefined();
+    expect(noLine2.diagnostics).toContainEqual(
+      expect.objectContaining({
+        kind: "truncated",
+        code: "LINE1_SPILL_TARGET_MISSING",
+        field: "name__v",
+      }),
+    );
+    expect(noLine2.diagnostics).not.toContainEqual(
+      expect.objectContaining({ code: "LINE1_SPILLED" }),
+    );
+    // an explicit row-level `truncation: fail` still fails the row instead
+    const noLine2Fail = applyMapping(
+      row({ Name: LONG_LINE_1 }),
+      mappingFor({
+        line1Overflow: "spillToLine2",
+        fields: {
+          remove: ["street_address_2_cda__v", "address_line_2__v"],
+          override: [
+            {
+              source: "Name",
+              target: "name__v",
+              transform: "custom(addressLine1)",
+              truncation: "fail",
+            },
+          ],
+        },
+      }),
+      applyCtx({ metadata: metadata(["street_address_2_cda__v"]) }),
+    );
+    expect(noLine2Fail.status).toBe("failed");
+    expect(noLine2Fail.failure?.code).toBe("TRUNCATION_FAIL");
   });
 
   it("validates the postal code against the country pattern (warn keeps, fail rejects)", () => {
@@ -554,9 +631,16 @@ describe("address custom transforms", () => {
       line1Overflow: "spillToLine2",
     };
     const nameField = { name: "name__v", maxLength: 10 };
+    const line2Field = { name: "street_address_2_cda__v", maxLength: 100 };
     const line1Ctx = buildTransformContext({
       field: { source: "Name", target: "name__v" },
       targetField: nameField,
+      metadata: {
+        fields: {
+          name__v: { ...nameField } as never,
+          street_address_2_cda__v: { ...line2Field } as never,
+        },
+      },
       mapping: { options: opts },
     });
     const line2Ctx = buildTransformContext({
@@ -577,6 +661,49 @@ describe("address custom transforms", () => {
       value: "one two",
       diagnostic: { code: "LINE1_SPILLED" },
     });
+    expect(hasLine2Target(line1Ctx)).toBe(true);
+    // metadata known but no line-2 spelling on the object → truncate loudly
+    const noLine2Ctx = buildTransformContext({
+      field: { source: "Name", target: "name__v" },
+      targetField: nameField,
+      metadata: { fields: { name__v: { ...nameField } as never } },
+      mapping: { options: opts },
+    });
+    expect(hasLine2Target(noLine2Ctx)).toBe(false);
+    expect(addressLine1(r.Name, r, noLine2Ctx)).toEqual({
+      value: "one two th",
+      diagnostic: {
+        kind: "truncated",
+        field: "name__v",
+        code: "LINE1_SPILL_TARGET_MISSING",
+        detail: expect.stringContaining("street_address_2_cda__v"),
+      },
+    });
+    // the UNV spelling counts too
+    const altCtx = buildTransformContext({
+      field: { source: "Name", target: "name__v" },
+      targetField: nameField,
+      metadata: {
+        fields: {
+          name__v: { ...nameField } as never,
+          address_line_2__v: {
+            ...line2Field,
+            name: "address_line_2__v",
+          } as never,
+        },
+      },
+      mapping: { options: opts },
+    });
+    expect(addressLine1(r.Name, r, altCtx)).toMatchObject({
+      value: "one two",
+      diagnostic: { code: "LINE1_SPILLED" },
+    });
+    // no metadata at all (field list unknown) → trust the policy
+    const unknownCtx = buildTransformContext({
+      field: { source: "Name", target: "name__v" },
+      mapping: { options: opts },
+    });
+    expect(hasLine2Target(unknownCtx)).toBe(true);
     expect(addressLine2(r.Address_line_2_vod__c, r, line2Ctx)).toEqual({
       value: "three four Suite 9",
     });

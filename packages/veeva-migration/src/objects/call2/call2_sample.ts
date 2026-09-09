@@ -16,8 +16,17 @@
  *  - `triggersOnCallSamples` → loaded **with** triggers so Vault regenerates
  *    disbursement transactions; `sample_transaction` disbursements are not
  *    loaded (other types still are).
- * `call2SampleNoTriggers(strategy)` is the pure rule the engine applies to
- * `mapping.load.noTriggers`; the module default is `true`.
+ * `call2SampleNoTriggers(strategy)` is the pure rule for this object's
+ * `load.noTriggers`; the module default is `true` (every strategy but
+ * `triggersOnCallSamples`). The strategy is keyed on
+ * `objects.sample_transaction.load.sampleStrategy` **only** — this module
+ * carries no `load.sampleStrategy` of its own, so the value cannot be set in
+ * two places (and cannot leak into `mappingHash`). Wiring point: the rule has
+ * to be applied where the country config is visible, i.e. `materialise()`
+ * (`config/resolve.ts`) after the `objects.call2_sample.load` overlay merge —
+ * an explicit `objects.call2_sample.load.noTriggers` wins over the rule. Until
+ * that wiring lands, `triggersOnCallSamples` does **not** change this object's
+ * `X-VaultAPI-NoTriggers` header (the module default `true` applies).
  *
  * `Lot_vod__c` is the lot **name** (text 80), not the lot FK. `Amount_vod__c`
  * / `Product_Value_vod__c` are currency fields → `CurrencyIsoCode` feeds
@@ -140,8 +149,10 @@ export const call2_sample = defineObject({
   deletePolicy: "delete",
   inactivate: [],
   createPolicy: "create",
-  load: { noTriggers: true, sampleStrategy: "noTriggersRecalc" },
+  // no `sampleStrategy` here: it is decided once per country on
+  // `objects.sample_transaction.load.sampleStrategy` (§6.3.34/§6.3.35)
+  load: { noTriggers: true },
   match: CALL2_MATCH_RULES,
   notes:
-    "Samples family child of call2 (§6.3.34): scoped through the parent's call date widened by sampleRetentionMonths; NoTriggers under every sample strategy except triggersOnCallSamples (call2SampleNoTriggers); deleted with the parent (§4.4).",
+    "Samples family child of call2 (§6.3.34): scoped through the parent's call date widened by sampleRetentionMonths; NoTriggers under every sample strategy except triggersOnCallSamples (call2SampleNoTriggers — keyed on objects.sample_transaction.load.sampleStrategy, applied at materialise time); deleted with the parent (§4.4).",
 });

@@ -14,6 +14,7 @@ import {
   crossCheckUpdated,
   detectUndeletes,
   fetchDeletedFeed,
+  isLater,
   keySetReconcile,
   planDeltaWindow,
   routeDeletes,
@@ -190,6 +191,22 @@ describe("delete sources (§4.4)", () => {
     expect(r.latestDateCovered).toBe("2026-09-09T00:00:00Z");
   });
 
+  it("fetchDeletedFeed normalises the feed's +0000 offset form to ISO Z", async () => {
+    const sfdc = new FakeSfdcClient().addDescribe(sampleCall2Describe());
+    sfdc.addDeleted(
+      "Call2_vod__c",
+      "a0K000000000009",
+      "2026-09-05T10:00:00.000+0000",
+    );
+    const r = await fetchDeletedFeed(
+      sfdc,
+      "Call2_vod__c",
+      "2026-09-01T00:00:00Z",
+      "2026-09-09T00:00:00Z",
+    );
+    expect(r.rows[0].deletedDate).toBe("2026-09-05T10:00:00.000Z");
+  });
+
   it("keySetReconcile routes id-map rows missing from the source as deleted at wm_hi", async () => {
     const sfdc = new FakeSfdcClient()
       .addDescribe(sampleCall2Describe())
@@ -279,6 +296,39 @@ describe("routeDeletes (§4.3 step 5, last-wins)", () => {
     ]);
     expect(r.superseded.map((d) => d.id)).toEqual([B]);
     expect(r.ignored).toEqual([]);
+  });
+
+  it("compares instants, not strings: a +0000 deletedDate against a Z modstamp", () => {
+    const X = to18("a0K000000000004");
+    const Y = to18("a0K000000000005");
+    // same instant in two renderings → the live row did NOT change after the delete
+    const sameInstant = routeDeletes(
+      [{ id: X, deletedDate: "2026-09-05T10:00:00.000+0000", source: "feed" }],
+      "delete",
+      new Map([[X, "2026-09-05T10:00:00.000Z"]]),
+    );
+    expect(sameInstant.apply.map((d) => d.id)).toEqual([X]);
+    expect(sameInstant.superseded).toEqual([]);
+    // a later modstamp in the other rendering supersedes
+    const later = routeDeletes(
+      [{ id: X, deletedDate: "2026-09-05T10:00:00.000+0000", source: "feed" }],
+      "delete",
+      new Map([[X, "2026-09-05T10:00:01.000Z"]]),
+    );
+    expect(later.superseded.map((d) => d.id)).toEqual([X]);
+    // dedupe keeps the later instant regardless of rendering
+    const dedup = routeDeletes(
+      [
+        { id: Y, deletedDate: "2026-09-06T00:00:00.000+0000", source: "feed" },
+        { id: Y, deletedDate: "2026-09-05T00:00:00Z", source: "queryAll" },
+      ],
+      "delete",
+    );
+    expect(dedup.apply[0].source).toBe("feed");
+    expect(
+      isLater("2026-09-05T10:00:00.000Z", "2026-09-05T10:00:00.000+0000"),
+    ).toBe(false);
+    expect(isLater("not-a-date-b", "not-a-date-a")).toBe(true); // lexical fallback
   });
 
   it("policy ignore lists rows for the report only", () => {

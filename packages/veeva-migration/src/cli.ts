@@ -112,6 +112,7 @@ export function toRunOptions(
     allowPicklistCreate: Boolean(f.allowPicklistCreate),
     allowPicklistReactivate: Boolean(f.allowPicklistReactivate),
     probeWrites: Boolean(f.probeWrites),
+    reprobe: Boolean(f.reprobe),
     freezeAt:
       typeof f.freezeAt === "string"
         ? new Date(f.freezeAt).toISOString()
@@ -346,6 +347,7 @@ function minimalConfig(): MigrationConfig {
     delta: { overlapMinutes: 10, safetyLagMinutes: 5 },
     performance: {
       sfdcBulkConcurrency: 4,
+      sfdcBulkMaxRecords: 100_000,
       sfdcRestConcurrency: 2,
       vaultConcurrency: 4,
       vaultBatch: 500,

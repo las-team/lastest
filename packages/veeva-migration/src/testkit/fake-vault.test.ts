@@ -194,6 +194,14 @@ describe("FakeVaultClient", () => {
     await expect(c.deleteRecords("user__sys", ["1"])).rejects.toThrow(
       /cannot be deleted/,
     );
+    // ≤ 500 ids per DELETE /vobjects/{object} call (§2.5.4)
+    const many = Array.from({ length: 501 }, (_, i) => `V${i}`);
+    await expect(c.deleteRecords("account__v", many)).rejects.toThrow(
+      /Maximum 500 records/,
+    );
+    expect(
+      (await c.deleteRecords("account__v", many.slice(0, 500))).data,
+    ).toHaveLength(500);
   });
   it("metadata, picklists (active only), object types, MDL and burst counters", async () => {
     const c = await client();

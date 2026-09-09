@@ -1,20 +1,28 @@
 import { describe, expect, it } from "vitest";
 import {
   SAMPLE_INVENTORY_ITEM_LOT_FIELDS,
-  lotRef,
-  readLotId,
+  SAMPLE_INVENTORY_ITEM_LOT_REFERENCE,
+  resolveLotLookupField,
   sample_inventory_item,
 } from "./sample_inventory_item";
 import { validateObjectModule } from "../types";
 import { materialise, resolveCountry } from "../../config/resolve";
 import { parseConfig } from "../../config/schema";
 import { applyMapping } from "../../transform/apply";
+import { buildColumnList, mappingFkColumns } from "../../extract/columns";
 import { buildScopePredicate } from "../../extract/scope";
 import {
+  checkSourceUnit,
+  classifyRow,
+  createSourceContext,
+} from "../../preflight/source";
+import { FindingCollector } from "../../preflight/findings";
+import {
+  FakeSfdcClient,
   SAMPLE_USER_ID,
   buildCountryContext,
+  buildDescribe,
   buildIdResolver,
-  buildTransformContext,
   buildVaultMetadata,
   resolveMetadata,
 } from "../../testkit";
@@ -96,6 +104,34 @@ function sampleRow(extra: Partial<SourceRow> = {}): SourceRow {
   };
 }
 
+/** Describe of the item object whose lot lookup carries the given name. */
+function itemDescribe(lotField: string) {
+  return buildDescribe("Sample_Inventory_Item_vod__c", [
+    { name: "Name", type: "string" },
+    {
+      name: "Sample_Inventory_vod__c",
+      type: "reference",
+      referenceTo: ["Sample_Inventory_vod__c"],
+      relationshipName: "Sample_Inventory_vod__r",
+    },
+    { name: lotField, type: "reference", referenceTo: ["Sample_Lot_vod__c"] },
+    { name: "Quantity_vod__c", type: "double" },
+    {
+      name: "Product_vod__c",
+      type: "reference",
+      referenceTo: ["Product_vod__c"],
+    },
+    { name: "Mobile_ID_vod__c", type: "string" },
+  ]);
+}
+
+/** Parent describe (the via-parent scope path is resolved through it). */
+function parentDescribe() {
+  return buildDescribe("Sample_Inventory_vod__c", [
+    { name: "Inventory_Date_Time_vod__c", type: "datetime" },
+  ]);
+}
+
 function run(
   row: SourceRow,
   opts: {
@@ -128,7 +164,6 @@ function run(
       ids,
       migrationUserId: 1,
       runMode: "init",
-      custom: sample_inventory_item.custom,
     }),
   };
 }
@@ -174,9 +209,9 @@ describe("sample_inventory_item module", () => {
     expect(sample_inventory_item.objectTypes).toEqual({});
     expect(sample_inventory_item.states).toEqual({});
     expect(sample_inventory_item.blockS.ownerId).toBe(false);
-    expect(sample_inventory_item.optionDefaults).toEqual({
-      lotLookupField: "Lot_vod__c",
-    });
+    // no inert config knobs: the lot lookup is resolved at preflight / overridden per row
+    expect(sample_inventory_item.optionDefaults).toBeUndefined();
+    expect(sample_inventory_item.custom).toBeUndefined();
     expect(sample_inventory_item.match.map((m) => m.method)).toEqual([
       "legacy_id",
       "mobile_id",
@@ -210,13 +245,17 @@ describe("sample_inventory_item module", () => {
       transform: { kind: "ref", objectKey: "sample_inventory" },
     });
     expect(byTarget.get("sample_inventory__v")?.unverifiedSource).toBeFalsy();
+    // a real FK row (id-set collection, closure, FK classification) whose
+    // describe miss is blocking — not an unverifiedSource info-drop
     expect(byTarget.get("lot__v")).toMatchObject({
       source: "Lot_vod__c",
       required: "Y",
       evidence: "UNV",
-      unverifiedSource: true,
-      transform: { kind: "custom", fnName: "lotRef" },
+      sourceType: "reference",
+      transform: { kind: "ref", objectKey: "sample_lot" },
     });
+    expect(byTarget.get("lot__v")?.unverifiedSource).toBeFalsy();
+    expect(byTarget.get("lot__v")?.optionalSource).toBeFalsy();
     expect(byTarget.get("quantity__v")).toMatchObject({
       source: "Quantity_vod__c",
       required: "Y",
@@ -276,30 +315,126 @@ describe("sample_inventory_item module", () => {
     );
   });
 
-  it("resolves the lot through whichever lookup the org has (custom lotRef)", () => {
-    // org names the lookup Sample_Lot_vod__c and has no Lot_vod__c column
-    const alt = run(
-      sampleRow({ Lot_vod__c: undefined, Sample_Lot_vod__c: LOT_ID }),
-    );
-    expect(alt.result.status).toBe("ok");
-    expect(alt.result.payload.lot__v).toEqual({
-      $fk: { object: "sample_lot", sfdcId: LOT_ID },
-    });
-    // configured lookup name wins
-    const cfg = run(sampleRow({ Lot_vod__c: "", Lot_Ref__c: LOT_ID }), {
-      config: { sample_inventory_item: { lotLookupField: "Lot_Ref__c" } },
-    });
-    expect(cfg.mapping.options.lotLookupField).toBe("Lot_Ref__c");
-    expect(cfg.result.status).toBe("ok");
-    expect(cfg.result.payload.lot__v).toEqual({
-      $fk: { object: "sample_lot", sfdcId: LOT_ID },
-    });
-    // no lot anywhere: required → failed
+  it("fails a row without a lot (required master-detail reference)", () => {
     const none = run(sampleRow({ Lot_vod__c: "" }));
     expect(none.result.status).toBe("failed");
     expect(none.result.failure).toMatchObject({
       code: "REQUIRED_MISSING",
       field: "lot__v",
+    });
+  });
+
+  it("exposes the lot lookup as an FK to id-set collection and preflight (§2.2 step 4, §5.1)", () => {
+    const { mapping } = run(sampleRow());
+    expect(mappingFkColumns(mapping)).toContainEqual({
+      column: "Lot_vod__c",
+      targetObjectKey: "sample_lot",
+    });
+    const row = mapping.fields.find((f) => f.target === "lot__v")!;
+    expect(classifyRow(row, mapping)).toMatchObject({
+      fk: true,
+      requiredTarget: true,
+    });
+    const describe = itemDescribe("Lot_vod__c");
+    const { columns, fkColumns } = buildColumnList(mapping, {
+      describe,
+      columns: [],
+    });
+    expect(columns).toContain("Lot_vod__c");
+    expect(fkColumns).toContainEqual({
+      column: "Lot_vod__c",
+      targetObjectKey: "sample_lot",
+      polymorphic: false,
+    });
+  });
+
+  it("blocks preflight when the org has no Lot_vod__c instead of dropping the required lot silently", async () => {
+    const { mapping } = run(sampleRow());
+    // org names the lookup Sample_Lot_vod__c
+    const describe = itemDescribe("Sample_Lot_vod__c");
+    const sfdc = new FakeSfdcClient()
+      .addDescribe(describe)
+      .addDescribe(parentDescribe());
+    const findings = new FindingCollector();
+    const unit = { objectKey: "sample_inventory_item" as const, country: "US" };
+    const res = await checkSourceUnit(
+      createSourceContext(sfdc),
+      unit,
+      mapping,
+      findings,
+    );
+    expect(res.drops.get("lot__v")).toBeUndefined();
+    expect(findings.findings).toContainEqual(
+      expect.objectContaining({
+        severity: "blocking",
+        code: "SF_FIELD_MISSING",
+        objectKey: "sample_inventory_item",
+        field: "lot__v",
+      }),
+    );
+    expect(findings.hasBlocking(unit)).toBe(true);
+    expect(
+      findings.findings
+        .filter((f) => f.severity === "blocking")
+        .map((f) => f.field),
+    ).toEqual(["lot__v"]);
+    // the §6.3.37 rule names the field preflight should rewrite the row to
+    expect(resolveLotLookupField(describe.fields)).toBe("Sample_Lot_vod__c");
+  });
+
+  it("loads through an overridden lookup name (objects.sample_inventory_item.fields.override)", async () => {
+    const cfg = {
+      sample_inventory_item: {
+        fields: {
+          override: [
+            {
+              source: "Sample_Lot_vod__c",
+              target: "lot__v",
+              transform: "ref(sample_lot)",
+            },
+          ],
+        },
+      },
+    };
+    const alt = run(
+      sampleRow({ Lot_vod__c: undefined, Sample_Lot_vod__c: LOT_ID }),
+      { config: cfg },
+    );
+    const row = alt.mapping.fields.find((f) => f.target === "lot__v")!;
+    expect(row).toMatchObject({
+      source: "Sample_Lot_vod__c",
+      required: "Y",
+      transform: { kind: "ref", objectKey: "sample_lot" },
+    });
+    expect(alt.result.status).toBe("ok");
+    expect(alt.result.payload.lot__v).toEqual({
+      $fk: { object: "sample_lot", sfdcId: LOT_ID },
+    });
+    // preflight and the column list follow the rewritten source
+    const describe = itemDescribe("Sample_Lot_vod__c");
+    const sfdc = new FakeSfdcClient()
+      .addDescribe(describe)
+      .addDescribe(parentDescribe());
+    const findings = new FindingCollector();
+    const unit = { objectKey: "sample_inventory_item" as const, country: "US" };
+    const res = await checkSourceUnit(
+      createSourceContext(sfdc),
+      unit,
+      alt.mapping,
+      findings,
+    );
+    expect(findings.hasBlocking(unit)).toBe(false);
+    expect(res.columns).toContain("Sample_Lot_vod__c");
+    const { columns, fkColumns } = buildColumnList(alt.mapping, {
+      describe,
+      columns: res.columns,
+    });
+    expect(columns).toContain("Sample_Lot_vod__c");
+    expect(columns).not.toContain("Lot_vod__c");
+    expect(fkColumns).toContainEqual({
+      column: "Sample_Lot_vod__c",
+      targetObjectKey: "sample_lot",
+      polymorphic: false,
     });
   });
 
@@ -341,37 +476,52 @@ describe("sample_inventory_item module", () => {
   });
 
   describe("helpers", () => {
-    it("readLotId prefers the configured field, then Lot_vod__c, then Sample_Lot_vod__c", () => {
+    it("resolveLotLookupField picks the reference to Sample_Lot_vod__c regardless of name (§6.3.37)", () => {
+      expect(SAMPLE_INVENTORY_ITEM_LOT_REFERENCE).toBe("Sample_Lot_vod__c");
+      const parent = {
+        name: "Sample_Inventory_vod__c",
+        type: "reference" as const,
+        referenceTo: ["Sample_Inventory_vod__c"],
+      };
+      const product = {
+        name: "Product_vod__c",
+        type: "reference" as const,
+        referenceTo: ["Product_vod__c"],
+      };
+      const lot = (name: string) => ({
+        name,
+        type: "reference" as const,
+        referenceTo: ["Sample_Lot_vod__c"],
+      });
+      expect(resolveLotLookupField([parent, product, lot("Lot_vod__c")])).toBe(
+        "Lot_vod__c",
+      );
       expect(
-        readLotId({ Id: "x", Lot_vod__c: "a", Sample_Lot_vod__c: "b" }),
-      ).toBe("a");
+        resolveLotLookupField([parent, product, lot("Sample_Lot_vod__c")]),
+      ).toBe("Sample_Lot_vod__c");
+      // any name works when it is the only lot reference
       expect(
-        readLotId({ Id: "x", Lot_vod__c: "", Sample_Lot_vod__c: "b" }),
-      ).toBe("b");
+        resolveLotLookupField([parent, product, lot("Custom_Lot_Ref__c")]),
+      ).toBe("Custom_Lot_Ref__c");
+      // several: the known candidates win in order; ambiguous otherwise
       expect(
-        readLotId({ Id: "x", Lot_vod__c: "a", Custom__c: "c" }, "Custom__c"),
-      ).toBe("c");
-      expect(readLotId({ Id: "x" })).toBeUndefined();
-      expect(readLotId({ Id: "x" }, 42)).toBeUndefined();
-    });
-
-    it("lotRef behaves like ref(sample_lot)", () => {
-      const ctx = buildTransformContext({
-        objectKey: "sample_inventory_item",
-        field: { source: "Lot_vod__c", target: "lot__v" },
-        ids: buildIdResolver({ sample_lot: { [LOT_ID]: "V0L1" } }),
-      });
-      expect(lotRef(LOT_ID, { Id: "x" }, ctx)).toEqual({
-        value: { $fk: { object: "sample_lot", sfdcId: LOT_ID } },
-      });
-      expect(lotRef("", { Id: "x", Sample_Lot_vod__c: LOT_ID }, ctx)).toEqual({
-        value: { $fk: { object: "sample_lot", sfdcId: LOT_ID } },
-      });
-      expect(lotRef("", { Id: "x" }, ctx)).toEqual({ omit: true });
-      expect(lotRef("not-an-id", { Id: "x" }, ctx)).toMatchObject({
-        omit: true,
-        diagnostic: { code: "INVALID_ID" },
-      });
+        resolveLotLookupField([
+          lot("Custom_Lot_Ref__c"),
+          lot("Sample_Lot_vod__c"),
+          lot("Lot_vod__c"),
+        ]),
+      ).toBe("Lot_vod__c");
+      expect(
+        resolveLotLookupField([lot("Custom_A__c"), lot("Custom_B__c")]),
+      ).toBeUndefined();
+      // a non-reference field of the same name never qualifies; none → undefined
+      expect(
+        resolveLotLookupField([
+          parent,
+          { name: "Lot_vod__c", type: "string", referenceTo: [] },
+        ]),
+      ).toBeUndefined();
+      expect(resolveLotLookupField([])).toBeUndefined();
     });
   });
 });

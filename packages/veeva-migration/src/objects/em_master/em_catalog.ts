@@ -5,7 +5,11 @@
  * Events-management topic catalogue: full scope, `GLOBAL` country, no
  * dependencies, loaded with `noTriggers = false` (§6.2). Upserted with
  * `idParam = external_id__v` in the wild `[OBS]`; the tool keeps the legacy-id
- * field as idParam and `external_id__v` as the first match key (§3.3).
+ * field as idParam and `external_id__v` as the first match key (§3.3). The
+ * module defaults `externalIdOwnedBy = integration` so §3.2 step 4 never
+ * promotes `external_id__v` to the legacy-id field (that would overwrite the
+ * integration keys with `SF:{orgId15}:{id18}` and defeat the match key);
+ * `objects.em_catalog.externalIdOwnedBy = migration` overrides it.
  *
  * Targets are all **OBS**: `name__v`, `em_catalog_name__v`, `external_id__v`,
  * `description__v`, `em_catalog_status__v`, `object_type__v.api_name__v`.
@@ -99,6 +103,9 @@ export const em_catalog = defineObject({
     },
     { method: "legacy_id" },
   ],
+  // §3.2 step 4: external_id__v is integration-written [OBS idParam] — never a
+  // legacy-id candidate, so it stays a usable match key. Config-overridable.
+  optionDefaults: { externalIdOwnedBy: "integration" },
   notes:
-    "EM master data (§6.3.20): GLOBAL, full scope, inactivate on delete (status__v only). Targets OBS; Description/Status sources unverified (describe miss = info, row dropped).",
+    "EM master data (§6.3.20): GLOBAL, full scope, inactivate on delete (status__v only). Targets OBS; Description/Status sources unverified (describe miss = info, row dropped). externalIdOwnedBy defaults to integration so external_id__v stays the match key and is never the legacy-id field (§3.2 step 4).",
 });

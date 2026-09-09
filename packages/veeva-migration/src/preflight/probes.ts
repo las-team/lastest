@@ -153,11 +153,18 @@ export async function runProbes(input: ProbeInput): Promise<void> {
   if (!setup) return;
   const apiVersion = config.target.apiVersion;
   const reprobe = Boolean(flags.reprobe || config.preflight.reprobe);
+  // Results are cached *per vault* (§5.3): the default vault keeps the bare
+  // probe name (`migrationMode`), a per-country vault (CN, §1.2) is keyed
+  // `migrationMode@{dns}` so two vaults never share or overwrite a result.
+  const probeKey = (probe: ProbeName) =>
+    ctx.vaultDns === config.target.vaultDns
+      ? probe
+      : `${probe}@${ctx.vaultDns}`;
 
   const cached = async (probe: ProbeName): Promise<boolean> => {
     if (reprobe) return false;
     try {
-      const r = await store.probeResults.get(probe);
+      const r = await store.probeResults.get(probeKey(probe));
       if (r && r.result.apiVersion === apiVersion) {
         findings.info("PROBE_RESULT", {
           probe,
@@ -177,7 +184,7 @@ export async function runProbes(input: ProbeInput): Promise<void> {
     try {
       await store.probeResults.set({
         vaultDns: ctx.vaultDns,
-        probe,
+        probe: probeKey(probe),
         result: { ...result, apiVersion },
         checkedAt: new Date().toISOString(),
       });

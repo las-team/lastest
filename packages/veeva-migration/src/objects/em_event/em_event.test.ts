@@ -11,6 +11,7 @@ import {
   EM_EVENT_TIMEZONE_FROM_OWNER_CODE,
   EM_EVENT_TIMEZONE_INVALID_CODE,
   EM_VENDOR_REF_DROPPED_CODE,
+  EVENT_COUNTRY_FALLBACK_SOURCE,
   EVENT_TIME_ZONE_SOURCE,
   OWNER_TIME_ZONE_SOURCE,
   VT_EM_CONFIG_UNMATCHED_CODE,
@@ -460,14 +461,18 @@ describe("em_event module", () => {
       optionalSource: true,
       enabledBy: "ownerTimezoneLookup",
     });
+    // the Event_Country_vod__c fallback sits inside the primary row so a
+    // required country__v is satisfied before REQUIRED_MISSING is evaluated
     expect(byTarget.get("country__v")).toMatchObject({
+      source: "Country_vod__c",
       required: "y?",
-      transform: { kind: "country", mode: "ref" },
+      transform: { kind: "custom", fnName: "eventCountry" },
     });
     expect(byTarget.get("country__v.event_country")).toMatchObject({
-      source: "Event_Country_vod__c",
+      source: EVENT_COUNTRY_FALLBACK_SOURCE,
       evidence: "UNV",
       unverifiedSource: true,
+      transform: { kind: "custom", fnName: "eventCountry" },
     });
     expect(byTarget.get("venue__v")?.transform).toEqual({
       kind: "ref",
@@ -786,13 +791,21 @@ describe("em_event module", () => {
       mapping(),
       applyCtx(),
     );
-    expect(unmatched.status).toBe("ok"); // y? and not required on the target
+    // §6.1 / §6.3.22: a configuration reference without a Vault match is
+    // blocking — the row is held for review even though the target field is
+    // not required, rather than loaded unconfigured
+    expect(unmatched.status).toBe("failed");
+    expect(unmatched.failure).toMatchObject({
+      code: VT_EM_CONFIG_UNMATCHED_CODE,
+      field: "event_configuration__v",
+    });
     expect(unmatched.diagnostics).toContainEqual(
       expect.objectContaining({
         kind: "unresolved_fk",
         field: "event_configuration__v",
         code: VT_EM_CONFIG_UNMATCHED_CODE,
         value: CONFIG,
+        fatal: true,
       }),
     );
     const required = applyMapping(
@@ -805,6 +818,23 @@ describe("em_event module", () => {
     );
     expect(required.status).toBe("failed");
     expect(required.failure?.code).toBe(VT_EM_CONFIG_UNMATCHED_CODE);
+    // explicit opt-out: required.event_configuration__v = false → counted, not fatal
+    const optedOut = applyMapping(
+      row({
+        [EM_EVENT_CONFIG_EXTERNAL_ID_SOURCE]: "",
+        [EM_EVENT_CONFIG_NAME_SOURCE]: "",
+      }),
+      mapping({ em_event: { required: { event_configuration__v: false } } }),
+      applyCtx(),
+    );
+    expect(optedOut.status).toBe("ok");
+    expect(optedOut.payload.event_configuration__v).toBeUndefined();
+    expect(optedOut.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: VT_EM_CONFIG_UNMATCHED_CODE,
+        fatal: false,
+      }),
+    );
     // no configuration at all → nothing emitted
     const none = applyMapping(
       row({
@@ -925,6 +955,45 @@ describe("em_event module", () => {
       applyCtx(),
     );
     expect(iso.payload.country__v).toBe("V0C000000000102");
+    expect(iso.payload["country__v.event_country"]).toBeUndefined();
+    // country__v required on the target (the y? case): the fallback must
+    // satisfy it — a second mapping row would come too late
+    const meta = metadata();
+    const requiredMeta = {
+      ...meta,
+      fields: {
+        ...meta.fields,
+        country__v: { ...meta.fields.country__v, required: true },
+      },
+    };
+    const requiredFallback = applyMapping(
+      row({ Country_vod__c: "", Event_Country_vod__c: IDS.countryDE }),
+      mapping(),
+      applyCtx({ metadata: requiredMeta }),
+    );
+    expect(requiredFallback.status).toBe("ok");
+    expect(requiredFallback.failure).toBeUndefined();
+    expect(requiredFallback.payload.country__v).toBe("V0C000000000102");
+    const requiredNone = applyMapping(
+      row({ Country_vod__c: "", Event_Country_vod__c: "" }),
+      mapping(),
+      applyCtx({ metadata: requiredMeta }),
+    );
+    expect(requiredNone.status).toBe("failed");
+    expect(requiredNone.failure).toMatchObject({
+      code: "REQUIRED_MISSING",
+      field: "country__v",
+    });
+    // unknown country id → unresolved marker (not silently dropped)
+    const unknown = applyMapping(
+      row({ Country_vod__c: "", Event_Country_vod__c: "zz" }),
+      mapping(),
+      applyCtx(),
+    );
+    expect(unknown.payload.country__v).toBeUndefined();
+    expect(unknown.diagnostics).toContainEqual(
+      expect.objectContaining({ field: "country__v" }),
+    );
     const staged = applyMapping(
       row(),
       mapping({ em_event: { stageMap: { Approved_vod: "planning__v" } } }),

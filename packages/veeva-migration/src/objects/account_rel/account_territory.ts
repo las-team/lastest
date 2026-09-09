@@ -12,17 +12,27 @@
  * Source quirks the extractor must honour:
  *  - the association object is polymorphic — only rows with
  *    `SobjectType = 'Account'` belong here (`ACCOUNT_TERRITORY_SOURCE_FILTER`);
- *  - the `Object` relationship cannot be traversed in SOQL, so the country
- *    rule `account:ObjectId` has no path form and must use the id-set form
- *    (`ObjectId IN (in-scope account ids)`, §6.0.5);
+ *  - the country rule is `account:ObjectId`, i.e. the SOQL path
+ *    `Object.Country_vod__r.Alpha_2_Code_vod__c` through the polymorphic
+ *    `Object` relationship (`[UNV]` — traversal of a polymorphic lookup into
+ *    a custom Account field is not guaranteed by SOQL). Preflight resolves the
+ *    hop against the describe (`SF_FIELD_MISSING`, blocking when no rule of
+ *    the object resolves), and there is **no id-set form for `account:`
+ *    rules** (§6.0.5 reserves it for `parent:`) — an org that rejects the
+ *    traversal needs an `objects.account_territory.countryOf` override
+ *    (e.g. a `field:` path the org exposes) before the object can be enabled;
  *  - it is expected to be **non-replicateable** (§2.1.6): no `getDeleted`,
  *    deletes come from `IsDeleted` rows and the key-set reconciliation.
  *
  * `name__v` is synthesised (`custom(accountTerritoryName)`) from
  * `nameTemplates.accountTerritory` (default `{territory}:{account}` —
  * `Territory2.Name` and the account's 18-char SFDC id) because the source has
- * no Name column; the target name is `[UNV]` and likely system-managed, so an
- * incomplete input omits the field rather than failing the row.
+ * no Name column. The row's `source` **is** the relationship column
+ * `Territory2.Name` (`ACCOUNT_TERRITORY_NAME_SOURCE`), so the column builder
+ * selects it like any mapped path (kept when `Territory2` is a relationship of
+ * the describe) and the account id is read from `ObjectId` through the row;
+ * the target name is `[UNV]` and likely system-managed, so an incomplete
+ * input omits the field rather than failing the row.
  *
  * Legacy Territory Management orgs (`describeGlobal` lacks `Territory2`) keep
  * assignments in `AccountShare WHERE RowCause = 'Territory'` `[DOC]` (§6.3.3
@@ -43,10 +53,18 @@ export const ACCOUNT_TERRITORY_SOURCE_FILTER = "SobjectType = 'Account'";
 export const ACCOUNT_TERRITORY_ACCOUNT_FIELD = "ObjectId";
 /** Territory lookup of the association. */
 export const ACCOUNT_TERRITORY_TERRITORY_FIELD = "Territory2Id";
-/** Relationship column the name template reads (select via `ColumnOptions.extra`). */
-export const ACCOUNT_TERRITORY_EXTRA_COLUMNS = ["Territory2.Name"] as const;
+/** Relationship column the name template reads — the `source` of the `name__v` row, hence selected. */
+export const ACCOUNT_TERRITORY_NAME_SOURCE = "Territory2.Name";
 /** Default `nameTemplates.accountTerritory` (§7.3). */
 export const ACCOUNT_TERRITORY_NAME_TEMPLATE = "{territory}:{account}";
+/**
+ * Relationship columns the name template reads (`objects.account_territory
+ * .extraColumns` default → preflight resolves them against the describe and
+ * selects them even when the `name__v` row is dropped or overridden).
+ */
+export const ACCOUNT_TERRITORY_EXTRA_COLUMNS = [
+  ACCOUNT_TERRITORY_NAME_SOURCE,
+] as const;
 
 function isEmpty(v: unknown): boolean {
   return v === null || v === undefined || v === "";
@@ -66,7 +84,10 @@ export function renderAccountTerritoryName(
   row: SourceRow,
   accountColumn: string = ACCOUNT_TERRITORY_ACCOUNT_FIELD,
 ): { name: string; territory: string; account: string } {
-  const territory = firstText(row, ["Territory2.Name", "territory"]);
+  const territory = firstText(row, [
+    ACCOUNT_TERRITORY_NAME_SOURCE,
+    "territory",
+  ]);
   const rawAccount = row[accountColumn];
   const account = isSfdcId(rawAccount)
     ? to18(rawAccount)
@@ -82,18 +103,25 @@ export function renderAccountTerritoryName(
 
 /**
  * `name__v` = `nameTemplates.accountTerritory` rendered with `{territory}` =
- * `Territory2.Name` and `{account}` = the account's 18-char id. Incomplete
+ * `Territory2.Name` (the row's `source`, so `value`) and `{account}` = the
+ * account's 18-char id read from `ObjectId` through the row. Incomplete
  * inputs omit the field with a non-fatal `ACCOUNT_TERRITORY_NAME_INCOMPLETE`
  * diagnostic (Vault assigns its system-managed name or rejects the row).
  */
-export const accountTerritoryName: CustomTransformFn = (_value, row, ctx) => {
+export const accountTerritoryName: CustomTransformFn = (value, row, ctx) => {
   const template =
     ctx.country.nameTemplates.accountTerritory ??
     ACCOUNT_TERRITORY_NAME_TEMPLATE;
-  const accountColumn = ctx.field.source || ACCOUNT_TERRITORY_ACCOUNT_FIELD;
+  const accountColumn = ACCOUNT_TERRITORY_ACCOUNT_FIELD;
+  // `value` is the row's `Territory2.Name`; fall back to it when the caller
+  // hands the name in without the column (unit contexts)
+  const input =
+    row[ACCOUNT_TERRITORY_NAME_SOURCE] === undefined && !isEmpty(value)
+      ? { ...row, [ACCOUNT_TERRITORY_NAME_SOURCE]: value }
+      : row;
   const { name, territory, account } = renderAccountTerritoryName(
     template,
-    row,
+    input,
     accountColumn,
   );
   if (!territory || !account || !name)
@@ -104,7 +132,7 @@ export const accountTerritoryName: CustomTransformFn = (_value, row, ctx) => {
         field: ctx.field.target,
         code: "ACCOUNT_TERRITORY_NAME_INCOMPLETE",
         detail: !territory
-          ? "Territory2.Name missing"
+          ? `${ACCOUNT_TERRITORY_NAME_SOURCE} missing`
           : `${accountColumn} missing`,
       },
     } satisfies TransformResult;
@@ -167,13 +195,14 @@ export const account_territory = defineObject({
       notes: "Territory2 assignment cause — not loaded (§6.3.11)",
     },
     {
-      source: ACCOUNT_TERRITORY_ACCOUNT_FIELD,
+      source: ACCOUNT_TERRITORY_NAME_SOURCE,
       target: "name__v",
       transform: "custom(accountTerritoryName)",
       required: "y?",
       evidence: "UNV",
+      sourceType: "string",
       notes:
-        "{territory}:{account} via nameTemplates.accountTerritory; reads Territory2.Name (ACCOUNT_TERRITORY_EXTRA_COLUMNS); omitted when incomplete",
+        "{territory}:{account} via nameTemplates.accountTerritory; source is the Territory2.Name relationship column (selected with the mapping), account read from ObjectId; omitted when incomplete",
     },
   ],
   deletePolicy: "delete",
@@ -193,7 +222,11 @@ export const account_territory = defineObject({
     },
   ],
   custom: { accountTerritoryName },
-  optionDefaults: { enabled: false, optional: true },
+  optionDefaults: {
+    enabled: false,
+    optional: true,
+    extraColumns: [...ACCOUNT_TERRITORY_EXTRA_COLUMNS],
+  },
   notes:
-    "Optional (default disabled — Align owns alignment; creating one auto-creates tsf__v). Extract with SobjectType = 'Account'; country via the id-set form of account:ObjectId (Object is not traversable); likely non-replicateable → key-set reconciliation for deletes (§2.1.6, §4.4).",
+    "Optional (default disabled — Align owns alignment; creating one auto-creates tsf__v, so tsf depends on this object). Extract with SobjectType = 'Account'; country via account:ObjectId = Object.Country_vod__r.Alpha_2_Code_vod__c [UNV polymorphic traversal — preflight resolves the hop; no id-set form exists for account: rules, override countryOf when the org rejects it]; likely non-replicateable → key-set reconciliation for deletes (§2.1.6, §4.4).",
 });

@@ -59,6 +59,11 @@ const clone = <T>(v: T): T =>
   v === undefined ? v : (JSON.parse(JSON.stringify(v)) as T);
 const nowIso = () => new Date().toISOString();
 
+/** A row that occupies its (vaultObject, vaultId) slot per `id_map_vault_uidx`. */
+const isLive = (r: IdMapRow): boolean => !r.mergedInto && !r.deletedAt;
+const vaultKey = (r: Pick<IdMapRow, "vaultObject" | "vaultId">): string =>
+  `${r.vaultObject}|${r.vaultId}`;
+
 type JournalEntry = { k: string; v: unknown } | { k: string; d: 1 };
 
 type TableFile =
@@ -236,6 +241,14 @@ export class FileStateStore implements StateStore {
     this,
     "country_status",
   );
+  /**
+   * Secondary index for `id_map_vault_uidx`: `vaultObject|vaultId` → id-map
+   * key, live rows only. Keeps `put`/`putMany`/`byVaultId` O(1) per row
+   * instead of a scan of the whole map (the loader puts once per loaded row
+   * and the matcher looks up once per hit). Maintained by the `idMap*`
+   * mutators below and rebuilt on `load()`.
+   */
+  private liveByVault = new Map<string, string>();
   private auditSeq = 0;
   private findingSeq = 0;
 
@@ -311,6 +324,9 @@ export class FileStateStore implements StateStore {
         );
     }
     for (const t of this.tables()) await t.load();
+    this.liveByVault.clear();
+    for (const [k, r] of this.idMapT.rows)
+      if (isLive(r)) this.liveByVault.set(vaultKey(r), k);
     for (const e of this.auditT.values())
       this.auditSeq = Math.max(this.auditSeq, e.id ?? 0);
     for (const k of this.findingsT.rows.keys())
@@ -341,6 +357,28 @@ export class FileStateStore implements StateStore {
 
   private idKey(objectKey: ObjectKey, sfdcId: string): string {
     return `${objectKey}|${to18(sfdcId)}`;
+  }
+
+  /** Every id_map mutation goes through these so `liveByVault` stays exact. */
+  private reindexIdMap(key: string, next: IdMapRow | undefined): void {
+    const prev = this.idMapT.get(key);
+    if (prev && isLive(prev)) {
+      const vk = vaultKey(prev);
+      if (this.liveByVault.get(vk) === key) this.liveByVault.delete(vk);
+    }
+    if (next && isLive(next)) this.liveByVault.set(vaultKey(next), key);
+  }
+  private idMapSet(key: string, row: IdMapRow): Promise<void> {
+    this.reindexIdMap(key, row);
+    return this.idMapT.set(key, row);
+  }
+  private idMapSetMany(entries: Array<[string, IdMapRow]>): Promise<void> {
+    for (const [k, v] of entries) this.reindexIdMap(k, v);
+    return this.idMapT.setMany(entries);
+  }
+  private idMapDeleteMany(keys: string[]): Promise<void> {
+    for (const k of keys) this.reindexIdMap(k, undefined);
+    return this.idMapT.deleteMany(keys);
   }
 
   // -------------------------------------------------------------------------
@@ -406,35 +444,47 @@ export class FileStateStore implements StateStore {
     },
   };
 
-  /** Shared by put/putMany: validates + returns the normalised row (no I/O). */
+  /**
+   * Shared by put/putMany: validates + returns the normalised row (no I/O).
+   * `staged` holds this batch's rows by id-map key and `stagedByVault` the
+   * batch-local counterpart of `liveByVault`; both take precedence over the
+   * committed tables so a batch that re-maps a row is checked against its
+   * own final state.
+   */
   private prepareIdMapRow(
     row: IdMapRow,
     staged: Map<string, IdMapRow>,
+    stagedByVault: Map<string, string>,
   ): [string, IdMapRow] {
     const key = this.idKey(row.objectKey, row.sfdcId);
-    const existing = staged.get(key) ?? this.idMapT.get(key);
+    const prevStaged = staged.get(key);
+    const existing = prevStaged ?? this.idMapT.get(key);
     const next: IdMapRow = {
       ...clone(row),
       sfdcId: to18(row.sfdcId),
       vaultDns: this.vaultDns,
       firstSeenRun: existing?.firstSeenRun ?? row.firstSeenRun,
     };
-    if (!next.mergedInto && !next.deletedAt) {
-      const check = (other: IdMapRow, otherKey: string) => {
-        if (
-          otherKey !== key &&
-          other.vaultObject === next.vaultObject &&
-          other.vaultId === next.vaultId &&
-          !other.mergedInto &&
-          !other.deletedAt
-        )
-          throw new Error(
-            `id_map_vault_uidx violation: ${next.vaultObject}/${next.vaultId} already mapped to ${other.sfdcId}`,
-          );
-      };
-      for (const [k, other] of this.idMapT.rows)
-        if (!staged.has(k)) check(other, k);
-      for (const [k, other] of staged) check(other, k);
+    if (prevStaged && isLive(prevStaged)) {
+      const vk = vaultKey(prevStaged);
+      if (stagedByVault.get(vk) === key) stagedByVault.delete(vk);
+    }
+    if (isLive(next)) {
+      const vk = vaultKey(next);
+      let otherKey = stagedByVault.get(vk);
+      if (otherKey === undefined) {
+        const committed = this.liveByVault.get(vk);
+        // a committed holder that this batch re-stages is judged by its staged state
+        if (committed !== undefined && !staged.has(committed))
+          otherKey = committed;
+      }
+      if (otherKey !== undefined && otherKey !== key) {
+        const other = staged.get(otherKey) ?? this.idMapT.get(otherKey);
+        throw new Error(
+          `id_map_vault_uidx violation: ${next.vaultObject}/${next.vaultId} already mapped to ${other?.sfdcId ?? otherKey}`,
+        );
+      }
+      stagedByVault.set(vk, key);
     }
     staged.set(key, next);
     return [key, next];
@@ -447,14 +497,15 @@ export class FileStateStore implements StateStore {
     },
     put: async (row) => {
       await this.ready();
-      const [key, next] = this.prepareIdMapRow(row, new Map());
-      await this.idMapT.set(key, next);
+      const [key, next] = this.prepareIdMapRow(row, new Map(), new Map());
+      await this.idMapSet(key, next);
     },
     putMany: async (rows) => {
       await this.ready();
       const staged = new Map<string, IdMapRow>();
-      for (const r of rows) this.prepareIdMapRow(r, staged);
-      await this.idMapT.setMany([...staged.entries()]);
+      const stagedByVault = new Map<string, string>();
+      for (const r of rows) this.prepareIdMapRow(r, staged, stagedByVault);
+      await this.idMapSetMany([...staged.entries()]);
     },
     bulkGet: async (objectKey, sfdcIds) => {
       await this.ready();
@@ -467,23 +518,14 @@ export class FileStateStore implements StateStore {
     },
     byVaultId: async (vaultObject, vaultId) => {
       await this.ready();
-      return clone(
-        this.idMapT
-          .values()
-          .find(
-            (r) =>
-              r.vaultObject === vaultObject &&
-              r.vaultId === vaultId &&
-              !r.mergedInto &&
-              !r.deletedAt,
-          ),
-      );
+      const key = this.liveByVault.get(vaultKey({ vaultObject, vaultId }));
+      return key === undefined ? undefined : clone(this.idMapT.get(key));
     },
     markDeleted: async (objectKey, sfdcId, deletedAt) => {
       await this.ready();
       const key = this.idKey(objectKey, sfdcId);
       const row = this.idMapT.get(key);
-      if (row) await this.idMapT.set(key, { ...row, deletedAt });
+      if (row) await this.idMapSet(key, { ...row, deletedAt });
     },
     merge: async (objectKey, loser, survivor, runId) => {
       await this.ready();
@@ -493,7 +535,7 @@ export class FileStateStore implements StateStore {
       if (!s) throw new Error(`merge survivor ${survivor} not in id map`);
       const survivorId = to18(survivor);
       if (l) {
-        await this.idMapT.set(lKey, {
+        await this.idMapSet(lKey, {
           ...l,
           mergedInto: survivorId,
           vaultId: s.vaultId,
@@ -501,7 +543,7 @@ export class FileStateStore implements StateStore {
           lastSeenRun: runId,
         });
       } else {
-        await this.idMapT.set(lKey, {
+        await this.idMapSet(lKey, {
           ...clone(s),
           sfdcId: to18(loser),
           mergedInto: survivorId,
@@ -519,13 +561,13 @@ export class FileStateStore implements StateStore {
       const key = this.idKey(objectKey, sfdcId);
       const row = this.idMapT.get(key);
       if (row)
-        await this.idMapT.set(key, { ...row, sourceHash, lastSeenRun: runId });
+        await this.idMapSet(key, { ...row, sourceHash, lastSeenRun: runId });
     },
     setVerified: async (objectKey, sfdcId, verifiedHash, verifiedAt) => {
       await this.ready();
       const key = this.idKey(objectKey, sfdcId);
       const row = this.idMapT.get(key);
-      if (row) await this.idMapT.set(key, { ...row, verifiedHash, verifiedAt });
+      if (row) await this.idMapSet(key, { ...row, verifiedHash, verifiedAt });
     },
     count: async (objectKey, country) => {
       await this.ready();
@@ -545,7 +587,7 @@ export class FileStateStore implements StateStore {
       const keys = [...this.idMapT.rows]
         .filter(([, r]) => r.dryRun)
         .map(([k]) => k);
-      await this.idMapT.deleteMany(keys);
+      await this.idMapDeleteMany(keys);
       return keys.length;
     },
   };

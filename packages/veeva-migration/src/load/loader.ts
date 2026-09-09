@@ -27,7 +27,7 @@ import type { VaultBulkResponse, VaultRow } from "../vault/types";
 import { AdaptiveBatchSize, cutBatches, shouldHashSkip } from "./batcher";
 import { runBlobs, type BlobRow } from "./blobs";
 import { LoaderRuntime, type LoaderOptions } from "./context";
-import { runDeletes, type DeleteOutcome } from "./deletes";
+import { runDeletes, runMerges, type DeleteOutcome } from "./deletes";
 import { matchRows, type MatchHit, type PayloadRowWithSource } from "./matcher";
 import {
   enqueuePending,
@@ -54,9 +54,14 @@ import type {
   LoadResult,
   Loader,
   LoaderDeps,
+  MergeRequest,
+  MergeResult,
   PayloadRow,
   SecondPassResult,
 } from "./types";
+import { MATCHED_MARKER } from "./types";
+
+export { MATCHED_MARKER };
 
 const TERMINAL_STATES: readonly RowState[] = [
   "loaded_created",
@@ -136,11 +141,10 @@ export class DefaultLoader implements Loader {
     const terminal = ctx.fromPending
       ? new Set<string>()
       : await this.terminalIds(plan);
-    let batchNo = result.batches.length;
     for await (const batch of cutBatches(rows, () => adaptive.current())) {
       const live = batch.filter((r) => !terminal.has(r.sfdcId));
       if (!live.length) continue;
-      batchNo++;
+      const batchNo = await this.rt.nextBatchNo(plan);
       const outcome = await this.sendBatch(live, plan, batchNo, ctx);
       result.batches.push(outcome);
       result.created += outcome.created;
@@ -286,7 +290,9 @@ export class DefaultLoader implements Loader {
     // 5. resolve references at send time
     const refs = new Map<RefKey, Set<string>>();
     for (const r of candidates) collectRefs(r.payload, refs);
-    const index = await RefIndex.build(rt.deps.store, refs);
+    const index = await RefIndex.build(rt.deps.store, refs, {
+      dryRun: plan.dryRun,
+    });
     const legacyField = plan.target.legacyIdField ?? plan.mapping.legacyIdField;
     const pending: PendingEntry[] = [];
     const prepared: Prepared[] = [];
@@ -347,26 +353,31 @@ export class DefaultLoader implements Loader {
       )
         vaultRow.status__v = "active__v";
 
-      // 6. object type change routing (§2.5.6)
+      // 6. object type change routing (§2.5.6) — for mapped rows and fresh matches alike:
+      // a type difference never travels through a plain upsert/PUT
+      const currentType = mapped?.objectType ?? hit?.objectType;
+      const currentVaultId = mapped?.vaultId ?? hit?.vaultId;
       if (
-        mapped &&
-        mapped.objectType &&
+        currentType &&
+        currentVaultId &&
         row.objectType &&
-        mapped.objectType !== row.objectType
+        currentType !== row.objectType &&
+        !(hit && matchOnly && !updateMatched)
       ) {
         if (!plan.mapping.options.allowTypeChange) {
           fail(
             row,
             "TYPE_CHANGE_BLOCKED",
-            `object type ${mapped.objectType} → ${row.objectType} blocked by allowTypeChange = false`,
-            mapped.vaultId,
+            `object type ${currentType} → ${row.objectType} blocked by allowTypeChange = false`,
+            currentVaultId,
           );
           continue;
         }
         prepared.push({
           row,
           idRow: mapped,
-          vaultRow: { ...vaultRow, id: mapped.vaultId },
+          hit,
+          vaultRow: { ...vaultRow, id: currentVaultId },
           op: "changetype",
         });
         continue;
@@ -374,8 +385,15 @@ export class DefaultLoader implements Loader {
       // 7. route: fresh match (legacy id not yet stamped) → PUT by id; else upsert by idParam
       if (hit) {
         if (matchOnly && !updateMatched) {
+          // matched, never written: no source_hash bookkeeping — marked so reconciliation
+          // keeps it out of the aggregate hash set (§2.8)
           out.unchanged++;
-          results.push(rr(row, "loaded_unchanged", { vaultId: hit.vaultId }));
+          results.push(
+            rr(row, "loaded_unchanged", {
+              vaultId: hit.vaultId,
+              errorType: MATCHED_MARKER,
+            }),
+          );
           continue;
         }
         prepared.push({
@@ -393,7 +411,12 @@ export class DefaultLoader implements Loader {
         mapped.matchMethod !== "created"
       ) {
         out.unchanged++;
-        results.push(rr(row, "loaded_unchanged", { vaultId: mapped.vaultId }));
+        results.push(
+          rr(row, "loaded_unchanged", {
+            vaultId: mapped.vaultId,
+            errorType: mapped.sourceHash ? null : MATCHED_MARKER,
+          }),
+        );
         continue;
       }
       prepared.push({ row, idRow: mapped, vaultRow, op: "upsert" });
@@ -411,11 +434,37 @@ export class DefaultLoader implements Loader {
       );
     }
 
-    // dry run: simulate (§8.9)
+    // dry run: simulate (§8.9); would-create rows get a `dry_run` id-map row so that
+    // children simulated later in the same run resolve their references (purged at the next real run)
     if (plan.dryRun) {
       for (const p of prepared) {
-        if (p.op === "upsert" && !p.idRow) out.created++;
-        else out.updated++;
+        const wouldCreate = p.op === "upsert" && !p.idRow;
+        // simulated outcome in row_results so the reconciliation row carries would_create / would_update
+        results.push(
+          rr(p.row, wouldCreate ? "loaded_created" : "loaded_updated", {
+            vaultId:
+              p.idRow?.vaultId ?? p.hit?.vaultId ?? `dry-run:${p.row.sfdcId}`,
+            errorType: "dry_run",
+          }),
+        );
+        if (wouldCreate) {
+          out.created++;
+          await rt.deps.store.idMap.put({
+            objectKey: plan.unit.objectKey,
+            sfdcId: p.row.sfdcId,
+            vaultDns: rt.deps.store.vaultDns,
+            vaultObject: plan.target.targetObject,
+            vaultId: `dry-run:${p.row.sfdcId}`,
+            country: plan.unit.country,
+            matchMethod: "created",
+            mergedInto: null,
+            firstSeenRun: plan.runId,
+            lastSeenRun: plan.runId,
+            sourceHash: p.row.sourceHash,
+            objectType: p.row.objectType ?? null,
+            dryRun: true,
+          });
+        } else out.updated++;
         if (p.op === "changetype") out.typeChanged++;
       }
       out.elapsedMs = Date.now() - started;
@@ -466,7 +515,7 @@ export class DefaultLoader implements Loader {
             rt.deps.vault.changeType!(
               plan.target.targetObject,
               g.items.map((p) => ({
-                id: p.idRow!.vaultId,
+                id: (p.idRow ?? p.hit)!.vaultId,
                 objectType: p.row.objectType!,
               })),
             ),
@@ -481,7 +530,7 @@ export class DefaultLoader implements Loader {
                 p.row,
                 r.errors?.[0]?.type ?? "TYPE_CHANGE_FAILED",
                 r.errors?.[0]?.message ?? "changetype failed",
-                p.idRow!.vaultId,
+                (p.idRow ?? p.hit)!.vaultId,
               );
           });
           out.typeChanged += ok.length;
@@ -647,7 +696,10 @@ export class DefaultLoader implements Loader {
         verifiedHash: p.idRow?.verifiedHash ?? null,
         verifiedAt: p.idRow?.verifiedAt ?? null,
         deletedAt: null,
-        objectType: p.row.objectType ?? p.idRow?.objectType ?? null,
+        // after a changetype/upsert the row's type is what Vault now holds; a matched
+        // record that the payload does not type keeps the type Vault reported
+        objectType:
+          p.row.objectType ?? p.hit?.objectType ?? p.idRow?.objectType ?? null,
       });
     }
     for (const row of puts) await rt.deps.store.idMap.put(row);
@@ -669,6 +721,11 @@ export class DefaultLoader implements Loader {
     const out = await this.applyDeletesDetailed(req, plan);
     const { ignoredDetail: _d, ...rest } = out;
     return rest;
+  }
+
+  /** §3.4 a / §4.2: `merged_into` for SFDC merge losers plus child fan-out PUTs. */
+  applyMerges(req: MergeRequest, plan: LoadPlan): Promise<MergeResult> {
+    return runMerges(this.rt, req, plan);
   }
 
   /** `applyDeletes` plus the per-id ignore reasons for the report. */

@@ -7,7 +7,11 @@
  * with `noTriggers = false` (§6.2). Upserted with `idParam = external_id__v`
  * in the wild `[OBS]`; the tool keeps the legacy-id field as idParam and
  * `external_id__v` as the first match key, then the `account__v` natural key
- * (§3.3, warning-level).
+ * (§3.3, warning-level). The module defaults `externalIdOwnedBy = integration`
+ * so §3.2 step 4 never promotes `external_id__v` to the legacy-id field (that
+ * would overwrite the integration keys with `SF:{orgId15}:{id18}` and defeat
+ * the match key); `objects.em_speaker.externalIdOwnedBy = migration`
+ * overrides it.
  *
  * `account__v` is the required parent (`ref(account)`, `Y`) and the source of
  * `em_event_speaker.account__v`; an unresolved account makes the row
@@ -25,7 +29,22 @@
  * (a) the target stays unique per row (`MAP_DUP_TARGET`), (b) preflight
  * validates them against the base field (`outputField` strips the suffix)
  * and (c) the transform emits into the real `first_name__v`/`last_name__v`
- * column via `targetField`. The primary row always wins when it has a value.
+ * column via `targetField`. The primary row always wins when it has a
+ * non-blank value (a whitespace-only own name counts as empty — the `text`
+ * transform would omit it anyway).
+ *
+ * **Delta caveat — the account-derived names are an init-time snapshot.** The
+ * value is hashed into `source_hash`, but on `delta` the unit only re-extracts
+ * rows whose own `EM_Speaker_vod__c.SystemModstamp` moved (§4.1); an Account
+ * rename does not touch the speaker's modstamp and §4.2's fan-out only covers
+ * merge/re-key/delete of the parent, not parent column values. Speakers that
+ * carry their own `First_Name_vod__c`/`Last_Name_vod__c` are unaffected;
+ * speakers on the fallback path keep the name seen at their last extract
+ * until they are modified themselves. The per-row diagnostic
+ * `SPEAKER_NAME_FROM_ACCOUNT` is counted per unit by the transform stage so
+ * the reviewer can size that population; closing the gap needs a
+ * parent-modstamp term in the delta predicate (or a `verify`-time
+ * re-transform), which `ScopeSpec` cannot express today.
  *
  * `Next_Year_Status_vod__c` maps to `next_year_status__v`, which was observed
  * on `em_speaker_qualification__v`, not on the speaker — `[UNV]` on
@@ -77,16 +96,22 @@ export function baseNameTarget(
   return base === "first_name__v" || base === "last_name__v" ? base : undefined;
 }
 
+/** Absent, empty or whitespace-only (the `text` transform would omit it). */
+export function isBlank(v: unknown): boolean {
+  return isEmpty(v) || String(v).trim() === "";
+}
+
 /**
  * Pure reader: the account-derived value for `first_name__v`/`last_name__v`
- * when the speaker's own field is absent or empty; `undefined` otherwise.
+ * when the speaker's own field is absent, empty or blank; `undefined`
+ * otherwise.
  */
 export function speakerNameFallback(
   row: SourceRow,
   base: "first_name__v" | "last_name__v",
 ): string | undefined {
   const src = SPEAKER_NAME_SOURCES[base];
-  if (!isEmpty(row[src.own])) return undefined;
+  if (!isBlank(row[src.own])) return undefined;
   const v = row[src.account];
   if (isEmpty(v)) return undefined;
   const s = String(v).trim();
@@ -96,8 +121,8 @@ export function speakerNameFallback(
 /**
  * `custom(speakerNamesFromAccount)`: on the fallback rows
  * (`Account_vod__r.FirstName → first_name__v.account`, …) emits the account's
- * name into the base target only when the speaker's own field is absent or
- * empty; the primary `text` row wins otherwise. Non-fatal `custom`
+ * name into the base target only when the speaker's own field is absent,
+ * empty or whitespace-only; the primary `text` row wins otherwise. Non-fatal `custom`
  * diagnostic `SPEAKER_NAME_FROM_ACCOUNT` for reporting counts.
  */
 export const speakerNamesFromAccount: CustomTransformFn = (
@@ -267,6 +292,9 @@ export const em_speaker = defineObject({
     },
   ],
   custom: { speakerNamesFromAccount },
+  // §3.2 step 4: external_id__v is integration-written [OBS idParam] — never a
+  // legacy-id candidate, so it stays a usable match key. Config-overridable.
+  optionDefaults: { externalIdOwnedBy: "integration" },
   notes:
-    "EM master data (§6.3.21): country of the linked account, full scope, inactivate on delete (status__v only). Names fall back to the account's FirstName/LastName; qualifications out of v1 (§6.2.1).",
+    "EM master data (§6.3.21): country of the linked account, full scope, inactivate on delete (status__v only). Names fall back to the account's FirstName/LastName (SPEAKER_NAME_FROM_ACCOUNT, counted per unit) — an init-time snapshot: an Account rename does not move the speaker's SystemModstamp, so the fallback names are not refreshed on delta until the speaker itself changes. externalIdOwnedBy defaults to integration so external_id__v stays the match key and is never the legacy-id field (§3.2 step 4). Qualifications out of v1 (§6.2.1).",
 });

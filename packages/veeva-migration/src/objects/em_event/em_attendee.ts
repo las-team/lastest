@@ -13,8 +13,12 @@
  * id map already carries a person-account entry for the contact id
  * (`objects.account.contactToPersonAccount`, §3.4). `attendee_type__v` is
  * set explicitly by `custom(attendeeType)` from the source formula value
- * (crosswalk `em_attendee.attendeeType`), else derived from whichever
- * reference is set.
+ * (`Attendee_Type_vod__c`, crosswalk `em_attendee.attendeeType`), else
+ * derived from whichever reference is set. The formula is a *selector* row
+ * (`attendee_type__v.formula`) — preflight drops calculated sources, so the
+ * primary row is keyed on `Id` and reads the formula column from the row
+ * when it was selected; a contact re-pointed to a person account is typed
+ * `person_account__v`.
  *
  * Object type `Attendee_vod → attendee__v` (UNV). Business status →
  * `em_attendee_status__v` (pattern field `[UNV]`; values `[OBS invited__v]`).
@@ -27,6 +31,7 @@ import { isContactId, isSfdcId, to18 } from "../../transform/ids";
 import type {
   CustomTransformFn,
   SourceRow,
+  TransformContext,
   TransformResult,
 } from "../../types";
 import { defineObject, type ObjectModuleInput } from "../types";
@@ -72,6 +77,8 @@ export const EM_ATTENDEE_TYPE: Record<string, string> = {
 };
 
 export const ATTENDEE_TYPE_MAP_KEY = "em_attendee.attendeeType";
+/** Source formula (`[OBS]`, calculated — dropped by preflight; read from the row when selected). */
+export const ATTENDEE_TYPE_FORMULA_SOURCE = "Attendee_Type_vod__c";
 /** Blob name (`objects.em_attendee.blobs.signature`). */
 export const EM_ATTENDEE_SIGNATURE_BLOB = "signature";
 /** Opt-in selector column (`objects.em_attendee.personAccountTypeLookup`). */
@@ -115,11 +122,28 @@ export function deriveAttendeeSourceType(row: SourceRow): string | undefined {
 }
 
 /**
+ * True when the row's only reference is a contact that the id map already
+ * knows as a person account (`contactAttendee` re-points it to `account__v`).
+ */
+export function contactRepointedToPersonAccount(
+  row: SourceRow,
+  ctx: Pick<TransformContext, "ids">,
+): boolean {
+  if (!isEmpty(row.Account_vod__c) || !isEmpty(row.User_vod__c)) return false;
+  if (isEmpty(row.Contact_vod__c)) return false;
+  const raw = String(row.Contact_vod__c).trim();
+  if (!isSfdcId(raw) || !isContactId(raw)) return false;
+  return ctx.ids.resolve("account", to18(raw)) !== undefined;
+}
+
+/**
  * `custom(attendeeType)`: `attendee_type__v` from the formula value
- * (`Attendee_Type_vod__c`) or, when empty, from the references; crosswalked
- * through `em_attendee.attendeeType` (country overlay → module defaults →
- * derivation → target validation → onUnmapped policy). Selector rows emit
- * nothing.
+ * (`Attendee_Type_vod__c`, read from the row — the primary row is keyed on
+ * `Id` because preflight drops calculated sources) or, when empty, from the
+ * references; a contact re-pointed to a person account (§3.4) is typed
+ * `Person_Account_vod`. Crosswalked through `em_attendee.attendeeType`
+ * (country overlay → module defaults → derivation → target validation →
+ * onUnmapped policy). Selector rows emit nothing.
  */
 export const attendeeType: CustomTransformFn = (
   value,
@@ -127,9 +151,15 @@ export const attendeeType: CustomTransformFn = (
   ctx,
 ): TransformResult | undefined => {
   if (ctx.field.target !== "attendee_type__v") return undefined;
-  const source = isEmpty(value)
+  const formula = !isEmpty(row[ATTENDEE_TYPE_FORMULA_SOURCE])
+    ? row[ATTENDEE_TYPE_FORMULA_SOURCE]
+    : ctx.field.source === ATTENDEE_TYPE_FORMULA_SOURCE
+      ? value
+      : undefined;
+  let source = isEmpty(formula)
     ? deriveAttendeeSourceType(row)
-    : String(value).trim();
+    : String(formula).trim();
+  if (contactRepointedToPersonAccount(row, ctx)) source = "Person_Account_vod";
   if (!source) return undefined;
   const r = crosswalkPicklist(ctx, ATTENDEE_TYPE_MAP_KEY, source);
   if (r.skip || r.value === undefined)
@@ -261,13 +291,23 @@ export const em_attendee = defineObject({
         "dropped with CONTACT_REF_DROPPED unless the id map carries a person account for the contact (objects.account.contactToPersonAccount, §3.4); emits into account__v",
     },
     {
-      source: "Attendee_Type_vod__c",
+      source: "Id",
       target: "attendee_type__v",
       transform: "custom(attendeeType)",
       required: "y?",
       evidence: "OBS",
       notes:
-        "formula in source; set explicitly: person_account__v / business_account__v / user__v / contact__v [UNV values]",
+        "set explicitly: person_account__v / business_account__v / user__v / contact__v [UNV values] — from the Attendee_Type_vod__c formula (selector row attendee_type__v.formula) when selected, else derived from the reference that is set; keyed on Id because preflight drops calculated sources",
+    },
+    {
+      source: ATTENDEE_TYPE_FORMULA_SOURCE,
+      target: "attendee_type__v.formula",
+      transform: "custom(attendeeType)",
+      required: "n",
+      evidence: "OBS",
+      optionalSource: true,
+      notes:
+        "selector row: formula in source (dropped by preflight when calculated — SF_FIELD_CALCULATED); read by the attendee_type__v row",
     },
     {
       source: ACCOUNT_IS_PERSON_SOURCE,
@@ -567,14 +607,24 @@ export const em_attendee = defineObject({
       method: "mobile_id",
       keys: [{ target: "mobile_id__v", source: "Mobile_ID_vod__c" }],
     },
+    // §3.3 4th rule `(event__v, account__v | user__v)` is an alternation:
+    // exactly one of account/user is ever set, so it is two pairs (a rule
+    // needs every key populated to fire); precedence stops at the first hit.
     {
       method: "natural_key",
       keys: [
         { target: "event__v", source: "Event_vod__c" },
         { target: "account__v", source: "Account_vod__c" },
+      ],
+      notes: "(event__v, account__v) pair (§3.3), warning-level",
+    },
+    {
+      method: "natural_key",
+      keys: [
+        { target: "event__v", source: "Event_vod__c" },
         { target: "user__v", source: "User_vod__c" },
       ],
-      notes: "(event__v, account__v | user__v) pair (§3.3), warning-level",
+      notes: "(event__v, user__v) pair (§3.3), warning-level",
     },
   ],
   blobs: { [EM_ATTENDEE_SIGNATURE_BLOB]: "optional" },

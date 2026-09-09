@@ -325,6 +325,58 @@ describe("DefaultReconciler (§2.8 / §8.8)", () => {
     expect(s.findings.map((f) => f.code)).toEqual(["RECON_SKIP_UNDOCUMENTED"]);
   });
 
+  it("match-only rows that were matched but never written stay out of the aggregate hash set (§3.3, §2.8)", async () => {
+    // a pre-existing address matched by key: id-map row without source_hash, row_results marked `matched`
+    const matched = payloadRow(ADDR[2], ACC2, "Berlin");
+    await store.idMap.put({
+      objectKey: "address",
+      sfdcId: ADDR[2],
+      vaultDns: vault.vaultDns,
+      vaultObject: "address__v",
+      vaultId: addressIds[ADDR[2]],
+      country: "US",
+      matchMethod: "external_id",
+      firstSeenRun: "run-1",
+      lastSeenRun: "run-1",
+      sourceHash: null,
+    });
+    await store.rowResults.upsert([
+      rr(ADDR[2], "loaded_unchanged", { errorType: "matched" }),
+    ]);
+    const r = await reconciler([rows[0], rows[1], matched]).reconcileUnit(
+      input(),
+    );
+    expect(r.row).toMatchObject({ created: 2, unchanged: 1, status: "pass" });
+    expect(r.row.aggHashSrc).toBe(r.row.aggHashTgt);
+    expect(r.row.aggHashSrc?.startsWith("2:")).toBe(true);
+    expect(r.findings.map((f) => f.code)).not.toContain(
+      "RECON_AGG_HASH_MISMATCH",
+    );
+  });
+
+  it("a dry run carries no aggregate hashes (nothing was written, §8.9)", async () => {
+    await store.runs.create({
+      runId: "run-1",
+      mode: "init",
+      wave: null,
+      countries: ["US"],
+      startedAt: NOW,
+      status: "running",
+      toolVersion: "t",
+      configHash: "c",
+      mappingHash: "m",
+      sourceOrgId: "o",
+      sourceApiVersion: "67.0",
+      targetVaultDns: vault.vaultDns,
+      targetApiVersion: null,
+      freezeAt: null,
+      dryRun: true,
+    });
+    const r = await reconciler().reconcileUnit(input());
+    expect(r.row.aggHashSrc).toBeNull();
+    expect(r.row.aggHashTgt).toBeNull();
+  });
+
   it("detects a row loaded without its id-map bookkeeping through the aggregate hashes", async () => {
     await store.idMap.setSourceHash("address", ADDR[1], "stale-hash", "run-0");
     const r = await reconciler().reconcileUnit(input());

@@ -11,37 +11,45 @@
  * (`deletePolicy: "delete"`, §4.4).
  *
  * Scope (§6.2): via parent `Expense_Header_vod__r…`. The header is scoped on
- * two dates (`Event_vod__r.Start_Time_vod__c` ∨ `Payment_Date_vod__c`), and a
- * `via-parent` rule carries a single `parentField` — its second term could
- * only travel as a parent open predicate, which `extract/scope.ts` prefixes
- * with everything before the last dot of `parentField` (the *event*
- * relationship for a two-hop path), producing an invalid field. The line is
- * therefore `dated` with both header terms spelled through
- * `Expense_Header_vod__r.`: a line is in scope exactly when its header is,
- * with no dependence on how the engine passes parent open terms. Rendered:
- * `Expense_Header_vod__r.Event_vod__r.Start_Time_vod__c >= {cutoff}T00:00:00Z OR Expense_Header_vod__r.Payment_Date_vod__c >= {cutoff}`.
+ * two dates (`Event_vod__r.Start_Time_vod__c` ∨ `Payment_Date_vod__c`) plus
+ * the event's open-item term (§1.1 #4), and a `via-parent` rule carries a
+ * single `parentField` — so the line is `dated` with all three header terms
+ * spelled through `Expense_Header_vod__r.`: a line is in scope exactly when
+ * its header is. Rendered:
+ * `(Expense_Header_vod__r.Event_vod__r.Start_Time_vod__c >= {cutoff}T00:00:00Z OR Expense_Header_vod__r.Payment_Date_vod__c >= {cutoff}) OR ((Expense_Header_vod__r.Event_vod__r.End_Time_vod__c >= {cutoff}T00:00:00Z) OR (Expense_Header_vod__r.Event_vod__r.Status_vod__c NOT IN (…closed…)))`.
+ *
+ * FK rows are **plain `ref(...)`** so the engine sees them: the transform-time
+ * id-map snapshot (`referenceColumns`), the §2.2 step 5 closure
+ * (`mappingFkColumns`), the preflight FK checks and the
+ * `MAP_FK_PARENT_NOT_IN_PLAN` lint all read `refTarget()`, which a
+ * `custom(...)` transform would hide (see `product.parent_product__v`).
+ *  - `event__v` is read from the **header's** event
+ *    (`Expense_Header_vod__r.Event_vod__c`, `HEADER_EVENT_COLUMN`): a line
+ *    cannot belong to another event than its master-detail header, the
+ *    header's `Event_vod__c` is required there, and the line's own
+ *    `Event_vod__c` is `[UNVERIFIED-SOURCE]`. This is the spec's "derived from
+ *    the header when absent" made unconditional; an org whose lines carry an
+ *    authoritative own event overrides the source through
+ *    `objects.expense_line.fields.override`.
+ *  - `expense_type__v` defaults to `ref(em_catalog)` (the spec default "when
+ *    the target is an object reference to `em_catalog__v`"). A vault whose
+ *    `expense_type__v` is a Picklist/String fails preflight's VT type check
+ *    (`VT_TYPE_INCOMPATIBLE`) for this row; the fix is the documented override
+ *    to `picklist(expense_line.expenseType)` / `text` — the
+ *    `expense_line.expenseType` crosswalk key is registered for that purpose.
  *
  * Block S opt-outs: `Name` follows the autoNumber rule; no `OwnerId`
  * (master-detail children have no owner column); `CurrencyIsoCode` is on.
  *
- * Custom transforms (pure, unit-tested in `expense_line.test.ts`):
- *  - `eventRef`         `Event_vod__c → event__v` (`ref(em_event)`), "derived
- *                       from the header when absent": falls back to the
- *                       header's `Expense_Header_vod__r.Event_vod__c` when the
- *                       row carries it (flattened or nested).
+ * Custom transform (pure, unit-tested in `expense_line.test.ts`):
  *  - `budgetRefDropped` `Event_Budget_vod__c → event_budget__v`: EM budgets
  *                       are out of v1 (§6.2.1) — omitted and counted through
  *                       a non-fatal `EM_BUDGET_REF_DROPPED` diagnostic.
- *  - `expenseTypeAuto`  `Expense_Type_vod__c → expense_type__v`:
- *                       `ref(em_catalog)` when the target is an Object
- *                       reference to `em_catalog__v`, `picklist(expense_line.expenseType)`
- *                       when it is a Picklist, `text` otherwise.
  */
-import { readSource } from "../../transform/apply";
 import { isSfdcId, to18 } from "../../transform/ids";
-import { applyTransform } from "../../transform/registry";
-import type { CustomTransformFn, TransformSpec } from "../../types";
+import type { CustomTransformFn } from "../../types";
 import { defineObject } from "../types";
+import { emEventOpenTerm } from "./expense_header";
 
 // ---------------------------------------------------------------------------
 // helpers (local copies — no coupling to other families)
@@ -51,22 +59,21 @@ export function isEmpty(v: unknown): boolean {
   return v === null || v === undefined || v === "";
 }
 
-/** Relationship column of the header's event, read by `eventRef` as the fallback. */
+/** Source of `event__v`: the header's event through the master-detail relationship. */
 export const HEADER_EVENT_COLUMN = "Expense_Header_vod__r.Event_vod__c";
-/** Picklist map key of the expense-type crosswalk (used when `expense_type__v` is a Picklist). */
+/** Picklist map key of the expense-type crosswalk (override `expense_type__v` to `picklist(expense_line.expenseType)` when the target is a Picklist). */
 export const EXPENSE_LINE_TYPE_MAP_KEY = "expense_line.expenseType";
 /** Diagnostic code of the omit+count rule for `event_budget__v` (§6.2.1). */
 export const EM_BUDGET_REF_DROPPED = "EM_BUDGET_REF_DROPPED";
-
-/** `event__v`: own `Event_vod__c`, else the header's event (`HEADER_EVENT_COLUMN`), as `ref(em_event)`. */
-export const eventRef: CustomTransformFn = (value, row, ctx) => {
-  const own = isEmpty(value) ? undefined : value;
-  const fromHeader = readSource(row, HEADER_EVENT_COLUMN);
-  const effective = own ?? (isEmpty(fromHeader) ? undefined : fromHeader);
-  if (effective === undefined) return undefined;
-  const spec: TransformSpec = { kind: "ref", objectKey: "em_event" };
-  return applyTransform(spec, effective, row, ctx);
-};
+/** Relationship prefix of the header's event as seen from a line. */
+export const LINE_EVENT_PREFIX = "Expense_Header_vod__r.Event_vod__r.";
+/**
+ * §1.1 #4 open-item term of the header's event, mirrored through
+ * `Expense_Header_vod__r.Event_vod__r.` (same shape as the header's, one hop
+ * further; the prefixes are written literally so the `{cutoffDateTime}` token
+ * survives untouched).
+ */
+export const EXPENSE_LINE_OPEN_PREDICATE = emEventOpenTerm(LINE_EVENT_PREFIX);
 
 /** `event_budget__v`: omit + count `EM_BUDGET_REF_DROPPED` (non-fatal); blanks are simply omitted. */
 export const budgetRefDropped: CustomTransformFn = (value, _row, ctx) => {
@@ -85,55 +92,28 @@ export const budgetRefDropped: CustomTransformFn = (value, _row, ctx) => {
   };
 };
 
-/** `expense_type__v`: `ref(em_catalog)` | `picklist(expense_line.expenseType)` | `text` by target type. */
-export const expenseTypeAuto: CustomTransformFn = (value, row, ctx) => {
-  if (isEmpty(value)) return undefined;
-  const type = ctx.targetField?.type;
-  const referenceObject = ctx.targetField?.referenceObject;
-  let spec: TransformSpec;
-  if (
-    type === "object" &&
-    (referenceObject === undefined || referenceObject === "em_catalog__v")
-  )
-    spec = { kind: "ref", objectKey: "em_catalog" };
-  else if (type === "object")
-    return {
-      omit: true,
-      diagnostic: {
-        kind: "unresolved_fk",
-        field: ctx.field.target,
-        code: "EXPENSE_TYPE_TARGET_UNSUPPORTED",
-        value: String(value).trim(),
-        detail: `expense_type__v references ${referenceObject}, not em_catalog__v`,
-      },
-    };
-  else if (type === "picklist")
-    spec = { kind: "picklist", mapKey: EXPENSE_LINE_TYPE_MAP_KEY };
-  else spec = { kind: "text" };
-  return applyTransform(spec, value, row, ctx);
-};
-
 export const expense_line = defineObject({
   key: "expense_line",
   source: "Expense_Line_vod__c",
   target: "expense_line__v",
   targetEvidence: "OBS",
-  // §6.2: via parent `Expense_Header_vod__r…` — both header terms mirrored
+  // §6.2: via parent `Expense_Header_vod__r…` — every header term mirrored
   // through the relationship (see header comment for why not `via-parent`).
   scope: {
     kind: "dated",
     predicates: [
       {
-        field: "Expense_Header_vod__r.Event_vod__r.Start_Time_vod__c",
+        field: `${LINE_EVENT_PREFIX}Start_Time_vod__c`,
         type: "datetime",
       },
       { field: "Expense_Header_vod__r.Payment_Date_vod__c", type: "date" },
     ],
+    openPredicate: EXPENSE_LINE_OPEN_PREDICATE,
     retentionFamily: "tov",
   },
   countryOf: "parent:expense_header:Expense_Header_vod__c",
   // §6.2 lists expense_header, em_event; em_catalog is added because
-  // `expense_type__v` may resolve as ref(em_catalog) (step 10, no cycle).
+  // `expense_type__v` defaults to ref(em_catalog) (step 10, no cycle).
   dependsOn: ["expense_header", "em_event", "em_catalog"],
   // Master-detail child: auto-number Name, no OwnerId; amounts carry a currency.
   blockS: { name: "autoNumber", ownerId: false, currency: true },
@@ -151,15 +131,15 @@ export const expense_line = defineObject({
         "[UNVERIFIED-SOURCE] master-detail parent; unresolved → pending_fk (§3.5)",
     },
     {
-      source: "Event_vod__c",
+      source: HEADER_EVENT_COLUMN,
       target: "event__v",
-      transform: "custom(eventRef)",
+      transform: "ref(em_event)",
       required: "y?",
       evidence: "OBS",
       unverifiedSource: true,
       sourceType: "reference",
       notes:
-        "[UNVERIFIED-SOURCE] ref(em_event); derived from the header (Expense_Header_vod__r.Event_vod__c) when absent",
+        "[UNVERIFIED-SOURCE] ref(em_event) read from the header's event (Expense_Header_vod__r.Event_vod__c — the spec's 'derived from the header' made unconditional, keeps the FK visible to the engine); override the source to Event_vod__c when the line's own lookup is authoritative",
     },
     {
       source: "Event_Budget_vod__c",
@@ -175,13 +155,14 @@ export const expense_line = defineObject({
     {
       source: "Expense_Type_vod__c",
       target: "expense_type__v",
-      transform: "custom(expenseTypeAuto)",
+      transform: "ref(em_catalog)",
       required: "y?",
       evidence: "OBS",
       unverifiedSource: true,
+      sourceType: "reference",
       countryConfigurable: true,
       notes:
-        "[UNVERIFIED-SOURCE] ref(em_catalog) when the target references em_catalog__v, else picklist(expense_line.expenseType) / text; crosswalk per country",
+        "[UNVERIFIED-SOURCE] ref(em_catalog) — the spec default for an em_catalog__v reference target; when preflight reports VT_TYPE_INCOMPATIBLE (Picklist/String target) override to picklist(expense_line.expenseType) / text; crosswalk per country",
     },
     {
       source: "Expense_Type_Name_vod__c",
@@ -245,7 +226,8 @@ export const expense_line = defineObject({
     },
   ],
   // No documented value list: derivation rule (strip `_vod`, lowercase, `__v`)
-  // validated against the target; overlays add entries under this key.
+  // validated against the target; overlays add entries under this key. Used
+  // only once `expense_type__v` is overridden to `picklist(expense_line.expenseType)`.
   picklists: { [EXPENSE_LINE_TYPE_MAP_KEY]: {} },
   objectTypes: {},
   states: {},
@@ -263,8 +245,8 @@ export const expense_line = defineObject({
         "external_id__v = External_ID_vod__c when the target has the field (§3.3 'if present')",
     },
   ],
-  custom: { eventRef, budgetRefDropped, expenseTypeAuto },
+  custom: { budgetRefDropped },
   optionDefaults: { optional: true },
   notes:
-    "Master-detail child of expense_header (§6.3.25b): optional, scoped through the header's event start time (+ the header's payment-date term via parentOpenPredicate), widened by scope.tovRetentionMonths; deleted with the parent (§4.4); event_budget__v omitted and counted (EM_BUDGET_REF_DROPPED); noTriggers = true.",
+    "Master-detail child of expense_header (§6.3.25b): optional; scoped `dated` with the header's terms mirrored through Expense_Header_vod__r (event start time ∨ payment date ∨ the event open-item term), widened by scope.tovRetentionMonths; event__v read from the header's event; deleted with the parent (§4.4); event_budget__v omitted and counted (EM_BUDGET_REF_DROPPED); noTriggers = true.",
 });

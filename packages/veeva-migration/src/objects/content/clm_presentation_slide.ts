@@ -12,9 +12,19 @@
  * `[UNVERIFIED-SOURCE]`; when the column is blank (or absent from the org)
  * the value falls back to the referenced key message's
  * `Key_Message_vod__r.Vault_External_Id_vod__c` — `custom(slideVaultExternalId)`.
- * The fallback path is also a match-rule key (§3.3 precedence), which is what
- * makes the extractor select the relationship column. When neither source
- * has a value the row is created without the field and a non-fatal
+ *
+ * The row is deliberately **anchored on the fallback path** (its `source`),
+ * not on the unverified slide column: preflight drops a row whose
+ * `unverifiedSource` column is absent from the describe, which would have
+ * removed the fallback together with it in exactly the org shape the spec
+ * anticipates. The key-message path is a real §6.3.14 field and always
+ * resolvable; the slide's own column is read by the transform
+ * (`readSource`) and travels with the extract because it is the first
+ * §3.3 match-rule key (the column builder selects match-key sources that
+ * the describe has and silently leaves out the ones it lacks). Preference
+ * order is unchanged: own value first, then the key message's (counted as
+ * `SLIDE_VAULT_EXTERNAL_ID_FROM_KEY_MESSAGE`). When neither source has a
+ * value the row is created without the field and a non-fatal
  * `SLIDE_VAULT_EXTERNAL_ID_MISSING` diagnostic counts it (warning at run
  * level) — the `y?` requirement is deliberately not enforced here.
  *
@@ -42,18 +52,20 @@ function isEmpty(v: unknown): boolean {
 }
 
 /**
- * `vault_external_id__v`: the row's own `Vault_External_Id_vod__c`, else the
- * key message's `Vault_External_Id_vod__c` (counted as
- * `SLIDE_VAULT_EXTERNAL_ID_FROM_KEY_MESSAGE`), else omitted with the
- * non-fatal `SLIDE_VAULT_EXTERNAL_ID_MISSING` diagnostic.
+ * `vault_external_id__v`: the row's own `Vault_External_Id_vod__c` (read
+ * from the row — the mapping row is anchored on the fallback path, see the
+ * module comment), else the key message's `Vault_External_Id_vod__c`
+ * (`value`, counted as `SLIDE_VAULT_EXTERNAL_ID_FROM_KEY_MESSAGE`), else
+ * omitted with the non-fatal `SLIDE_VAULT_EXTERNAL_ID_MISSING` diagnostic.
  */
 export const slideVaultExternalId: CustomTransformFn = (value, row, ctx) => {
-  const own = isEmpty(value) ? undefined : String(value).trim();
+  const ownRaw = readSource(row, SLIDE_VAULT_EXTERNAL_ID_SOURCE);
+  const own = isEmpty(ownRaw) ? undefined : String(ownRaw).trim();
   if (own) return own;
-  const fallback = readSource(row, SLIDE_VAULT_EXTERNAL_ID_FALLBACK);
-  if (!isEmpty(fallback)) {
+  const fallback = isEmpty(value) ? undefined : String(value).trim();
+  if (fallback) {
     return {
-      value: String(fallback).trim(),
+      value: fallback,
       diagnostic: {
         kind: "custom",
         field: ctx.field.target,
@@ -134,15 +146,17 @@ export const clm_presentation_slide = defineObject({
       notes: "match key (§3.3)",
     },
     {
-      source: SLIDE_VAULT_EXTERNAL_ID_SOURCE,
+      // anchored on the always-resolvable key-message path; the slide's own
+      // [UNVERIFIED-SOURCE] column is read by the transform (see module comment)
+      source: SLIDE_VAULT_EXTERNAL_ID_FALLBACK,
       target: "vault_external_id__v",
       transform: "custom(slideVaultExternalId)",
       required: "y?",
       evidence: "DOC",
-      unverifiedSource: true,
+      optionalSource: true,
       sourceType: "string",
       notes:
-        "slide identity used by gotoSlide/CLM matching [DOC]; source [UNVERIFIED-SOURCE], fallback Key_Message_vod__r.Vault_External_Id_vod__c; y? when PromoMats content exists — missing values are counted (SLIDE_VAULT_EXTERNAL_ID_MISSING), never fatal",
+        "slide identity used by gotoSlide/CLM matching [DOC]; preferred source Vault_External_Id_vod__c [UNVERIFIED-SOURCE] (read from the row, selected as match key), fallback Key_Message_vod__r.Vault_External_Id_vod__c (row anchor); y? when PromoMats content exists — missing values are counted (SLIDE_VAULT_EXTERNAL_ID_MISSING), never fatal",
     },
     {
       source: "Display_Order_vod__c",

@@ -75,7 +75,7 @@ export async function runBlobs(
 
   const flush = async () => {
     if (!batch.length && !attachments.length) return;
-    batchNo++;
+    batchNo = await rt.nextBatchNo(plan);
     const started = Date.now();
     const outcome: BatchOutcome = {
       batchNo,

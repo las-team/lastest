@@ -14,10 +14,24 @@
  * Contacts (§3.4): `From_Contact_vod__c` / `To_Contact_vod__c` have no Vault
  * equivalent. A row whose account side is empty but whose contact side is
  * populated cannot be represented and is `skipped(CONTACT_REF_DROPPED)` —
- * counted, never failed (`custom(affiliationAccountRef)`). Mapping contacts to
- * person accounts (`objects.account.contactToPersonAccount`) is an
- * account-module concern and needs `Account.PersonContactId` resolution; it is
- * not attempted here.
+ * counted, never failed (`custom(affiliationAccountRef)`). The contact
+ * columns are `skip` rows (§6.3.10) and `skip` rows contribute no SELECT
+ * column, so they are declared through `objects.affiliation.extraColumns`
+ * (`AFFILIATION_EXTRA_COLUMNS`, the same mechanism `account` uses for
+ * `IsPersonAccount` / `PersonContactId`): preflight resolves them against the
+ * describe and the run selects them with the mapped columns. Mapping
+ * contacts to person accounts (`objects.account.contactToPersonAccount`) is
+ * an account-module concern and needs `Account.PersonContactId` resolution;
+ * it is not attempted here.
+ *
+ * The account lookups stay `custom(affiliationAccountRef)` rather than plain
+ * `ref(account)`: a Contact id in the lookup must be a **fatal skip**, and the
+ * registry's `ref` reports it as a non-fatal `contact_ref_dropped` omit that
+ * would let a required row through without the field. Known cost: the column
+ * builder only derives FK id-sets (§2.2 step 4 closure) from `ref`/`refUser`/
+ * composite rows, so an out-of-country account referenced only by an
+ * affiliation is not fetched by closure and the row waits in `pending_fk`
+ * until that country's `account` unit lands.
  *
  * Inactivation (§4.4): `status__v = inactive__v` only (no business flag).
  */
@@ -43,6 +57,16 @@ export const AFFILIATION_SKIPPED_FORMULAS = [
   "To_Account_Name_vod__c",
   "To_Account_Identifier_vod__c",
   "To_Account_Record_Type_vod__c",
+] as const;
+/**
+ * Contact lookups read by `custom(affiliationAccountRef)` through the row.
+ * `skip` rows select nothing, so they are declared as the module default of
+ * `objects.affiliation.extraColumns` (preflight resolves them; a describe
+ * miss is an `SF_FIELD_MISSING` warning and the guard then sees no contact).
+ */
+export const AFFILIATION_EXTRA_COLUMNS = [
+  "From_Contact_vod__c",
+  "To_Contact_vod__c",
 ] as const;
 /** Transient trigger flags (§6.3.10). */
 export const AFFILIATION_SKIPPED_TRANSIENT = [
@@ -147,7 +171,7 @@ export const affiliation = defineObject({
       transform: "skip",
       required: "-",
       notes:
-        "Contact lookup — CONTACT_REF_DROPPED (§3.4); read by custom(affiliationAccountRef) via the row",
+        "Contact lookup — CONTACT_REF_DROPPED (§3.4); selected via objects.affiliation.extraColumns and read by custom(affiliationAccountRef) via the row",
     },
     {
       source: "To_Contact_vod__c",
@@ -155,7 +179,7 @@ export const affiliation = defineObject({
       transform: "skip",
       required: "-",
       notes:
-        "Contact lookup — CONTACT_REF_DROPPED (§3.4); read by custom(affiliationAccountRef) via the row",
+        "Contact lookup — CONTACT_REF_DROPPED (§3.4); selected via objects.affiliation.extraColumns and read by custom(affiliationAccountRef) via the row",
     },
     {
       source: AFFILIATION_MIRROR_FIELD,
@@ -267,6 +291,10 @@ export const affiliation = defineObject({
     },
   ],
   custom: { affiliationAccountRef },
+  optionDefaults: {
+    // contact columns read by custom(affiliationAccountRef) beyond its `source`
+    extraColumns: [...AFFILIATION_EXTRA_COLUMNS],
+  },
   notes:
-    "Account-to-account relationships incl. mirror rows (child_affiliation__v patched in pass 2); contact affiliations are skipped and counted (CONTACT_REF_DROPPED); inactivated (status__v only) on delete (§4.4).",
+    "Account-to-account relationships incl. mirror rows (child_affiliation__v patched in pass 2); contact affiliations are skipped and counted (CONTACT_REF_DROPPED — the contact columns are selected through objects.affiliation.extraColumns); inactivated (status__v only) on delete (§4.4).",
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyMapping, readSource } from "./apply";
+import { applyMapping, canonicalSkipReason, readSource } from "./apply";
 import { parseTransform } from "./spec";
 import type { FieldMapping, SourceRow } from "../types";
 import {
@@ -203,13 +203,82 @@ describe("applyMapping (§2.3)", () => {
       failure: { code: "INVALID_ID" },
     });
   });
-  it("skipRow user policy yields skipped", () => {
+  it("skipRow user policy yields skipped(rule) with the code kept in diagnostics (§8.8)", () => {
     const m = {
       ...mapping,
       options: { ...mapping.options, unmappedUserPolicy: "skipRow" as const },
     };
     const r = applyMapping({ ...base, OwnerId: SAMPLE_USER_ID_2 }, m, ctx);
     expect(r.status).toBe("skipped");
+    expect(r.skipReason).toBe("rule");
+    expect(r.diagnostics).toContainEqual(
+      expect.objectContaining({ kind: "skipped", code: "UNMAPPED_USER_SKIP" }),
+    );
+    // a configured null object type (country picklist map) is a rule skip too
+    const nullType = {
+      ...ctx,
+      country: buildCountryContext({
+        picklists: {
+          "account.specialty": { CD: "cardiology__v" },
+          "account.objectType": { Professional_vod: null },
+        },
+      }),
+    };
+    const t = applyMapping(base, { ...mapping, objectTypes: {} }, nullType);
+    expect(t.status).toBe("skipped");
+    expect(t.skipReason).toBe("rule");
+    expect(canonicalSkipReason("OBJECT_TYPE_SKIPPED")).toBe("rule");
+    expect(canonicalSkipReason("CONTACT_REF_DROPPED")).toBe("contact_ref");
+    expect(canonicalSkipReason("COUNTRY_UNRESOLVED")).toBe(
+      "country_unresolved",
+    );
+    expect(canonicalSkipReason("OUT_OF_SCOPE_REF_DROPPED")).toBe(
+      "out_of_scope_ref",
+    );
+    expect(canonicalSkipReason(undefined)).toBe("rule");
+  });
+  it("target-required references go to pending_fk even on an `n` row; empty `n` values defer to Vault defaults", () => {
+    const requiredMeta = {
+      ...metadata,
+      fields: {
+        ...metadata.fields,
+        primary_parent__v: {
+          ...metadata.fields.primary_parent__v,
+          required: true,
+        },
+        first_name__v: { ...metadata.fields.first_name__v, required: true },
+      },
+    };
+    const m = buildMaterialisedMapping({
+      objectKey: "account",
+      fields: [
+        F("Id", "legacy_crm_id__v", "legacyId", "K"),
+        F("Primary_Parent_vod__c", "primary_parent__v", "ref(account)", "n"),
+        F("FirstName", "first_name__v", "text", "n"),
+      ],
+      mappingHash: "mh3",
+    });
+    const rctx = { ...ctx, metadata: requiredMeta };
+    // unresolved parent on a Vault-required reference → pending_fk (§3.5), deferred ref kept
+    const r = applyMapping(
+      { Id: base.Id, Primary_Parent_vod__c: "001000000000009AAA" },
+      m,
+      rctx,
+    );
+    expect(r.status).toBe("pending_fk");
+    expect(r.payload.primary_parent__v).toEqual({
+      $fk: { object: "account", sfdcId: "001000000000009AAA" },
+    });
+    // empty source on a Vault-required text field with an `n` row → omitted, Vault defaults it
+    expect(applyMapping({ Id: base.Id }, m, rctx).status).toBe("ok");
+    // an explicit required: false override still wins for the reference
+    expect(
+      applyMapping(
+        { Id: base.Id, Primary_Parent_vod__c: "001000000000009AAA" },
+        { ...m, required: { primary_parent__v: false } },
+        rctx,
+      ).status,
+    ).toBe("ok");
   });
   it("readSource supports flattened and nested relationship paths", () => {
     expect(readSource({ Id: "x", "A.B": 1 }, "A.B")).toBe(1);

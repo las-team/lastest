@@ -9,12 +9,14 @@ import {
   buildDescribe,
   buildMaterialisedMapping,
   sampleAccountDescribe,
+  sampleCall2Describe,
+  sampleCall2Rows,
 } from "../testkit";
 import { to18 } from "../transform/ids";
 import { parseTransform } from "../transform/spec";
 import type { MaterialisedMapping, ObjectKey, SourceRow } from "../types";
 import type { ResolvedTarget } from "../preflight/types";
-import { collectRowFks, runClosure } from "./closure";
+import { collectRowFks, partitionIndex, runClosure } from "./closure";
 import { readCsvRows } from "./files";
 import { cleanup, makeTarget, tmpRunDir } from "./test-helpers";
 import type { FkIdSets } from "./types";
@@ -185,6 +187,7 @@ describe("runClosure (§2.2 step 5)", () => {
         targets,
         maxRounds: 20,
         strategy: "soqlIn",
+        tag: "address:US",
       },
     );
     expect(r.rounds).toBe(3);
@@ -193,12 +196,15 @@ describe("runClosure (§2.2 step 5)", () => {
     expect(r.findings).toEqual([]);
     const files = r.files.get("account")!;
     expect(files.map((f) => f.jobId)).toEqual([
-      "closure-r1",
-      "closure-r2",
-      "closure-r3",
+      "closure-address_US-r1",
+      "closure-address_US-r2",
+      "closure-address_US-r3",
     ]);
     expect(files.every((f) => f.closure)).toBe(true);
-    expect(files[0].path).toContain(`/US/account/extract/`);
+    expect(files.every((f) => f.partition === undefined)).toBe(true);
+    expect(files[0].path).toContain(
+      `/US/account/extract/closure-address_US-r1-0.csv`,
+    );
     const ids: string[] = [];
     for (const f of files)
       for (const row of await readCsvRows(f.path)) ids.push(row.Id);
@@ -217,6 +223,118 @@ describe("runClosure (§2.2 step 5)", () => {
     );
     expect(r.queueOwners.has(to18(SAMPLE_QUEUE_ID))).toBe(true);
     expect(r.userIds.has(SAMPLE_USER_ID)).toBe(true);
+  });
+
+  it("page files never collide across referencing units of the same country", async () => {
+    // two units (address:US, tsf:US) close over `account` concurrently; the
+    // engine runs them in parallel, so both invocations must write distinct
+    // pages even without a caller-supplied tag
+    runDir = await tmpRunDir();
+    const { sfdc, store, mappings, targets } = setup();
+    const req = {
+      runId: "r1",
+      country: "US" as const,
+      runDir,
+      needed: needed({ account: [A(3)] }),
+      mappings,
+      targets,
+      maxRounds: 20,
+      strategy: "soqlIn" as const,
+    };
+    const [a, b] = await Promise.all([
+      runClosure({ sfdc, store }, req),
+      runClosure({ sfdc, store }, req),
+    ]);
+    const pa = a.files.get("account")![0].path;
+    const pb = b.files.get("account")![0].path;
+    expect(pa).not.toBe(pb);
+    expect(a.files.get("account")![0].jobId).toMatch(
+      /^closure-[0-9a-f]{8}-r1$/,
+    );
+    expect((await readCsvRows(pa)).map((r) => r.Id)).toEqual([A(3)]);
+    expect((await readCsvRows(pb)).map((r) => r.Id)).toEqual([A(3)]);
+  });
+
+  it("partitions closure rows of a partitionBy object: parents (p0) before children (p1) across rounds", async () => {
+    runDir = await tmpRunDir();
+    const child = to18("a0K000000000007");
+    const parent = to18("a0K000000000008");
+    const base = sampleCall2Rows()[0];
+    const sfdc = new FakeSfdcClient()
+      .addDescribe(sampleCall2Describe())
+      .addRows("Call2_vod__c", [
+        { ...base, Id: child, Parent_Call_vod__c: parent },
+        { ...base, Id: parent, Parent_Call_vod__c: null },
+      ]);
+    const store = new MemoryStateStore();
+    const call2Mapping = buildMaterialisedMapping({
+      objectKey: "call2",
+      sourceObject: "Call2_vod__c",
+      targetObject: "call2__v",
+      countryOf: parseCountryOf("account"),
+      load: {
+        noTriggers: true,
+        partitionBy: {
+          field: "Parent_Call_vod__c",
+          order: ["null", "notNull"],
+        },
+      },
+      fields: [
+        {
+          source: "Id",
+          target: "legacy_crm_id__v",
+          transform: parseTransform("legacyId"),
+          required: "K",
+        },
+        {
+          source: "Parent_Call_vod__c",
+          target: "parent_call__v",
+          transform: parseTransform("ref(call2)"),
+          required: "n",
+        },
+      ],
+    });
+    // the referencing unit (say a medical inquiry) only knows the child call
+    const r = await runClosure(
+      { sfdc, store },
+      {
+        runId: "r1",
+        country: "US",
+        runDir,
+        needed: needed({ call2: [child] }),
+        mappings: new Map<ObjectKey, MaterialisedMapping>([
+          ["call2", call2Mapping],
+        ]),
+        targets: new Map<ObjectKey, ResolvedTarget>([
+          ["call2", makeTarget("call2", sampleCall2Describe())],
+        ]),
+        maxRounds: 20,
+        strategy: "soqlIn",
+        tag: "medical_inquiry:US",
+      },
+    );
+    expect(r.rounds).toBe(2);
+    expect(r.fetched.get("call2")).toBe(2);
+    const files = r.files.get("call2")!;
+    // round 1 fetched the child, round 2 the parent — the parent's file comes first
+    expect(files.map((f) => [f.partition, f.jobId])).toEqual([
+      [0, "closure-medical_inquiry_US-r2"],
+      [1, "closure-medical_inquiry_US-r1"],
+    ]);
+    expect(files[0].path).toContain("/US/call2/extract/p0/");
+    expect(files[1].path).toContain("/US/call2/extract/p1/");
+    expect((await readCsvRows(files[0].path)).map((x) => x.Id)).toEqual([
+      parent,
+    ]);
+    expect((await readCsvRows(files[1].path)).map((x) => x.Id)).toEqual([
+      child,
+    ]);
+    expect(
+      partitionIndex(
+        { Id: child, Parent_Call_vod__c: parent },
+        { field: "Parent_Call_vod__c", order: ["notNull", "null"] },
+      ),
+    ).toBe(0);
   });
 
   it("stops at ids already in the id map or in this run's extract", async () => {

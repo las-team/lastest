@@ -74,6 +74,11 @@ export function effectiveCutoffDate(
   opts: Pick<ScopeOptions, "cutoffDate" | "now"> = {},
 ): string | undefined {
   if (scope.spec.kind === "full") return undefined;
+  // `scope.objects.<key>.historyMonths: null` (§7.2.1) materialises as a
+  // resolved scope with neither `historyMonths` nor `cutoffDate`
+  // (`config/resolve.ts`): the operator asked for every row, so the plan's
+  // country-level cutoff must not re-scope it.
+  if (isUnscoped(scope)) return undefined;
   if (opts.cutoffDate) {
     assertCutoff(opts.cutoffDate);
     return opts.cutoffDate;
@@ -84,6 +89,15 @@ export function effectiveCutoffDate(
   }
   if (scope.historyMonths === undefined) return undefined;
   return computeCutoffDate(opts.now ?? new Date(), scope.historyMonths);
+}
+
+/** Resolved shape of `historyMonths: null`: a dated/via-parent spec with no window and no literal. */
+export function isUnscoped(scope: ResolvedScope): boolean {
+  return (
+    scope.spec.kind !== "full" &&
+    scope.historyMonths === undefined &&
+    scope.cutoffDate === undefined
+  );
 }
 
 /** `field >= literal` per predicate field. */

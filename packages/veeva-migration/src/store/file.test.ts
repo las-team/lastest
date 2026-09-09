@@ -367,4 +367,50 @@ describe("FileStateStore persistence", () => {
     ).toHaveLength(1);
     await s.close();
   });
+  it("rebuilds the vault-id index on reopen (snapshot + journal)", async () => {
+    const dir = await tmp();
+    const s = await FileStateStore.open({
+      dir,
+      vaultDns: DNS,
+      compactEvery: 2,
+    });
+    await s.idMap.putMany([
+      idRow(a1, { vaultId: "V1" }),
+      idRow(a2, { vaultId: "V2" }),
+    ]);
+    await s.idMap.put(idRow(a2, { vaultId: "V3" })); // journal after compaction
+    await s.idMap.markDeleted("account", a1, "t");
+    await s.close();
+    const r = await FileStateStore.open({ dir, vaultDns: DNS });
+    expect((await r.idMap.byVaultId("account__v", "V3"))?.sfdcId).toBe(a2);
+    expect(await r.idMap.byVaultId("account__v", "V2")).toBeUndefined();
+    expect(await r.idMap.byVaultId("account__v", "V1")).toBeUndefined();
+    await expect(
+      r.idMap.put(idRow(to18("001000000000003"), { vaultId: "V3" })),
+    ).rejects.toThrow(/id_map_vault_uidx/);
+    await r.idMap.put(idRow(to18("001000000000003"), { vaultId: "V1" }));
+    await r.close();
+  });
+  it("id-map put/byVaultId stay linear on a large map (no per-row scan)", async () => {
+    const dir = await tmp();
+    const s = await FileStateStore.open({ dir, vaultDns: DNS });
+    const N = 20_000;
+    const id = (i: number) => to18(`001${String(i).padStart(12, "0")}`);
+    const rows: IdMapRow[] = [];
+    for (let i = 1; i <= N; i++) rows.push(idRow(id(i), { vaultId: `V${i}` }));
+    const t0 = performance.now();
+    await s.idMap.putMany(rows);
+    for (let i = 1; i <= 500; i++)
+      await s.idMap.put(idRow(id(N + i), { vaultId: `V${N + i}` }));
+    for (let i = 1; i <= N; i += 7)
+      expect((await s.idMap.byVaultId("account__v", `V${i}`))?.sfdcId).toBe(
+        id(i),
+      );
+    await expect(
+      s.idMap.put(idRow(id(N + 1000), { vaultId: "V17" })),
+    ).rejects.toThrow(/id_map_vault_uidx/);
+    // the old implementation scanned all rows per put: ~4e8 comparisons here
+    expect(performance.now() - t0).toBeLessThan(3000);
+    await s.close();
+  });
 });

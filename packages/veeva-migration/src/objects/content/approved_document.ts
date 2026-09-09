@@ -25,21 +25,45 @@
  * §6.3.42 (`configMaps.contentType`, keyed by the SFDC 18-char id of the
  * `Content_Type_vod__c` row; value = Vault record id | `external_id:<v>` |
  * `name:<v>`), `custom(contentType)`. The map is read from this object's
- * materialised options (`mapping.options.configMaps.contentType`) — the
- * engine/preflight is expected to project `objects.multichannel_consent.configMaps`
- * onto it (the schema accepts `configMaps` on any object). Automatic
- * fallbacks (2)/(3) of §6.3.42 use the relationship columns when the extract
- * carries them. No hit → field omitted, `VT_CONSENT_CONFIG_UNMATCHED`
- * counted (blocking at preflight, non-fatal here).
+ * materialised options (`mapping.options.configMaps.contentType`); the
+ * spec location is `objects.multichannel_consent.configMaps.contentType`
+ * and the engine/preflight must project it onto every module declaring
+ * `configObjects` (the schema accepts `configMaps` on any object) — until
+ * that projection exists, an `objects.approved_document.configMaps` overlay
+ * reaches the transform directly.
+ *
+ * Automatic fallback (2) of §6.3.42 (`Content_Type_vod__r.External_ID_vod__c`
+ * = `external_id__v`, the spec's `refLookup(content_type, external_id__v)`)
+ * is an **explicit mapping row** (`custom(contentTypeExternalId)` →
+ * `content_type__v.external_id__v`, `unverifiedSource` + `optionalSource`):
+ * the column builder only selects columns named by a mapping row or a match
+ * key, so a fallback read from inside `custom(contentType)` alone would
+ * never see the relationship column. The explicit row yields when the
+ * crosswalk has an entry for the row's `Content_Type_vod__c` (the entry may
+ * pick the `name__v` / record-id form and two lookup forms must never be
+ * sent for one reference). Fallback (3) (`Name` = `name__v` *within the same
+ * country and object type*) is deliberately not implemented in the row
+ * transform — it cannot enforce the scoping and ambiguity rules; use an
+ * explicit `name:<v>` map entry. No hit → field omitted,
+ * `VT_CONSENT_CONFIG_UNMATCHED` counted (blocking at preflight, non-fatal
+ * here).
  *
  * `Survey_vod__c` references an object out of v1 (§6.2.1): omitted and
  * counted by `custom(outOfScopeRef)`.
  *
  * HTML bodies (`Email_HTML_1/2_vod__c` 131072, fragment HTML, template
- * fragment HTML/document id) are `deferredBlob` rows loaded in the blob pass
- * (§8.6) under the `emailHtml` policy; LongText targets hold ≤ 32 000 chars,
- * the split/truncate policy is `objects.approved_document.htmlOverflow`
- * (default `truncate`, §7.2.1).
+ * fragment HTML/document id) are `custom(emailHtml) deferredBlob` rows loaded
+ * in the blob pass (§8.6) under the `emailHtml` blob policy. LongText targets
+ * hold ≤ 32 000 chars (`APPROVED_DOCUMENT_HTML_MAX`, or the target field's
+ * `max_length`); a longer body follows `objects.approved_document.htmlOverflow`
+ * (§7.2.1): `truncate` (default) cuts the value at the limit, `fail` fails the
+ * row (`HTML_OVERFLOW_FAIL`), `attachment` passes the full body to the blob
+ * pass, which routes oversized values to an attachment when
+ * `objects.approved_document.blobs.emailHtml = attachment` — with any other
+ * blob policy the loader would drop the value silently, so that combination
+ * fails the row instead (`HTML_OVERFLOW_ATTACHMENT_UNCONFIGURED`). Values
+ * within the limit are passed through verbatim (HTML is content, not text to
+ * normalise).
  *
  * Inactivation (§4.4): `status__v = inactive__v` (implied) **and**
  * `approved_document_status__v = withdrawn__v` (or the business `status__v`
@@ -47,17 +71,24 @@
  */
 import { readSource } from "../../transform/apply";
 import { isSfdcId, to15, to18 } from "../../transform/ids";
-import type { CustomTransformFn } from "../../types";
+import type { CustomTransformFn, TransformContext } from "../../types";
 import { defineObject } from "../types";
-import { outOfScopeRef } from "./key_message";
+import {
+  CONTENT_EXTERNAL_ID_FIELD,
+  externalIdIfMigrationOwned,
+  outOfScopeRef,
+} from "./key_message";
 
 /** Blob name of the HTML bodies (`objects.approved_document.blobs.emailHtml`, §8.6). */
 export const APPROVED_DOCUMENT_HTML_BLOB = "emailHtml";
 
-/** `Content_Type_vod__c` relationship columns used by the §6.3.42 automatic fallbacks (2)/(3). */
+/** `Content_Type_vod__c` lookup column on the row (crosswalk key, §6.3.42). */
+export const CONTENT_TYPE_SOURCE = "Content_Type_vod__c";
+/** Relationship column of the §6.3.42 automatic fallback (2) — its own mapping row (`[UNVERIFIED-SOURCE]`). */
 export const CONTENT_TYPE_EXTERNAL_ID_PATH =
   "Content_Type_vod__r.External_ID_vod__c";
-export const CONTENT_TYPE_NAME_PATH = "Content_Type_vod__r.Name";
+/** LongText limit applied to the HTML bodies when the target field carries no `max_length` (§6.3.17). */
+export const APPROVED_DOCUMENT_HTML_MAX = 32000;
 
 /** RecordType DeveloperName → object type api name (§6.3.17, all `[UNV]`). */
 export const APPROVED_DOCUMENT_OBJECT_TYPES: Record<string, string> = {
@@ -161,18 +192,39 @@ export const publishMethod: CustomTransformFn = (_value, _row, ctx) => {
   return name;
 };
 
+/** Explicit `configMaps.contentType` entry for a `Content_Type_vod__c` id (18- or 15-char key). */
+function contentTypeEntry(
+  raw: unknown,
+  ctx: TransformContext,
+): { id: string; entry?: string } | undefined {
+  if (isEmpty(raw)) return undefined;
+  const text = String(raw).trim();
+  if (!isSfdcId(text)) return undefined;
+  const id = to18(text);
+  const maps = ctx.mapping.options.configMaps as
+    | { contentType?: Record<string, string> }
+    | undefined;
+  return {
+    id,
+    entry: maps?.contentType?.[id] ?? maps?.contentType?.[to15(id)],
+  };
+}
+
 /**
  * `content_type__v` via the shared §6.3.42 crosswalk: (1) explicit
  * `configMaps.contentType[<sfdc id>]` entry — Vault id, `external_id:<v>`
  * (→ `content_type__v.external_id__v`) or `name:<v>` (→
  * `content_type__v.name__v`); (2) `Content_Type_vod__r.External_ID_vod__c`
- * when extracted; (3) `Content_Type_vod__r.Name`; else omitted with a
- * non-fatal `VT_CONSENT_CONFIG_UNMATCHED` diagnostic.
+ * when the row carries it (same output as the explicit
+ * `custom(contentTypeExternalId)` row, which is what makes the extractor
+ * select the column); else omitted with a non-fatal
+ * `VT_CONSENT_CONFIG_UNMATCHED` diagnostic.
  */
 export const contentType: CustomTransformFn = (value, row, ctx) => {
   if (isEmpty(value)) return undefined;
   const raw = String(value).trim();
-  if (!isSfdcId(raw))
+  const resolved = contentTypeEntry(raw, ctx);
+  if (!resolved)
     return {
       omit: true,
       diagnostic: {
@@ -182,11 +234,7 @@ export const contentType: CustomTransformFn = (value, row, ctx) => {
         value: raw,
       },
     };
-  const id = to18(raw);
-  const maps = ctx.mapping.options.configMaps as
-    | { contentType?: Record<string, string> }
-    | undefined;
-  const entry = maps?.contentType?.[id] ?? maps?.contentType?.[to15(id)];
+  const { id, entry } = resolved;
   if (entry) {
     if (entry.startsWith("external_id:"))
       return {
@@ -207,12 +255,6 @@ export const contentType: CustomTransformFn = (value, row, ctx) => {
       value: String(ext).trim(),
       targetField: `${ctx.field.target}.external_id__v`,
     };
-  const name = readSource(row, CONTENT_TYPE_NAME_PATH);
-  if (!isEmpty(name))
-    return {
-      value: String(name).trim(),
-      targetField: `${ctx.field.target}.name__v`,
-    };
   return {
     omit: true,
     diagnostic: {
@@ -221,7 +263,75 @@ export const contentType: CustomTransformFn = (value, row, ctx) => {
       code: "VT_CONSENT_CONFIG_UNMATCHED",
       value: id,
       detail:
-        "Content_Type_vod__c row has no entry in configMaps.contentType (§6.3.42)",
+        "Content_Type_vod__c row has no entry in configMaps.contentType and no Content_Type_vod__r.External_ID_vod__c (§6.3.42)",
+    },
+  };
+};
+
+/**
+ * §6.3.42 automatic fallback (2) as its own row:
+ * `Content_Type_vod__r.External_ID_vod__c → content_type__v.external_id__v`.
+ * Yields (omits) whenever the crosswalk has an explicit entry for the row's
+ * `Content_Type_vod__c`, so a `name:`/record-id entry is never accompanied by
+ * a second lookup form for the same reference.
+ */
+export const contentTypeExternalId: CustomTransformFn = (value, row, ctx) => {
+  if (isEmpty(value)) return undefined;
+  const resolved = contentTypeEntry(readSource(row, CONTENT_TYPE_SOURCE), ctx);
+  if (resolved?.entry) return undefined;
+  const text = String(value).trim();
+  return text === "" ? undefined : text;
+};
+
+/**
+ * HTML body → blob pass value under `objects.approved_document.htmlOverflow`
+ * (§6.3.17, §7.2.1). Within the LongText limit the value is verbatim;
+ * beyond it: `truncate` (default) cuts at the limit (`truncated`
+ * diagnostic, `HTML_TRUNCATED`), `fail` fails the row (`HTML_OVERFLOW_FAIL`),
+ * `attachment` passes the full body through for the blob pass to route to an
+ * attachment — only valid with `blobs.emailHtml = attachment`, otherwise the
+ * loader would drop it silently, so the row fails
+ * (`HTML_OVERFLOW_ATTACHMENT_UNCONFIGURED`).
+ */
+export const emailHtml: CustomTransformFn = (value, _row, ctx) => {
+  if (isEmpty(value)) return undefined;
+  const text = String(value);
+  const max = ctx.targetField?.maxLength ?? APPROVED_DOCUMENT_HTML_MAX;
+  if (text.length <= max) return text;
+  const policy = ctx.mapping.options.htmlOverflow ?? "truncate";
+  const detail = `${text.length} > ${max} (objects.approved_document.htmlOverflow = ${String(policy)})`;
+  if (policy === "attachment") {
+    const blobPolicy = ctx.mapping.options.blobs?.[APPROVED_DOCUMENT_HTML_BLOB];
+    if (blobPolicy === "attachment") return text;
+    return {
+      omit: true,
+      diagnostic: {
+        kind: "truncated",
+        field: ctx.field.target,
+        code: "HTML_OVERFLOW_ATTACHMENT_UNCONFIGURED",
+        fatal: true,
+        detail: `${detail} but objects.approved_document.blobs.${APPROVED_DOCUMENT_HTML_BLOB} = ${String(blobPolicy ?? "optional")} — the blob pass would drop the value`,
+      },
+    };
+  }
+  if (policy === "fail")
+    return {
+      omit: true,
+      diagnostic: {
+        kind: "truncated",
+        field: ctx.field.target,
+        code: "HTML_OVERFLOW_FAIL",
+        fatal: true,
+        detail,
+      },
+    };
+  return {
+    value: text.slice(0, max),
+    diagnostic: {
+      kind: "truncated",
+      field: ctx.field.target,
+      code: "HTML_TRUNCATED",
+      detail,
     },
   };
 };
@@ -323,14 +433,28 @@ export const approved_document = defineObject({
       sourceType: "reference",
     },
     {
-      source: "Content_Type_vod__c",
+      // §6.3.42 automatic fallback (2) — its own row so the extractor selects
+      // the relationship column; yields to an explicit crosswalk entry
+      source: CONTENT_TYPE_EXTERNAL_ID_PATH,
+      target: "content_type__v.external_id__v",
+      transform: "custom(contentTypeExternalId)",
+      required: "n",
+      evidence: "UNV",
+      unverifiedSource: true,
+      optionalSource: true,
+      sourceType: "string",
+      notes:
+        "refLookup(content_type, external_id__v): Content_Type_vod__c.External_ID_vod__c [UNVERIFIED-SOURCE] = content_type__v.external_id__v when no explicit configMaps.contentType entry exists (§6.3.42 fallback 2)",
+    },
+    {
+      source: CONTENT_TYPE_SOURCE,
       target: "content_type__v",
       transform: "custom(contentType)",
       required: "n",
       evidence: "UNV",
       sourceType: "reference",
       notes:
-        "refLookup(content_type, external_id__v) via the shared objects.multichannel_consent.configMaps.contentType crosswalk (§6.3.42)",
+        "explicit entry of the shared objects.multichannel_consent.configMaps.contentType crosswalk (Vault id | external_id:<v> | name:<v>), else the External_ID_vod__c relationship value, else omitted + VT_CONSENT_CONFIG_UNMATCHED (§6.3.42)",
     },
     {
       source: "Survey_vod__c",
@@ -410,13 +534,14 @@ export const approved_document = defineObject({
     ...APPROVED_DOCUMENT_HTML_FIELDS.map((source) => ({
       source,
       target: renameApprovedDocumentField(source),
-      transform: `deferredBlob(${APPROVED_DOCUMENT_HTML_BLOB})`,
+      transform: "custom(emailHtml) deferredBlob",
       required: "n" as const,
       evidence: "UNV" as const,
       blobName: APPROVED_DOCUMENT_HTML_BLOB,
       notes:
-        "LongText ≤ 32k: split/truncate per objects.approved_document.htmlOverflow; loaded in the blob pass (§8.6)",
+        "LongText ≤ 32k: objects.approved_document.htmlOverflow = truncate (default) | fail | attachment applied by custom(emailHtml); loaded in the blob pass (§8.6) under blobs.emailHtml",
     })),
+    CONTENT_EXTERNAL_ID_FIELD,
   ],
   objectTypes: { ...APPROVED_DOCUMENT_OBJECT_TYPES },
   picklists: {
@@ -456,8 +581,15 @@ export const approved_document = defineObject({
   ],
   blobs: { [APPROVED_DOCUMENT_HTML_BLOB]: "optional" },
   configObjects: ["contentType"],
-  custom: { publishMethod, contentType, outOfScopeRef },
+  custom: {
+    publishMethod,
+    contentType,
+    contentTypeExternalId,
+    emailHtml,
+    outOfScopeRef,
+    externalIdIfMigrationOwned,
+  },
   optionDefaults: { htmlOverflow: "truncate" },
   notes:
-    "Integration-owned (PromoMats) → createPolicy match-only by default; object types UNV; publish_method__v omitted unless objects.approved_document.publishMethod is set (create mode only); content_type__v via the shared configMaps.contentType crosswalk (§6.3.42); HTML bodies in the blob pass (htmlOverflow default truncate); deletePolicy inactivate → status__v = inactive__v + approved_document_status__v = withdrawn__v (UNV value).",
+    "Integration-owned (PromoMats) → createPolicy match-only by default; external_id__v written only with externalIdOwnedBy = migration; object types UNV; publish_method__v omitted unless objects.approved_document.publishMethod is set (create mode only); content_type__v via the shared configMaps.contentType crosswalk, else Content_Type_vod__r.External_ID_vod__c (§6.3.42); HTML bodies in the blob pass (htmlOverflow default truncate, applied by custom(emailHtml)); deletePolicy inactivate → status__v = inactive__v + approved_document_status__v = withdrawn__v (UNV value).",
 });

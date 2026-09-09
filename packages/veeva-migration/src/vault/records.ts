@@ -14,7 +14,7 @@
  *    `recalculaterollups`, …) behind an availability probe — the roll-up path
  *    is `[UNVERIFIED]` (§2.5.6) and must never be assumed.
  */
-import { VaultRequestError } from "./errors";
+import { classifyVaultError, toVaultError, VaultRequestError } from "./errors";
 import type { VaultHttp } from "./http";
 import { objectMetadata } from "./metadata";
 import type {
@@ -462,28 +462,42 @@ export async function probeObjectAction(
   const path = `/vobjects/${encodeURIComponent(objectName)}/actions/${encodeURIComponent(action)}`;
   for (const method of ["OPTIONS", "GET"] as const) {
     try {
-      const res = await http.request({
-        method,
-        path,
-        retry: false,
-        allowFailure: true,
-      });
+      // `allowFailure` hands back structural/permission/fatal envelopes only;
+      // INVALID_SESSION_ID goes through re-auth + replay and API_LIMIT_EXCEEDED
+      // / EXCEPTION through the retry loop, so neither can masquerade as an
+      // answer about the path (§2.5.2).
+      const res = await http.request({ method, path, allowFailure: true });
       const status = res.responseStatus;
-      const errType =
-        (res.body as { errors?: Array<{ type?: string }> })?.errors?.[0]
-          ?.type ?? "";
       if (res.httpStatus === 404 || res.httpStatus === 405) continue;
-      if (
-        status === "FAILURE" &&
-        (errType.startsWith("MALFORMED_URL") ||
-          errType.startsWith("METHOD_NOT_SUPPORTED"))
-      )
-        continue;
-      return { availability: "available", path, via: method };
-    } catch (e) {
-      const err = e as VaultRequestError;
-      if (err instanceof VaultRequestError && err.errorClass === "permission")
+      if (status === "SUCCESS" || status === "WARNING")
         return { availability: "available", path, via: method };
+      const errType = (
+        (res.body as { errors?: Array<{ type?: string }> })?.errors?.[0]
+          ?.type ?? ""
+      ).toUpperCase();
+      const cls = classifyVaultError(errType, res.httpStatus, status);
+      // The handler behind the path answered: it exists but the probe verb
+      // lacks a body/permission. An unroutable path or an unknown/fatal
+      // envelope is no evidence of existence.
+      if (
+        cls === "permission" ||
+        (cls === "structural" &&
+          !errType.startsWith("MALFORMED_URL") &&
+          !errType.startsWith("METHOD_NOT_SUPPORTED"))
+      )
+        return { availability: "available", path, via: method };
+      http.logger.debug(
+        { object: objectName, action, method, error_type: errType },
+        "action probe: envelope treated as absent",
+      );
+    } catch (e) {
+      const err = toVaultError(e);
+      if (err.errorClass === "permission")
+        return { availability: "available", path, via: method };
+      // A session that cannot be re-established or an exhausted retry loop is
+      // not an answer about the path — surface it instead of reporting absent.
+      if (err.errorClass === "session" || err.errorClass === "retryable")
+        throw err;
       // MALFORMED_URL / 404 / anything else: keep probing
     }
   }

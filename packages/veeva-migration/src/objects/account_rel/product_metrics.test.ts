@@ -3,12 +3,14 @@ import {
   PRODUCT_METRICS_ACCOUNT_FIELD,
   PRODUCT_METRICS_PRODUCT_FALLBACK_TARGET,
   PRODUCT_METRICS_PRODUCT_FIELD,
+  PRODUCT_METRICS_PRODUCT_TARGET,
   product_metrics,
 } from "./product_metrics";
 import { validateObjectModule } from "../types";
 import { materialise, resolveCountry } from "../../config/resolve";
 import { parseConfig } from "../../config/schema";
 import { applyMapping } from "../../transform/apply";
+import { mappingFkColumns } from "../../extract/columns";
 import { buildScopePredicate } from "../../extract/scope";
 import {
   IDS,
@@ -47,7 +49,7 @@ function makeConfig(overrides: Record<string, unknown> = {}) {
   });
 }
 
-function metadata() {
+function metadata(productField = PRODUCT_METRICS_PRODUCT_TARGET) {
   return resolveMetadata(
     buildVaultMetadata(
       "product_metrics__v",
@@ -59,7 +61,7 @@ function metadata() {
           required: true,
         },
         {
-          name: "products__v",
+          name: productField,
           type: "Object",
           object: { name: "product__v" },
           required: true,
@@ -128,9 +130,22 @@ function run(
   opts: {
     overrides?: Record<string, unknown>;
     products?: Record<string, string>;
+    /** Product field the vault carries (the other spelling is pruned as preflight would). */
+    vaultProductField?: string;
   } = {},
 ) {
-  const config = makeConfig(opts.overrides);
+  const productField = opts.vaultProductField ?? PRODUCT_METRICS_PRODUCT_TARGET;
+  const pruned =
+    productField === PRODUCT_METRICS_PRODUCT_TARGET
+      ? PRODUCT_METRICS_PRODUCT_FALLBACK_TARGET
+      : PRODUCT_METRICS_PRODUCT_TARGET;
+  const config = makeConfig({
+    ...(opts.overrides ?? {}),
+    fields: {
+      ...(opts.overrides?.fields as object | undefined),
+      remove: [pruned],
+    },
+  });
   const mapping = materialise(
     product_metrics,
     resolveCountry(config, "US"),
@@ -156,7 +171,7 @@ function run(
     mapping,
     result: applyMapping(row, mapping, {
       country: buildCountryContext(),
-      metadata: metadata(),
+      metadata: metadata(productField),
       ids,
       migrationUserId: 1,
       runMode: "init",
@@ -190,8 +205,11 @@ describe("product_metrics module", () => {
     expect(product_metrics.inactivate).toEqual([]);
     expect(product_metrics.createPolicy).toBe("create");
     expect(product_metrics.load.noTriggers).toBe(false);
+    // the natural key is declared once per product-field spelling (§3.3);
+    // the matcher skips the rule whose key field the vault lacks
     expect(product_metrics.match.map((m) => m.method)).toEqual([
       "legacy_id",
+      "natural_key",
       "natural_key",
       "external_id",
     ]);
@@ -199,6 +217,11 @@ describe("product_metrics module", () => {
       "account__v",
       "products__v",
     ]);
+    expect(product_metrics.match[2].keys?.map((k) => k.target)).toEqual([
+      "account__v",
+      "product__v",
+    ]);
+    expect(PRODUCT_METRICS_PRODUCT_TARGET).toBe("products__v");
     expect(PRODUCT_METRICS_PRODUCT_FALLBACK_TARGET).toBe("product__v");
     // customer metric columns are the payload of this object
     expect(product_metrics.optionDefaults?.customFields).toEqual({
@@ -216,12 +239,30 @@ describe("product_metrics module", () => {
       required: "Y",
       evidence: "UNV",
     });
+    // both spellings carried, same source, y? so the absent one degrades to a
+    // VT_FIELD_MISSING warning at preflight instead of blocking the object
     expect(byTarget.get("products__v")).toMatchObject({
       source: "Products_vod__c",
       transform: { kind: "ref", objectKey: "product" },
-      required: "Y",
+      required: "y?",
       evidence: "UNV",
     });
+    expect(byTarget.get("product__v")).toMatchObject({
+      source: "Products_vod__c",
+      transform: { kind: "ref", objectKey: "product" },
+      required: "y?",
+      evidence: "UNV",
+    });
+    // one FK column feeds the product id-set regardless of the spelling
+    expect(mappingFkColumns(product_metrics)).toContainEqual({
+      column: "Products_vod__c",
+      targetObjectKey: "product",
+    });
+    expect(
+      mappingFkColumns(product_metrics).filter(
+        (c) => c.column === "Products_vod__c",
+      ),
+    ).toHaveLength(1);
     expect(byTarget.get("detail_group__v")).toMatchObject({
       transform: { kind: "ref", objectKey: "product" },
       required: "n",
@@ -315,30 +356,55 @@ describe("product_metrics module", () => {
     ]);
   });
 
-  it("lets the overlay re-target products__v to product__v (preflight fallback)", () => {
+  it("carries the reference through the product__v fallback row on a vault without products__v", () => {
     const { mapping, result } = run(sampleRow(), {
-      overrides: {
-        fields: {
-          override: [
-            {
-              target: "products__v",
-              source: "Products_vod__c",
-              transform: "ref(product)",
-            },
-          ],
-          remove: ["products__v"],
-          add: [
-            {
-              source: "Products_vod__c",
-              target: PRODUCT_METRICS_PRODUCT_FALLBACK_TARGET,
-              transform: "ref(product)",
-              required: "Y",
-            },
-          ],
-        },
-      },
+      vaultProductField: PRODUCT_METRICS_PRODUCT_FALLBACK_TARGET,
     });
+    // preflight prunes the missing spelling (simulated by the run helper)
     expect(mapping.fields.some((f) => f.target === "products__v")).toBe(false);
+    expect(result.status).toBe("ok");
+    expect(result.payload.product__v).toEqual({
+      $fk: { object: "product", sfdcId: PRODUCT_ID },
+    });
+    expect(result.payload.products__v).toBeUndefined();
+    // required-ness follows the vault's flag on the surviving field → pending_fk
+    const { result: unresolved } = run(sampleRow(), {
+      vaultProductField: PRODUCT_METRICS_PRODUCT_FALLBACK_TARGET,
+      products: {},
+    });
+    expect(unresolved.status).toBe("pending_fk");
+    expect(unresolved.unresolvedRequiredFks).toEqual([
+      { field: "product__v", objectKey: "product", sfdcId: PRODUCT_ID },
+    ]);
+  });
+
+  it("transforms both spellings before preflight prunes one (unit contexts only)", () => {
+    const config = makeConfig();
+    const mapping = materialise(
+      product_metrics,
+      resolveCountry(config, "US"),
+      config,
+      { now: NOW },
+    );
+    expect(
+      mapping.fields.filter((f) => f.source === "Products_vod__c"),
+    ).toHaveLength(2);
+    const result = applyMapping(sampleRow(), mapping, {
+      country: buildCountryContext(),
+      metadata: metadata(),
+      ids: buildIdResolver(
+        {
+          account: { [ACCOUNT_ID]: "V0A1" },
+          product: { [PRODUCT_ID]: "V0P1" },
+        },
+        { [SAMPLE_USER_ID]: 101 },
+      ),
+      migrationUserId: 1,
+      runMode: "init",
+    });
+    expect(result.payload.products__v).toEqual({
+      $fk: { object: "product", sfdcId: PRODUCT_ID },
+    });
     expect(result.payload.product__v).toEqual({
       $fk: { object: "product", sfdcId: PRODUCT_ID },
     });

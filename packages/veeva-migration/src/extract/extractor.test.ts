@@ -21,7 +21,8 @@ import type {
   SourceRow,
   Unit,
 } from "../types";
-import { SfdcExtractor, mergeFkSets } from "./extractor";
+import { readCsvRows, writeCsvFile } from "./files";
+import { PK_CHUNK_INIT_SOURCES, SfdcExtractor, mergeFkSets } from "./extractor";
 import { cleanup, makeTarget, tmpRunDir } from "./test-helpers";
 import type { ExtractPlan } from "./types";
 
@@ -190,7 +191,8 @@ describe("SfdcExtractor.extractUnit", () => {
     expect([...m.fkSets.get("account")!]).toEqual([IDS.account1]);
     expect([...m.fkSets.get("user")!]).toEqual([SAMPLE_USER_ID]);
     expect(m.fkSets.has("call2")).toBe(false);
-    expect(m.liveModstamps.get(IDS.call1)).toBe("2025-03-04T10:31:00.000Z");
+    // no per-id modstamp index on init (nothing to supersede; unbounded on large objects)
+    expect(m.liveModstamps.size).toBe(0);
     expect(m.columns).toEqual(
       expect.arrayContaining([
         "Id",
@@ -363,6 +365,8 @@ describe("SfdcExtractor.extractUnit", () => {
       [gone, "feed"],
     ]);
     expect(m.deletedLatestCovered).toBe("2026-09-09T11:55:00Z");
+    // last-wins routing input (§4.3 step 5) is kept for delta windows
+    expect(m.liveModstamps.get(IDS.call1)).toBe("2026-09-05T00:00:00.000Z");
     expect(sfdc.calls.find((c) => c.method === "getDeleted")?.args).toEqual([
       "Call2_vod__c",
       "2026-09-01T10:00:00Z",
@@ -519,7 +523,9 @@ describe("SfdcExtractor.extractUnit", () => {
       [IDS.call1, IDS.call3].sort(),
     );
 
-    // client-side filter mode (large parent sets): same rows, count over the unfiltered predicate
+    // client-side filter mode (large parent sets): same rows; the reported
+    // scope count is netted of the rows the client filter dropped so the
+    // §2.8 gate (sfdc_scope_count == extracted_live) can pass
     const ex2 = new SfdcExtractor(
       {
         sfdc: new FakeSfdcClient()
@@ -539,7 +545,7 @@ describe("SfdcExtractor.extractUnit", () => {
     );
     expect(m2.extractedLive).toBe(2);
     expect(m2.filteredOut).toBe(1);
-    expect(m2.sfdcScopeCount).toBe(3);
+    expect(m2.sfdcScopeCount).toBe(2);
     expect(m2.findings.some((x) => x.code === "EXTRACT_COUNT_MISMATCH")).toBe(
       false,
     );
@@ -722,5 +728,263 @@ describe("SfdcExtractor.extractUnit", () => {
       [...first.fkSets.get("product")!].sort(),
     );
     expect(second.findings).toEqual([]);
+  });
+
+  it("a resumed-complete Bulk extract still runs the count check and re-queries when a page lost rows", async () => {
+    runDir = await tmpRunDir();
+    const sfdc = new FakeSfdcClient()
+      .addDescribe(productDescribe())
+      .addRows("Product_vod__c", productRows());
+    const store = new MemoryStateStore();
+    const p = plan({
+      mapping: productMapping(),
+      target: makeTarget("product", productDescribe()),
+    });
+    const first = await new SfdcExtractor(
+      { sfdc, store },
+      { restThreshold: 0 },
+    ).extractUnit({ objectKey: "product", country: "GLOBAL" }, p);
+    // simulate a torn page on disk: drop one row from the first page file
+    const page = first.files[0];
+    const rows = await readCsvRows(page.path);
+    await writeCsvFile(page.path, rows.slice(1), first.columns);
+    const second = await new SfdcExtractor(
+      { sfdc, store },
+      { restThreshold: 0 },
+    ).extractUnit({ objectKey: "product", country: "GLOBAL" }, p);
+    expect(second.findings).toMatchObject([
+      { severity: "warning", code: "EXTRACT_COUNT_MISMATCH", count: 1 },
+    ]);
+    const bulk = sfdc.calls.filter((c) => c.method === "bulkQuery");
+    expect(bulk).toHaveLength(2);
+    expect(bulk[1].args[1]).toMatchObject({ pkChunking: true });
+    expect(second.extractedLive).toBe(5);
+    expect(second.sfdcScopeCount).toBe(5);
+    expect(second.files.reduce((n, x) => n + x.rows, 0)).toBe(5);
+  });
+
+  it("PK chunking is on from the first pass on init for the §2.1.5 large objects and above the row threshold", async () => {
+    runDir = await tmpRunDir();
+    expect(PK_CHUNK_INIT_SOURCES.has("Call2_vod__c")).toBe(true);
+    expect(PK_CHUNK_INIT_SOURCES.has("Account")).toBe(true);
+    const mk = () =>
+      new FakeSfdcClient()
+        .addDescribe(sampleCall2Describe())
+        .addRows("Call2_vod__c", sampleCall2Rows());
+    const call2Plan = (over: Partial<ExtractPlan> = {}) =>
+      plan({
+        mapping: call2Mapping,
+        target: makeTarget("call2", sampleCall2Describe()),
+        cutoffDate: "2024-09-09",
+        ...over,
+      });
+    const unit: Unit = { objectKey: "call2", country: "US" };
+
+    // restThreshold −1: Bulk even for the empty `notNull` partition
+    const init = mk();
+    await new SfdcExtractor(
+      { sfdc: init, store: new MemoryStateStore() },
+      { restThreshold: -1 },
+    ).extractUnit(unit, call2Plan());
+    const initJobs = init.calls.filter((c) => c.method === "bulkQuery");
+    expect(initJobs).toHaveLength(2); // one job per partition
+    for (const j of initJobs)
+      expect(j.args[1]).toMatchObject({ pkChunking: true });
+
+    // delta windows are small: no chunking unless the count says otherwise
+    const delta = mk();
+    await new SfdcExtractor(
+      { sfdc: delta, store: new MemoryStateStore() },
+      { restThreshold: 0 },
+    ).extractUnit(
+      unit,
+      call2Plan({
+        mode: "delta",
+        runId: "r2",
+        window: { wmLo: "2020-01-01T00:00:00Z", wmHi: "2026-09-09T11:55:00Z" },
+      }),
+    );
+    for (const j of delta.calls.filter((c) => c.method === "bulkQuery"))
+      expect(j.args[1]).toMatchObject({ pkChunking: false });
+
+    // the list is a configurable default
+    const off = mk();
+    await new SfdcExtractor(
+      { sfdc: off, store: new MemoryStateStore() },
+      { restThreshold: 0, pkChunkInitSources: [] },
+    ).extractUnit(unit, call2Plan({ runId: "r3" }));
+    for (const j of off.calls.filter((c) => c.method === "bulkQuery"))
+      expect(j.args[1]).toMatchObject({ pkChunking: false });
+
+    // scoped COUNT() above the threshold chunks any object
+    const big = new FakeSfdcClient()
+      .addDescribe(productDescribe())
+      .addRows("Product_vod__c", productRows());
+    await new SfdcExtractor(
+      { sfdc: big, store: new MemoryStateStore() },
+      { restThreshold: 0, pkChunkRowThreshold: 4 },
+    ).extractUnit(
+      { objectKey: "product", country: "GLOBAL" },
+      plan({
+        runId: "r4",
+        mapping: productMapping(),
+        target: makeTarget("product", productDescribe()),
+      }),
+    );
+    expect(
+      big.calls.find((c) => c.method === "bulkQuery")!.args[1],
+    ).toMatchObject({ pkChunking: true });
+  });
+
+  it("delta: rows re-queried after the /updated/ cross-check join the ordered stream", async () => {
+    runDir = await tmpRunDir();
+    const describe = buildDescribe(
+      "Multichannel_Consent_vod__c",
+      [{ name: "Capture_Datetime_vod__c", type: "datetime" }],
+      { keyPrefix: "a0M" },
+    );
+    const rows: SourceRow[] = [
+      {
+        Id: MC(3),
+        Capture_Datetime_vod__c: "2025-03-01T00:00:00.000Z",
+        SystemModstamp: "2026-09-05T00:00:00.000Z",
+      },
+      {
+        Id: MC(1),
+        Capture_Datetime_vod__c: "2025-01-01T00:00:00.000Z",
+        SystemModstamp: "2026-09-05T00:00:00.000Z",
+      },
+      {
+        Id: MC(2),
+        Capture_Datetime_vod__c: "2025-02-01T00:00:00.000Z",
+        SystemModstamp: "2026-09-05T00:00:00.000Z",
+      },
+    ];
+    /**
+     * A lagging index: COUNT() and the first window query both miss MC(1)
+     * (consistent with each other, so the step 8 check passes) while the
+     * /updated/ feed still reports it.
+     */
+    class SkippingSfdc extends FakeSfdcClient {
+      lagging = true;
+      async count(objectName: string, whereClause?: string) {
+        const n = await super.count(objectName, whereClause);
+        return this.lagging ? n - 1 : n;
+      }
+      async *query(
+        soql: string,
+        opts?: Parameters<FakeSfdcClient["query"]>[1],
+      ) {
+        for await (const r of super.query(soql, opts)) {
+          if (this.lagging && r.Id === MC(1)) {
+            this.lagging = false;
+            continue;
+          }
+          yield r;
+        }
+      }
+    }
+    const sfdc = new SkippingSfdc()
+      .addDescribe(describe)
+      .addRows("Multichannel_Consent_vod__c", rows);
+    const mapping = buildMaterialisedMapping({
+      objectKey: "multichannel_consent",
+      sourceObject: "Multichannel_Consent_vod__c",
+      targetObject: "multichannel_consent__v",
+      countryOf: parseCountryOf("global"),
+      load: { noTriggers: true, orderBy: ["Capture_Datetime_vod__c", "Id"] },
+      fields: [
+        f("Id", "legacy_crm_id__v", "legacyId", "K"),
+        f("Capture_Datetime_vod__c", "capture_datetime__v", "datetime", "Y"),
+      ],
+    });
+    const ex = new SfdcExtractor({ sfdc, store: new MemoryStateStore() });
+    const m = await ex.extractUnit(
+      { objectKey: "multichannel_consent", country: "GLOBAL" },
+      plan({
+        mode: "delta",
+        mapping,
+        target: makeTarget("multichannel_consent", describe),
+        window: { wmLo: "2026-09-01T00:00:00Z", wmHi: "2026-09-09T11:55:00Z" },
+      }),
+    );
+    expect(m.findings).toMatchObject([
+      { code: "DELTA_COUNT_MISMATCH", severity: "warning", count: 1 },
+    ]);
+    expect(sfdc.calls.some((c) => c.method === "queryIds")).toBe(true);
+    expect(m.extractedLive).toBe(3);
+    // the re-queried row is not appended after the ordered pages
+    const got: string[] = [];
+    for await (const { row } of ex.readRows(m.files)) got.push(row.Id);
+    expect(got).toEqual([MC(1), MC(2), MC(3)]);
+    expect(m.files.every((x) => x.path.includes("/sorted/"))).toBe(true);
+  });
+
+  it("load.orderBy over several id-set IN chunks: per-chunk ORDER BY is not a global order → external sort", async () => {
+    runDir = await tmpRunDir();
+    const describe = buildDescribe(
+      "Call2_Detail_vod__c",
+      [
+        {
+          name: "Call2_vod__c",
+          type: "reference",
+          referenceTo: ["Call2_vod__c"],
+          relationshipName: "Call2_vod__r",
+        },
+        { name: "Seq_vod__c", type: "datetime" },
+      ],
+      { keyPrefix: "a0D", systemFields: { owner: false, name: "autoNumber" } },
+    );
+    // 401 parents → two IN chunks (400 + 1); the child of the 401st parent
+    // has the smallest sort key, so concatenating the chunk results in
+    // query order is NOT the global order
+    const parents: Record<string, string> = {};
+    const children: SourceRow[] = [];
+    for (let i = 1; i <= 401; i++) {
+      const pid = to18(`a0K${String(i).padStart(12, "0")}`);
+      parents[pid] = `V${i}`;
+      children.push({
+        Id: to18(`a0D${String(i).padStart(12, "0")}`),
+        Call2_vod__c: pid,
+        Seq_vod__c: `2025-01-01T00:00:00.000Z`.replace(
+          "00:00:00",
+          i === 401 ? "00:00:00" : "00:00:01",
+        ),
+      });
+    }
+    const sfdc = new FakeSfdcClient()
+      .addDescribe(describe)
+      .addRows("Call2_Detail_vod__c", children);
+    const store = new MemoryStateStore();
+    await store.seedIdMap("call2", "call2__v", parents, "US");
+    const mapping = buildMaterialisedMapping({
+      objectKey: "call2_detail",
+      sourceObject: "Call2_Detail_vod__c",
+      targetObject: "call2_detail__v",
+      countryOf: parseCountryOf("parent:call2:Call2_vod__c"),
+      dependsOn: ["call2"],
+      load: { noTriggers: true, orderBy: ["Seq_vod__c", "Id"] },
+      fields: [
+        f("Id", "legacy_crm_id__v", "legacyId", "K"),
+        f("Call2_vod__c", "call2__v", "ref(call2)", "Y"),
+        f("Seq_vod__c", "seq__v", "datetime"),
+      ],
+    });
+    const ex = new SfdcExtractor(
+      { sfdc, store },
+      { parentCountryOf: () => undefined },
+    );
+    const m = await ex.extractUnit(
+      { objectKey: "call2_detail", country: "US" },
+      plan({ mapping, target: makeTarget("call2_detail", describe) }),
+    );
+    expect(m.countryStrategy).toBe("idSet");
+    expect(sfdc.calls.filter((c) => c.method === "query")).toHaveLength(2);
+    expect(m.extractedLive).toBe(401);
+    expect(m.files.every((x) => x.path.includes("/sorted/"))).toBe(true);
+    const got: string[] = [];
+    for await (const { row } of ex.readRows(m.files)) got.push(row.Id);
+    expect(got[0]).toBe(to18(`a0D${String(401).padStart(12, "0")}`));
+    expect(got).toHaveLength(401);
   });
 });

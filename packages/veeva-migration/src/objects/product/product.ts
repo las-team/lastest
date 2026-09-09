@@ -4,11 +4,17 @@
  *
  * The product hierarchy is loaded **by depth** of `Parent_Product_vod__c`
  * (Detail Group ← Detail ← Sample/Order/BRC/Kit Item; `depthOrderBy`, BFS by
- * the extractor). `parent_product__v` therefore normally resolves in pass 1;
- * when the parent is not in the id map yet (depth ordering was not possible —
- * a parent outside the extract, a failed parent row) the reference falls back
- * to the pass-2 patch (`selfRefs`, §6.1 "product.parent_product__v when depth
- * ordering is not possible"). That is `custom(parentProduct)`.
+ * the extractor) so a child is matched/created only after its parent (§3.4).
+ * `parent_product__v` is `ref(product) secondPass` — the same shape as
+ * `territory.parent_territory__v`: the value is held back from the pass-1
+ * payload and patched by Vault id in pass 2 (`selfRefs`, §6.1 step 3), and a
+ * parent still missing then is queued as `pending_fk` (§3.5). A plain
+ * `ref(product)` must stay visible to FK discovery: the §2.2 step 5 closure
+ * (`mappingFkColumns`), the preflight FK checks (`classifyRow`,
+ * `VT_FK_TARGET_MISMATCH`) and the `MAP_SELFREF_NOT_REF` lint all read
+ * `refTarget()`, which a `custom(...)` transform would hide — that is why the
+ * parent is not a custom function even though depth ordering would let most
+ * rows resolve in pass 1.
  *
  * `product_type__v` value names are `[UNV]`: Veeva CRM stores plain English
  * (`Detail`, `Sample`, `Detail Group`, …); the module defaults derive the
@@ -31,13 +37,8 @@
  * `active__v = false`; the Block S `status__v` row derives from
  * `Active_vod__c = false` (§6.0.4).
  */
-import { isSfdcId, to18 } from "../../transform/ids";
 import { applyTransform } from "../../transform/registry";
-import type {
-  CustomTransformFn,
-  DeferredFk,
-  TransformResult,
-} from "../../types";
+import type { CustomTransformFn } from "../../types";
 import { defineObject } from "../types";
 
 /** Blob name of the thumbnail (`objects.product.blobs.thumbnail`, §8.6). */
@@ -103,44 +104,6 @@ export function renameProductFlag(source: string): string {
 function isEmpty(v: unknown): boolean {
   return v === null || v === undefined || v === "";
 }
-
-/**
- * `parent_product__v`: `ref(product)` resolved in pass 1 when the parent is
- * already in the id map (depth ordering), otherwise deferred to the pass-2
- * patch. Invalid ids are reported (`INVALID_ID`) and omitted.
- */
-export const parentProduct: CustomTransformFn = (value, _row, ctx) => {
-  if (isEmpty(value)) return undefined;
-  const raw = String(value).trim();
-  if (!isSfdcId(raw))
-    return {
-      omit: true,
-      diagnostic: {
-        kind: "invalid_value",
-        field: ctx.field.target,
-        value: raw,
-        code: "INVALID_ID",
-      },
-    };
-  const id = to18(raw);
-  const fk: DeferredFk = { $fk: { object: "product", sfdcId: id } };
-  if (ctx.ids.resolve("product", id) !== undefined) return { value: fk };
-  const deferred: TransformResult = {
-    omit: true,
-    defer: "secondPass",
-    deferredValue: fk,
-    unresolved: { objectKey: "product", sfdcId: id },
-    diagnostic: {
-      kind: "second_pass",
-      field: ctx.field.target,
-      objectKey: "product",
-      value: id,
-      code: "PARENT_PRODUCT_SECOND_PASS",
-      detail: "parent not loaded yet — patched in pass 2",
-    },
-  };
-  return deferred;
-};
 
 /**
  * `require_discussion__v`: `{No_vod, Yes_vod}` → boolean when the target is a
@@ -214,12 +177,12 @@ export const product = defineObject({
     {
       source: PRODUCT_PARENT_FIELD,
       target: "parent_product__v",
-      transform: "custom(parentProduct)",
+      transform: "ref(product) secondPass",
       required: "n",
       evidence: "DOC",
       sourceType: "reference",
       notes:
-        "ref(product) depth-ordered (pass 1 when the parent is mapped); secondPass fallback",
+        "depth-ordered (parent matched first, §3.4); patched by id in pass 2 (§6.1 step 3) — a visible ref so closure/preflight see the self-FK",
     },
     {
       source: "External_ID_vod__c",
@@ -518,7 +481,7 @@ export const product = defineObject({
     },
   ],
   blobs: { [PRODUCT_THUMBNAIL_BLOB]: "optional" },
-  custom: { parentProduct, requireDiscussion },
+  custom: { requireDiscussion },
   notes:
-    "Depth-ordered by Parent_Product_vod__c (BFS; parent_product__v pass-2 fallback); (name, type[, country]) natural key; deletePolicy inactivate → status__v = inactive__v + active__v = false; product_type__v value names UNV (resolved by label at preflight).",
+    "Depth-ordered by Parent_Product_vod__c (BFS; parent_product__v patched in pass 2); (name, type[, country]) natural key; deletePolicy inactivate → status__v = inactive__v + active__v = false; product_type__v value names UNV (resolved by label at preflight).",
 });

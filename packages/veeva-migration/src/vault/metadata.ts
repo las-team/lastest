@@ -344,18 +344,45 @@ function configurationData(body: unknown): unknown[] {
   return [];
 }
 
+/** One object type whose `/configuration/Objecttype.{object}.{type}` could not be read. */
+export interface UnreadableObjectType {
+  name: string;
+  /** Vault error type (`INSUFFICIENT_ACCESS`, `MALFORMED_URL`, …). */
+  error: string;
+  message: string;
+  /** Which `type_fields` the returned config carries instead. */
+  fallback: "object_metadata_required" | "none";
+}
+
+export interface ObjectTypesResult {
+  types: VaultObjectTypeConfig[];
+  /** Types whose per-type configuration is missing — preflight must not treat their `type_fields` as authoritative. */
+  unreadable: UnreadableObjectType[];
+}
+
+/** `source` stamped on `type_fields` synthesised from the base object's `required` flags. */
+export const OBJECT_TYPE_FALLBACK_SOURCE = "object_metadata_required";
+
 /**
  * `GET /configuration/Objecttype.{object}.{type}` for every type of the
- * object (required-ness is per type). Types come from `metadata.object_types`
- * when given, otherwise from `GET /configuration/Objecttype` filtered by
- * object. A type whose configuration cannot be read degrades to an empty
- * `type_fields` list (logged) — the shape is documented, not observed.
+ * object (required-ness is per type, §2.5.6). Types come from
+ * `metadata.object_types` when given, otherwise from
+ * `GET /configuration/Objecttype` filtered by object.
+ *
+ * A type whose configuration cannot be read (permission, or the
+ * `[UNVERIFIED]` path shape differs on this vault) is never returned as an
+ * empty, silently-valid config: its `type_fields` fall back to the base
+ * object's `required` fields (a strict subset of what the type requires —
+ * `source: object_metadata_required`), a `warn` with code
+ * `VT_OBJECT_TYPE_CONFIG_UNREADABLE` is logged, and the type is listed in
+ * `unreadable` so preflight can raise a finding. Retryable and session
+ * errors are rethrown (the transport already exhausted its policy).
  */
-export async function objectTypes(
+export async function objectTypesDetailed(
   http: VaultHttp,
   objectName: string,
   metadata?: VaultObjectMetadata,
-): Promise<VaultObjectTypeConfig[]> {
+): Promise<ObjectTypesResult> {
   const names = (metadata?.object_types ?? [])
     .map((t) => t.name)
     .filter(Boolean);
@@ -364,11 +391,15 @@ export async function objectTypes(
       method: "GET",
       path: "/configuration/Objecttype",
     });
-    return configurationData(body)
-      .map((raw) => normaliseObjectTypeConfig(raw, objectName))
-      .filter((t) => t.object === objectName);
+    return {
+      types: configurationData(body)
+        .map((raw) => normaliseObjectTypeConfig(raw, objectName))
+        .filter((t) => t.object === objectName),
+      unreadable: [],
+    };
   }
-  const out: VaultObjectTypeConfig[] = [];
+  const types: VaultObjectTypeConfig[] = [];
+  const unreadable: UnreadableObjectType[] = [];
   for (const type of names) {
     try {
       const body = await http.json({
@@ -376,20 +407,56 @@ export async function objectTypes(
         path: `/configuration/Objecttype.${encodeURIComponent(objectName)}.${encodeURIComponent(type)}`,
       });
       const [first] = configurationData(body);
-      out.push(normaliseObjectTypeConfig(first, objectName, type));
+      types.push(normaliseObjectTypeConfig(first, objectName, type));
     } catch (e) {
       const err = toVaultError(e);
       if (err.errorClass === "retryable" || err.errorClass === "session")
         throw err;
-      out.push({
+      const baseRequired = (metadata?.fields ?? [])
+        .filter((f) => f.required)
+        .map((f) => ({
+          name: f.name,
+          required: true,
+          source: OBJECT_TYPE_FALLBACK_SOURCE,
+        }));
+      const ref = metadata?.object_types?.find((t) => t.name === type);
+      const active = ref?.status ? ref.status.includes("active__v") : true;
+      http.logger.warn(
+        {
+          code: "VT_OBJECT_TYPE_CONFIG_UNREADABLE",
+          object: objectName,
+          object_type: type,
+          error_type: err.type,
+          error_class: err.errorClass,
+          http_status: err.httpStatus,
+          fallback_required_fields: baseRequired.map((f) => f.name),
+        },
+        "object type configuration could not be read — per-type required fields fall back to the base object's required fields",
+      );
+      unreadable.push({
+        name: type,
+        error: err.type,
+        message: err.message,
+        fallback: baseRequired.length ? "object_metadata_required" : "none",
+      });
+      types.push({
         name: type,
         object: objectName,
-        active: true,
-        type_fields: [],
+        active,
+        type_fields: baseRequired,
       });
     }
   }
-  return out;
+  return { types, unreadable };
+}
+
+/** `objectTypesDetailed().types` — the `VaultClient` contract shape. */
+export async function objectTypes(
+  http: VaultHttp,
+  objectName: string,
+  metadata?: VaultObjectMetadata,
+): Promise<VaultObjectTypeConfig[]> {
+  return (await objectTypesDetailed(http, objectName, metadata)).types;
 }
 
 /** `GET /configuration/Objectlifecycle.{lifecycle}` → state API names. */

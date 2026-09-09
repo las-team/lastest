@@ -29,6 +29,19 @@ describe("error classification (§8.1)", () => {
     expect(classifySfdcError(418, "WEIRD")).toBe("fatal");
   });
 
+  it("recognises the Bulk API 2.0 code spellings (no underscores)", () => {
+    expect(classifySfdcError(400, "INVALIDJOB")).toBe("structural");
+    expect(classifySfdcError(400, "INVALIDJOBSTATE")).toBe("structural");
+    expect(classifySfdcError(400, "INVALIDENTITY")).toBe("structural");
+    expect(classifySfdcError(400, "INVALIDOPERATION")).toBe("structural");
+    expect(classifySfdcError(400, "INVALIDVALUE")).toBe("structural");
+    expect(classifySfdcError(400, "FEATURENOTENABLED")).toBe("permission");
+    expect(classifySfdcError(400, "INVALIDSESSIONID")).toBe("session");
+    // the REST spellings keep working
+    expect(classifySfdcError(400, "INVALID_JOB")).toBe("structural");
+    expect(classifySfdcError(400, "INVALID_JOB_STATE")).toBe("structural");
+  });
+
   it("wraps network failures as retryable and keeps SfdcApiError instances", () => {
     const e = toSfdcError(
       Object.assign(new TypeError("fetch failed"), {

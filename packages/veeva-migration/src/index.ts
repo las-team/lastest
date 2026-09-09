@@ -45,3 +45,5 @@ export { toCsv } from "./sfdc/csv";
 export { buildCount, buildSelect } from "./sfdc/soql";
 export { unitDir } from "./extract/files";
 export { SYSTEM_COLUMNS } from "./extract/columns";
+export { isLater } from "./extract/delta";
+export { blobNameOf, blobPolicyOf } from "./load/blobs";

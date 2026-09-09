@@ -6,6 +6,7 @@ import {
   EM_EVENT_SPEAKER_SIGNATURE_BLOB,
   EM_EVENT_SPEAKER_SKIPPED_FORMULAS,
   EM_EVENT_SPEAKER_STATUS,
+  SPEAKER_ACCOUNT_FORMULA_SOURCE,
   SPEAKER_ACCOUNT_NOT_EDITABLE_CODE,
   SPEAKER_ACCOUNT_SOURCE,
   contractRefDropped,
@@ -229,6 +230,7 @@ describe("em_event_speaker module", () => {
       "event__v",
       "speaker__v",
       "account__v",
+      "account__v.formula",
       "account__v.speaker",
       "em_event_speaker_status__v",
       "meal_opt_in__v",
@@ -273,9 +275,17 @@ describe("em_event_speaker module", () => {
       evidence: "OBS",
       transform: { kind: "ref", objectKey: "em_speaker" },
     });
+    // primary row keyed on Speaker_vod__c (never calculated, never dropped
+    // by preflight); the formula is a selector row that preflight may drop
     expect(byTarget.get("account__v")).toMatchObject({
+      source: "Speaker_vod__c",
       required: "n",
       evidence: "OBS",
+      transform: { kind: "custom", fnName: "fromSpeakerAccount" },
+    });
+    expect(byTarget.get("account__v.formula")).toMatchObject({
+      source: SPEAKER_ACCOUNT_FORMULA_SOURCE,
+      optionalSource: true,
       transform: { kind: "custom", fnName: "fromSpeakerAccount" },
     });
     expect(byTarget.get("account__v.speaker")).toMatchObject({
@@ -410,6 +420,7 @@ describe("em_event_speaker module", () => {
     expect(r.payload.credentials__v).toBeUndefined();
     expect(r.payload.signature__v).toBeUndefined();
     expect(r.payload["account__v.speaker"]).toBeUndefined();
+    expect(r.payload["account__v.formula"]).toBeUndefined();
     expect(r.blobs).toEqual({ signature__v: "iVBORw0KGgoAAAANSUhEUg==" });
     expect(r.secondPass).toEqual({});
     expect(r.diagnostics).toContainEqual(
@@ -453,6 +464,29 @@ describe("em_event_speaker module", () => {
     );
     expect(none.status).toBe("ok");
     expect(none.payload.account__v).toBeUndefined();
+    // preflight drops the calculated formula row (SF_FIELD_CALCULATED) and
+    // its column is never selected — account__v must still be written
+    const m = mapping();
+    const dropped = {
+      ...m,
+      fields: m.fields.filter((f) => f.target !== "account__v.formula"),
+    };
+    const noFormula = row();
+    delete noFormula[SPEAKER_ACCOUNT_FORMULA_SOURCE];
+    const editable = applyMapping(noFormula, dropped, applyCtx());
+    expect(editable.status).toBe("ok");
+    expect(editable.payload.account__v).toEqual({
+      $fk: { object: "account", sfdcId: IDS.account1 },
+    });
+    const notEditable = applyMapping(
+      noFormula,
+      dropped,
+      applyCtx({ metadata: metadata(false) }),
+    );
+    expect(notEditable.payload.account__v).toBeUndefined();
+    expect(notEditable.diagnostics).toContainEqual(
+      expect.objectContaining({ code: SPEAKER_ACCOUNT_NOT_EDITABLE_CODE }),
+    );
     const defaulted = applyMapping(
       row({ Status_vod__c: "" }),
       mapping(),
@@ -520,7 +554,7 @@ describe("em_event_speaker custom transforms", () => {
   const accountCtx = (editable: boolean, target = "account__v") =>
     buildTransformContext({
       objectKey: "em_event_speaker",
-      field: { source: "Account_vod__c", target },
+      field: { source: "Speaker_vod__c", target },
       metadata: {
         fields: {
           account__v: {
@@ -540,23 +574,53 @@ describe("em_event_speaker custom transforms", () => {
     });
 
   it("fromSpeakerAccount emits ref(account) from the formula or the speaker column, editable targets only", () => {
+    const withFormula = (extra: Record<string, unknown> = {}) => ({
+      ...base(),
+      [SPEAKER_ACCOUNT_FORMULA_SOURCE]: IDS.account1,
+      ...extra,
+    });
     expect(
-      fromSpeakerAccount(IDS.account1, base(), accountCtx(true)),
+      fromSpeakerAccount(SPEAKER_1, withFormula(), accountCtx(true)),
+    ).toMatchObject({
+      value: { $fk: { object: "account", sfdcId: IDS.account1 } },
+    });
+    // the formula wins over the speaker column when both are present
+    expect(
+      fromSpeakerAccount(
+        SPEAKER_1,
+        withFormula({ [SPEAKER_ACCOUNT_SOURCE]: IDS.account4 }),
+        accountCtx(true),
+      ),
     ).toMatchObject({
       value: { $fk: { object: "account", sfdcId: IDS.account1 } },
     });
     expect(
       fromSpeakerAccount(
-        "",
+        SPEAKER_1,
         { ...base(), [SPEAKER_ACCOUNT_SOURCE]: IDS.account1 },
         accountCtx(true),
       ),
     ).toMatchObject({
       value: { $fk: { object: "account", sfdcId: IDS.account1 } },
     });
-    expect(fromSpeakerAccount("", base(), accountCtx(true))).toBeUndefined();
     expect(
-      fromSpeakerAccount(IDS.account1, base(), accountCtx(false)),
+      fromSpeakerAccount(SPEAKER_1, base(), accountCtx(true)),
+    ).toBeUndefined();
+    // an overlay that keeps the formula as the row source still works
+    const legacyLayout = {
+      ...accountCtx(true),
+      field: {
+        ...accountCtx(true).field,
+        source: SPEAKER_ACCOUNT_FORMULA_SOURCE,
+      },
+    };
+    expect(
+      fromSpeakerAccount(IDS.account1, base(), legacyLayout),
+    ).toMatchObject({
+      value: { $fk: { object: "account", sfdcId: IDS.account1 } },
+    });
+    expect(
+      fromSpeakerAccount(SPEAKER_1, withFormula(), accountCtx(false)),
     ).toMatchObject({
       omit: true,
       diagnostic: {
@@ -567,16 +631,27 @@ describe("em_event_speaker custom transforms", () => {
     });
     // unresolved account → deferred ref with the unresolved marker (optional lookup → omitted by apply)
     expect(
-      fromSpeakerAccount(IDS.account4, base(), accountCtx(true)),
+      fromSpeakerAccount(
+        SPEAKER_1,
+        { ...base(), [SPEAKER_ACCOUNT_FORMULA_SOURCE]: IDS.account4 },
+        accountCtx(true),
+      ),
     ).toMatchObject({
       unresolved: { objectKey: "account", sfdcId: IDS.account4 },
     });
-    // selector row → nothing
+    // selector rows → nothing
     expect(
       fromSpeakerAccount(
         IDS.account1,
-        base(),
+        withFormula(),
         accountCtx(true, "account__v.speaker"),
+      ),
+    ).toBeUndefined();
+    expect(
+      fromSpeakerAccount(
+        IDS.account1,
+        withFormula(),
+        accountCtx(true, "account__v.formula"),
       ),
     ).toBeUndefined();
   });

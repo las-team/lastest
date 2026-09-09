@@ -1,11 +1,22 @@
+import pino from "pino";
 import { describe, expect, it } from "vitest";
 import {
   canonicalVaultType,
   normaliseFieldMetadata,
   normaliseObjectMetadata,
+  OBJECT_TYPE_FALLBACK_SOURCE,
   stripPicklistPrefix,
 } from "./metadata";
 import { API, authRoutes, failureBody, makeTestClient } from "./test-support";
+
+function collectLogger() {
+  const lines: string[] = [];
+  const logger = pino(
+    { level: "debug" },
+    { write: (s: string) => lines.push(s) },
+  );
+  return { logger: logger.child({ scope: "Vault" }), lines };
+}
 
 describe("metadata normalisation (§2.5.6)", () => {
   it("normalises field types case-insensitively and strips the Picklist. prefix", () => {
@@ -181,46 +192,57 @@ describe("metadata endpoints", () => {
     expect(t.fetch.calls.at(-1)?.form?.get("status")).toBe("active");
   });
 
-  it("objectTypes fetches /configuration/Objecttype.{object}.{type} per type and degrades a missing one", async () => {
-    const t = makeTestClient([
-      ...authRoutes(),
-      {
-        method: "GET",
-        path: `${API}/metadata/vobjects/call2__v`,
-        body: {
-          responseStatus: "SUCCESS",
-          object: {
-            name: "call2__v",
-            status: ["active__v"],
-            object_types: [{ name: "base__v" }, { name: "group_call__v" }],
-            fields: [],
+  it("objectTypes fetches /configuration/Objecttype.{object}.{type} per type; an unreadable one is warned about and falls back to the base object's required fields", async () => {
+    const { logger, lines } = collectLogger();
+    const t = makeTestClient(
+      [
+        ...authRoutes(),
+        {
+          method: "GET",
+          path: `${API}/metadata/vobjects/call2__v`,
+          body: {
+            responseStatus: "SUCCESS",
+            object: {
+              name: "call2__v",
+              status: ["active__v"],
+              object_types: [
+                { name: "base__v" },
+                { name: "group_call__v", status: ["active__v"] },
+              ],
+              fields: [
+                { name: "name__v", type: "String", required: true },
+                { name: "call_date__v", type: "Date", required: true },
+                { name: "notes__v", type: "LongText", required: false },
+              ],
+            },
           },
         },
-      },
-      {
-        method: "GET",
-        path: `${API}/configuration/Objecttype.call2__v.base__v`,
-        body: {
-          responseStatus: "SUCCESS",
-          data: {
-            name: "base__v",
-            object: "call2__v",
-            active: true,
-            type_fields: [
-              { name: "account__v", required: true, source: "standard" },
-            ],
+        {
+          method: "GET",
+          path: `${API}/configuration/Objecttype.call2__v.base__v`,
+          body: {
+            responseStatus: "SUCCESS",
+            data: {
+              name: "base__v",
+              object: "call2__v",
+              active: true,
+              type_fields: [
+                { name: "account__v", required: true, source: "standard" },
+              ],
+            },
           },
         },
-      },
-      {
-        method: "GET",
-        path: `${API}/configuration/Objecttype.call2__v.group_call__v`,
-        body: failureBody("MALFORMED_URL"),
-      },
-    ]);
+        {
+          method: "GET",
+          path: `${API}/configuration/Objecttype.call2__v.group_call__v`,
+          body: failureBody("INSUFFICIENT_ACCESS", "no configuration access"),
+        },
+      ],
+      { logger },
+    );
     await t.client.authenticate();
-    const types = await t.client.objectTypes("call2__v");
-    expect(types).toEqual([
+    const detailed = await t.client.objectTypesDetailed("call2__v");
+    expect(detailed.types).toEqual([
       {
         name: "base__v",
         object: "call2__v",
@@ -233,9 +255,38 @@ describe("metadata endpoints", () => {
         name: "group_call__v",
         object: "call2__v",
         active: true,
-        type_fields: [],
+        type_fields: [
+          {
+            name: "name__v",
+            required: true,
+            source: OBJECT_TYPE_FALLBACK_SOURCE,
+          },
+          {
+            name: "call_date__v",
+            required: true,
+            source: OBJECT_TYPE_FALLBACK_SOURCE,
+          },
+        ],
       },
     ]);
+    expect(detailed.unreadable).toEqual([
+      {
+        name: "group_call__v",
+        error: "INSUFFICIENT_ACCESS",
+        message: "INSUFFICIENT_ACCESS: no configuration access",
+        fallback: "object_metadata_required",
+      },
+    ]);
+    const warn = lines
+      .map((l) => JSON.parse(l))
+      .find((r) => r.code === "VT_OBJECT_TYPE_CONFIG_UNREADABLE");
+    expect(warn).toMatchObject({
+      level: 40,
+      object: "call2__v",
+      object_type: "group_call__v",
+      error_type: "INSUFFICIENT_ACCESS",
+      fallback_required_fields: ["name__v", "call_date__v"],
+    });
     // metadata is cached: a second objectTypes() call re-reads only the type configs
     t.fetch.add(
       {

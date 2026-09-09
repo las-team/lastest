@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  USER_EXTRA_COLUMNS,
   USER_LICENSE_FIELDS,
   USER_SYS_CREATE_REQUIRED,
   buildUsersApiRow,
@@ -16,6 +17,7 @@ import { materialise, resolveCountry } from "../../config/resolve";
 import { parseConfig } from "../../config/schema";
 import { applyMapping } from "../../transform/apply";
 import { buildScopePredicate } from "../../extract/scope";
+import { isGlobalModule } from "../../run/plan";
 import {
   SAMPLE_USER_ID,
   SAMPLE_USER_ID_2,
@@ -180,7 +182,9 @@ describe("user module", () => {
     expect(user.target).toBe("user__sys");
     expect(user.targetEvidence).toBe("OBS");
     expect(user.scope).toEqual({ kind: "full" });
-    expect(user.countryOf).toEqual([{ kind: "field", path: "Country_vod__c" }]);
+    // §3.4 / §6.1 step 0: one GLOBAL unit — every user incl. country-less ones
+    expect(user.countryOf).toEqual([{ kind: "global" }]);
+    expect(isGlobalModule(user, resolveCountry(makeConfig(), "US"))).toBe(true);
     expect(user.dependsOn).toEqual(["country"]);
     expect(user.createPolicy).toBe("match-only");
     expect(user.deletePolicy).toBe("inactivate");
@@ -192,7 +196,10 @@ describe("user module", () => {
       mode: "match",
       usernameTemplate: "{Username}",
       licenseType: "full__v",
+      // `User.Country` fallback of userCountry is a declared extra column
+      extraColumns: [...USER_EXTRA_COLUMNS],
     });
+    expect(USER_EXTRA_COLUMNS).toEqual(["Country"]);
     expect(user.match.map((m) => m.method)).toEqual([
       "legacy_id",
       "username",
@@ -390,6 +397,21 @@ describe("user module", () => {
     );
   });
 
+  it("fails a create-mode row whose Profile.Name is empty (security_profile__sys is Y on create)", () => {
+    const { result: r } = run(sampleRow({ "Profile.Name": "" }), {
+      mode: "create",
+    });
+    expect(r.status).toBe("failed");
+    expect(r.failure).toMatchObject({
+      code: "REQUIRED_MISSING",
+      field: "security_profile__sys",
+    });
+    // match mode: an empty profile is simply omitted
+    const match = run(sampleRow({ "Profile.Name": "" }));
+    expect(match.result.status).toBe("ok");
+    expect(match.result.payload.security_profile__sys).toBeUndefined();
+  });
+
   it("is unscoped (full): the scope builder yields no predicate", () => {
     const config = makeConfig();
     const mapping = materialise(user, resolveCountry(config, "US"), config, {
@@ -426,8 +448,18 @@ describe("user custom transforms", () => {
     // lookup-typed source (Country_vod__c id) → crosswalk by SFDC id
     const usId = buildCountryContext().countries.byIso2("US")!.sfdcId!;
     expect(userCountry(usId, row({}), iso2Ctx)).toBe("US");
-    // fallback to User.Country when Country_vod__c is empty
+    // fallback to User.Country when Country_vod__c is empty — ISO-2 codes only
     expect(userCountry("", row({ Country: "de" }), iso2Ctx)).toBe("DE");
+    expect(
+      userCountry("", row({ Country: "United States" }), iso2Ctx),
+    ).toMatchObject({
+      omit: true,
+      diagnostic: {
+        code: "USER_COUNTRY_UNRESOLVED",
+        value: "United States",
+        detail: expect.stringContaining("not an ISO-2 code"),
+      },
+    });
     const refCtx = buildTransformContext({
       objectKey: "user",
       field: { target: "vcountry__v" },
@@ -507,6 +539,17 @@ describe("user custom transforms", () => {
     expect(securityProfile("Other", row({}), create)).toMatchObject({
       omit: true,
       diagnostic: { fatal: true },
+    });
+    // empty: omitted in match mode, fatal REQUIRED_MISSING in create mode
+    expect(securityProfile("", row({}), fromPicklist)).toBeUndefined();
+    expect(securityProfile(null, row({}), create)).toMatchObject({
+      omit: true,
+      diagnostic: {
+        kind: "required_missing",
+        code: "REQUIRED_MISSING",
+        field: "security_profile__sys",
+        fatal: true,
+      },
     });
   });
 

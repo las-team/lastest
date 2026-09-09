@@ -117,6 +117,8 @@ type Expr = (row: SourceRow) => boolean;
 
 class Parser {
   pos = 0;
+  /** Every field name referenced by a WHERE predicate, in source order. */
+  readonly fields: string[] = [];
   constructor(private toks: Tok[]) {}
   peek(): Tok | undefined {
     return this.toks[this.pos];
@@ -173,6 +175,7 @@ class Parser {
       return e;
     }
     const field = this.expect("id").v;
+    this.fields.push(field);
     if (this.is("kw", "NOT")) {
       this.next();
       this.expect("kw", "IN");
@@ -244,17 +247,40 @@ function norm(v: unknown): string | number | boolean | null {
   return s;
 }
 
+const DATE_LITERAL_RE =
+  /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:?\d{2}))?$/;
+
+/**
+ * Epoch millis of a date / datetime literal (date-only = midnight UTC), or
+ * `undefined` for anything else. Salesforce compares datetimes as instants:
+ * the §4.1 window literal `…T03:04:05Z` (no fractional seconds) and the row
+ * value `…T03:04:05.000Z` (as Bulk CSV / REST return it) are equal, which a
+ * lexicographic comparison would invert (`'.' < 'Z'`).
+ */
+export function instantOf(v: unknown): number | undefined {
+  if (typeof v !== "string" || !DATE_LITERAL_RE.test(v)) return undefined;
+  const ms = Date.parse(v);
+  return Number.isNaN(ms) ? undefined : ms;
+}
+
 function compare(
   a: string | number | boolean | null,
   op: string,
   b: string | number | boolean | null,
 ): boolean {
+  const ia = instantOf(a);
+  const ib = instantOf(b);
   if (op === "=")
-    return a === b || (a !== null && b !== null && String(a) === String(b));
+    return (
+      a === b ||
+      (ia !== undefined && ia === ib) ||
+      (a !== null && b !== null && String(a) === String(b))
+    );
   if (op === "!=") return !compare(a, "=", b);
   if (a === null || b === null) return false;
-  const x = typeof a === "number" ? a : String(a);
-  const y = typeof b === "number" ? b : String(b);
+  const instants = ia !== undefined && ib !== undefined;
+  const x = instants ? ia : typeof a === "number" ? a : String(a);
+  const y = instants ? ib : typeof b === "number" ? b : String(b);
   if (op === "<") return x < y;
   if (op === "<=") return x <= y;
   if (op === ">") return x > y;
@@ -269,6 +295,8 @@ export interface ParsedSoql {
   where?: Expr;
   orderBy: Array<{ field: string; desc: boolean }>;
   limit?: number;
+  /** Fields referenced by WHERE / ORDER BY (validated like columns). */
+  referencedFields: string[];
 }
 
 export function parseSoql(soql: string): ParsedSoql {
@@ -316,7 +344,15 @@ export function parseSoql(soql: string): ParsedSoql {
     p.next();
     limit = Number(p.expect("num").v);
   }
-  return { columns, count, object, where, orderBy, limit };
+  return {
+    columns,
+    count,
+    object,
+    where,
+    orderBy,
+    limit,
+    referencedFields: [...p.fields, ...orderBy.map((o) => o.field)],
+  };
 }
 
 function projectRow(row: SourceRow, columns: string[]): SourceRow {
@@ -512,8 +548,10 @@ export class FakeSfdcClient implements SfdcClient {
         { errorCode: "INVALID_TYPE" },
       );
     if (describe) {
+      // a mistyped scope/country/order field is INVALID_FIELD on Salesforce
+      // (structural, §8.1) — not a predicate that silently evaluates to null
       const known = new Set(describe.fields.map((f) => f.name));
-      for (const c of parsed.columns)
+      for (const c of [...parsed.columns, ...parsed.referencedFields])
         if (!c.includes(".") && !known.has(c))
           throw Object.assign(
             new Error(
@@ -641,9 +679,12 @@ export class FakeSfdcClient implements SfdcClient {
         new Error(`INVALID_TYPE: entity '${objectName}' is not replicable`),
         { errorCode: "INVALID_TYPE" },
       );
-    const list = (this.deleted.get(objectName) ?? []).filter(
-      (x) => x.deletedDate >= start && x.deletedDate < end,
-    );
+    const lo = instantOf(start) ?? Number.NaN;
+    const hi = instantOf(end) ?? Number.NaN;
+    const list = (this.deleted.get(objectName) ?? []).filter((x) => {
+      const t = instantOf(x.deletedDate);
+      return t !== undefined && t >= lo && t < hi;
+    });
     return {
       deletedRecords: list,
       earliestDateAvailable: "1970-01-01T00:00:00.000Z",
@@ -657,14 +698,13 @@ export class FakeSfdcClient implements SfdcClient {
     end: string,
   ): Promise<SfdcUpdatedResult> {
     this.record("getUpdated", objectName, start, end);
+    const lo = instantOf(start) ?? Number.NaN;
+    const hi = instantOf(end) ?? Number.NaN;
     const ids = (this.rows.get(objectName) ?? [])
-      .filter(
-        (r) =>
-          typeof r.SystemModstamp === "string" &&
-          r.SystemModstamp >= start &&
-          r.SystemModstamp < end &&
-          r.IsDeleted !== true,
-      )
+      .filter((r) => {
+        const t = instantOf(r.SystemModstamp);
+        return t !== undefined && t >= lo && t < hi && r.IsDeleted !== true;
+      })
       .map((r) => r.Id);
     return { ids, latestDateCovered: end };
   }

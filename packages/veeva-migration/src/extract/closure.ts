@@ -12,12 +12,22 @@
  *    the round cap (`extract.closureMaxRounds`, default 20) raises a
  *    `blocking` finding.
  *  - Closure rows are tagged `closure = true` (they bypass the scope
- *    filter) and are written under the *referencing* row's country.
+ *    filter) and are written under the *referencing* row's country. Page
+ *    files carry a per-invocation tag (`closure-{tag}-r{round}-{page}.csv`)
+ *    so concurrent units closing over the same parent never overwrite each
+ *    other's pages.
+ *  - Objects with `load.partitionBy` (`call2`, `em_event`) keep one buffer
+ *    per partition: parent rows (`field = null`) land in `p0`, child rows in
+ *    `p1`, and the returned file list is ordered parents-first, so the
+ *    loader can commit parents before the children that reference them
+ *    (§2.2 step 9, §6.1 step 16) — a child fetched in round N routinely has
+ *    its parent fetched only in round N+1.
  *  - Deleted parents (`IsDeleted = true`) and ids the source no longer has
  *    are `dangling` — the child's FK stays unresolved (§3.5).
  *  - Users are never closure-fetched (matched in wave 0, §3.4); `user` ids
  *    in `needed` are ignored.
  */
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { getLogger } from "../logger";
 import type { SfdcClient } from "../sfdc/types";
@@ -53,6 +63,25 @@ export interface ClosureOptions {
 export interface ClosureRunRequest extends ClosureRequest {
   /** Ids already extracted in this run per object (subtracted in every round). */
   have?: FkIdSets;
+}
+
+/** File-name safe form of a caller-supplied tag (unit ids contain `:`). */
+function fileTag(tag: string | undefined): string {
+  const t = (tag ?? "")
+    .replace(/[^A-Za-z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return t || randomUUID().slice(0, 8);
+}
+
+/** Partition index of a row for `load.partitionBy` (0 = parents by default order). */
+export function partitionIndex(
+  row: SourceRow,
+  partitionBy: { field: string; order?: readonly ("null" | "notNull")[] },
+): number {
+  const order = partitionBy.order ?? ["null", "notNull"];
+  const want = nonEmpty(row[partitionBy.field]) ? "notNull" : "null";
+  const i = order.indexOf(want);
+  return i < 0 ? 0 : i;
 }
 
 export interface ClosureRunResult extends ClosureResult {
@@ -132,6 +161,7 @@ export async function runClosure(
   );
   const pageRows = opts.pageRows ?? 2000;
   const maxRounds = req.maxRounds > 0 ? req.maxRounds : 20;
+  const tag = fileTag(req.tag);
 
   const files = new Map<ObjectKey, ExtractFile[]>();
   const fetched = new Map<ObjectKey, number>();
@@ -219,29 +249,46 @@ export async function runClosure(
         countryPaths: countryColumns(strategy),
       });
       const source = mapping.sourceObject;
-      const dir = extractDir(req.runDir, req.country, key);
+      const partitionBy = mapping.load.partitionBy;
       const want = new Set(ids);
       const got = new Set<string>();
       const liveIds = new Set<string>();
       let deletedCount = 0;
-      let buffer: SourceRow[] = [];
-      let pageNo = 0;
       const outFiles = files.get(key) ?? [];
       files.set(key, outFiles);
-      const jobId = `closure-r${rounds}`;
-      const flush = async () => {
-        if (!buffer.length) return;
-        const file = path.join(dir, `${jobId}-${pageNo}.csv`);
-        await writeCsvFile(file, buffer, columns);
+      const jobId = `closure-${tag}-r${rounds}`;
+      // one buffer per partition (a single unpartitioned one otherwise)
+      const buffers = new Map<
+        number | undefined,
+        { rows: SourceRow[]; pageNo: number }
+      >();
+      const bufferFor = (partition: number | undefined) => {
+        let b = buffers.get(partition);
+        if (!b) {
+          b = { rows: [], pageNo: 0 };
+          buffers.set(partition, b);
+        }
+        return b;
+      };
+      const flush = async (partition: number | undefined) => {
+        const b = buffers.get(partition);
+        if (!b?.rows.length) return;
+        const dir = extractDir(req.runDir, req.country, key, partition);
+        const file = path.join(dir, `${jobId}-${b.pageNo}.csv`);
+        await writeCsvFile(file, b.rows, columns);
         outFiles.push({
           path: file,
           jobId,
-          pageNo,
-          rows: buffer.length,
+          pageNo: b.pageNo,
+          rows: b.rows.length,
           closure: true,
+          ...(partition !== undefined ? { partition } : {}),
         });
-        pageNo++;
-        buffer = [];
+        b.pageNo++;
+        b.rows = [];
+      };
+      const flushAll = async () => {
+        for (const partition of [...buffers.keys()]) await flush(partition);
       };
       const handle = async (row: SourceRow) => {
         const id = to18(row.Id);
@@ -272,8 +319,12 @@ export async function runClosure(
             bucket.add(t);
           }
         }
-        buffer.push(row);
-        if (buffer.length >= pageRows) await flush();
+        const partition = partitionBy
+          ? partitionIndex(row, partitionBy)
+          : undefined;
+        const b = bufferFor(partition);
+        b.rows.push(row);
+        if (b.rows.length >= pageRows) await flush(partition);
       };
 
       if (want.size > bulkThreshold) {
@@ -299,7 +350,7 @@ export async function runClosure(
             await handle(row);
         }
       }
-      await flush();
+      await flushAll();
       const live = got.size - deletedCount;
       fetched.set(key, (fetched.get(key) ?? 0) + live);
       const missing = [...want].filter((id) => !got.has(id));
@@ -330,6 +381,10 @@ export async function runClosure(
   }
 
   for (const [key, set] of dangling) if (!set.size) dangling.delete(key);
+  // parents-first across rounds for partitioned objects (stable: round/page
+  // order is kept within a partition)
+  for (const list of files.values())
+    list.sort((a, b) => (a.partition ?? 0) - (b.partition ?? 0));
 
   const totalDangling = [...dangling.values()].reduce((n, s) => n + s.size, 0);
   if (totalDangling)

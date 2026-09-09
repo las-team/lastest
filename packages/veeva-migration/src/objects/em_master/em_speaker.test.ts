@@ -4,6 +4,7 @@ import {
   SPEAKER_NAME_SOURCES,
   baseNameTarget,
   em_speaker,
+  isBlank,
   speakerNameFallback,
   speakerNamesFromAccount,
 } from "./em_speaker";
@@ -239,6 +240,19 @@ describe("em_speaker module", () => {
         expect(f.evidence, `${f.target} has an evidence tag`).toBeDefined();
   });
 
+  it("defaults externalIdOwnedBy to integration so external_id__v stays the match key (§3.2 step 4), overridable per object", () => {
+    expect(mapping().options.externalIdOwnedBy).toBe("integration");
+    const overridden = parseConfig({
+      ...config,
+      objects: { em_speaker: { externalIdOwnedBy: "migration" } },
+    });
+    expect(
+      materialise(em_speaker, resolveCountry(overridden, "US"), overridden, {
+        now: NOW,
+      }).options.externalIdOwnedBy,
+    ).toBe("migration");
+  });
+
   it("is full scope and selects the account name columns through the verified relationship", () => {
     const m = mapping();
     expect(m.scope.spec).toEqual({ kind: "full" });
@@ -313,6 +327,21 @@ describe("em_speaker module", () => {
     expect(empty.payload.last_name__v).toBe("Doe");
     expect(
       empty.diagnostics.filter(
+        (d) => d.code === SPEAKER_NAME_FROM_ACCOUNT_CODE,
+      ),
+    ).toHaveLength(2);
+    // whitespace-only own names (blank-padded CSV/bulk exports) count as empty:
+    // the primary text row omits them, so the account still supplies the name
+    const blank = applyMapping(
+      row({ First_Name_vod__c: "   ", Last_Name_vod__c: "\t " }),
+      mapping(),
+      applyCtx(),
+    );
+    expect(blank.status).toBe("ok");
+    expect(blank.payload.first_name__v).toBe("Jane");
+    expect(blank.payload.last_name__v).toBe("Doe");
+    expect(
+      blank.diagnostics.filter(
         (d) => d.code === SPEAKER_NAME_FROM_ACCOUNT_CODE,
       ),
     ).toHaveLength(2);
@@ -422,6 +451,22 @@ describe("em_speaker custom transforms", () => {
         "last_name__v",
       ),
     ).toBeUndefined();
+    // a whitespace-only own name does not suppress the fallback
+    expect(
+      speakerNameFallback(
+        {
+          ...base(),
+          First_Name_vod__c: "   ",
+          "Account_vod__r.FirstName": "Jane",
+        },
+        "first_name__v",
+      ),
+    ).toBe("Jane");
+    expect(isBlank(undefined)).toBe(true);
+    expect(isBlank("")).toBe(true);
+    expect(isBlank(" \t ")).toBe(true);
+    expect(isBlank("x")).toBe(false);
+    expect(isBlank(0)).toBe(false);
   });
 
   it("speakerNamesFromAccount emits into the base field with a non-fatal diagnostic, honouring the target length", () => {

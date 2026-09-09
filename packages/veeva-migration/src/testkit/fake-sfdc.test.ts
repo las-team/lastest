@@ -66,6 +66,80 @@ describe("FakeSfdcClient", () => {
       ),
     ).toHaveLength(2);
   });
+  it("compares datetime literals as instants at the §4.1 window boundaries", async () => {
+    const c = client();
+    // account1 carries SystemModstamp 2025-01-02T03:04:05.000Z; the window
+    // literal has no fractional seconds — lexicographically '.' < 'Z' would
+    // invert both boundaries
+    const at = "2025-01-02T03:04:05Z";
+    const ids = async (where: string) =>
+      (await collect(c.query(`SELECT Id FROM Account WHERE ${where}`))).map(
+        (r) => r.Id,
+      );
+    expect(await ids(`SystemModstamp < ${at}`)).not.toContain(IDS.account1);
+    expect(await ids(`SystemModstamp >= ${at}`)).toContain(IDS.account1);
+    expect(await ids(`SystemModstamp > ${at}`)).not.toContain(IDS.account1);
+    expect(await ids(`SystemModstamp <= ${at}`)).toContain(IDS.account1);
+    expect(await ids(`SystemModstamp = ${at}`)).toEqual([IDS.account1]);
+    expect(await ids(`SystemModstamp != ${at}`)).not.toContain(IDS.account1);
+    // wm_lo inclusive / wm_hi exclusive, exactly like the delta predicate
+    expect(
+      await ids(`SystemModstamp >= ${at} AND SystemModstamp < ${at}`),
+    ).toEqual([]);
+    // date-only literals are midnight UTC
+    expect(await ids("CreatedDate >= 2021-05-04")).toContain(IDS.account1);
+    expect(await ids("CreatedDate < 2021-05-04")).not.toContain(IDS.account1);
+    // feeds apply the same instant semantics
+    expect(
+      (await c.getUpdated("Account", "2025-01-01T00:00:00Z", at)).ids,
+    ).not.toContain(IDS.account1);
+    expect(
+      (await c.getUpdated("Account", at, "2025-02-01T00:00:00Z")).ids,
+    ).toContain(IDS.account1);
+    c.deleteRow("Account", IDS.account3, "2025-05-01T00:00:00.000Z");
+    const del = async (start: string, end: string) =>
+      (await c.getDeleted("Account", start, end)).deletedRecords.map(
+        (d) => d.id,
+      );
+    expect(await del("2025-04-01T00:00:00Z", "2025-05-01T00:00:00Z")).toEqual(
+      [],
+    );
+    expect(await del("2025-05-01T00:00:00Z", "2025-06-01T00:00:00Z")).toEqual([
+      IDS.account3,
+    ]);
+  });
+  it("rejects unknown fields in WHERE and ORDER BY like SELECT", async () => {
+    const c = client();
+    await expect(
+      collect(c.query("SELECT Id FROM Account WHERE Nope__c = null")),
+    ).rejects.toThrow(/INVALID_FIELD.*Nope__c/);
+    await expect(
+      collect(
+        c.query(
+          "SELECT Id FROM Account WHERE Name != null AND Typo_vod__c >= 2024-01-01",
+        ),
+      ),
+    ).rejects.toThrow(/INVALID_FIELD.*Typo_vod__c/);
+    await expect(
+      collect(c.query("SELECT Id FROM Account WHERE Id IN ('x') ORDER BY Zz")),
+    ).rejects.toThrow(/INVALID_FIELD.*Zz/);
+    await expect(c.count("Account", "Nope__c = 'x'")).rejects.toThrow(
+      /INVALID_FIELD/,
+    );
+    // relationship paths are not validated (they resolve through other describes)
+    expect(
+      await collect(
+        c.query(
+          "SELECT Id FROM Call2_vod__c WHERE Account_vod__r.Country_vod__r.Alpha_2_Code_vod__c = 'US' ORDER BY Call_Date_vod__c",
+        ),
+      ),
+    ).not.toHaveLength(0);
+    expect(
+      parseSoql(
+        "SELECT Id FROM A WHERE B = 1 AND (C IN (2) OR NOT D LIKE 'x') ORDER BY E",
+      ).referencedFields,
+    ).toEqual(["B", "C", "D", "E"]);
+  });
   it("projects relationship columns and rejects unknown fields", async () => {
     const c = client();
     const [r] = await collect(

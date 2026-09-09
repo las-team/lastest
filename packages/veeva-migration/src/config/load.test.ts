@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { EMPTY_OVERLAYS } from "./countries";
 import {
   ConfigError,
   configHash,
@@ -49,6 +50,32 @@ describe("config loader", () => {
       expect((e as ConfigError).issues.join("\n")).toMatch(/version/);
     }
     expect(() => loadConfigFromText("a: [", {})).toThrow(/CONFIG_YAML_INVALID/);
+  });
+  it("merges the shipped overlays beneath the user's countries (§7.1)", () => {
+    const env = { SF_CLIENT_ID: "cid", VAULT_USER: "vu", VAULT_PASSWORD: "vp" };
+    const text = yaml.replace(
+      "countries:\n  DE: { defaultTimezone: Europe/Berlin }",
+      "countries:\n  DE: { defaultTimezone: Europe/Berlin }\n  US: {}\n  AT: { region: EU }",
+    );
+    const c = loadConfigFromText(text, env);
+    // US: {} carries the §7.4.1 overlay (PDMA widening, rollup recalc, state crosswalk)
+    expect(c.countries.US.scope?.sampleRetentionMonths).toBe(36);
+    expect(c.countries.US.scope?.samplesIncludeCalls).toBe(true);
+    expect(c.countries.US.postLoad?.recalculateRollups).toBe("required");
+    expect(c.countries.US.region).toBe("NA");
+    expect(c.regions.NA).toBeDefined();
+    // the user's own value still wins over the shipped DE overlay
+    expect(c.countries.DE.defaultTimezone).toBe("Europe/Berlin");
+    expect(c.countries.DE.region).toBe("EU");
+    // a region that only ships as an overlay is accepted and added
+    expect(c.countries.AT.region).toBe("EU");
+    expect(c.regions.EU?.scope?.tovRetentionMonths).toBe(60);
+    // opting out keeps the bare file
+    const bare = loadConfigFromText(yaml, env, { overlays: EMPTY_OVERLAYS });
+    expect(bare.countries.DE).toEqual({ defaultTimezone: "Europe/Berlin" });
+    expect(() =>
+      loadConfigFromText(text, env, { overlays: EMPTY_OVERLAYS }),
+    ).toThrow(/CONFIG_REGION_UNKNOWN/);
   });
   it("config hash ignores secret rotation", () => {
     const env = { SF_CLIENT_ID: "cid", VAULT_USER: "vu", VAULT_PASSWORD: "vp" };

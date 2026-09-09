@@ -8,10 +8,14 @@
  * `MaterialisedMapping` for the (object, country) unit, including
  * `mappingHash` and any findings raised while merging.
  */
-import { formatCountryOf, parseCountryOf } from "../country-of";
+import {
+  formatCountryOf,
+  isTerritoryCountryRule,
+  parseCountryOf,
+} from "../country-of";
 import { hashObject } from "../hash";
 import type { ObjectModule } from "../objects/types";
-import { parseTransform } from "../transform/spec";
+import { parseTransform, TransformSpecError } from "../transform/spec";
 import {
   GLOBAL_COUNTRY,
   type CountryCode,
@@ -43,6 +47,9 @@ function isDict(v: unknown): v is Dict {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+/** Keys whose object value replaces the lower layer wholesale (discriminated unions such as `target.auth`). */
+const ATOMIC_KEYS = new Set(["auth"]);
+
 function mergeInto(
   base: Dict,
   overlay: Dict | undefined,
@@ -52,7 +59,7 @@ function mergeInto(
   for (const [k, v] of Object.entries(overlay)) {
     if (v === undefined) continue;
     const cur = base[k];
-    if (isDict(v) && isDict(cur)) {
+    if (isDict(v) && isDict(cur) && !ATOMIC_KEYS.has(k)) {
       base[k] = mergeInto({ ...cur }, v, [...path, k]);
     } else if (isDict(v)) {
       base[k] = mergeInto({}, v, [...path, k]);
@@ -315,16 +322,18 @@ const INTEGRATION_OWNED_EXTERNAL_ID = new Set([
   "territory",
 ]);
 
-/** `cutoffDate = today − historyMonths` in UTC as `YYYY-MM-DD` (§1.1 #2). */
+/**
+ * `cutoffDate = today − historyMonths` in UTC as `YYYY-MM-DD` (§1.1 #2). The
+ * day is clamped to the target month's length (2026-03-31 − 1 month is
+ * 2026-02-28, not a roll-forward to 03-03 that would drop rows).
+ */
 export function computeCutoffDate(now: Date, historyMonths: number): string {
-  const d = new Date(
-    Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth() - historyMonths,
-      now.getUTCDate(),
-    ),
-  );
-  return d.toISOString().slice(0, 10);
+  const total = now.getUTCFullYear() * 12 + now.getUTCMonth() - historyMonths;
+  const year = Math.floor(total / 12);
+  const month = total - year * 12;
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const day = Math.min(now.getUTCDate(), daysInMonth);
+  return new Date(Date.UTC(year, month, day)).toISOString().slice(0, 10);
 }
 
 function normaliseRequirement(
@@ -363,9 +372,11 @@ export function resolveScope(
   const key = module.key;
   if (spec.kind === "full") return { spec };
   const base = cc.scope.historyMonths;
-  const override =
-    cc.scope.objects[key]?.historyMonths ??
-    cc.objects[key]?.scope?.historyMonths;
+  // `null` (= unscoped) must survive: `??` would swallow the documented
+  // `scope.objects.<key>.historyMonths: null` form (§7.2.1).
+  const fromScope = cc.scope.objects[key]?.historyMonths;
+  const fromObject = cc.objects[key]?.scope?.historyMonths;
+  const override = fromScope !== undefined ? fromScope : fromObject;
   if (override === null) return { spec, retentionFamily: spec.retentionFamily };
 
   let family = spec.retentionFamily;
@@ -378,30 +389,57 @@ export function resolveScope(
         : undefined;
 
   let effective = override ?? base;
-  if (familyRetention !== undefined && familyRetention > effective)
-    effective = familyRetention;
-  if (override !== undefined && override < base && family === undefined) {
-    findings.push({
-      severity: "warning",
-      code: "SCOPE_NARROWED",
-      objectKey: key,
-      country: cc.iso2,
-      detail: `historyMonths ${override} is narrower than the global ${base}`,
-    });
-  } else if (
-    override !== undefined &&
-    familyRetention !== undefined &&
-    override < familyRetention
-  ) {
-    findings.push({
-      severity: "info",
-      code: "SCOPE_WIDENED",
-      objectKey: key,
-      country: cc.iso2,
-      detail: `historyMonths ${override} widened to family retention ${familyRetention} (${family})`,
-    });
+  if (family === undefined) {
+    if (override !== undefined && override < base)
+      findings.push({
+        severity: "warning",
+        code: "SCOPE_NARROWED",
+        objectKey: key,
+        country: cc.iso2,
+        detail: `historyMonths ${override} is narrower than the global ${base}`,
+      });
+  } else {
+    // §7.2: a regulated family is `max(historyMonths, familyRetention)` per
+    // object — never below the global window, even without a family knob.
+    const floor = Math.max(base, familyRetention ?? 0);
+    if (effective < floor) {
+      if (override !== undefined) {
+        if (familyRetention !== undefined && familyRetention > base)
+          findings.push({
+            severity: "info",
+            code: "SCOPE_WIDENED",
+            objectKey: key,
+            country: cc.iso2,
+            detail: `historyMonths ${override} widened to family retention ${familyRetention} (${family})`,
+          });
+        else
+          findings.push({
+            severity: "warning",
+            code: "SCOPE_CLAMPED",
+            objectKey: key,
+            country: cc.iso2,
+            detail: `historyMonths ${override} is narrower than the global ${base}; regulated family ${family} may only widen — clamped to ${base}`,
+          });
+      }
+      effective = floor;
+    }
   }
-  const cutoffDate = cc.scope.cutoffDate ?? computeCutoffDate(now, effective);
+  let cutoffDate = cc.scope.cutoffDate;
+  if (cutoffDate === undefined) cutoffDate = computeCutoffDate(now, effective);
+  else if (familyRetention !== undefined) {
+    // An explicit global cutoff is still only a floor for a regulated family.
+    const familyCutoff = computeCutoffDate(now, familyRetention);
+    if (familyCutoff < cutoffDate) {
+      findings.push({
+        severity: "info",
+        code: "SCOPE_WIDENED",
+        objectKey: key,
+        country: cc.iso2,
+        detail: `explicit cutoffDate ${cutoffDate} moved to ${familyCutoff} by family retention ${familyRetention} months (${family})`,
+      });
+      cutoffDate = familyCutoff;
+    }
+  }
   return {
     spec,
     historyMonths: effective,
@@ -459,6 +497,23 @@ export function materialise(
     cc.fieldLayers[module.key] ?? (ov.fields ? [ov.fields] : []);
   for (const [k, v] of Object.entries(flatOv))
     if (v !== undefined) (options as Record<string, unknown>)[k] = v;
+  // `objects.territory.countryOf` is the territory country *rule* (how
+  // `country__v` is derived per row), not a §6.0.5 unit rule: keep it in the
+  // options for the module, leave the unit global and say so.
+  const territoryRule =
+    module.key === "territory" && isTerritoryCountryRule(countryOfOv)
+      ? countryOfOv
+      : undefined;
+  if (territoryRule !== undefined) {
+    (options as Record<string, unknown>).countryOf = territoryRule;
+    findings.push({
+      severity: "info",
+      code: "CONFIG_TERRITORY_COUNTRY_RULE",
+      objectKey: module.key,
+      country: cc.iso2,
+      detail: `objects.territory.countryOf "${territoryRule}" is the territory country rule (field | prefixMap | fromUsers | const); the unit stays global`,
+    });
+  }
   if (inactivateBy)
     options.inactivateBy = inactivateBy as ObjectOptions["inactivateBy"];
   if (blobsOv) options.blobs = { ...options.blobs, ...blobsOv };
@@ -469,11 +524,51 @@ export function materialise(
       exclude: [],
       ...ov.customFields,
     } as ObjectOptions["customFields"];
+  // §6.0.4 describe-driven `__c` discovery is not expanded into mapping rows
+  // yet; never let the flag pass silently. An explicit config request is
+  // blocking (the operator expects those fields loaded), a module default
+  // (`product_metrics`) is a warning.
+  if (options.customFields.mode !== "none")
+    findings.push({
+      severity: ov.customFields ? "blocking" : "warning",
+      code: "MAP_CUSTOM_FIELDS_UNSUPPORTED",
+      objectKey: module.key,
+      country: cc.iso2,
+      detail: {
+        mode: options.customFields.mode,
+        include: options.customFields.include,
+        exclude: options.customFields.exclude,
+        note: ov.customFields
+          ? "customFields is not expanded into mapping rows yet: map the fields with objects.<key>.fields.add or set customFields.mode: none"
+          : "module default; set objects.<key>.customFields.mode: none to silence",
+      },
+    });
 
   // --- fields
   let fields: FieldMapping[] = module.fields.map((f) => ({ ...f }));
   const byTarget = () => new Map(fields.map((f, i) => [f.target, i] as const));
   const requiredFromFields: Record<string, boolean> = {};
+  // A transform string the schema did not see (programmatic config) must
+  // surface as a blocking finding, not an exception out of `plan`.
+  const tryOverlayRow = (
+    o: FieldOverride,
+    existing?: FieldMapping,
+  ): FieldMapping | undefined => {
+    try {
+      return overlayRow(o, existing);
+    } catch (e) {
+      if (!(e instanceof TransformSpecError)) throw e;
+      findings.push({
+        severity: "blocking",
+        code: "MAP_TRANSFORM_INVALID",
+        objectKey: module.key,
+        country: cc.iso2,
+        field: o.target,
+        detail: e.message,
+      });
+      return undefined;
+    }
+  };
   for (const layer of fieldLayers) {
     for (const o of layer.override ?? []) {
       const idx = byTarget().get(o.target);
@@ -486,15 +581,21 @@ export function materialise(
           field: o.target,
           detail: "override target not in the base mapping; row added",
         });
-        fields.push(overlayRow(o));
-      } else fields[idx] = overlayRow(o, fields[idx]);
+        const row = tryOverlayRow(o);
+        if (row) fields.push(row);
+      } else {
+        const row = tryOverlayRow(o, fields[idx]);
+        if (row) fields[idx] = row;
+      }
     }
     for (const target of layer.remove ?? [])
       fields = fields.filter((f) => f.target !== target);
     for (const o of layer.add ?? []) {
       const idx = byTarget().get(o.target);
-      if (idx === undefined) fields.push(overlayRow(o));
-      else fields[idx] = overlayRow(o, fields[idx]);
+      const row = tryOverlayRow(o, idx === undefined ? undefined : fields[idx]);
+      if (!row) continue;
+      if (idx === undefined) fields.push(row);
+      else fields[idx] = row;
     }
     Object.assign(requiredFromFields, layer.required ?? {});
   }
@@ -559,7 +660,7 @@ export function materialise(
 
   // --- countryOf
   let countryOf = module.countryOf;
-  if (countryOfOv) {
+  if (countryOfOv && territoryRule === undefined) {
     try {
       countryOf = parseCountryOf(countryOfOv);
     } catch (e) {
@@ -608,6 +709,10 @@ export function materialise(
   if (load.batchSize === undefined)
     load.batchSize = config.performance.vaultBatch;
 
+  // `cutoffDate` is a run literal (§1.1 #2, persisted with the watermark and
+  // detected via SCOPE_CUTOFF_CHANGED); hashing it would change `mapping_hash`
+  // every calendar day and defeat the §8.2 hash skip / MAP_HASH_CHANGED.
+  const { cutoffDate: _cutoffDate, ...scopeForHash } = scope;
   const hashable = {
     objectKey: module.key,
     country: cc.iso2,
@@ -620,7 +725,7 @@ export function materialise(
     objectTypes: { ...module.objectTypes, ...(objectTypeOv ?? {}) },
     states: { ...module.states, ...(stateOv ?? {}) },
     countryOf: countryOf.map(formatCountryOf),
-    scope,
+    scope: scopeForHash,
     load,
     options,
     match: module.match,
@@ -631,6 +736,7 @@ export function materialise(
   const mappingHash = hashObject(hashable);
   return {
     ...hashable,
+    scope,
     countryOf,
     findings,
     mappingHash,

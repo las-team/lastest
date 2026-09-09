@@ -10,8 +10,11 @@
  * `speaker__v ← ref(em_speaker)` is the required reference; `account__v`
  * is a formula in the source (the speaker's account) and is written by
  * `custom(fromSpeakerAccount)` only when Vault metadata says the field is
- * editable — from the formula value, else from the selected
- * `Speaker_vod__r.Account_vod__c` column. Business status →
+ * editable — from the formula value when its column was selected, else from
+ * the selected `Speaker_vod__r.Account_vod__c` column. Preflight drops
+ * calculated sources, so the primary row is keyed on `Speaker_vod__c` and
+ * both columns are *selector* rows (`account__v.formula`,
+ * `account__v.speaker`) read from the row. Business status →
  * `em_event_speaker_status__v` (`[OBS]`, default value `invited__v`).
  * `Contract_vod__c` is out of v1 (`contract__v`, `CONTRACT_REF_DROPPED`,
  * §6.2.1). Speaker name formulas are skipped (Vault derives them).
@@ -42,6 +45,8 @@ export const EM_EVENT_SPEAKER_STATUS: Record<string, string> = {
 
 /** Default status when the source is empty (`[OBS]`). */
 export const EM_EVENT_SPEAKER_DEFAULT_STATUS = "invited__v";
+/** Source formula (`[OBS]`, calculated — dropped by preflight; read from the row when selected). */
+export const SPEAKER_ACCOUNT_FORMULA_SOURCE = "Account_vod__c";
 /** Selector column for the account fallback. */
 export const SPEAKER_ACCOUNT_SOURCE = "Speaker_vod__r.Account_vod__c";
 /** Blob name (`objects.em_event_speaker.blobs.signature`). */
@@ -71,10 +76,12 @@ export function isEmpty(v: unknown): boolean {
 
 /**
  * `custom(fromSpeakerAccount)`: `account__v` = the speaker's account
- * (formula `Account_vod__c`, else `Speaker_vod__r.Account_vod__c`) as
- * `ref(account)` — only when the target field is editable per metadata
- * (omitted with `SPEAKER_ACCOUNT_NOT_EDITABLE` otherwise; Vault derives it
- * from `speaker__v`). Selector rows emit nothing.
+ * (formula `Account_vod__c` read from the row — the primary row is keyed on
+ * `Speaker_vod__c` because preflight drops calculated sources — else
+ * `Speaker_vod__r.Account_vod__c`) as `ref(account)` — only when the target
+ * field is editable per metadata (omitted with
+ * `SPEAKER_ACCOUNT_NOT_EDITABLE` otherwise; Vault derives it from
+ * `speaker__v`). Selector rows emit nothing.
  */
 export const fromSpeakerAccount: CustomTransformFn = (
   value,
@@ -82,7 +89,12 @@ export const fromSpeakerAccount: CustomTransformFn = (
   ctx,
 ): TransformResult | undefined => {
   if (ctx.field.target !== "account__v") return undefined;
-  const raw = isEmpty(value) ? row[SPEAKER_ACCOUNT_SOURCE] : value;
+  const formula = !isEmpty(row[SPEAKER_ACCOUNT_FORMULA_SOURCE])
+    ? row[SPEAKER_ACCOUNT_FORMULA_SOURCE]
+    : ctx.field.source === SPEAKER_ACCOUNT_FORMULA_SOURCE
+      ? value
+      : undefined;
+  const raw = isEmpty(formula) ? row[SPEAKER_ACCOUNT_SOURCE] : formula;
   if (isEmpty(raw)) return undefined;
   const target = ctx.metadata.fields.account__v ?? ctx.targetField;
   if (target && target.editable === false)
@@ -191,13 +203,23 @@ export const em_event_speaker = defineObject({
       sourceType: "reference",
     },
     {
-      source: "Account_vod__c",
+      source: "Speaker_vod__c",
       target: "account__v",
       transform: "custom(fromSpeakerAccount)",
       required: "n",
       evidence: "OBS",
       notes:
-        "formula in source = em_speaker.account__v; written only if metadata says editable",
+        "= em_speaker.account__v, written only if metadata says editable; from the Account_vod__c formula (selector row account__v.formula) when selected, else Speaker_vod__r.Account_vod__c; keyed on Speaker_vod__c because preflight drops calculated sources",
+    },
+    {
+      source: SPEAKER_ACCOUNT_FORMULA_SOURCE,
+      target: "account__v.formula",
+      transform: "custom(fromSpeakerAccount)",
+      required: "n",
+      evidence: "OBS",
+      optionalSource: true,
+      notes:
+        "selector row: formula in source (dropped by preflight when calculated — SF_FIELD_CALCULATED); read by the account__v row",
     },
     {
       source: SPEAKER_ACCOUNT_SOURCE,

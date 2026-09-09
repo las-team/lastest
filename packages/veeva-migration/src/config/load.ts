@@ -1,22 +1,21 @@
 /**
- * Config loader: YAML → `${ENV}` interpolation → zod (`MigrationConfigSchema`).
+ * Config loader: YAML → `${ENV}` interpolation → zod (`MigrationConfigSchema`)
+ * → shipped region/country overlays merged beneath the user's blocks
+ * (`mergeOverlays`, §7.1 — so `countries.DE: {}` carries the §7.4.2 overlay).
  * Exit code 5 (`ConfigError`) on any failure (§8.10).
  */
 import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
-import { ZodError } from "zod";
 import { hashObject } from "../hash";
-import { MigrationConfigSchema, type MigrationConfig } from "./schema";
+import {
+  loadBuiltinCountryOverlays,
+  mergeOverlays,
+  type BuiltinOverlays,
+} from "./countries";
+import { ConfigError, formatZodError } from "./errors";
+import { makeMigrationConfigSchema, type MigrationConfig } from "./schema";
 
-export class ConfigError extends Error {
-  readonly exitCode = 5;
-  constructor(
-    message: string,
-    public readonly issues: string[] = [],
-  ) {
-    super(message);
-  }
-}
+export { ConfigError, formatZodError } from "./errors";
 
 const ENV_RE = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
 
@@ -58,14 +57,25 @@ export function interpolateEnv(
   return result;
 }
 
-export function formatZodError(err: ZodError): string[] {
-  return err.issues.map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`);
+export interface LoadConfigOptions {
+  /**
+   * Shipped overlays merged beneath the user's `regions` / `countries` blocks
+   * (default: `loadBuiltinCountryOverlays()` from `<package>/config/`).
+   * Pass `EMPTY_OVERLAYS` to opt out.
+   */
+  overlays?: BuiltinOverlays;
 }
 
-/** Parse YAML text through interpolation and the schema. */
+/**
+ * Parse YAML text through interpolation, the schema and the shipped overlays.
+ * A `countries.<ISO>.region` naming a region that only ships as an overlay
+ * (`AT: { region: EU }`) is accepted: the region is added by the merge and
+ * the merged result is re-validated against the full schema.
+ */
 export function loadConfigFromText(
   text: string,
   env?: NodeJS.ProcessEnv,
+  opts: LoadConfigOptions = {},
 ): MigrationConfig {
   let raw: unknown;
   try {
@@ -74,17 +84,21 @@ export function loadConfigFromText(
     throw new ConfigError(`CONFIG_YAML_INVALID: ${(e as Error).message}`);
   }
   const interpolated = interpolateEnv(raw, env);
-  const parsed = MigrationConfigSchema.safeParse(interpolated);
+  const overlays = opts.overlays ?? loadBuiltinCountryOverlays();
+  const parsed = makeMigrationConfigSchema({
+    knownRegions: Object.keys(overlays.regions),
+  }).safeParse(interpolated);
   if (!parsed.success) {
     const issues = formatZodError(parsed.error);
     throw new ConfigError(`CONFIG_INVALID:\n  ${issues.join("\n  ")}`, issues);
   }
-  return parsed.data;
+  return mergeOverlays(parsed.data, { overlays, env });
 }
 
 export function loadConfig(
   path: string,
   env?: NodeJS.ProcessEnv,
+  opts: LoadConfigOptions = {},
 ): MigrationConfig {
   let text: string;
   try {
@@ -94,7 +108,7 @@ export function loadConfig(
       `CONFIG_FILE_UNREADABLE: ${path}: ${(e as Error).message}`,
     );
   }
-  return loadConfigFromText(text, env);
+  return loadConfigFromText(text, env, opts);
 }
 
 /** `runs.config_hash` — secrets are redacted before hashing so a rotated password does not change the hash. */

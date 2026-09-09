@@ -15,6 +15,13 @@ import type {
 } from "../types";
 import type { ResolvedTarget } from "../preflight/types";
 
+/**
+ * `row_results.error_type` of a `loaded_unchanged` row that was matched
+ * (§3.3) but never written — no `id_map.source_hash` exists for it, so the
+ * reconciler keeps it out of the aggregate hash set (§2.8).
+ */
+export const MATCHED_MARKER = "matched";
+
 /** One transformed row ready for batching (payload files, §2.3). */
 export interface PayloadRow {
   sfdcId: string;
@@ -84,6 +91,8 @@ export interface SecondPassResult {
   patched: number;
   failed: number;
   unresolved: number;
+  /** Rows with at least one unresolved pass-2 reference (re-tried by the engine at run end, §3.5). */
+  unresolvedIds: string[];
 }
 
 export interface DeleteRequest {
@@ -104,6 +113,25 @@ export interface DeleteResult {
   failed: number;
 }
 
+/** §3.4 a: SFDC merge losers (`MasterRecordId`) of a delta window. */
+export interface MergeRequest {
+  unit: Unit;
+  merges: Array<{ loser: string; survivor: string; deletedDate: string }>;
+  /** As in `DeleteRequest`: an update after the merge event keeps the loser (last-wins). */
+  seenModstamps?: Map<string, string>;
+}
+
+export interface MergeResult {
+  unit: Unit;
+  /** Losers now carrying `merged_into` in the id map. */
+  merged: number;
+  /** Merges not applied (survivor unmapped, loser unmapped/already merged, stale). */
+  skipped: number;
+  /** Child rows whose FK field was re-pointed at the survivor (§4.2 fan-out). */
+  childrenRepointed: number;
+  childrenFailed: number;
+}
+
 export interface Loader {
   /**
    * §2.5.4 batch upsert: dedupe by legacy id (last-wins by SystemModstamp),
@@ -122,6 +150,8 @@ export interface Loader {
   ): Promise<SecondPassResult>;
   /** §4.4 apply deletes per policy; sets `id_map.deleted_at`. */
   applyDeletes(req: DeleteRequest, plan: LoadPlan): Promise<DeleteResult>;
+  /** §3.4 a / §4.2: record SFDC merges (`merged_into`) and re-point the losers' children. */
+  applyMerges?(req: MergeRequest, plan: LoadPlan): Promise<MergeResult>;
   /** §8.4 re-evaluate the pending queue after parents landed (≤ `pendingFk.maxRounds`). */
   retryPending(plan: LoadPlan, round: number): Promise<LoadResult>;
   /** §8.6 blob pass by Vault id (PUT ≤ `performance.blobBatchBytes`). */

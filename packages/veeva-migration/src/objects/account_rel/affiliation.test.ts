@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AFFILIATION_EXTRA_COLUMNS,
   AFFILIATION_FROM_FIELD,
   AFFILIATION_MIRROR_FIELD,
   AFFILIATION_SKIPPED_FORMULAS,
@@ -12,11 +13,14 @@ import { validateObjectModule } from "../types";
 import { materialise, resolveCountry } from "../../config/resolve";
 import { parseConfig } from "../../config/schema";
 import { applyMapping } from "../../transform/apply";
+import { buildColumnList } from "../../extract/columns";
 import { buildScopePredicate } from "../../extract/scope";
+import { extraColumnsOf } from "../../preflight/source";
 import {
   IDS,
   SAMPLE_USER_ID,
   buildCountryContext,
+  buildDescribe,
   buildIdResolver,
   buildVaultMetadata,
   resolveMetadata,
@@ -310,7 +314,8 @@ describe("affiliation module", () => {
       sampleRow({ [AFFILIATION_TO_FIELD]: "", To_Contact_vod__c: CONTACT_ID }),
     );
     expect(result.status).toBe("skipped");
-    expect(result.skipReason).toBe("CONTACT_REF_DROPPED");
+    // §8.8 gate vocabulary: CONTACT_REF_* → contact_ref (the diagnostic keeps the code)
+    expect(result.skipReason).toBe("contact_ref");
     expect(result.diagnostics).toContainEqual(
       expect.objectContaining({
         kind: "skipped",
@@ -327,7 +332,51 @@ describe("affiliation module", () => {
       }),
     );
     expect(fromContact.status).toBe("skipped");
-    expect(fromContact.skipReason).toBe("CONTACT_REF_DROPPED");
+    expect(fromContact.skipReason).toBe("contact_ref");
+  });
+
+  it("selects the contact columns through objects.affiliation.extraColumns (skip rows select nothing)", () => {
+    const { mapping } = run(sampleRow());
+    expect(affiliation.optionDefaults?.extraColumns).toEqual([
+      "From_Contact_vod__c",
+      "To_Contact_vod__c",
+    ]);
+    expect(extraColumnsOf(mapping)).toEqual([...AFFILIATION_EXTRA_COLUMNS]);
+    const describe = buildDescribe("Affiliation_vod__c", [
+      {
+        name: "From_Account_vod__c",
+        type: "reference",
+        referenceTo: ["Account"],
+      },
+      {
+        name: "To_Account_vod__c",
+        type: "reference",
+        referenceTo: ["Account"],
+      },
+      {
+        name: "From_Contact_vod__c",
+        type: "reference",
+        referenceTo: ["Contact"],
+      },
+      {
+        name: "To_Contact_vod__c",
+        type: "reference",
+        referenceTo: ["Contact"],
+      },
+      { name: "Role_vod__c", type: "picklist" },
+    ]);
+    // the run selects preflight's resolved columns (mapped ∪ extraColumns)
+    const { columns } = buildColumnList(
+      mapping,
+      { describe, columns: extraColumnsOf(mapping) },
+      { extra: extraColumnsOf(mapping) },
+    );
+    expect(columns).toContain("From_Contact_vod__c");
+    expect(columns).toContain("To_Contact_vod__c");
+    // without the declaration the skip rows would leave them unselected
+    const bare = buildColumnList(mapping, { describe, columns: [] });
+    expect(bare.columns).not.toContain("From_Contact_vod__c");
+    expect(bare.columns).toContain("From_Account_vod__c");
   });
 
   it("fails a row with neither account nor contact on the to-side (REQUIRED_MISSING)", () => {
@@ -353,7 +402,7 @@ describe("affiliation module", () => {
   it("skips a row whose account lookup itself carries a Contact id (CONTACT_REF_DROPPED)", () => {
     const { result } = run(sampleRow({ [AFFILIATION_TO_FIELD]: CONTACT_ID }));
     expect(result.status).toBe("skipped");
-    expect(result.skipReason).toBe("CONTACT_REF_DROPPED");
+    expect(result.skipReason).toBe("contact_ref");
     expect(result.diagnostics).toContainEqual(
       expect.objectContaining({
         kind: "skipped",

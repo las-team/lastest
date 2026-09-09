@@ -596,6 +596,37 @@ describe("derived fields", () => {
       ),
     ).toMatchObject({ value: "inactive__v" });
   });
+  it("statusFromFlag reads relationship-path flags from nested and flattened rows (§6.0.4 territory rule)", () => {
+    const spec: TransformSpec = {
+      kind: "statusFromFlag",
+      sourceFlag: "Territory2Model.State",
+      inactiveWhen: { notEquals: "Active" },
+    };
+    expect(
+      run(
+        spec,
+        undefined,
+        {},
+        { Id: row.Id, Territory2Model: { State: "Active" } },
+      ),
+    ).toEqual({ omit: true });
+    expect(
+      run(
+        spec,
+        undefined,
+        {},
+        { Id: row.Id, Territory2Model: { State: "Planning" } },
+      ),
+    ).toEqual({ value: "inactive__v", targetField: "status__v" });
+    expect(
+      run(
+        spec,
+        undefined,
+        {},
+        { Id: row.Id, "Territory2Model.State": "Active" },
+      ),
+    ).toEqual({ omit: true });
+  });
   it("compositeExternalId renders literals or defers", () => {
     const spec: TransformSpec = {
       kind: "compositeExternalId",

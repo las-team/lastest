@@ -4,7 +4,6 @@ import {
   PRODUCT_PARENT_FIELD,
   PRODUCT_THUMBNAIL_BLOB,
   PRODUCT_TYPE_DEFAULTS,
-  parentProduct,
   product,
   renameProductFlag,
   requireDiscussion,
@@ -15,6 +14,8 @@ import { parseConfig } from "../../config/schema";
 import { applyMapping } from "../../transform/apply";
 import { renamePicklistValue } from "../../transform/rename";
 import { buildScopePredicate } from "../../extract/scope";
+import { mappingFkColumns } from "../../extract/columns";
+import { refTarget } from "../../transform/spec";
 import {
   IDS,
   SAMPLE_USER_ID,
@@ -229,12 +230,20 @@ describe("product module", () => {
       evidence: "DOC",
       transform: { kind: "picklist", mapKey: "product.productType" },
     });
+    // §6.3.5: `ref(product)` (depth-ordered; secondPass) — same shape as
+    // territory.parent_territory__v, so `refTarget()` sees the self-FK
     expect(byTarget.get("parent_product__v")).toMatchObject({
       source: "Parent_Product_vod__c",
       required: "n",
       evidence: "DOC",
-      transform: { kind: "custom", fnName: "parentProduct" },
+      transform: {
+        kind: "secondPass",
+        inner: { kind: "ref", objectKey: "product" },
+      },
     });
+    expect(refTarget(byTarget.get("parent_product__v")!.transform)).toBe(
+      "product",
+    );
     expect(byTarget.get("external_id__v")).toMatchObject({
       source: "External_ID_vod__c",
       evidence: "OBS",
@@ -414,7 +423,7 @@ describe("product module", () => {
     expect(mapping.picklists["product.productType"].Sample).toBe("sample__v");
   });
 
-  it("transforms a realistic Product_vod__c row (parent resolved in pass 1 by depth order)", () => {
+  it("transforms a realistic Product_vod__c row (parent held for the pass-2 patch)", () => {
     const { result: r } = run(sampleRow());
     expect(r.status).toBe("ok");
     expect(r.failure).toBeUndefined();
@@ -422,7 +431,6 @@ describe("product module", () => {
       legacy_crm_id__v: CHILD_ID,
       name__v: "Cholecap 10mg",
       product_type__v: "detail__v",
-      parent_product__v: { $fk: { object: "product", sfdcId: PARENT_ID } },
       external_id__v: "EXT-CHOLECAP-10",
       vexternal_id__v: "VEXT-0001",
       master_align_id__v: "ALIGN-9",
@@ -458,8 +466,12 @@ describe("product module", () => {
     // skipped columns never reach the payload
     expect(r.payload.no_promo_items__v).toBeUndefined();
     expect(r.payload.zvod_custom_text__v).toBeUndefined();
-    // parent known → nothing left for pass 2
-    expect(r.secondPass).toEqual({});
+    // §6.1 step 3: parent_product__v never rides in the pass-1 payload — it is
+    // patched by Vault id in pass 2; the FK edge is still recorded
+    expect(r.payload.parent_product__v).toBeUndefined();
+    expect(r.secondPass).toEqual({
+      parent_product__v: { $fk: { object: "product", sfdcId: PARENT_ID } },
+    });
     expect(r.fkEdges).toContainEqual({
       field: "parent_product__v",
       targetObjectKey: "product",
@@ -469,7 +481,7 @@ describe("product module", () => {
     expect(r.unresolvedOptionalFks).toEqual([]);
   });
 
-  it("defers an unknown parent to pass 2 (depth ordering not possible) instead of failing", () => {
+  it("keeps an unknown parent for pass 2 as an unresolved optional FK (pending_fk, §3.5) instead of failing", () => {
     const { result: r } = run(sampleRow(), { knownParent: false });
     expect(r.status).toBe("ok");
     expect(r.payload.parent_product__v).toBeUndefined();
@@ -484,12 +496,43 @@ describe("product module", () => {
         secondPass: true,
       }),
     );
+    expect(r.unresolvedRequiredFks).toEqual([]);
     expect(r.diagnostics).toContainEqual(
       expect.objectContaining({
-        kind: "second_pass",
-        code: "PARENT_PRODUCT_SECOND_PASS",
+        kind: "unresolved_fk",
+        field: "parent_product__v",
+        code: "UNRESOLVED_FK",
       }),
     );
+    // bad / blank parent ids: reported and omitted, never deferred
+    const bad = run(sampleRow({ [PRODUCT_PARENT_FIELD]: "not-an-id" }));
+    expect(bad.result.status).toBe("ok");
+    expect(bad.result.secondPass).toEqual({});
+    expect(bad.result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        kind: "invalid_value",
+        field: "parent_product__v",
+        code: "INVALID_ID",
+      }),
+    );
+    const blank = run(sampleRow({ [PRODUCT_PARENT_FIELD]: "" }));
+    expect(blank.result.secondPass).toEqual({});
+    expect(blank.result.payload.parent_product__v).toBeUndefined();
+  });
+
+  it("exposes Parent_Product_vod__c to FK discovery (§2.2 step 5 closure) and the selfRef lint", () => {
+    const { mapping } = run(sampleRow());
+    // the closure collects fk_sets[product] from this column; a custom
+    // transform would hide it and a parent outside the extract would be lost
+    expect(mappingFkColumns(mapping)).toContainEqual({
+      column: PRODUCT_PARENT_FIELD,
+      targetObjectKey: "product",
+    });
+    expect(
+      validateObjectModule(product).filter(
+        (i) => i.code === "MAP_SELFREF_NOT_REF",
+      ),
+    ).toEqual([]);
   });
 
   it("inactivates: Active_vod__c = false → status__v = inactive__v and active__v = false", () => {
@@ -557,34 +600,6 @@ describe("product helpers", () => {
     expect(renameProductFlag("Pricing_Rule_Quantity_Bound_vod__c")).toBe(
       "pricing_rule_quantity_bound__v",
     );
-  });
-
-  it("parentProduct resolves in pass 1, defers otherwise, rejects bad ids, omits blanks", () => {
-    const known = buildTransformContext({
-      objectKey: "product",
-      field: { target: "parent_product__v" },
-      ids: buildIdResolver({ product: { [PARENT_ID]: "V0P1" } }),
-    });
-    const row: SourceRow = { Id: "a0P000000000002" };
-    expect(parentProduct("a0P000000000001", row, known)).toEqual({
-      value: { $fk: { object: "product", sfdcId: PARENT_ID } },
-    });
-    const unknown = buildTransformContext({
-      objectKey: "product",
-      field: { target: "parent_product__v" },
-    });
-    expect(parentProduct(PARENT_ID, row, unknown)).toMatchObject({
-      omit: true,
-      defer: "secondPass",
-      deferredValue: { $fk: { object: "product", sfdcId: PARENT_ID } },
-      unresolved: { objectKey: "product", sfdcId: PARENT_ID },
-    });
-    expect(parentProduct("not-an-id", row, unknown)).toMatchObject({
-      omit: true,
-      diagnostic: { kind: "invalid_value", code: "INVALID_ID" },
-    });
-    expect(parentProduct("", row, unknown)).toBeUndefined();
-    expect(parentProduct(null, row, unknown)).toBeUndefined();
   });
 
   it("requireDiscussion maps Yes_vod/No_vod to booleans on a Boolean target and flags junk", () => {

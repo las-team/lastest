@@ -186,8 +186,11 @@ describe("cli (§8.10)", () => {
     expect(p.opts).toMatchObject({
       mode: "preflight",
       probeWrites: true,
+      reprobe: false,
       dryRun: false,
     });
+    const re = await run("preflight --config cfg.yaml --wave w1 --reprobe");
+    expect(re.opts.reprobe).toBe(true);
     const rep = await run("report --run init-1");
     expect(rep.code).toBe(0);
     expect(rep.loaded).toEqual([]);

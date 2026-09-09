@@ -9,8 +9,13 @@
  *
  * `name__v` is synthesised as `{username}:{territory name}`
  * (`nameTemplates.userTerritory`, §7.3) from the relationship columns in
- * `USER_TERRITORY_EXTRA_COLUMNS`; `external_id__v` is the composite
- * `{userVaultId}__{territoryVaultId}` resolved by the loader.
+ * `USER_TERRITORY_EXTRA_COLUMNS`. Only `User.Username` is the row's `source`;
+ * the territory name column is declared through `objects.user_territory
+ * .extraColumns` (module default) so preflight resolves it and the column
+ * builder selects it (`ColumnOptions.extra`). When an input is missing the
+ * required `name__v` is **not** dropped silently: the row fails with
+ * `USER_TERRITORY_NAME_INCOMPLETE` (`required_missing`). `external_id__v` is
+ * the composite `{userVaultId}__{territoryVaultId}` resolved by the loader.
  *
  * Legacy Territory Management orgs use `user_territoryLegacy`
  * (`UserTerritory`: `UserId`, `TerritoryId`, `IsActive`).
@@ -18,12 +23,13 @@
 import type {
   CustomTransformFn,
   SourceRow,
+  TransformContext,
   TransformResult,
 } from "../../types";
 import { defineObject, type ObjectModuleInput } from "../types";
 import { readFlag } from "./user";
 
-/** Relationship columns the name template reads (select them with `ColumnOptions.extra`). */
+/** Relationship columns the name template reads (`objects.user_territory.extraColumns` default → `ColumnOptions.extra`). */
 export const USER_TERRITORY_EXTRA_COLUMNS = [
   "User.Username",
   "Territory2.Name",
@@ -63,26 +69,48 @@ export function renderUserTerritoryName(
   return { name, username, territory };
 }
 
+/** Mirrors `applyMapping`'s rule: config override → row `K`/`Y` → target metadata (a `-` row is never required). */
+function targetRequired(ctx: TransformContext): boolean {
+  const override = ctx.mapping.required[ctx.field.target];
+  if (override !== undefined) return override;
+  if (ctx.field.required === "K" || ctx.field.required === "Y") return true;
+  if (ctx.field.required === "-") return false;
+  return ctx.field.required !== "n" && ctx.targetField?.required === true;
+}
+
 /**
  * `name__v` = `{username}:{territory name}`. Incomplete inputs (a relationship
- * column not selected or empty) omit the field with a non-fatal
- * `USER_TERRITORY_NAME_INCOMPLETE` diagnostic — Vault either assigns its
- * system-managed name or rejects the row with a clear error.
+ * column not selected or empty) omit the field with a
+ * `USER_TERRITORY_NAME_INCOMPLETE` diagnostic — **fatal** (`required_missing`,
+ * the row fails) when `name__v` is required, as it is by default (`Y`), so a
+ * missing `Territory2.Name` column can never silently drop the field;
+ * non-fatal when the operator made the field optional (Vault then assigns
+ * its system-managed name or rejects the row with a clear error).
  */
 export const userTerritoryName: CustomTransformFn = (_value, row, ctx) => {
   const template =
     ctx.country.nameTemplates.userTerritory ?? "{username}:{territory}";
   const { name, username, territory } = renderUserTerritoryName(template, row);
-  if (!username || !territory || !name)
+  if (!username || !territory || !name) {
+    const required = targetRequired(ctx);
+    const missing = !username
+      ? "User.Username"
+      : ctx.objectKey === "user_territory" &&
+          row["Territory.Name"] === undefined &&
+          row["Territory2.Name"] === undefined
+        ? "Territory2.Name / Territory.Name (column not selected — objects.user_territory.extraColumns)"
+        : "territory Name";
     return {
       omit: true,
       diagnostic: {
-        kind: "custom",
+        kind: required ? "required_missing" : "custom",
         field: ctx.field.target,
         code: "USER_TERRITORY_NAME_INCOMPLETE",
-        detail: !username ? "User.Username missing" : "Territory name missing",
+        detail: `${missing} missing`,
+        fatal: required || undefined,
       },
     } satisfies TransformResult;
+  }
   const max = ctx.targetField?.maxLength ?? 128;
   if (name.length <= max) return name;
   return {
@@ -129,7 +157,11 @@ const shared = {
   // §3.5: `user__v` is a required business user field → never silently fall back.
   // Users are matched in wave 0 and never auto-created, so a pending row could
   // not resolve later; `fail` surfaces UNMAPPED_USER with a count instead.
-  optionDefaults: { unmappedUserPolicy: "fail" },
+  optionDefaults: {
+    unmappedUserPolicy: "fail",
+    // relationship columns read by custom(userTerritoryName) beyond its `source`
+    extraColumns: [...USER_TERRITORY_EXTRA_COLUMNS],
+  },
 } satisfies Partial<ObjectModuleInput>;
 
 function rows(opts: { territoryIdColumn: string }) {
@@ -157,7 +189,7 @@ function rows(opts: { territoryIdColumn: string }) {
       required: "Y",
       evidence: "OBS",
       notes:
-        "{username}:{territory name} via nameTemplates.userTerritory; reads User.Username and the territory Name relationship column (USER_TERRITORY_EXTRA_COLUMNS)",
+        "{username}:{territory name} via nameTemplates.userTerritory; reads User.Username and the territory Name relationship column (USER_TERRITORY_EXTRA_COLUMNS via objects.user_territory.extraColumns); missing input → failed(USER_TERRITORY_NAME_INCOMPLETE)",
     },
     {
       source: "Id",
@@ -217,6 +249,10 @@ export const user_territory = defineObject({
 export const user_territoryLegacy = defineObject({
   ...shared,
   source: "UserTerritory",
+  optionDefaults: {
+    ...shared.optionDefaults,
+    extraColumns: [...USER_TERRITORY_LEGACY_EXTRA_COLUMNS],
+  },
   fields: rows({ territoryIdColumn: "TerritoryId" }).filter(
     (r) => r.source !== "RoleInTerritory2",
   ),

@@ -3,15 +3,18 @@ import {
   APPROVED_DOCUMENT_BOOLEAN_FIELDS,
   APPROVED_DOCUMENT_HTML_BLOB,
   APPROVED_DOCUMENT_HTML_FIELDS,
+  APPROVED_DOCUMENT_HTML_MAX,
   APPROVED_DOCUMENT_ID_FIELDS,
   APPROVED_DOCUMENT_OBJECT_TYPES,
   APPROVED_DOCUMENT_STATUS_DEFAULTS,
   APPROVED_DOCUMENT_TEXT_FIELDS,
   CONTENT_TYPE_EXTERNAL_ID_PATH,
-  CONTENT_TYPE_NAME_PATH,
+  CONTENT_TYPE_SOURCE,
   PUBLISH_METHOD_VALUES,
   approved_document,
   contentType,
+  contentTypeExternalId,
+  emailHtml,
   publishMethod,
   renameApprovedDocumentField,
 } from "./approved_document";
@@ -54,6 +57,11 @@ function makeConfig(overrides: Record<string, unknown> = {}) {
     },
     objects: {
       approved_document: {
+        // The module reads the crosswalk from its own materialised options.
+        // The spec location is objects.multichannel_consent.configMaps.contentType
+        // (§6.3.17/§7.2.1) — the engine/preflight projection onto every
+        // module declaring configObjects is pending; until then the overlay
+        // is placed here.
         configMaps: {
           contentType: { [CONTENT_TYPE_ID]: "external_id:CT-EMAIL" },
         },
@@ -423,6 +431,7 @@ describe("approved_document module", () => {
       transform: { kind: "longtext" },
     });
     expect(APPROVED_DOCUMENT_HTML_FIELDS).toHaveLength(5);
+    // htmlOverflow is applied by the inner custom before the blob pass
     for (const src of APPROVED_DOCUMENT_HTML_FIELDS)
       expect(byTarget.get(renameApprovedDocumentField(src)), src).toMatchObject(
         {
@@ -431,11 +440,37 @@ describe("approved_document module", () => {
           blobName: APPROVED_DOCUMENT_HTML_BLOB,
           transform: {
             kind: "deferredBlob",
-            blobName: APPROVED_DOCUMENT_HTML_BLOB,
+            inner: { kind: "custom", fnName: "emailHtml" },
           },
         },
       );
-    expect(byTarget.get("external_id__v")).toBeDefined();
+    // §6.3.42 fallback (2) is its own row (so the extractor selects the
+    // relationship column), placed before the crosswalk row
+    expect(byTarget.get("content_type__v.external_id__v")).toMatchObject({
+      source: CONTENT_TYPE_EXTERNAL_ID_PATH,
+      required: "n",
+      evidence: "UNV",
+      unverifiedSource: true,
+      optionalSource: true,
+      transform: { kind: "custom", fnName: "contentTypeExternalId" },
+    });
+    expect(byTarget.get("content_type__v")).toMatchObject({
+      source: CONTENT_TYPE_SOURCE,
+      transform: { kind: "custom", fnName: "contentType" },
+    });
+    const targets = approved_document.fields.map((f) => f.target);
+    expect(targets.indexOf("content_type__v.external_id__v")).toBeLessThan(
+      targets.indexOf("content_type__v"),
+    );
+    // Block S external_id__v replaced by the integration-ownership guard
+    expect(byTarget.get("external_id__v")).toMatchObject({
+      source: "External_ID_vod__c",
+      optionalSource: true,
+      transform: { kind: "custom", fnName: "externalIdIfMigrationOwned" },
+    });
+    expect(
+      approved_document.fields.filter((f) => f.target === "external_id__v"),
+    ).toHaveLength(1);
     expect(byTarget.get("ownerid__v")).toBeDefined();
   });
 
@@ -588,6 +623,9 @@ describe("approved_document module", () => {
     });
     expect(unmatched.result.status).toBe("ok");
     expect(unmatched.result.payload.content_type__v).toBeUndefined();
+    expect(
+      unmatched.result.payload["content_type__v.external_id__v"],
+    ).toBeUndefined();
     expect(unmatched.result.diagnostics).toContainEqual(
       expect.objectContaining({
         kind: "unresolved_fk",
@@ -596,6 +634,110 @@ describe("approved_document module", () => {
         value: CONTENT_TYPE_ID,
       }),
     );
+    // no map entry, but the extract carries the relationship column →
+    // §6.3.42 fallback (2) through the explicit row, no miss counted
+    const viaRelationship = run(
+      sampleRow({ [CONTENT_TYPE_EXTERNAL_ID_PATH]: " CT-REL " }),
+      { overrides: { configMaps: { contentType: {} } } },
+    );
+    expect(viaRelationship.result.status).toBe("ok");
+    expect(
+      viaRelationship.result.payload["content_type__v.external_id__v"],
+    ).toBe("CT-REL");
+    expect(viaRelationship.result.payload.content_type__v).toBeUndefined();
+    expect(
+      viaRelationship.result.payload["content_type__v.name__v"],
+    ).toBeUndefined();
+    expect(
+      viaRelationship.result.diagnostics.some(
+        (d) => d.code === "VT_CONSENT_CONFIG_UNMATCHED",
+      ),
+    ).toBe(false);
+    // an explicit entry wins over the relationship value, and only ONE lookup
+    // form is ever sent for the reference
+    const bothName = run(
+      sampleRow({ [CONTENT_TYPE_EXTERNAL_ID_PATH]: "CT-REL" }),
+      {
+        overrides: {
+          configMaps: { contentType: { [CONTENT_TYPE_ID]: "name:Email" } },
+        },
+      },
+    );
+    expect(bothName.result.payload["content_type__v.name__v"]).toBe("Email");
+    expect(
+      bothName.result.payload["content_type__v.external_id__v"],
+    ).toBeUndefined();
+    const bothId = run(
+      sampleRow({ [CONTENT_TYPE_EXTERNAL_ID_PATH]: "CT-REL" }),
+      {
+        overrides: {
+          configMaps: { contentType: { [CONTENT_TYPE_ID]: "V0CT00000000001" } },
+        },
+      },
+    );
+    expect(bothId.result.payload.content_type__v).toBe("V0CT00000000001");
+    expect(
+      bothId.result.payload["content_type__v.external_id__v"],
+    ).toBeUndefined();
+    const bothExt = run(
+      sampleRow({ [CONTENT_TYPE_EXTERNAL_ID_PATH]: "CT-REL" }),
+    );
+    expect(bothExt.result.payload["content_type__v.external_id__v"]).toBe(
+      "CT-EMAIL",
+    );
+  });
+
+  it("applies objects.approved_document.htmlOverflow to HTML bodies over the LongText limit before the blob pass", () => {
+    const big = `<html>${"x".repeat(40_000)}</html>`;
+    // default truncate: cut at the limit, still deferred to the blob pass
+    const truncated = run(sampleRow({ Email_HTML_1_vod__c: big }));
+    expect(truncated.mapping.options.htmlOverflow).toBe("truncate");
+    expect(truncated.result.status).toBe("ok");
+    expect(truncated.result.payload.email_html_1__v).toBeUndefined();
+    expect(truncated.result.blobs.email_html_1__v).toBe(
+      big.slice(0, APPROVED_DOCUMENT_HTML_MAX),
+    );
+    expect(truncated.result.blobs.email_html_2__v).toBe("<html>part 2</html>");
+    // fail: the row fails, nothing is silently lost
+    const failed = run(sampleRow({ Email_HTML_1_vod__c: big }), {
+      overrides: { htmlOverflow: "fail" },
+    });
+    expect(failed.result.status).toBe("failed");
+    expect(failed.result.failure).toMatchObject({
+      code: "HTML_OVERFLOW_FAIL",
+      field: "email_html_1__v",
+    });
+    // attachment: the full body reaches the blob pass under blobs.emailHtml = attachment
+    const attached = run(sampleRow({ Email_HTML_1_vod__c: big }), {
+      overrides: {
+        htmlOverflow: "attachment",
+        blobs: { [APPROVED_DOCUMENT_HTML_BLOB]: "attachment" },
+      },
+    });
+    expect(attached.result.status).toBe("ok");
+    expect(attached.result.blobs.email_html_1__v).toBe(big);
+    // attachment without the matching blob policy would be dropped by the loader → fails instead
+    const misconfigured = run(sampleRow({ Email_HTML_1_vod__c: big }), {
+      overrides: { htmlOverflow: "attachment" },
+    });
+    expect(misconfigured.result.status).toBe("failed");
+    expect(misconfigured.result.failure?.code).toBe(
+      "HTML_OVERFLOW_ATTACHMENT_UNCONFIGURED",
+    );
+    // within the limit: verbatim
+    const small = run(sampleRow({ Email_HTML_1_vod__c: " <p>\r\nkeep</p> " }));
+    expect(small.result.blobs.email_html_1__v).toBe(" <p>\r\nkeep</p> ");
+  });
+
+  it("never overwrites the PromoMats-owned external_id__v unless the migration owns it", () => {
+    const owned = run(sampleRow({ External_ID_vod__c: " EXT-DOC-1 " }));
+    expect(owned.mapping.options.externalIdOwnedBy).toBe("integration");
+    expect(owned.result.status).toBe("ok");
+    expect(owned.result.payload.external_id__v).toBeUndefined();
+    const migration = run(sampleRow({ External_ID_vod__c: " EXT-DOC-1 " }), {
+      overrides: { externalIdOwnedBy: "migration" },
+    });
+    expect(migration.result.payload.external_id__v).toBe("EXT-DOC-1");
   });
 
   it("reports an unresolved FK made required by the overlay as pending_fk, omits it when optional", () => {
@@ -691,11 +833,11 @@ describe("approved_document helpers", () => {
     });
   });
 
-  it("contentType: explicit map forms, relationship fallbacks, bad ids, blanks", () => {
+  it("contentType: explicit map forms, relationship fallback, bad ids, blanks", () => {
     const ctx = (maps?: Record<string, string>) =>
       buildTransformContext({
         objectKey: "approved_document",
-        field: { source: "Content_Type_vod__c", target: "content_type__v" },
+        field: { source: CONTENT_TYPE_SOURCE, target: "content_type__v" },
         mapping: {
           options: { configMaps: maps ? { contentType: maps } : undefined },
         } as never,
@@ -719,7 +861,7 @@ describe("approved_document helpers", () => {
     expect(
       contentType(CONTENT_TYPE_ID, row, ctx({ [CONTENT_TYPE_ID]: "V0CT1" })),
     ).toEqual({ value: "V0CT1" });
-    // automatic fallbacks (2) and (3) of §6.3.42
+    // automatic fallback (2) of §6.3.42 when the row carries the relationship column
     expect(
       contentType(
         CONTENT_TYPE_ID,
@@ -730,18 +872,27 @@ describe("approved_document helpers", () => {
       value: "CT-EXT",
       targetField: "content_type__v.external_id__v",
     });
+    // fallback (3) (Name within country + object type) is not a row-level
+    // decision: a bare Name never resolves the reference here
     expect(
       contentType(
         CONTENT_TYPE_ID,
-        { ...row, [CONTENT_TYPE_NAME_PATH]: "Email" },
+        { ...row, "Content_Type_vod__r.Name": "Email" },
         ctx(),
       ),
-    ).toEqual({ value: "Email", targetField: "content_type__v.name__v" });
+    ).toMatchObject({
+      omit: true,
+      diagnostic: {
+        kind: "unresolved_fk",
+        code: "VT_CONSENT_CONFIG_UNMATCHED",
+      },
+    });
     expect(contentType(CONTENT_TYPE_ID, row, ctx())).toMatchObject({
       omit: true,
       diagnostic: {
         kind: "unresolved_fk",
         code: "VT_CONSENT_CONFIG_UNMATCHED",
+        value: CONTENT_TYPE_ID,
       },
     });
     expect(contentType("not-an-id", row, ctx())).toMatchObject({
@@ -749,5 +900,98 @@ describe("approved_document helpers", () => {
       diagnostic: { kind: "invalid_value", code: "INVALID_ID" },
     });
     expect(contentType("", row, ctx())).toBeUndefined();
+  });
+
+  it("contentTypeExternalId copies the relationship value unless the crosswalk has an explicit entry", () => {
+    const ctx = (maps?: Record<string, string>) =>
+      buildTransformContext({
+        objectKey: "approved_document",
+        field: {
+          source: CONTENT_TYPE_EXTERNAL_ID_PATH,
+          target: "content_type__v.external_id__v",
+        },
+        mapping: {
+          options: { configMaps: maps ? { contentType: maps } : undefined },
+        } as never,
+      });
+    const row: SourceRow = {
+      Id: "a0R000000000001",
+      [CONTENT_TYPE_SOURCE]: CONTENT_TYPE_ID,
+    };
+    expect(contentTypeExternalId(" CT-EXT ", row, ctx())).toBe("CT-EXT");
+    expect(contentTypeExternalId("CT-EXT", row, ctx({}))).toBe("CT-EXT");
+    // explicit entry (any form) → the crosswalk row decides, this one yields
+    for (const entry of ["name:Email", "external_id:CT-1", "V0CT1"])
+      expect(
+        contentTypeExternalId("CT-EXT", row, ctx({ [CONTENT_TYPE_ID]: entry })),
+        entry,
+      ).toBeUndefined();
+    // 15-char key entries count as well
+    expect(
+      contentTypeExternalId("CT-EXT", row, ctx({ a1C000000000001: "V0CT1" })),
+    ).toBeUndefined();
+    expect(contentTypeExternalId("", row, ctx())).toBeUndefined();
+    expect(contentTypeExternalId("   ", row, ctx())).toBeUndefined();
+    // no Content_Type_vod__c on the row → nothing to look up, value copied
+    expect(
+      contentTypeExternalId("CT-EXT", { Id: "a0R000000000001" }, ctx()),
+    ).toBe("CT-EXT");
+  });
+
+  it("emailHtml honours htmlOverflow and the target max_length", () => {
+    const ctx = (options: Record<string, unknown> = {}, maxLength?: number) =>
+      buildTransformContext({
+        objectKey: "approved_document",
+        field: { source: "Email_HTML_1_vod__c", target: "email_html_1__v" },
+        targetField: {
+          name: "email_html_1__v",
+          type: "longtext",
+          rawType: "LongText",
+          maxLength,
+        },
+        mapping: { options: { blobs: {}, ...options } } as never,
+      });
+    const row: SourceRow = { Id: "a0R000000000001" };
+    const big = "y".repeat(APPROVED_DOCUMENT_HTML_MAX + 10);
+    expect(emailHtml("<p>ok</p>", row, ctx())).toBe("<p>ok</p>");
+    expect(emailHtml(null, row, ctx())).toBeUndefined();
+    // default (unset) policy → truncate, counted
+    expect(emailHtml(big, row, ctx())).toEqual({
+      value: big.slice(0, APPROVED_DOCUMENT_HTML_MAX),
+      diagnostic: expect.objectContaining({
+        kind: "truncated",
+        field: "email_html_1__v",
+        code: "HTML_TRUNCATED",
+      }),
+    });
+    // the target field's own max_length wins over the 32k default
+    expect(
+      emailHtml("abcdef", row, ctx({ htmlOverflow: "truncate" }, 4)),
+    ).toMatchObject({
+      value: "abcd",
+    });
+    expect(emailHtml(big, row, ctx({ htmlOverflow: "fail" }))).toMatchObject({
+      omit: true,
+      diagnostic: { code: "HTML_OVERFLOW_FAIL", fatal: true },
+    });
+    expect(
+      emailHtml(
+        big,
+        row,
+        ctx({
+          htmlOverflow: "attachment",
+          blobs: { [APPROVED_DOCUMENT_HTML_BLOB]: "attachment" },
+        }),
+      ),
+    ).toBe(big);
+    expect(
+      emailHtml(big, row, ctx({ htmlOverflow: "attachment" })),
+    ).toMatchObject({
+      omit: true,
+      diagnostic: {
+        code: "HTML_OVERFLOW_ATTACHMENT_UNCONFIGURED",
+        fatal: true,
+      },
+    });
   });
 });

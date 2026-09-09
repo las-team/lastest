@@ -20,7 +20,7 @@ import {
   resolvePayload,
   type RefKey,
 } from "../load/resolve-refs";
-import type { PayloadRow } from "../load/types";
+import { MATCHED_MARKER, type PayloadRow } from "../load/types";
 import { innerTransform } from "../transform/spec";
 import {
   isDeferredValue,
@@ -136,6 +136,13 @@ export class DefaultReconciler implements Reconciler {
     return undefined;
   }
 
+  /**
+   * Rows in a loaded state that the tool actually wrote (or hash-skipped
+   * after writing). Rows matched under `createPolicy = match-only` and never
+   * written (`error_type = matched`, §3.3) have no `source_hash` bookkeeping
+   * and no payload of ours in Vault, so they belong in neither the aggregate
+   * hash set nor the read-back sample.
+   */
   private async loadedIds(input: ReconcileInput): Promise<Set<string>> {
     const rows = await this.deps.store.rowResults.query({
       runId: input.runId,
@@ -143,7 +150,17 @@ export class DefaultReconciler implements Reconciler {
       country: input.unit.country,
       state: [...LOADED_STATES],
     });
-    return new Set(rows.map((r) => r.sfdcId));
+    return new Set(
+      rows.filter((r) => r.errorType !== MATCHED_MARKER).map((r) => r.sfdcId),
+    );
+  }
+
+  private async isDryRun(runId: string): Promise<boolean> {
+    try {
+      return Boolean((await this.deps.store.runs.get(runId))?.dryRun);
+    } catch {
+      return false;
+    }
   }
 
   private vaultCountQuery(input: ReconcileInput): string | undefined {
@@ -195,9 +212,13 @@ export class DefaultReconciler implements Reconciler {
       : transformed + skipped;
     const closure = input.manifest?.closureRows ?? 0;
 
+    // a dry run writes nothing: no target count or bookkeeping to compare (§8.9)
+    const dryRun = await this.isDryRun(runId);
     let vaultCount: number | null = null;
-    const q = this.vaultCountQuery(input);
-    if (q) {
+    const q = dryRun ? undefined : this.vaultCountQuery(input);
+    if (dryRun) {
+      // nothing to count
+    } else if (q) {
       try {
         vaultCount = await this.deps.vault.vqlCount(q);
       } catch (e) {
@@ -218,10 +239,11 @@ export class DefaultReconciler implements Reconciler {
         detail: "no legacy-id field resolved",
       });
 
-    // aggregate hashes over rows that reached a loaded state
+    // aggregate hashes over rows that reached a loaded state — a dry run writes nothing,
+    // so there is no target-side bookkeeping to compare (§8.9)
     let aggHashSrc: string | null = null;
     let aggHashTgt: string | null = null;
-    const payloads = this.payloads(input);
+    const payloads = dryRun ? undefined : this.payloads(input);
     if (payloads) {
       const loaded = await this.loadedIds(input);
       const src: string[] = [];

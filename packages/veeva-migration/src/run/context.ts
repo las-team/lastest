@@ -20,7 +20,9 @@ import type {
   IdResolver,
   MaterialisedMapping,
   ObjectKey,
+  TransformSpec,
 } from "../types";
+import type { VaultClient } from "../vault/types";
 
 export interface CountryContextInput {
   cc: ResolvedCountryConfig;
@@ -99,6 +101,61 @@ export function referenceColumns(
 }
 
 /**
+ * True when a mapping resolves territories **by name** (`territoryRef`, or a
+ * module custom function / match key that wraps it — §6.0.3, §6.3.12): the
+ * unit then needs the `name__v → id` snapshot of `territory__v`.
+ */
+export function needsTerritoryNames(mapping: MaterialisedMapping): boolean {
+  const usesTerritory = (spec: TransformSpec | undefined): boolean => {
+    if (!spec) return false;
+    const inner = innerTransform(spec);
+    if (inner.kind === "territoryRef") return true;
+    return inner.kind === "custom" && /territory/i.test(inner.fnName);
+  };
+  if (mapping.fields.some((f) => usesTerritory(f.transform))) return true;
+  return mapping.match.some((r) =>
+    (r.keys ?? []).some((k) => usesTerritory(k.transform)),
+  );
+}
+
+/**
+ * `territoryRef` resolver input: one VQL `SELECT id, name__v FROM
+ * {territory object}` per vault and run (§6.3.3: `name__v` must match the
+ * text stamped in `Territory_vod__c` fields). Names are compared trimmed
+ * and case-insensitively; a duplicated name keeps the first id and is
+ * reported by the caller through `duplicates`.
+ */
+export async function loadTerritoryNames(
+  vault: VaultClient,
+  targetObject = "territory__v",
+): Promise<{ byName: Map<string, string>; duplicates: string[] }> {
+  const byName = new Map<string, string>();
+  const duplicates: string[] = [];
+  for await (const page of vault.vql(`SELECT id, name__v FROM ${targetObject}`))
+    for (const rec of page.data) {
+      const id = rec.id;
+      const name = rec.name__v;
+      if (typeof id !== "string" || typeof name !== "string") continue;
+      const key = territoryNameKey(name);
+      if (!key) continue;
+      if (byName.has(key)) duplicates.push(name);
+      else byName.set(key, id);
+    }
+  return { byName, duplicates };
+}
+
+export function territoryNameKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+export interface UnitResolverOptions {
+  /** `territory__v` `name__v` (as keyed by `territoryNameKey`) → Vault id (`territoryRef`). */
+  territories?: ReadonlyMap<string, string>;
+  /** Dry run: rows simulated earlier in the same dry run (`dryRun = true`) count as mapped (§8.9). */
+  dryRun?: boolean;
+}
+
+/**
  * Build a synchronous `IdResolver` over the ids a set of extract files
  * references: one scan of the rows collects the FK values per object, one
  * `bulkGet` per object (chunked) snapshots the id map.
@@ -108,6 +165,7 @@ export async function buildUnitResolver(
   mapping: MaterialisedMapping,
   files: readonly ExtractFile[],
   extractor: Extractor,
+  opts: UnitResolverOptions = {},
 ): Promise<IdResolver> {
   const log = getLogger("Transform", {
     object_key: mapping.objectKey,
@@ -135,7 +193,7 @@ export async function buildUnitResolver(
         list.slice(i, i + 500),
       );
       for (const r of got.values()) {
-        if (r.dryRun) continue;
+        if (r.dryRun && !opts.dryRun) continue;
         if (r.mergedInto) {
           const s =
             got.get(r.mergedInto) ??
@@ -155,11 +213,18 @@ export async function buildUnitResolver(
     },
     "id resolver snapshot built",
   );
+  const territories = opts.territories;
   return {
     resolve: (key, id) => maps.get(key)?.get(to18(id)),
     resolveUser: (id) => {
       const v = maps.get("user")?.get(to18(id));
       return v === undefined ? undefined : Number(v);
     },
+    ...(territories
+      ? {
+          resolveTerritoryByName: (name: string) =>
+            territories.get(territoryNameKey(name)),
+        }
+      : {}),
   };
 }

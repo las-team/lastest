@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   TERRITORY_ACTIVE_MODEL_PREDICATE,
+  TERRITORY_MODEL_INACTIVE,
   TERRITORY_USERS_COUNTRY_COLUMN,
   countryFromPrefixMap,
+  enrichTerritoryRows,
   majorityCountry,
   parseTerritoryCountryRule,
   territory,
   territoryCountry,
+  territoryExternalId,
+  territoryExtraColumns,
   territoryLegacy,
   territoryStatus,
 } from "./territory";
@@ -15,6 +19,7 @@ import { materialise, resolveCountry } from "../../config/resolve";
 import { parseConfig } from "../../config/schema";
 import { applyMapping } from "../../transform/apply";
 import { buildScopePredicate } from "../../extract/scope";
+import { isGlobalModule } from "../../run/plan";
 import {
   SAMPLE_USER_ID,
   buildCountryContext,
@@ -160,10 +165,17 @@ describe("territory module", () => {
     expect(territory.optionDefaults).toMatchObject({
       countryRule: "fromUsers",
       countryPrefixMap: {},
+      activeModelOnly: true,
     });
     expect(TERRITORY_ACTIVE_MODEL_PREDICATE).toBe(
       "Territory2Model.State = 'Active'",
     );
+    // the territory country rule never re-scopes the GLOBAL unit
+    const config = makeConfig({
+      countryRule: "prefixMap",
+      countryPrefixMap: { US_: "US" },
+    });
+    expect(isGlobalModule(territory, resolveCountry(config, "US"))).toBe(true);
   });
 
   it("maps every §6.3.3 row with the spec's transforms, requirement and evidence", () => {
@@ -180,11 +192,12 @@ describe("territory module", () => {
       evidence: "OBS",
       transform: { kind: "text", max: 128 },
     });
+    // ownership-gated copy (Align owns external_id__v by default)
     expect(byTarget.get("external_id__v")).toMatchObject({
       source: "DeveloperName",
       required: "n",
       evidence: "UNV",
-      transform: { kind: "copy" },
+      transform: { kind: "custom", fnName: "territoryExternalId" },
     });
     expect(byTarget.get("parent_territory__v")).toMatchObject({
       source: "ParentTerritory2Id",
@@ -210,12 +223,14 @@ describe("territory module", () => {
       countryConfigurable: true,
       transform: { kind: "custom", fnName: "territoryCountry" },
     });
-    // §6.0.4: status__v derived from the model state, switchable off
+    // §6.0.4: status__v derived from the model state; the row also carries the
+    // active-model filter, so `statusFromFlag` is honoured inside the transform
+    // rather than removing the row
     expect(byTarget.get("status__v")).toMatchObject({
       source: "Territory2Model.State",
-      disabledBy: "statusFromFlag",
       transform: { kind: "custom", fnName: "territoryStatus" },
     });
+    expect(byTarget.get("status__v")!.disabledBy).toBeUndefined();
     // Align-owned territories carry no owner / mobile / lock stamps
     for (const t of ["ownerid__v", "mobile_id__v", "lock__v", "unlock__v"])
       expect(byTarget.has(t), t).toBe(false);
@@ -253,12 +268,13 @@ describe("territory module", () => {
     expect(r.payload).toMatchObject({
       legacy_crm_id__v: CHILD_ID,
       name__v: "US East",
-      external_id__v: "US_East",
       description__v: "East coast reps",
       country__v: "V0C000000000101",
       created_date__v: "2021-02-03T04:05:06.000Z",
       created_by__v: { $user: SAMPLE_USER_ID },
     });
+    // Align owns external_id__v by default → never written (§3.2 step 4)
+    expect(r.payload.external_id__v).toBeUndefined();
     // active model → status__v omitted (Vault defaults active__v)
     expect(r.payload.status__v).toBeUndefined();
     // skipped columns never reach the payload
@@ -277,12 +293,50 @@ describe("territory module", () => {
     expect(r.unresolvedRequiredFks).toEqual([]);
   });
 
-  it("marks rows of an inactive model as status__v = inactive__v", () => {
+  it("writes external_id__v = DeveloperName only when the migration owns the field", () => {
+    const { result: r } = run(sampleRow(), {
+      territory: { externalIdOwnedBy: "migration" },
+    });
+    expect(r.status).toBe("ok");
+    expect(r.payload.external_id__v).toBe("US_East");
+    const ctx = buildTransformContext({
+      objectKey: "territory",
+      field: { target: "external_id__v" },
+      mapping: { options: { externalIdOwnedBy: "integration" } as never },
+    });
+    expect(territoryExternalId("US_East", row({}), ctx)).toBeUndefined();
+  });
+
+  it("skips rows of a non-active model by default (only the active model is loaded, §6.3.3)", () => {
     const { result: r } = run(
       sampleRow({ "Territory2Model.State": "Planning" }),
     );
-    expect(r.status).toBe("ok");
-    expect(r.payload.status__v).toBe("inactive__v");
+    expect(r.status).toBe("skipped");
+    expect(r.diagnostics).toContainEqual(
+      expect.objectContaining({
+        kind: "skipped",
+        code: TERRITORY_MODEL_INACTIVE,
+        value: "Planning",
+        fatal: true,
+      }),
+    );
+    // activeModelOnly = false → §6.0.4 applies: loaded as inactive__v
+    const loaded = run(sampleRow({ "Territory2Model.State": "Planning" }), {
+      territory: { activeModelOnly: false },
+    });
+    expect(loaded.result.status).toBe("ok");
+    expect(loaded.result.payload.status__v).toBe("inactive__v");
+    // …unless statusFromFlag is off (the filter switch is independent)
+    const noStatus = run(sampleRow({ "Territory2Model.State": "Planning" }), {
+      territory: { activeModelOnly: false, statusFromFlag: false },
+    });
+    expect(noStatus.result.status).toBe("ok");
+    expect(noStatus.result.payload.status__v).toBeUndefined();
+    const stillSkipped = run(
+      sampleRow({ "Territory2Model.State": "Archived" }),
+      { territory: { statusFromFlag: false } },
+    );
+    expect(stillSkipped.result.status).toBe("skipped");
   });
 
   it("resolves the country through prefixMap / field / const rules from config", () => {
@@ -298,14 +352,81 @@ describe("territory module", () => {
       territory: { countryRule: "field:Country__c" },
     });
     expect(field.result.payload.country__v).toBe("V0C000000000102");
+    // the custom field is a declared extra column of the rule
+    expect(territoryExtraColumns({ countryRule: "field:Country__c" })).toEqual([
+      "Country__c",
+    ]);
+    expect(territoryExtraColumns({ countryOf: "prefixMap" })).toEqual([]);
+    // column not selected at all → unresolved with an actionable detail
+    const unselected = run(sampleRow(), {
+      territory: { countryRule: "field:Country__c" },
+    });
+    expect(unselected.result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "TERRITORY_COUNTRY_UNRESOLVED",
+        detail: expect.stringContaining("extraColumns"),
+      }),
+    );
 
     const konst = run(sampleRow(), {
       territory: { countryRule: "const:DE" },
     });
     expect(konst.result.payload.country__v).toBe("V0C000000000102");
+
+    // the spec key `objects.territory.countryOf` is honoured when it reaches the options
+    const specKey = buildTransformContext({
+      objectKey: "territory",
+      field: { target: "country__v" },
+      mapping: { options: { countryOf: "const:DE" } as never },
+    });
+    expect(territoryCountry(undefined, row({}), specKey)).toBe(
+      "V0C000000000102",
+    );
   });
 
-  it("holds the row as pending_fk when the required country is ambiguous, loads it when optional", () => {
+  it("fromUsers resolves out of the box once the rows are enriched from the associations", () => {
+    const { [TERRITORY_USERS_COUNTRY_COLUMN]: _unset, ...raw } = sampleRow();
+    const bare = raw as SourceRow;
+    // not enriched → unresolved, and the detail names the missing step
+    const unenriched = run(bare);
+    expect(unenriched.result.payload.country__v).toBeUndefined();
+    expect(unenriched.result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "TERRITORY_COUNTRY_UNRESOLVED",
+        detail: expect.stringContaining("enrichTerritoryRows"),
+      }),
+    );
+    const u = (n: number) => to18(`00500000000000${n}`);
+    const [enriched, other] = enrichTerritoryRows(
+      [bare, { ...bare, Id: "0MI000000000009" }],
+      [
+        { TerritoryId: bare.Id, UserId: u(1), IsActive: "true" },
+        { TerritoryId: bare.Id, UserId: u(2), IsActive: true },
+        { TerritoryId: bare.Id, UserId: u(3), IsActive: "false" }, // inactive: ignored
+        { TerritoryId: bare.Id, UserId: u(4) }, // unknown country: ignored
+        { TerritoryId: bare.Id, UserId: u(5), IsActive: "true" },
+      ],
+      { [u(1)]: "US", [u(2)]: "us", [u(3)]: "DE", [u(5)]: "DE" },
+    );
+    expect(enriched[TERRITORY_USERS_COUNTRY_COLUMN]).toEqual([
+      "US",
+      "US",
+      "DE",
+    ]);
+    expect(other[TERRITORY_USERS_COUNTRY_COLUMN]).toEqual([]);
+    expect(run(enriched).result.payload.country__v).toBe("V0C000000000101");
+    expect(run(other).result.diagnostics).toContainEqual(
+      expect.objectContaining({ code: "TERRITORY_COUNTRY_UNRESOLVED" }),
+    );
+    // idempotent: rows already carrying the column are left alone
+    expect(
+      enrichTerritoryRows([enriched], [], new Map())[0][
+        TERRITORY_USERS_COUNTRY_COLUMN
+      ],
+    ).toEqual(["US", "US", "DE"]);
+  });
+
+  it("fails the row when the required country is unresolved/ambiguous, loads it when optional", () => {
     const ambiguousRow = sampleRow({
       [TERRITORY_USERS_COUNTRY_COLUMN]: "US;DE",
     });
@@ -320,15 +441,38 @@ describe("territory module", () => {
       }),
     );
 
+    // required: countries are never created, so a pending_fk hold could never
+    // resolve — the row fails now with the real code
     const required = run(ambiguousRow, { countryRequired: true });
-    expect(required.result.status).toBe("pending_fk");
-    expect(required.result.unresolvedRequiredFks).toContainEqual(
-      expect.objectContaining({ field: "country__v", objectKey: "country" }),
+    expect(required.result.status).toBe("failed");
+    expect(required.result.failure).toMatchObject({
+      code: "TERRITORY_COUNTRY_AMBIGUOUS",
+      field: "country__v",
+    });
+    expect(required.result.unresolvedRequiredFks).toEqual([]);
+    expect(required.result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        kind: "required_missing",
+        code: "TERRITORY_COUNTRY_AMBIGUOUS",
+        fatal: true,
+      }),
     );
 
     const none = run(sampleRow({ [TERRITORY_USERS_COUNTRY_COLUMN]: "" }));
+    expect(none.result.status).toBe("ok");
     expect(none.result.diagnostics).toContainEqual(
-      expect.objectContaining({ code: "TERRITORY_COUNTRY_UNRESOLVED" }),
+      expect.objectContaining({
+        kind: "country_unresolved",
+        code: "TERRITORY_COUNTRY_UNRESOLVED",
+      }),
+    );
+    const noneRequired = run(
+      sampleRow({ [TERRITORY_USERS_COUNTRY_COLUMN]: "" }),
+      { countryRequired: true },
+    );
+    expect(noneRequired.result.status).toBe("failed");
+    expect(noneRequired.result.failure?.code).toBe(
+      "TERRITORY_COUNTRY_UNRESOLVED",
     );
   });
 
@@ -444,11 +588,26 @@ describe("territory helpers", () => {
         sctx,
       ),
     ).toBeUndefined();
+    // default (activeModelOnly): non-active model rows are skipped
     expect(
       territoryStatus(
         undefined,
         row({ "Territory2Model.State": "Archived" }),
         sctx,
+      ),
+    ).toMatchObject({
+      omit: true,
+      diagnostic: { kind: "skipped", code: TERRITORY_MODEL_INACTIVE },
+    });
+    const loadAll = buildTransformContext({
+      objectKey: "territory",
+      mapping: { options: { activeModelOnly: false } as never },
+    });
+    expect(
+      territoryStatus(
+        undefined,
+        row({ "Territory2Model.State": "Archived" }),
+        loadAll,
       ),
     ).toBe("inactive__v");
     expect(territoryStatus(undefined, row({}), sctx)).toBeUndefined();

@@ -4,9 +4,18 @@
  * (1 s → 30 s cap, no timeout below 6 h), page results with
  * `Sforce-Locator` / `maxRecords`, abort + delete, list for cleanup.
  *
+ * `maxRecords` is **always** sent (default `DEFAULT_BULK_MAX_RECORDS`,
+ * 100 000 — the PK chunk size) so a results page is bounded regardless of
+ * what the server would otherwise choose: an unbounded page of a
+ * multi-million-row `queryAll` would be buffered whole, and a download that
+ * outlives the 10-min request timeout would be retried from scratch up to
+ * 8 times against the 150M/day allocation (§2.1.5, §2.1.7).
+ *
  * Every page is a full CSV with a header row and is parsed with the
- * streaming RFC-4180 parser (`csv.ts`); `(jobId, locator, pageNo)` is the
- * resumable checkpoint (§2.2 step 3, §8.2). Concurrent jobs are capped by
+ * RFC-4180 parser (`csv.ts`) **lazily** — `page.records` parses `page.csv`
+ * on first access and memoises, so a consumer that only streams the CSV to
+ * disk (§2.1.4 / §2.2 step 3) never pays for the object array;
+ * `(jobId, locator, pageNo)` is the resumable checkpoint (§2.2 step 3, §8.2). Concurrent jobs are capped by
  * `performance.sfdcBulkConcurrency` — the semaphore slot is held from job
  * creation until the last page has been yielded (or the iterator is closed).
  */
@@ -34,7 +43,7 @@ export interface SfdcBulkOptions {
   pollCapMs?: number;
   /** Give up polling after this long (ms), default 6 h (§2.1.5). */
   pollTimeoutMs?: number;
-  /** Default `maxRecords` per results page (undefined = server default). */
+  /** Default `maxRecords` per results page (default `DEFAULT_BULK_MAX_RECORDS`; must be a positive integer). */
   maxRecords?: number;
   /** Default PK chunk size when `pkChunking: true` (1 000–250 000; default 100 000). */
   pkChunkSize?: number;
@@ -53,6 +62,21 @@ export interface BulkJobListEntry {
 }
 
 const TERMINAL = new Set(["JobComplete", "Failed", "Aborted"]);
+
+/**
+ * `maxRecords` sent with every results request when neither the query
+ * options nor `SfdcBulkOptions.maxRecords` override it (§2.1.5). Matches
+ * the default PK chunk size so one page ≈ one internal chunk.
+ */
+export const DEFAULT_BULK_MAX_RECORDS = 100_000;
+
+function assertMaxRecords(n: number, where: string): number {
+  if (!Number.isInteger(n) || n < 1)
+    throw new RangeError(
+      `${where} must be a positive integer (records per results page), got ${n}`,
+    );
+  return n;
+}
 
 /** Render the `Sforce-Enable-PKChunking` header value (§2.1.5). */
 export function pkChunkingHeader(
@@ -104,7 +128,7 @@ export class SfdcBulk {
   private readonly pollBaseMs: number;
   private readonly pollCapMs: number;
   private readonly pollTimeoutMs: number;
-  private readonly defaultMaxRecords: number | undefined;
+  private readonly defaultMaxRecords: number;
   private readonly pkChunkSize: number;
   private readonly sleep: SleepFn;
   private readonly random: RandomFn;
@@ -118,7 +142,10 @@ export class SfdcBulk {
     this.pollBaseMs = opts.pollBaseMs ?? 1_000;
     this.pollCapMs = opts.pollCapMs ?? 30_000;
     this.pollTimeoutMs = opts.pollTimeoutMs ?? 6 * 3_600_000;
-    this.defaultMaxRecords = opts.maxRecords;
+    this.defaultMaxRecords = assertMaxRecords(
+      opts.maxRecords ?? DEFAULT_BULK_MAX_RECORDS,
+      "SfdcBulkOptions.maxRecords",
+    );
     this.pkChunkSize = opts.pkChunkSize ?? 100_000;
     this.sleep = opts.sleep ?? defaultSleep;
     this.random = opts.random ?? Math.random;
@@ -220,7 +247,11 @@ export class SfdcBulk {
     }
   }
 
-  /** Fetch one results page. */
+  /**
+   * Fetch one results page. `maxRecords` is always sent (caller override →
+   * `SfdcBulkOptions.maxRecords` → `DEFAULT_BULK_MAX_RECORDS`). The CSV
+   * text is kept on the page; `records` is parsed on first access.
+   */
   async fetchPage(
     jobId: string,
     locator: string | null,
@@ -233,26 +264,36 @@ export class SfdcBulk {
       lane: "bulk",
       accept: "text",
       query: {
-        maxRecords: maxRecords ?? this.defaultMaxRecords,
+        maxRecords:
+          maxRecords === undefined
+            ? this.defaultMaxRecords
+            : assertMaxRecords(maxRecords, "maxRecords"),
         locator: locator ?? undefined,
       },
     });
     const csv = res.body ?? "";
-    const records = parseCsvRows(csv).map((r) => {
-      if (typeof r.Id === "string") r.Id = to18(r.Id);
-      return r as SourceRow;
-    });
     const nHeader = res.headers.get("sforce-numberofrecords");
-    const rows =
-      nHeader !== null && nHeader !== "" ? Number(nHeader) : records.length;
+    const headerRows =
+      nHeader !== null && nHeader !== "" ? Number(nHeader) : Number.NaN;
+    let records: SourceRow[] | undefined;
+    const parse = (): SourceRow[] => {
+      records ??= parseCsvRows(csv).map((r) => {
+        if (typeof r.Id === "string") r.Id = to18(r.Id);
+        return r as SourceRow;
+      });
+      return records;
+    };
     return {
       jobId,
       locator,
       nextLocator: parseLocator(res.headers.get("sforce-locator")),
       pageNo,
-      rows: Number.isFinite(rows) ? rows : records.length,
+      // `Sforce-NumberOfRecords` when present; otherwise count by parsing.
+      rows: Number.isFinite(headerRows) ? headerRows : parse().length,
       csv,
-      records,
+      get records(): SourceRow[] {
+        return parse();
+      },
     };
   }
 

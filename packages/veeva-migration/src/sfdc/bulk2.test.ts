@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { to18 } from "../transform/ids";
 import { createSfdcAuthenticator } from "./auth";
-import { SfdcBulk, parseLocator, pkChunkingHeader } from "./bulk2";
+import {
+  DEFAULT_BULK_MAX_RECORDS,
+  SfdcBulk,
+  parseLocator,
+  pkChunkingHeader,
+} from "./bulk2";
 import { SfdcApiError } from "./errors";
 import { SfdcTransport } from "./rest";
 import {
@@ -255,6 +260,59 @@ describe("SfdcBulk.query", () => {
         (c) => c.method === "POST" && c.url.endsWith("/jobs/query"),
       ),
     ).toHaveLength(0);
+    // maxRecords is always sent so a page is bounded even when the caller passes none
+    expect(fm.callsTo("/results")[0].url).toBe(
+      `${API}/jobs/query/${JOB}/results?maxRecords=${DEFAULT_BULK_MAX_RECORDS}&locator=L1`,
+    );
+  });
+
+  it("always sends a bounded maxRecords (constructor default beats the built-in, caller beats both) and parses records lazily", async () => {
+    const job: FakeJob = {
+      states: ["JobComplete"],
+      pages: [{ csv: PAGE2, locator: null, next: null }],
+    };
+    const { fm, bulk } = build(jobRoutes(job));
+    const pages = await collect(bulk.query("SELECT Id FROM Call2_vod__c"));
+    expect(fm.callsTo("/results")[0].url).toBe(
+      `${API}/jobs/query/${JOB}/results?maxRecords=${DEFAULT_BULK_MAX_RECORDS}`,
+    );
+    expect(DEFAULT_BULK_MAX_RECORDS).toBe(100_000);
+    // records is a memoised lazy getter over csv
+    expect(pages[0].csv).toBe(PAGE2);
+    const first = pages[0].records;
+    expect(first).toEqual([
+      { Id: ID3, Name: "Third", "Account_vod__r.Name": null },
+    ]);
+    expect(pages[0].records).toBe(first);
+
+    const fm2 = mockFetch([tokenRoute(), ...jobRoutes(job)]);
+    vi.stubGlobal("fetch", fm2.fetch);
+    const auth = createSfdcAuthenticator({
+      loginUrl: LOGIN_URL,
+      auth: { kind: "jwt", clientId: "c", username: "u", privateKey },
+    });
+    const transport = new SfdcTransport({
+      auth,
+      apiVersion: "67.0",
+      retry: { sleep: async () => {}, random: () => 0.5 },
+    });
+    const bulk2 = new SfdcBulk(transport, { maxRecords: 5_000 });
+    await collect(bulk2.query("SELECT Id FROM Call2_vod__c"));
+    expect(fm2.callsTo("/results")[0].url).toBe(
+      `${API}/jobs/query/${JOB}/results?maxRecords=5000`,
+    );
+    await collect(
+      bulk2.query("SELECT Id FROM Call2_vod__c", { maxRecords: 7 }),
+    );
+    expect(fm2.callsTo("/results")[1].url).toBe(
+      `${API}/jobs/query/${JOB}/results?maxRecords=7`,
+    );
+    expect(() => new SfdcBulk(transport, { maxRecords: 0 })).toThrow(
+      RangeError,
+    );
+    await expect(
+      collect(bulk2.query("SELECT Id FROM Call2_vod__c", { maxRecords: 1.5 })),
+    ).rejects.toThrow(/positive integer/);
   });
 
   it("rejects both the job promise and the iterator when the job fails, and releases the slot", async () => {
@@ -346,6 +404,8 @@ describe("SfdcBulk.query", () => {
     )) as SfdcApiError;
     expect(err.status).toBe(400);
     expect(err.errorCode).toBe("INVALIDJOB");
+    // Bulk 2.0 spelling (no underscore) is a §8.1 structural error, never retried
+    expect(err.errorClass).toBe("structural");
     await expect(result.job).rejects.toBeInstanceOf(SfdcApiError);
   });
 });

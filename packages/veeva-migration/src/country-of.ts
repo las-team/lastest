@@ -75,6 +75,24 @@ export function formatCountryOf(spec: CountryOfSpec): string {
   }
 }
 
+/**
+ * `objects.territory.countryOf` is NOT a §6.0.5 rule: the territory unit is
+ * global and the key selects how `country__v` is derived per row
+ * (`fromUsers` | `prefixMap` | `field:<SFDC field>` | `const:<ISO-2>`, see
+ * `objects/reference/territory.ts`). Config resolution keeps such a value in
+ * the module options instead of parsing it as a countryOf rule.
+ */
+export function isTerritoryCountryRule(raw: unknown): raw is string {
+  if (typeof raw !== "string") return false;
+  const text = raw.trim();
+  return (
+    text === "fromUsers" ||
+    text === "prefixMap" ||
+    (text.startsWith("field:") && text.length > 6) ||
+    /^const:[A-Z]{2}$/.test(text)
+  );
+}
+
 export function isGlobalCountryOf(specs: readonly CountryOfSpec[]): boolean {
   return specs.length === 1 && specs[0].kind === "global";
 }

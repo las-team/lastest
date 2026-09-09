@@ -14,10 +14,18 @@
  *    (`versionFallback` is surfaced for preflight's VT_API_VERSION_MISSING);
  *  - keep-alive every 10 min while idle, `DELETE /session` at run end.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import { getLogger, type Logger } from "../logger";
 import { toVaultError, VaultRequestError } from "./errors";
-import type { VaultHttp } from "./http";
-import { defaultSleep, type SleepFn } from "./retry";
+import type { VaultHttp, VaultHttpResponse, VaultRequest } from "./http";
+import {
+  backoffDelayMs,
+  DEFAULT_VAULT_RETRY_POLICY,
+  defaultSleep,
+  type RandomFn,
+  type SleepFn,
+  type VaultRetryPolicy,
+} from "./retry";
 import type { VaultSession, VaultUser } from "./types";
 
 export type VaultAuthConfig =
@@ -45,8 +53,15 @@ export interface VaultAuthOptions {
   keepAliveIntervalMs?: number;
   /** Retry auth once on the previous release when the configured version is rejected (default true). */
   versionFallback?: boolean;
+  /**
+   * Backoff for retryable auth failures (§8.1 defaults). Every attempt goes
+   * through the auth burst guard; `API_LIMIT_EXCEEDED` waits a full guard
+   * window instead of the jittered delay.
+   */
+  retry?: Partial<VaultRetryPolicy>;
   now?: () => number;
   sleep?: SleepFn;
+  random?: RandomFn;
   logger?: Logger;
 }
 
@@ -177,25 +192,31 @@ function isVersionRejection(err: VaultRequestError): boolean {
 
 export class VaultAuth {
   session: VaultSession | undefined;
-  /** `users/me` as validated after the last auth (undefined for access-token sessions until `me()` runs). */
+  /** `users/me` as validated by the last auth (set together with `session`, never before validation succeeded). */
   user: VaultUser | undefined;
   versionFallback: VersionFallbackInfo | undefined;
   /** Timestamps of auth calls inside the guard window. */
   private authCalls: number[] = [];
   private keepAliveTimer: ReturnType<typeof setInterval> | undefined;
   private inflight: Promise<VaultSession> | undefined;
+  /** Set while `doAuthenticate()` runs, so a re-entrant `reauthenticate()` can be refused. */
+  private readonly authScope = new AsyncLocalStorage<true>();
   private readonly now: () => number;
   private readonly sleep: SleepFn;
+  private readonly random: RandomFn;
   private readonly log: Logger;
   private readonly rate: { max: number; windowMs: number };
   private readonly keepAliveIntervalMs: number;
+  private readonly retryPolicy: VaultRetryPolicy;
 
   constructor(private readonly opts: VaultAuthOptions) {
     this.now = opts.now ?? Date.now;
     this.sleep = opts.sleep ?? defaultSleep;
+    this.random = opts.random ?? Math.random;
     this.log = opts.logger ?? getLogger("Vault", { vault_dns: opts.vaultDns });
     this.rate = opts.authRateLimit ?? { max: 20, windowMs: 60_000 };
     this.keepAliveIntervalMs = opts.keepAliveIntervalMs ?? 10 * 60_000;
+    this.retryPolicy = { ...DEFAULT_VAULT_RETRY_POLICY, ...opts.retry };
   }
 
   /** Value for the `Authorization` header (raw session id, or `Bearer` for access tokens). */
@@ -237,12 +258,32 @@ export class VaultAuth {
     return this.reauthenticate();
   }
 
-  /** Force a new session (INVALID_SESSION_ID, post-downtime). Concurrent callers share one call. */
+  /**
+   * Force a new session (INVALID_SESSION_ID, post-downtime). Concurrent
+   * callers share one call. Called from inside the auth flow itself (a hook,
+   * or a transport path that slipped past `noAuth`) it throws instead of
+   * returning the in-flight promise — awaiting that would never settle.
+   */
   async reauthenticate(): Promise<VaultSession> {
+    if (this.authScope.getStore())
+      throw new VaultRequestError(
+        "INVALID_SESSION_ID",
+        "re-authentication requested from inside the authentication flow — the freshly issued session was rejected",
+        { errorClass: "fatal" },
+      );
     if (this.inflight) return this.inflight;
-    this.inflight = this.doAuthenticate().finally(() => {
-      this.inflight = undefined;
-    });
+    this.inflight = this.authScope
+      .run(true, () => this.doAuthenticate())
+      .catch((e: unknown) => {
+        // The previous session (if any) triggered this re-auth, so it is
+        // dead; forget it so the next authenticate() re-runs the full flow.
+        this.session = undefined;
+        this.user = undefined;
+        throw e;
+      })
+      .finally(() => {
+        this.inflight = undefined;
+      });
     return this.inflight;
   }
 
@@ -250,6 +291,7 @@ export class VaultAuth {
     const { auth } = this.opts;
     const http = this.opts.http;
     let session: VaultSession;
+    let user: VaultUser | undefined;
     switch (auth.kind) {
       case "password":
         session = await this.passwordAuthWithFallback(auth);
@@ -257,20 +299,23 @@ export class VaultAuth {
       case "oauth":
         session = await this.oauthAuth(auth);
         break;
-      case "accessToken":
-        session = await this.accessTokenAuth();
+      case "accessToken": {
+        const r = await this.accessTokenAuth();
+        session = r.session;
+        user = r.user;
         break;
+      }
     }
-    this.session = session;
     if (auth.kind !== "accessToken") {
       // §2.5.1: "Validate Session User" right after auth — confirms the session
       // and the migration user's id; a mismatch is only logged here (preflight
       // raises VT_MIGRATION_USER_MISMATCH against target.migrationUserId).
-      const me = await this.me();
-      this.user = me;
-      if (me.id && session.userId && me.id !== session.userId)
+      // The session is committed only once this succeeds: a session that
+      // failed validation must never be handed out by authenticate().
+      user = await this.fetchMe(session.sessionId);
+      if (user.id && session.userId && user.id !== session.userId)
         this.log.warn(
-          { session_user_id: session.userId, me_user_id: me.id },
+          { session_user_id: session.userId, me_user_id: user.id },
           "users/me id differs from the auth response userId",
         );
     }
@@ -286,6 +331,8 @@ export class VaultAuth {
         },
         "target.vaultId differs from the authenticated vault",
       );
+    this.session = session;
+    this.user = user;
     this.log.info(
       {
         vault_id: session.vaultId,
@@ -298,22 +345,61 @@ export class VaultAuth {
     return session;
   }
 
+  /**
+   * Send an auth call: every attempt passes the 20/min guard and is recorded;
+   * retryable failures back off (§8.1), `API_LIMIT_EXCEEDED` — the auth burst
+   * limit itself (§2.5.1) — waits a full guard window. The transport's own
+   * retry loop is bypassed because it would re-send outside the guard.
+   */
+  private async authRequest(
+    req: Omit<VaultRequest, "noAuth" | "retry" | "replayOnSessionError">,
+  ): Promise<VaultHttpResponse> {
+    const policy = this.retryPolicy;
+    for (let attempt = 1; ; attempt++) {
+      await this.guardAuthCall();
+      try {
+        return await this.opts.http.request({
+          ...req,
+          noAuth: true,
+          retry: false,
+        });
+      } catch (raw) {
+        const err = toVaultError(raw);
+        if (!err.retryable || attempt >= policy.maxAttempts) throw err;
+        let delayMs = err.type.toUpperCase().startsWith("API_LIMIT_EXCEEDED")
+          ? this.rate.windowMs
+          : backoffDelayMs(attempt, policy, this.random);
+        if (err.retryAfterMs !== undefined)
+          delayMs = Math.min(policy.capMs, Math.max(delayMs, err.retryAfterMs));
+        this.log.warn(
+          {
+            code: "VT_AUTH_RETRY",
+            error_type: err.type,
+            attempt,
+            delay_ms: delayMs,
+            http_status: err.httpStatus,
+          },
+          "auth call failed with a retryable error — waiting before the next attempt",
+        );
+        await this.sleep(delayMs);
+      }
+    }
+  }
+
   private async passwordAuth(auth: {
     username: string;
     password: string;
   }): Promise<VaultSession> {
-    await this.guardAuthCall();
     const http = this.opts.http;
     const form = new URLSearchParams({
       username: auth.username,
       password: auth.password,
       vaultDNS: this.opts.vaultDns,
     });
-    const res = await http.request({
+    const res = await this.authRequest({
       method: "POST",
       path: "/auth",
       body: form,
-      noAuth: true,
     });
     return sessionFromAuthResponse(
       res.body,
@@ -351,10 +437,9 @@ export class VaultAuth {
         http.apiVersion = configured;
         throw err;
       }
-      this.session = session;
       let available: string[] = [];
       try {
-        available = await this.availableVersions();
+        available = await this.fetchVersions(session.sessionId);
       } catch (e) {
         this.log.warn(
           { err: toVaultError(e).message },
@@ -381,16 +466,14 @@ export class VaultAuth {
     clientId?: string;
     loginHost?: string;
   }): Promise<VaultSession> {
-    await this.guardAuthCall();
     const http = this.opts.http;
     const host = auth.loginHost ?? "login.veevavault.com";
     const form = new URLSearchParams({ vaultDNS: this.opts.vaultDns });
     if (auth.clientId) form.set("client_id", auth.clientId);
-    const res = await http.request({
+    const res = await this.authRequest({
       method: "POST",
       path: `https://${host}/auth/oauth/session/${encodeURIComponent(auth.profileId)}`,
       body: form,
-      noAuth: true,
       headers: { Authorization: `Bearer ${auth.idpToken}` },
     });
     return sessionFromAuthResponse(
@@ -400,43 +483,78 @@ export class VaultAuth {
     );
   }
 
-  private async accessTokenAuth(): Promise<VaultSession> {
-    // No auth call: the token is the credential. Validate it with users/me.
+  private async accessTokenAuth(): Promise<{
+    session: VaultSession;
+    user: VaultUser;
+  }> {
+    // No auth call: the token is the credential. Validate it with users/me —
+    // an invalid token fails here with INVALID_SESSION_ID (no replay: there is
+    // nothing to re-authenticate with).
     const http = this.opts.http;
-    const me = await this.me();
-    this.user = me;
+    const user = await this.fetchMe(this.authorization() ?? "");
     const vaultId = this.opts.configuredVaultId ?? 0;
     if (!vaultId)
       this.log.warn(
         "accessToken auth carries no vaultId — set target.vaultId to enable vault_membership composition",
       );
     return {
-      sessionId: "",
-      userId: me.id,
-      vaultId,
-      vaultDns: this.opts.vaultDns,
-      vaultIds: [],
-      apiVersion: http.apiVersion,
+      session: {
+        sessionId: "",
+        userId: user.id,
+        vaultId,
+        vaultDns: this.opts.vaultDns,
+        vaultIds: [],
+        apiVersion: http.apiVersion,
+      },
+      user,
     };
   }
 
-  /** `GET /objects/users/me` — validates the session and returns the migration user. */
-  async me(): Promise<VaultUser> {
-    const res = await this.opts.http.request({
-      method: "GET",
-      path: "/objects/users/me",
-    });
+  /**
+   * Build a request issued by the auth flow itself: the `Authorization`
+   * header is passed explicitly (the session is not committed yet) and
+   * `noAuth` keeps the transport from re-entering `reauthenticate()`.
+   */
+  private authFlowRequest(
+    req: Omit<VaultRequest, "noAuth" | "replayOnSessionError">,
+    authorization: string | undefined,
+  ): VaultRequest {
+    if (authorization === undefined) return req;
+    return {
+      ...req,
+      noAuth: true,
+      headers: { ...req.headers, Authorization: authorization },
+    };
+  }
+
+  private async fetchMe(authorization?: string): Promise<VaultUser> {
+    const res = await this.opts.http.request(
+      this.authFlowRequest(
+        { method: "GET", path: "/objects/users/me" },
+        authorization,
+      ),
+    );
     return parseUserEnvelope(res.body);
+  }
+
+  private async fetchVersions(authorization?: string): Promise<string[]> {
+    const res = await this.opts.http.request(
+      this.authFlowRequest(
+        { method: "GET", path: "/api", absolute: true },
+        authorization,
+      ),
+    );
+    return parseVersionsResponse(res.body);
+  }
+
+  /** `GET /objects/users/me` — validates the session and returns the migration user (cheap health check). */
+  async me(): Promise<VaultUser> {
+    return this.fetchMe();
   }
 
   /** `GET https://{vaultDNS}/api` (needs a session). */
   async availableVersions(): Promise<string[]> {
-    const res = await this.opts.http.request({
-      method: "GET",
-      path: "/api",
-      absolute: true,
-    });
-    return parseVersionsResponse(res.body);
+    return this.fetchVersions();
   }
 
   /** `POST /keep-alive`. */
@@ -461,6 +579,7 @@ export class VaultAuth {
       this.log.debug({ err: toVaultError(e).message }, "endSession failed");
     } finally {
       this.session = undefined;
+      this.user = undefined;
     }
   }
 

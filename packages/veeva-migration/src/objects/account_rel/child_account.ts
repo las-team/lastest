@@ -273,7 +273,7 @@ export const child_account = defineObject({
       keys: [{ target: "external_id__v", source: "External_ID_vod__c" }],
       evidence: "UNV",
       notes:
-        "compared against the verbatim SFDC composite; a rewritten value only matches rows this tool wrote",
+        "compared against the value the tool writes: with rewriteCompositeExternalId (default) that is the {parentVaultId}__{childVaultId} composite rendered from the id map, so this key only finds rows written with the same convention (a previous run of this tool); set rewriteCompositeExternalId = false to match a load keyed by the verbatim SFDC composite",
     },
   ],
   custom: { childAccountExternalId },

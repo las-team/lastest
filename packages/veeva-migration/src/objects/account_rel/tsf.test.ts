@@ -33,7 +33,10 @@ const ADDRESS_ID = to18("a0T000000000001");
 const ROW_ID = to18("a0U000000000001");
 const TERRITORY_NAME = "Northeast";
 
-function makeConfig(overrides: Record<string, unknown> = {}) {
+function makeConfig(
+  overrides: Record<string, unknown> = {},
+  objects: Record<string, Record<string, unknown>> = {},
+) {
   return parseConfig({
     version: 1,
     source: {
@@ -45,7 +48,7 @@ function makeConfig(overrides: Record<string, unknown> = {}) {
       auth: { kind: "password", username: "u", password: "p" },
       migrationUserId: 1,
     },
-    objects: { tsf: overrides },
+    objects: { ...objects, tsf: overrides },
     countries: { US: {} },
   });
 }
@@ -127,12 +130,16 @@ function run(
   row: SourceRow,
   opts: {
     overrides?: Record<string, unknown>;
+    /** Other objects' overlays (e.g. `objects.account.objectType`). */
+    objects?: Record<string, Record<string, unknown>>;
+    /** Layered `picklists.maps` seen by the country context. */
+    picklists?: Record<string, Record<string, string | null>>;
     territories?: Record<string, string>;
     typed?: boolean;
     territoryAsText?: boolean;
   } = {},
 ) {
-  const config = makeConfig(opts.overrides);
+  const config = makeConfig(opts.overrides, opts.objects);
   const mapping = materialise(tsf, resolveCountry(config, "US"), config, {
     now: NOW,
   });
@@ -147,7 +154,7 @@ function run(
   return {
     mapping,
     result: applyMapping(row, mapping, {
-      country: buildCountryContext(),
+      country: buildCountryContext({ picklists: opts.picklists }),
       metadata: metadata({
         typed: opts.typed ?? true,
         territoryAsText: opts.territoryAsText,
@@ -173,7 +180,13 @@ describe("tsf module", () => {
     expect(tsf.targetEvidence).toBe("DOC");
     expect(tsf.scope).toEqual({ kind: "full" });
     expect(tsf.countryOf).toEqual([{ kind: "account" }]);
-    expect(tsf.dependsOn).toEqual(["account", "territory", "address"]);
+    // account_territory precedes tsf (§6.1 step 7): its upsert auto-creates tsf__v rows
+    expect(tsf.dependsOn).toEqual([
+      "account",
+      "territory",
+      "address",
+      "account_territory",
+    ]);
     expect(tsf.selfRefs).toEqual([]);
     expect(tsf.deletePolicy).toBe("inactivate");
     expect(tsf.inactivate).toEqual([]);
@@ -185,13 +198,11 @@ describe("tsf module", () => {
       "natural_key",
       "external_id",
     ]);
+    // the matcher compares payload values (the territory id already resolved by
+    // custom(tsfTerritory)) — no key transform is declared
     expect(tsf.match[1].keys).toEqual([
       { target: "account__v", source: "Account_vod__c" },
-      {
-        target: "territory__v",
-        source: "Territory_vod__c",
-        transform: { kind: "territoryRef" },
-      },
+      { target: "territory__v", source: "Territory_vod__c" },
     ]);
     // object types mirror the account crosswalk (§6.3.12)
     expect(tsf.objectTypes).toEqual(ACCOUNT_OBJECT_TYPES);
@@ -302,18 +313,25 @@ describe("tsf module", () => {
     ]);
   });
 
-  it("routes an unresolved territory name to pending_fk (§6.3.12)", () => {
+  it("fails a row whose territory name is unknown to the vault (UNRESOLVED_FK, §6.3.12/§3.5)", () => {
     const { result } = run(sampleRow(), { territories: {} });
-    expect(result.status).toBe("pending_fk");
-    expect(result.unresolvedRequiredFks).toEqual([
-      { field: "territory__v", objectKey: "territory", sfdcId: TERRITORY_NAME },
-    ]);
+    // territories are complete after step 1 and the pending queue is id-keyed:
+    // the row fails now, with the name in the report, instead of parking
+    expect(result.status).toBe("failed");
+    expect(result.failure).toMatchObject({
+      code: "UNRESOLVED_FK",
+      field: "territory__v",
+    });
+    expect(result.failure?.message).toContain(TERRITORY_NAME);
+    expect(result.unresolvedRequiredFks).toEqual([]);
     expect(result.payload.territory__v).toBeUndefined();
     expect(result.diagnostics).toContainEqual(
       expect.objectContaining({
         kind: "unresolved_fk",
-        code: "TERRITORY_UNRESOLVED",
+        code: "UNRESOLVED_FK",
+        objectKey: "territory",
         value: TERRITORY_NAME,
+        fatal: true,
       }),
     );
   });
@@ -361,6 +379,37 @@ describe("tsf module", () => {
     expect(result.objectType).toBe("hospital__v");
   });
 
+  it("mirrors the country's account.objectType picklist map when tsf.objectType has no entry", () => {
+    const clinic = sampleRow({ [TSF_ACCOUNT_TYPE_COLUMN]: "Clinic" });
+    // layered picklists.maps["account.objectType"] reaches tsf__v
+    const { result } = run(clinic, {
+      picklists: { "account.objectType": { Clinic: "hospital__v" } },
+    });
+    expect(result.status).toBe("ok");
+    expect(result.objectType).toBe("hospital__v");
+    // a null there (skip rows of that type) skips the tsf row too
+    const { result: skipped } = run(clinic, {
+      picklists: { "account.objectType": { Clinic: null } },
+    });
+    expect(skipped.status).toBe("skipped");
+    expect(skipped.diagnostics).toContainEqual(
+      expect.objectContaining({ code: "OBJECT_TYPE_SKIPPED", value: "Clinic" }),
+    );
+    // an explicit tsf entry wins over the account map
+    const { result: own } = run(clinic, {
+      overrides: { objectType: { Clinic: "professional__v" } },
+      picklists: { "account.objectType": { Clinic: "hospital__v" } },
+    });
+    expect(own.objectType).toBe("professional__v");
+    // the per-object objects.account.objectType overlay is NOT visible from
+    // the tsf context — it has to be mirrored under objects.tsf.objectType
+    const { result: accountOverlayOnly } = run(clinic, {
+      objects: { account: { objectType: { Clinic: "hospital__v" } } },
+    });
+    expect(accountOverlayOnly.status).toBe("failed");
+    expect(accountOverlayOnly.failure?.code).toBe("VT_OBJECT_TYPE_MISSING");
+  });
+
   it("copies external_id__v verbatim when rewriteCompositeExternalId = false and omits an empty one", () => {
     const { result } = run(sampleRow(), {
       overrides: { rewriteCompositeExternalId: false },
@@ -391,10 +440,13 @@ describe("tsf module", () => {
       value: "V0T9",
     });
     expect(tsfTerritory("", { Id: ROW_ID }, ctx)).toBeUndefined();
-    expect(tsfTerritory("Nowhere", { Id: ROW_ID }, ctx)).toMatchObject({
+    const unknown = tsfTerritory("Nowhere", { Id: ROW_ID }, ctx);
+    expect(unknown).toMatchObject({
       omit: true,
-      unresolved: { objectKey: "territory", sfdcId: "Nowhere" },
+      diagnostic: { code: "UNRESOLVED_FK", value: "Nowhere", fatal: true },
     });
+    // never an `unresolved` marker: its sfdcId must be an 18-char id (CONTRACTS.md)
+    expect(unknown).not.toHaveProperty("unresolved");
     const untyped = buildTransformContext({
       objectKey: "tsf",
       field: {

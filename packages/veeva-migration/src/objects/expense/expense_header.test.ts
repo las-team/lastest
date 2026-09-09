@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  EXPENSE_HEADER_OPEN_PREDICATE,
   EXPENSE_HEADER_PAYEE_MAP_KEY,
   EXPENSE_HEADER_STATUS_MAP_KEY,
+  emEventOpenTerm,
   expense_header,
   payeeAuto,
 } from "./expense_header";
+import {
+  EM_EVENT_CLOSED_STATUSES,
+  EM_EVENT_OPEN_PREDICATE,
+} from "../em_event/em_event";
 import { validateObjectModule } from "../types";
 import { materialise, resolveCountry } from "../../config/resolve";
 import { parseConfig } from "../../config/schema";
@@ -279,6 +285,11 @@ describe("expense_header module", () => {
       countryConfigurable: true,
       unverifiedSource: true,
     });
+    // a guessed source never declares a type that could block the module
+    // (SF_FIELD_TYPE_MISMATCH has no picklist→string auto-switch)
+    expect(
+      byTarget.get("expense_header_status__v")?.sourceType,
+    ).toBeUndefined();
     expect(byTarget.get("payment_date__v")).toMatchObject({
       transform: { kind: "date" },
       required: "n",
@@ -312,15 +323,28 @@ describe("expense_header module", () => {
         expect(f.evidence, `${f.target} has an evidence tag`).toBeDefined();
   });
 
-  it("scopes on the parent event start time OR the payment date, in the tov retention family", () => {
+  it("scopes on the parent event start time OR the payment date OR an open parent event, in the tov retention family", () => {
     expect(expense_header.scope).toEqual({
       kind: "dated",
       predicates: [
         { field: "Event_vod__r.Start_Time_vod__c", type: "datetime" },
         { field: "Payment_Date_vod__c", type: "date" },
       ],
+      openPredicate: EXPENSE_HEADER_OPEN_PREDICATE,
       retentionFamily: "tov",
     });
+    // §1.1 #4: the parent event's open-item term, mirrored through Event_vod__r.
+    // — the same term the extractor appends for em_attendee/em_event_speaker
+    expect(EXPENSE_HEADER_OPEN_PREDICATE).toBe(
+      `(Event_vod__r.End_Time_vod__c >= {cutoffDateTime}) OR (Event_vod__r.Status_vod__c NOT IN (${EM_EVENT_CLOSED_STATUSES.map(
+        (st) => `'${st}'`,
+      ).join(", ")}))`,
+    );
+    expect(emEventOpenTerm("Event_vod__r")).toBe(EXPENSE_HEADER_OPEN_PREDICATE);
+    // identical to em_event's own open term once the relationship prefix is stripped
+    expect(EXPENSE_HEADER_OPEN_PREDICATE.replaceAll("Event_vod__r.", "")).toBe(
+      EM_EVENT_OPEN_PREDICATE,
+    );
     // default 24 months → 2024-09-07
     const m = mapping();
     expect(m.scope.retentionFamily).toBe("tov");
@@ -328,10 +352,16 @@ describe("expense_header module", () => {
     expect(m.scope.cutoffDate).toBe("2024-09-07");
     const built = buildScopePredicate(m.scope);
     expect(built.kind).toBe("dated");
-    expect(built.openTerm).toBeUndefined();
-    expect(built.predicate).toBe(
+    expect(built.dateTerm).toBe(
       "Event_vod__r.Start_Time_vod__c >= 2024-09-07T00:00:00Z OR Payment_Date_vod__c >= 2024-09-07",
     );
+    expect(built.openTerm).toBe(
+      "(Event_vod__r.End_Time_vod__c >= 2024-09-07T00:00:00Z) OR (Event_vod__r.Status_vod__c NOT IN ('Closed_vod', 'Canceled_vod', 'Cancelled_vod'))",
+    );
+    expect(built.predicate).toBe(
+      "(Event_vod__r.Start_Time_vod__c >= 2024-09-07T00:00:00Z OR Payment_Date_vod__c >= 2024-09-07) OR ((Event_vod__r.End_Time_vod__c >= 2024-09-07T00:00:00Z) OR (Event_vod__r.Status_vod__c NOT IN ('Closed_vod', 'Canceled_vod', 'Cancelled_vod')))",
+    );
+    expect(built.predicate).not.toContain("{cutoff");
     expect(m.options.optional).toBe(true);
     expect(m.options.deletePolicy).toBe("ignore");
   });
@@ -341,7 +371,7 @@ describe("expense_header module", () => {
     expect(widened.scope.historyMonths).toBe(60);
     expect(widened.scope.cutoffDate).toBe("2021-09-07");
     expect(buildScopePredicate(widened.scope).predicate).toBe(
-      "Event_vod__r.Start_Time_vod__c >= 2021-09-07T00:00:00Z OR Payment_Date_vod__c >= 2021-09-07",
+      "(Event_vod__r.Start_Time_vod__c >= 2021-09-07T00:00:00Z OR Payment_Date_vod__c >= 2021-09-07) OR ((Event_vod__r.End_Time_vod__c >= 2021-09-07T00:00:00Z) OR (Event_vod__r.Status_vod__c NOT IN ('Closed_vod', 'Canceled_vod', 'Cancelled_vod')))",
     );
     // a country override below the family retention is widened back
     const narrow = mapping(

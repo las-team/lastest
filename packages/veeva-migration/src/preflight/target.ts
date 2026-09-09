@@ -17,7 +17,11 @@ import type { StateStore } from "../store/types";
 import { isQueueId, isUserId, to18 } from "../transform/ids";
 import { renameObjectType, renamePicklistValue } from "../transform/rename";
 import { innerTransform } from "../transform/spec";
-import type { VaultClient, VaultSession } from "../vault/types";
+import {
+  VaultApiError,
+  type VaultClient,
+  type VaultSession,
+} from "../vault/types";
 import {
   GLOBAL_COUNTRY,
   normaliseVaultType,
@@ -137,9 +141,56 @@ function errMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** Lower-cased host of a `vaultIds[].url` (`https://x.veevavault.com/api` → `x.veevavault.com`). */
+function hostOf(url: string): string | undefined {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    const m = /^(?:[a-z]+:\/\/)?([^/:?#]+)/i.exec(url);
+    return m?.[1]?.toLowerCase();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Global checks
 // ---------------------------------------------------------------------------
+
+/**
+ * Object the §5.2 permissions read-back asks about when
+ * `preflight.probeObject` is unset — `account__v` exists in every Vault CRM
+ * vault (assumption A2).
+ */
+export const DEFAULT_PERMISSION_PROBE_OBJECT = "account__v";
+/**
+ * Filter suffix of `GET /objects/users/{id}/permissions?filter=object.{name}.…`
+ * `[UNV]` — the spec writes `{create,edit}`; the Users API groups object
+ * actions under one `…actions` entry. Entries are parsed defensively either way.
+ */
+export const PERMISSION_FILTER_SUFFIX = "actions";
+
+/**
+ * Actions among `create`/`edit` the permissions read-back explicitly denies
+ * for `objectName`. Accepts `{ name, permissions: { create, edit } }` entries
+ * (Users API) as well as flat `{ name, create, edit }` ones; an entry for
+ * another object, or one without a boolean for an action, denies nothing.
+ */
+export function deniedObjectActions(
+  entries: ReadonlyArray<Record<string, unknown>>,
+  objectName: string,
+): string[] {
+  const denied = new Set<string>();
+  for (const entry of entries) {
+    const name = typeof entry.name === "string" ? entry.name : "";
+    if (name && !name.split(".").includes(objectName)) continue;
+    const flags =
+      entry.permissions && typeof entry.permissions === "object"
+        ? (entry.permissions as Record<string, unknown>)
+        : entry;
+    for (const action of ["create", "edit"] as const)
+      if (flags[action] === false) denied.add(action);
+  }
+  return [...denied];
+}
 
 export async function checkVaultGlobal(
   ctx: TargetContext,
@@ -149,34 +200,99 @@ export async function checkVaultGlobal(
       vaultDns?: string;
       apiVersion?: string;
       migrationUserId?: number;
+      migrationMode?: boolean;
+      vaultId?: number;
     };
     findings: FindingCollector;
+    flags?: PreflightInput["flags"];
   },
 ): Promise<void> {
   const { findings, config } = input;
-  const dns = input.target.vaultDns ?? config.target.vaultDns;
+  const dns = (input.target.vaultDns ?? config.target.vaultDns).toLowerCase();
   const apiVersion = input.target.apiVersion ?? config.target.apiVersion;
   let session: VaultSession;
   try {
     session = await ctx.vault.authenticate();
   } catch (e) {
-    findings.blocking(
-      "VT_AUTH_FAILED",
-      `Vault authentication failed for ${dns}: ${errMessage(e)}`,
-    );
+    // the auth layer itself verifies membership / default vault (§2.5.1)
+    if (e instanceof VaultApiError && e.type === "VAULT_DNS_MISMATCH")
+      findings.blocking(
+        "VT_WRONG_VAULT",
+        `authenticated vault does not match target.vaultDns ${dns}: ${e.message}`,
+      );
+    else
+      findings.blocking(
+        "VT_AUTH_FAILED",
+        `Vault authentication failed for ${dns}: ${errMessage(e)}`,
+      );
     ctx.unavailable = true;
     return;
   }
   ctx.session = session;
-  const urls = session.vaultIds.map((v) => v.url);
-  const matches =
-    session.vaultDns === dns ||
-    urls.some((u) => u.includes(dns)) ||
-    ctx.vault.vaultDns === dns;
-  if (!matches)
+  // VT_WRONG_VAULT compares only what the auth response asserts: the
+  // `vaultIds[].url` hosts and the session's `vaultId`. `session.vaultDns`
+  // / `ctx.vault.vaultDns` are the configured value echoed back, never proof.
+  const hosts = session.vaultIds.map((v) => hostOf(v.url)).filter(Boolean);
+  const member = session.vaultIds.find((v) => hostOf(v.url) === dns);
+  if (hosts.length && !member)
     findings.blocking(
       "VT_WRONG_VAULT",
-      `session vault ${session.vaultDns} (vaultId ${session.vaultId}) does not match target.vaultDns ${dns}`,
+      `no vaultIds[].url of the session matches target.vaultDns ${dns} (vaults: ${hosts.join(", ")}; session vaultId ${session.vaultId})`,
+    );
+  else if (member && session.vaultId && member.id !== session.vaultId)
+    findings.blocking(
+      "VT_WRONG_VAULT",
+      `session was issued for vaultId ${session.vaultId} but ${dns} is vaultId ${member.id}`,
+    );
+  const wantedVaultId = input.target.vaultId ?? config.target.vaultId;
+  if (
+    wantedVaultId !== undefined &&
+    session.vaultId &&
+    session.vaultId !== wantedVaultId
+  )
+    findings.blocking(
+      "VT_WRONG_VAULT",
+      `session vaultId ${session.vaultId} ≠ target.vaultId ${wantedVaultId}`,
+    );
+
+  // VT_MIGRATION_PERMISSION (§5.2), first check: the permissions read-back
+  // `GET /objects/users/{id}/permissions?filter=object.{probeObject}.…` —
+  // a denied create/edit on the probe object blocks. The *Record Migration*
+  // permission itself is only proven by probe 13 (`--probe-writes`), so
+  // without probes it stays a warning rather than pass silently.
+  const migrationMode =
+    input.target.migrationMode ?? config.target.migrationMode;
+  const probes =
+    Boolean(input.flags?.probeWrites || config.preflight.probeWrites) &&
+    !input.flags?.dryRun;
+  let permissionDenied = false;
+  if (migrationMode && ctx.vault.userPermissions && session.userId) {
+    const probeObject =
+      config.preflight.probeObject ?? DEFAULT_PERMISSION_PROBE_OBJECT;
+    try {
+      const entries = await ctx.vault.userPermissions(
+        session.userId,
+        `object.${probeObject}.${PERMISSION_FILTER_SUFFIX}`,
+      );
+      const denied = deniedObjectActions(entries, probeObject);
+      if (denied.length) {
+        permissionDenied = true;
+        findings.blocking(
+          "VT_MIGRATION_PERMISSION",
+          `user ${session.userId} lacks object.${probeObject} ${denied.join("/")} on ${dns} (permissions read-back); migration mode needs create + edit and Vault Owner Actions: Record Migration`,
+        );
+      }
+    } catch (e) {
+      findings.info(
+        "VT_MIGRATION_PERMISSION",
+        `permissions read-back for ${probeObject} failed (${errMessage(e)}); relying on probe 13`,
+      );
+    }
+  }
+  if (migrationMode && !probes && !permissionDenied)
+    findings.warning(
+      "VT_MIGRATION_PERMISSION",
+      `target.migrationMode = true but Vault Owner Actions: Record Migration is not verified for ${dns} — run with --probe-writes (probe 13 on preflight.probeObject)`,
     );
   try {
     const versions = await ctx.vault.availableVersions();
@@ -358,6 +474,24 @@ function isRequiredRow(
   const ov = mapping.required[row.target];
   if (ov !== undefined) return ov;
   return row.required === "K" || row.required === "Y";
+}
+
+/** Blob name of a `deferredBlob` row (keys `objects.<key>.blobs`). */
+export function blobNameOf(row: FieldMapping): string | undefined {
+  if (row.blobName) return row.blobName;
+  return row.transform.kind === "deferredBlob"
+    ? row.transform.blobName
+    : undefined;
+}
+
+/** §8.6 policy of a blob row (`optional` when the overlay names none). */
+export function blobPolicyOf(
+  row: FieldMapping,
+  mapping: MaterialisedMapping,
+): "required" | "optional" | "attachment" | "skip" | undefined {
+  const name = blobNameOf(row);
+  if (!name) return undefined;
+  return mapping.options.blobs?.[name] ?? "optional";
 }
 
 /** Apply source-side drops and switches to the mapping rows. */
@@ -549,7 +683,15 @@ export async function checkTargetUnit(
         ctx.metadata.delete(mapping.targetObject);
         meta = (await loadObjectMetadata(ctx, mapping.targetObject)) ?? meta;
         fields = toResolvedFields(meta);
-        if (!fields[legacy.field]) {
+        const after = fields[legacy.field];
+        // a MODIFY on an existing field leaves it present but unusable until
+        // the (possibly async) MDL lands — check the attributes, not existence
+        const usable =
+          after !== undefined &&
+          after.active &&
+          after.unique &&
+          after.type === "string";
+        if (!usable) {
           if (r.jobId)
             findings.blocking(
               "VT_LEGACY_ID_FIELD_MISSING",
@@ -559,7 +701,7 @@ export async function checkTargetUnit(
           else
             findings.blocking(
               "VT_LEGACY_ID_FIELD_MISSING",
-              `${legacy.field} still absent after MDL on ${mapping.targetObject}`,
+              `${legacy.field} still ${after ? "not a unique active String field" : "absent"} after MDL on ${mapping.targetObject}`,
               octx,
             );
           legacy = { ...legacy, field: undefined, step: 7 };
@@ -732,6 +874,16 @@ export async function checkTargetUnit(
       continue;
     }
 
+    // §8.6 blob rows: the policy decides what a missing target means.
+    // `attachment` never writes the field (POST …/attachments), so the
+    // field/type checks do not apply; `VT_ATTACHMENTS_DISABLED` below is the
+    // only gate. `required` makes a missing target blocking.
+    const blobPolicy = blobPolicyOf(f, mapping);
+    if (blobPolicy === "attachment") {
+      finalRows.push(row);
+      continue;
+    }
+
     const field = fields[base];
     if (!field) {
       const code = custom ? "VT_CUSTOM_FIELD_MISSING" : "VT_FIELD_MISSING";
@@ -740,11 +892,16 @@ export async function checkTargetUnit(
             message: `customer field ${base} is absent from ${mapping.targetObject} (never auto-created)`,
             mdl: `ALTER Object ${mapping.targetObject} (\n  ADD Field ${base}(label('${base}'), type('String'), max_length(255), active(true), required(false))\n);`,
           }
-        : `target field ${base} not in ${mapping.targetObject} metadata${f.evidence === "UNV" ? " (name was [UNVERIFIED])" : ""}`;
+        : `target field ${base} not in ${mapping.targetObject} metadata${f.evidence === "UNV" ? " (name was [UNVERIFIED])" : ""}${blobPolicy ? ` (blob policy ${blobPolicy})` : ""}`;
+      // Blocking for the legacy id, required rows, FKs the load cannot do
+      // without and object type/state. An *optional* FK whose target name is
+      // `[UNVERIFIED]` degrades like any other guessed name (§0.1, §5.2):
+      // warning + row dropped, so one wrong guess cannot block the object.
       if (
         isLegacy ||
         required ||
-        isFk ||
+        blobPolicy === "required" ||
+        (isFk && f.evidence !== "UNV") ||
         inner.kind === "objectType" ||
         inner.kind === "state"
       )
@@ -922,7 +1079,9 @@ export async function checkTargetUnit(
         inner.kind === "text" && inner.max !== undefined
           ? Math.min(inner.max, field.maxLength)
           : field.maxLength;
-      const policy = f.truncation ?? "truncate";
+      // a `required` blob makes an oversized target blocking (§8.6)
+      const policy =
+        blobPolicy === "required" ? "fail" : (f.truncation ?? "truncate");
       if (input.sample.length) {
         let longest = 0;
         let over = 0;
@@ -946,9 +1105,13 @@ export async function checkTargetUnit(
         sf.length !== undefined &&
         sf.length > max
       ) {
-        findings.info(
+        // no sample to measure: the describe length only says values *may*
+        // exceed the target, so a `fail` policy is surfaced as a warning
+        // (blocking needs observed values) and anything else stays info.
+        findings.push(
+          policy === "fail" ? "warning" : "info",
           "VT_LENGTH",
-          `source length ${sf.length} > target max_length ${max}; truncation policy ${policy}`,
+          `source length ${sf.length} > target max_length ${max} (no sample measured); truncation policy ${policy}`,
           fctx,
         );
       }
@@ -1170,13 +1333,7 @@ export async function checkTargetUnit(
   const blobs = { ...mapping.options.blobs };
   for (const [name, policy] of Object.entries(blobs)) {
     if (policy !== "attachment" || meta.allow_attachments !== false) continue;
-    const blobRow = finalRows.find(
-      (f) =>
-        (f.blobName ??
-          (f.transform.kind === "deferredBlob"
-            ? f.transform.blobName
-            : undefined)) === name,
-    );
+    const blobRow = finalRows.find((f) => blobNameOf(f) === name);
     if (blobRow && isRequiredRow(blobRow, mapping))
       findings.blocking(
         "VT_ATTACHMENTS_DISABLED",

@@ -30,6 +30,26 @@
  * (`consent_type__v.external_id`, `consent_type__v.name`, …) exist so the
  * relationship columns are extracted and validated; they emit nothing.
  *
+ * **What the transform emits (and what it never emits).** Only two forms
+ * reach the upsert: a **Vault record id** in `<target>` or an
+ * **`external_id__v` lookup** (`<target>.external_id__v`, the spec's
+ * `refLookup(<target>, external_id__v)`). `name__v` is neither unique nor
+ * country-scoped on the config objects, so a load-time `<target>.name__v`
+ * lookup would either fail every row (FAILURE-in-200, no preflight signal)
+ * or silently bind the consent to another country's consent type; the
+ * `name:<value>` entries and the automatic Name match are therefore
+ * **resolved at preflight by VQL** (country + object type scoped, ambiguity →
+ * blocking) into the cache `objects.multichannel_consent.configMapsResolved.<mapName>[id18] = <vaultId>`
+ * (`MULTICHANNEL_CONSENT_RESOLVED_MAPS_KEY`), which the transform consults
+ * first. Preflight may resolve `external_id:` entries into the same cache: a
+ * Vault id in `consent_type__v` is also what the §3.3 natural-key match needs
+ * (the matcher compares `payload.consent_type__v` against Vault, a lookup
+ * form can never hit). A Name/`name:` entry the cache does not cover is
+ * omitted with `VT_CONSENT_CONFIG_UNMATCHED` (the Name is carried in
+ * `detail` so preflight can list the SFDC row); an un-prefixed map value that
+ * is not shaped like a Vault record id (a forgotten `external_id:` prefix)
+ * fails the row with `CONSENT_CONFIG_MAP_INVALID`.
+ *
  * `opt_type__v` (`opt_in__v` / `opt_out__v` `[DOC]`, `opt_in_pending__v`
  * `[UNV]`) and `channel_value__v` are required by Vault `[DOC]`;
  * `optout_event_type__v` is required **when the row is an opt-out**
@@ -43,7 +63,7 @@
  * silently cut (route to an attachment via the overlay instead).
  */
 import { readSource } from "../../transform/apply";
-import { isSfdcId, to15, to18 } from "../../transform/ids";
+import { isSfdcId, to18 } from "../../transform/ids";
 import { applyTransform } from "../../transform/registry";
 import type {
   CustomTransformFn,
@@ -74,6 +94,29 @@ export const MULTICHANNEL_CONSENT_SIGNATURE_BLOB = "signature";
 export const VT_CONSENT_CONFIG_UNMATCHED_CODE = "VT_CONSENT_CONFIG_UNMATCHED";
 export const CONSENT_OPTOUT_EVENT_TYPE_MISSING_CODE =
   "CONSENT_OPTOUT_EVENT_TYPE_MISSING";
+/** An un-prefixed `configMaps` value that cannot be a Vault record id (forgotten `external_id:`/`name:` prefix). */
+export const CONSENT_CONFIG_MAP_INVALID_CODE = "CONSENT_CONFIG_MAP_INVALID";
+
+/** Operator-written crosswalks (`objects.multichannel_consent.configMaps`, §6.3.42). */
+export const MULTICHANNEL_CONSENT_MAPS_KEY = "configMaps";
+/**
+ * Preflight-resolved cache, same shape as `configMaps` but every value is a
+ * Vault record id: `name:<v>` entries, the automatic Name match (VQL within
+ * country + object type) and, when preflight chooses to, `external_id:`
+ * entries / the automatic External_ID match. Consulted before `configMaps`.
+ * Runtime-only (`ObjectOptions` flag) — never written by an overlay.
+ */
+export const MULTICHANNEL_CONSENT_RESOLVED_MAPS_KEY = "configMapsResolved";
+
+/**
+ * Shape of a Vault object record id (`V4V000000001002`): ≥ 15 alphanumerics,
+ * no whitespace / `:` / `_`. Deliberately loose about length beyond 15 — it
+ * rejects the realistic mistakes (`AE_DE`, `Marketing Email`), not Vault.
+ */
+export const VAULT_RECORD_ID_RE = /^[A-Za-z0-9]{15,}$/;
+export function isVaultRecordId(value: unknown): value is string {
+  return typeof value === "string" && VAULT_RECORD_ID_RE.test(value);
+}
 
 /** `RecordType.DeveloperName` → object type api name (§6.3.42). */
 export const MULTICHANNEL_CONSENT_OBJECT_TYPES: Record<string, string> = {
@@ -178,22 +221,37 @@ export function isEmpty(v: unknown): boolean {
 }
 
 /**
- * `objects.multichannel_consent.configMaps.<mapName>` as a lookup with keys
+ * Normalised crosswalks memoised per raw map object: consent is a Bulk-2.0
+ * scale object loaded serially, and the transform asks for the map on every
+ * row × config field — the id checksums must not be recomputed each time.
+ * The raw map never changes identity within a unit (materialised once), and a
+ * replaced object simply misses the cache.
+ */
+const NORMALISED_MAPS = new WeakMap<object, Record<string, string>>();
+
+/**
+ * `objects.multichannel_consent.<optionsKey>.<mapName>` as a lookup with keys
  * normalised to 18 chars (an overlay may still write a 15-char id).
+ * `optionsKey` is `configMaps` (operator overlay, default) or
+ * `configMapsResolved` (preflight cache).
  */
 export function configMapOf(
   options: Record<string, unknown>,
   mapName: string,
+  optionsKey: string = MULTICHANNEL_CONSENT_MAPS_KEY,
 ): Record<string, string> | undefined {
-  const maps = options.configMaps;
+  const maps = options[optionsKey];
   if (!maps || typeof maps !== "object") return undefined;
   const raw = (maps as Record<string, unknown>)[mapName];
   if (!raw || typeof raw !== "object") return undefined;
+  const cached = NORMALISED_MAPS.get(raw);
+  if (cached) return cached;
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
     if (typeof v !== "string" || !v) continue;
     out[isSfdcId(k) ? to18(k) : k] = v;
   }
+  NORMALISED_MAPS.set(raw, out);
   return out;
 }
 
@@ -202,6 +260,11 @@ export function configMapOf(
  * (§6.3.42 resolution order). Only the base row (`target === cfg.target`)
  * emits; the selector rows (`<target>.external_id`, `<target>.name`) return
  * `undefined` so their columns are merely extracted.
+ *
+ * Emits a Vault record id (`{ value }`) or an `external_id__v` lookup
+ * (`{ value, targetField: "<target>.external_id__v" }`) — never a `name__v`
+ * lookup (see the module doc): Name-based resolution comes from the preflight
+ * cache (`configMapsResolved`) or is reported as unmatched.
  */
 export function consentConfigRef(cfg: ConsentConfigObject): CustomTransformFn {
   const externalIdPath = configExternalIdPath(cfg.source);
@@ -222,38 +285,11 @@ export function consentConfigRef(cfg: ConsentConfigObject): CustomTransformFn {
         },
       };
     const id = to18(raw);
-    // (1) explicit map entry — keyed by SFDC id (18 or 15), never by label
-    const map = configMapOf(ctx.mapping.options, cfg.mapName);
-    const entry = map?.[id] ?? map?.[to15(id)];
-    if (entry) {
-      if (entry.startsWith("external_id:"))
-        return {
-          value: entry.slice("external_id:".length),
-          targetField: `${target}.external_id__v`,
-        };
-      if (entry.startsWith("name:"))
-        return {
-          value: entry.slice("name:".length),
-          targetField: `${target}.name__v`,
-        };
-      // Vault record id resolved at preflight — config crosswalk exception (§6.3.42), as country(ref)
-      return { value: entry };
-    }
-    // (2) automatic: config row External_ID_vod__c = external_id__v
-    const ext = readSource(row, externalIdPath);
-    if (!isEmpty(ext))
-      return {
-        value: String(ext).trim(),
-        targetField: `${target}.external_id__v`,
-      };
-    // (3) automatic: config row Name = name__v (per country / object type, validated at preflight)
-    const name = readSource(row, namePath);
-    if (!isEmpty(name))
-      return { value: String(name).trim(), targetField: `${target}.name__v` };
-    // no hit: blocking at preflight (VT_CONSENT_CONFIG_UNMATCHED); fatal here only when required
     const required =
       ctx.mapping.required[target] ?? ctx.targetField?.required ?? false;
-    return {
+    const name = readSource(row, namePath);
+    const nameText = isEmpty(name) ? undefined : String(name).trim();
+    const unmatched = (why: string): TransformResult => ({
       omit: true,
       diagnostic: {
         kind: "unresolved_fk",
@@ -261,9 +297,74 @@ export function consentConfigRef(cfg: ConsentConfigObject): CustomTransformFn {
         code: VT_CONSENT_CONFIG_UNMATCHED_CODE,
         value: id,
         fatal: required,
-        detail: `${cfg.sfdcObject} row has no Vault match (configMaps.${cfg.mapName} / External_ID_vod__c / Name) — §6.3.42`,
+        detail: `${cfg.sfdcObject} row${nameText ? ` "${nameText}"` : ""} has no Vault match (${why}) — §6.3.42`,
       },
-    };
+    });
+
+    // (0) preflight-resolved cache: Vault id per SFDC config row (name:/Name/external_id: resolved by VQL)
+    const resolved = configMapOf(
+      ctx.mapping.options,
+      cfg.mapName,
+      MULTICHANNEL_CONSENT_RESOLVED_MAPS_KEY,
+    )?.[id];
+    if (resolved !== undefined) {
+      if (isVaultRecordId(resolved)) return { value: resolved };
+      return invalidMapValue(target, id, resolved, cfg, "configMapsResolved");
+    }
+    // (1) explicit map entry — keyed by SFDC id (18 or 15), never by label
+    const entry = configMapOf(ctx.mapping.options, cfg.mapName)?.[id];
+    if (entry !== undefined) {
+      if (entry.startsWith("external_id:"))
+        return {
+          value: entry.slice("external_id:".length).trim(),
+          targetField: `${target}.external_id__v`,
+        };
+      if (entry.startsWith("name:"))
+        // name__v is not unique across countries: preflight resolves it into configMapsResolved
+        return unmatched(
+          `configMaps.${cfg.mapName} entry "${entry}" was not resolved at preflight`,
+        );
+      // Vault record id — config crosswalk exception (§6.3.42), as country(ref)
+      if (isVaultRecordId(entry)) return { value: entry };
+      return invalidMapValue(target, id, entry, cfg, "configMaps");
+    }
+    // (2) automatic: config row External_ID_vod__c = external_id__v (refLookup)
+    const ext = readSource(row, externalIdPath);
+    if (!isEmpty(ext))
+      return {
+        value: String(ext).trim(),
+        targetField: `${target}.external_id__v`,
+      };
+    // (3) automatic: config row Name = name__v — per country / object type, resolvable only at preflight
+    if (nameText !== undefined)
+      return unmatched(
+        `Name "${nameText}" not resolved at preflight; configMaps.${cfg.mapName} / External_ID_vod__c absent`,
+      );
+    // no hit: blocking at preflight (VT_CONSENT_CONFIG_UNMATCHED); fatal here only when required
+    return unmatched(
+      `configMaps.${cfg.mapName} / External_ID_vod__c / Name all absent`,
+    );
+  };
+}
+
+/** A map value that is neither prefixed nor shaped like a Vault record id: a broken overlay, always fatal. */
+function invalidMapValue(
+  target: string,
+  id: string,
+  entry: string,
+  cfg: ConsentConfigObject,
+  optionsKey: string,
+): TransformResult {
+  return {
+    omit: true,
+    diagnostic: {
+      kind: "invalid_value",
+      field: target,
+      code: CONSENT_CONFIG_MAP_INVALID_CODE,
+      value: id,
+      fatal: true,
+      detail: `objects.multichannel_consent.${optionsKey}.${cfg.mapName}[${id}] = "${entry}" is not a Vault record id nor external_id:<v> / name:<v> — §6.3.42`,
+    },
   };
 }
 
@@ -307,11 +408,17 @@ export const optoutEventType: CustomTransformFn = (
     };
   }
   const r = applyTransform(OPTOUT_EVENT_TYPE_SPEC, value, row, ctx);
-  if ("omit" in r && optOut && r.diagnostic && !r.diagnostic.fatal)
+  // any omission under an opt-out is fatal — including a crosswalk entry
+  // mapped to null (`skip` without diagnostic) or a non-fatal unmapped policy
+  if ("omit" in r && optOut && !r.diagnostic?.fatal)
     return {
       ...r,
       diagnostic: {
-        ...r.diagnostic,
+        kind: "required_missing",
+        field: ctx.field.target,
+        code: CONSENT_OPTOUT_EVENT_TYPE_MISSING_CODE,
+        value: String(value).trim(),
+        ...(r.diagnostic ?? {}),
         fatal: true,
         detail:
           "optout_event_type__v is required by Vault when opt_type__v = opt_out__v (§6.3.42)",
@@ -362,7 +469,7 @@ function configRows(cfg: ConsentConfigObject, required: "Y" | "n"): RowInput[] {
       evidence: "DOC",
       sourceType: "reference",
       countryConfigurable: true,
-      notes: `${cfg.vaultObject} pre-exists (§6.1); objects.multichannel_consent.configMaps.${cfg.mapName} keyed by SFDC 18-char Id (value: Vault id | external_id:<v> | name:<v>), else ${cfg.sfdcObject}.External_ID_vod__c = external_id__v, then Name = name__v per country/object type; unmatched → blocking VT_CONSENT_CONFIG_UNMATCHED`,
+      notes: `${cfg.vaultObject} pre-exists (§6.1); objects.multichannel_consent.configMaps.${cfg.mapName} keyed by SFDC 18-char Id (value: Vault id | external_id:<v> | name:<v>), else ${cfg.sfdcObject}.External_ID_vod__c = external_id__v (refLookup), then Name = name__v per country/object type — name:<v> and Name are resolved at preflight by VQL into configMapsResolved.${cfg.mapName} (never a load-time name__v lookup); unmatched → blocking VT_CONSENT_CONFIG_UNMATCHED`,
     },
     {
       source: configExternalIdPath(cfg.source),
@@ -576,7 +683,8 @@ export const multichannel_consent = defineObject({
       ],
       sameCountry: true,
       evidence: "UNV",
-      notes: "reported as a warning with counts for review before init (§3.3)",
+      notes:
+        "reported as a warning with counts for review before init (§3.3); consent_type__v must hold the preflight-resolved Vault id (configMapsResolved) — a lookup-form payload cannot hit",
     },
   ],
   blobs: { [MULTICHANNEL_CONSENT_SIGNATURE_BLOB]: "optional" },

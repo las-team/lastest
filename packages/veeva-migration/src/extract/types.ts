@@ -30,6 +30,13 @@ export interface ExtractPlan {
   expectedRows?: number;
   /** Delete feed start (watermark kind `deleted`). */
   deletedSince?: string;
+  /**
+   * Delete feed end when the plan has `deletedSince` but no `window` (full
+   * re-extract after a cutoff change, §4.3 step 1): the run's `wm_hi`, so the
+   * `deleted` watermark stays aligned with the run clock. Falls back to the
+   * extractor clock when absent.
+   */
+  deletedUntil?: string;
 }
 
 export interface ExtractFile {
@@ -56,7 +63,14 @@ export interface ExtractManifest {
   extractedDeleted: number;
   /** Rows fetched by closure (§1.1 #5). */
   closureRows: number;
-  /** REST `COUNT()` with the identical predicate (§2.8). */
+  /**
+   * REST `COUNT()` (`query` semantics) with the identical predicate (§2.8),
+   * **net of the client-side country filter** when the parent id-set
+   * strategy filters rows client-side: the §2.8/§8.8 gate compares it with
+   * `extractedLive` at tolerance 0, so it must count the same population.
+   * The raw `COUNT()` is only compared internally (step 8) with the rows
+   * streamed before the filter.
+   */
   sfdcScopeCount?: number;
   /** Feed results (§4.4 sources 2). */
   deletedIds: Array<{ id: string; deletedDate: string }>;
@@ -80,6 +94,13 @@ export interface ClosureRequest {
   targets: Map<ObjectKey, ResolvedTarget>;
   maxRounds: number;
   strategy: "soqlIn" | "composite";
+  /**
+   * Distinguishes this invocation's page files from those of other units
+   * that close over the same parent object in the same country (the engine
+   * runs the units of a step concurrently). Defaults to a random token;
+   * callers should pass the referencing unit id for readable file names.
+   */
+  tag?: string;
 }
 
 export interface ClosureResult {

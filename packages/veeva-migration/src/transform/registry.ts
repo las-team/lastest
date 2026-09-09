@@ -24,6 +24,7 @@ import {
   renamePicklistValue,
   renameTimezone,
 } from "./rename";
+import { readSource } from "./source";
 import type {
   CompositePart,
   DeferredFk,
@@ -523,10 +524,12 @@ export const TRANSFORMS: { [K in TransformSpec["kind"]]: TransformFn<K> } = {
     const devName = isEmpty(value) ? row["RecordType.DeveloperName"] : value;
     if (isEmpty(devName)) return OMIT;
     const name = asString(devName).trim();
-    const target =
+    // `null` in the country map means "skip rows of this type" and must not
+    // be collapsed by `??` into the derived name.
+    const fromCountry = ctx.country.picklist(spec.mapKey, name);
+    const target: string | null =
       ctx.mapping.objectTypes[name] ??
-      ctx.country.picklist(spec.mapKey, name) ??
-      renameObjectType(name);
+      (fromCountry !== undefined ? fromCountry : renameObjectType(name));
     if (target === null)
       return omitWith("skipped", ctx, {
         code: "OBJECT_TYPE_SKIPPED",
@@ -785,7 +788,9 @@ export const TRANSFORMS: { [K in TransformSpec["kind"]]: TransformFn<K> } = {
   },
 
   statusFromFlag(spec, _value, row) {
-    const flag = row[spec.sourceFlag];
+    // `sourceFlag` may be a relationship path (`Territory2Model.State`,
+    // §6.0.4): flattened Bulk-CSV keys and nested REST rows both resolve.
+    const flag = readSource(row, spec.sourceFlag);
     if (evalCondition(spec.inactiveWhen, flag))
       return { value: "inactive__v", targetField: "status__v" };
     return OMIT;

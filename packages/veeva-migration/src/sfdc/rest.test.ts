@@ -489,6 +489,56 @@ describe("SfdcRest describe cache", () => {
     await expect(rest.describe("bad name")).rejects.toThrow(TypeError);
   });
 
+  it("describeGlobal() 304 revalidation refreshes the TTL so the next window is served from cache", async () => {
+    let t = NOW;
+    const { fm, rest } = build(
+      [
+        {
+          match: /\/sobjects$/,
+          reply: (req) =>
+            req.headers["if-modified-since"]
+              ? new Response(null, { status: 304 })
+              : jsonReply(
+                  {
+                    sobjects: [
+                      {
+                        name: "Account",
+                        keyPrefix: "001",
+                        queryable: true,
+                        custom: false,
+                        replicateable: true,
+                      },
+                    ],
+                  },
+                  200,
+                  { "Last-Modified": "Mon, 07 Sep 2026 00:00:00 GMT" },
+                ),
+        },
+      ],
+      { now: () => t, restOpts: { describeTtlMs: 1000 } },
+    );
+    const g1 = await rest.describeGlobal();
+    expect(g1[0]).toMatchObject({ name: "Account", keyPrefix: "001" });
+    expect(fm.callsTo(/\/sobjects$/)).toHaveLength(1);
+    // past the TTL: one conditional GET, answered 304
+    t += 2000;
+    expect((await rest.describeGlobal())[0].name).toBe("Account");
+    const calls = fm.callsTo(/\/sobjects$/);
+    expect(calls).toHaveLength(2);
+    expect(calls[1].headers["if-modified-since"]).toBe(
+      "Mon, 07 Sep 2026 00:00:00 GMT",
+    );
+    // within the refreshed TTL: served from cache, no request
+    t += 500;
+    await rest.describeGlobal();
+    await rest.describeGlobal();
+    expect(fm.callsTo(/\/sobjects$/)).toHaveLength(2);
+    // past it again: exactly one more conditional GET
+    t += 1000;
+    await rest.describeGlobal();
+    expect(fm.callsTo(/\/sobjects$/)).toHaveLength(3);
+  });
+
   it("recordTypes() is fetched once", async () => {
     const { fm, rest } = build([
       {

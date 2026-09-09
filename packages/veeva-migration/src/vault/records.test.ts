@@ -521,6 +521,105 @@ describe("actions, attachments, deletions feed", () => {
     ).toBe("available");
   });
 
+  it("probeObjectAction: INVALID_SESSION_ID on the probe re-authenticates and replays instead of meaning 'available'", async () => {
+    const t = makeTestClient([
+      ...authRoutes(),
+      {
+        method: "GET",
+        path: `${API}/metadata/vobjects/order__v`,
+        body: {
+          responseStatus: "SUCCESS",
+          object: { name: "order__v", status: [], fields: [] },
+        },
+      },
+      {
+        method: "OPTIONS",
+        path: `${API}/vobjects/order__v/actions/recalculaterollups`,
+        body: failureBody("INVALID_SESSION_ID"),
+      },
+      {
+        method: "OPTIONS",
+        path: `${API}/vobjects/order__v/actions/recalculaterollups`,
+        body: failureBody("MALFORMED_URL"),
+      },
+      {
+        method: "GET",
+        path: `${API}/vobjects/order__v/actions/recalculaterollups`,
+        status: 404,
+        body: "",
+      },
+    ]);
+    await t.client.authenticate();
+    const authsBefore = t.fetch.calls.filter((c) =>
+      c.pathname.endsWith("/auth"),
+    ).length;
+    expect(
+      await t.client.probeObjectAction("order__v", "recalculaterollups"),
+    ).toBe("absent");
+    expect(
+      t.fetch.calls.filter((c) => c.pathname.endsWith("/auth")),
+    ).toHaveLength(authsBefore + 1);
+    expect(t.fetch.calls.filter((c) => c.method === "OPTIONS")).toHaveLength(2);
+  });
+
+  it("probeObjectAction: API_LIMIT_EXCEEDED on the probe is retried, not interpreted", async () => {
+    const t = makeTestClient([
+      ...authRoutes(),
+      {
+        method: "GET",
+        path: `${API}/metadata/vobjects/order__v`,
+        body: {
+          responseStatus: "SUCCESS",
+          object: { name: "order__v", status: [], fields: [] },
+        },
+      },
+      {
+        method: "OPTIONS",
+        path: `${API}/vobjects/order__v/actions/recalculaterollups`,
+        body: failureBody("API_LIMIT_EXCEEDED"),
+      },
+      {
+        method: "OPTIONS",
+        path: `${API}/vobjects/order__v/actions/recalculaterollups`,
+        body: failureBody("PARAMETER_REQUIRED", "body required"),
+      },
+    ]);
+    await t.client.authenticate();
+    // PARAMETER_REQUIRED: the action handler answered → the path exists
+    expect(
+      await t.client.probeObjectAction("order__v", "recalculaterollups"),
+    ).toBe("available");
+    expect(t.sleeps).toEqual([1000]);
+  });
+
+  it("probeObjectAction: an unknown/fatal envelope is not evidence the action exists", async () => {
+    const t = makeTestClient([
+      ...authRoutes(),
+      {
+        method: "GET",
+        path: `${API}/metadata/vobjects/order__v`,
+        body: {
+          responseStatus: "SUCCESS",
+          object: { name: "order__v", status: [], fields: [] },
+        },
+      },
+      {
+        method: "OPTIONS",
+        path: `${API}/vobjects/order__v/actions/recalculaterollups`,
+        body: failureBody("UNEXPECTED_ERROR"),
+      },
+      {
+        method: "GET",
+        path: `${API}/vobjects/order__v/actions/recalculaterollups`,
+        body: failureBody("SOMETHING_NEW"),
+      },
+    ]);
+    await t.client.authenticate();
+    expect(
+      await t.client.probeObjectAction("order__v", "recalculaterollups"),
+    ).toBe("absent");
+  });
+
   it("mergeRecords caps sets at 10", async () => {
     const t = makeTestClient([
       ...authRoutes(),

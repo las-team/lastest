@@ -3,6 +3,7 @@ import {
   buildCountryPredicate,
   countryOfSoqlPath,
   formatCountryOf,
+  isTerritoryCountryRule,
   parseCountryOf,
   parseCountryOfRule,
   relationshipName,
@@ -45,6 +46,21 @@ describe("countryOf grammar (§6.0.5)", () => {
     expect(() => parseCountryOfRule("parent:nope")).toThrow();
     expect(() => parseCountryOfRule("const:Germany")).toThrow();
     expect(() => parseCountryOf([])).toThrow();
+  });
+  it("recognises the territory country rule grammar (objects.territory.countryOf)", () => {
+    for (const ok of ["fromUsers", "prefixMap", "field:Country__c", "const:DE"])
+      expect(isTerritoryCountryRule(ok), ok).toBe(true);
+    for (const no of [
+      "global",
+      "account",
+      "user:OwnerId",
+      "field:",
+      "const:de",
+      3,
+      undefined,
+      ["fromUsers"],
+    ])
+      expect(isTerritoryCountryRule(no), String(no)).toBe(false);
   });
   it("round-trips through formatCountryOf", () => {
     for (const r of [

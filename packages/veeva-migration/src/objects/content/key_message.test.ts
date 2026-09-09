@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  CONTENT_EXTERNAL_ID_FIELD,
   KEY_MESSAGE_STATUS_DEFAULTS,
   VAULT_IDENTITY_FIELDS,
+  externalIdIfMigrationOwned,
   key_message,
   outOfScopeRef,
 } from "./key_message";
@@ -339,7 +341,8 @@ describe("key_message module", () => {
         mapKey: "key_message.disableActions",
       },
     });
-    // Block S: status__v derived from Active_vod__c, external_id__v kept
+    // Block S: status__v derived from Active_vod__c; external_id__v replaced
+    // by the integration-ownership guard (§3.2 step 4 / §6.0.4)
     expect(byTarget.get("status__v")).toMatchObject({
       source: "Active_vod__c",
       disabledBy: "statusFromFlag",
@@ -347,8 +350,14 @@ describe("key_message module", () => {
     });
     expect(byTarget.get("external_id__v")).toMatchObject({
       source: "External_ID_vod__c",
-      transform: { kind: "copy" },
+      required: "n",
+      optionalSource: true,
+      transform: { kind: "custom", fnName: "externalIdIfMigrationOwned" },
     });
+    expect(
+      key_message.fields.filter((f) => f.target === "external_id__v"),
+    ).toHaveLength(1);
+    expect(CONTENT_EXTERNAL_ID_FIELD.target).toBe("external_id__v");
     expect(byTarget.get("ownerid__v")).toBeDefined();
     // UNV targets survive as rows (preflight prunes; the module never omits)
     expect(
@@ -546,6 +555,24 @@ describe("key_message module", () => {
     expect(off.result.payload.active__v).toBe(false);
   });
 
+  it("never overwrites the integration-owned external_id__v unless externalIdOwnedBy = migration", () => {
+    const owned = run(sampleRow({ External_ID_vod__c: " EXT-KM-1 " }));
+    expect(owned.mapping.options.externalIdOwnedBy).toBe("integration");
+    expect(owned.result.status).toBe("ok");
+    expect(owned.result.payload.external_id__v).toBeUndefined();
+    // matching still reads the source column, unaffected by the guard
+    expect(
+      owned.mapping.match.some((m) =>
+        m.keys?.some((k) => k.source === "VExternal_Id_vod__c"),
+      ),
+    ).toBe(true);
+    const migration = run(sampleRow({ External_ID_vod__c: " EXT-KM-1 " }), {
+      overrides: { externalIdOwnedBy: "migration" },
+    });
+    expect(migration.mapping.options.externalIdOwnedBy).toBe("migration");
+    expect(migration.result.payload.external_id__v).toBe("EXT-KM-1");
+  });
+
   it("fails the row on an unmapped status under the default error policy", () => {
     const { result: r } = run(sampleRow({ Status_vod__c: "Mystery_vod" }));
     expect(r.status).toBe("failed");
@@ -566,6 +593,31 @@ describe("key_message module", () => {
 });
 
 describe("key_message helpers", () => {
+  it("externalIdIfMigrationOwned copies only when the migration owns external_id__v", () => {
+    const ctx = (externalIdOwnedBy: "integration" | "migration") =>
+      buildTransformContext({
+        objectKey: "key_message",
+        field: { source: "External_ID_vod__c", target: "external_id__v" },
+        mapping: { options: { externalIdOwnedBy } } as never,
+      });
+    const row: SourceRow = { Id: "a0M000000000001" };
+    expect(
+      externalIdIfMigrationOwned("EXT-1", row, ctx("integration")),
+    ).toBeUndefined();
+    expect(externalIdIfMigrationOwned(" EXT-1 ", row, ctx("migration"))).toBe(
+      "EXT-1",
+    );
+    expect(
+      externalIdIfMigrationOwned("", row, ctx("migration")),
+    ).toBeUndefined();
+    expect(
+      externalIdIfMigrationOwned("  ", row, ctx("migration")),
+    ).toBeUndefined();
+    expect(
+      externalIdIfMigrationOwned(null, row, ctx("migration")),
+    ).toBeUndefined();
+  });
+
   it("outOfScopeRef drops populated references with a count and omits blanks", () => {
     const ctx = buildTransformContext({
       objectKey: "key_message",

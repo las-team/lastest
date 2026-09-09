@@ -251,13 +251,20 @@ describe("clm_presentation_slide module", () => {
       evidence: "UNV",
       transform: { kind: "copy" },
     });
+    // anchored on the always-resolvable key-message path so a describe miss
+    // on the [UNVERIFIED-SOURCE] slide column cannot prune the fallback
     expect(byTarget.get("vault_external_id__v")).toMatchObject({
-      source: "Vault_External_Id_vod__c",
+      source: SLIDE_VAULT_EXTERNAL_ID_FALLBACK,
       required: "y?",
       evidence: "DOC",
-      unverifiedSource: true,
+      optionalSource: true,
       transform: { kind: "custom", fnName: "slideVaultExternalId" },
     });
+    expect(byTarget.get("vault_external_id__v")?.unverifiedSource).toBeFalsy();
+    // the slide's own column still travels with the extract as match-rule key 1
+    expect(clm_presentation_slide.match[0].keys?.[0].source).toBe(
+      SLIDE_VAULT_EXTERNAL_ID_SOURCE,
+    );
     expect(byTarget.get("display_order__v")).toMatchObject({
       source: "Display_Order_vod__c",
       transform: { kind: "number" },
@@ -377,6 +384,18 @@ describe("clm_presentation_slide module", () => {
         code: "SLIDE_VAULT_EXTERNAL_ID_FROM_KEY_MESSAGE",
       }),
     );
+    // org without Vault_External_Id_vod__c on the slide at all (the column was
+    // never extracted): the fallback still runs through the mapping row
+    const noOwnColumn = sampleRow();
+    delete noOwnColumn[SLIDE_VAULT_EXTERNAL_ID_SOURCE];
+    const absent = run(noOwnColumn);
+    expect(absent.result.status).toBe("ok");
+    expect(absent.result.payload.vault_external_id__v).toBe("vault-km-1");
+    expect(absent.result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "SLIDE_VAULT_EXTERNAL_ID_FROM_KEY_MESSAGE",
+      }),
+    );
     // neither source, target required (PromoMats content exists) → row still created, counted
     const missing = run(
       sampleRow({
@@ -410,22 +429,33 @@ describe("clm_presentation_slide module", () => {
 });
 
 describe("clm_presentation_slide helpers", () => {
-  it("slideVaultExternalId prefers the slide's own value, then the key message's, else omits with a count", () => {
+  it("slideVaultExternalId prefers the slide's own value, then the key message's (the row value), else omits with a count", () => {
     const ctx = buildTransformContext({
       objectKey: "clm_presentation_slide",
       field: {
-        source: SLIDE_VAULT_EXTERNAL_ID_SOURCE,
+        source: SLIDE_VAULT_EXTERNAL_ID_FALLBACK,
         target: "vault_external_id__v",
       },
     });
-    const withBoth: SourceRow = {
+    // `value` is the row anchor (key-message path); the own column is read from the row
+    const withOwn: SourceRow = {
       Id: "a0O000000000001",
-      [SLIDE_VAULT_EXTERNAL_ID_FALLBACK]: "vault-km-1",
+      [SLIDE_VAULT_EXTERNAL_ID_SOURCE]: " vault-slide-3 ",
     };
-    expect(slideVaultExternalId(" vault-slide-3 ", withBoth, ctx)).toBe(
+    expect(slideVaultExternalId("vault-km-1", withOwn, ctx)).toBe(
       "vault-slide-3",
     );
-    expect(slideVaultExternalId("", withBoth, ctx)).toMatchObject({
+    const blankOwn: SourceRow = {
+      Id: "a0O000000000001",
+      [SLIDE_VAULT_EXTERNAL_ID_SOURCE]: "",
+    };
+    expect(slideVaultExternalId(" vault-km-1 ", blankOwn, ctx)).toMatchObject({
+      value: "vault-km-1",
+      diagnostic: { code: "SLIDE_VAULT_EXTERNAL_ID_FROM_KEY_MESSAGE" },
+    });
+    expect(
+      slideVaultExternalId("vault-km-1", { Id: "a0O000000000001" }, ctx),
+    ).toMatchObject({
       value: "vault-km-1",
       diagnostic: { code: "SLIDE_VAULT_EXTERNAL_ID_FROM_KEY_MESSAGE" },
     });

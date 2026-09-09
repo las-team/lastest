@@ -251,6 +251,19 @@ describe("em_venue module", () => {
         expect(f.evidence, `${f.target} has an evidence tag`).toBeDefined();
   });
 
+  it("defaults externalIdOwnedBy to integration so external_id__v stays the match key (§3.2 step 4), overridable per object", () => {
+    expect(mapping().options.externalIdOwnedBy).toBe("integration");
+    const overridden = parseConfig({
+      ...config,
+      objects: { em_venue: { externalIdOwnedBy: "migration" } },
+    });
+    expect(
+      materialise(em_venue, resolveCountry(overridden, "US"), overridden, {
+        now: NOW,
+      }).options.externalIdOwnedBy,
+    ).toBe("migration");
+  });
+
   it("is full scope: no predicate and no cutoff after materialisation", () => {
     const m = mapping();
     expect(m.scope.spec).toEqual({ kind: "full" });

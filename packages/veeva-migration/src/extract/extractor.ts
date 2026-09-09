@@ -9,17 +9,26 @@
  *  2. column list (§2.2 step 2);
  *  3. `COUNT()` first (REST, `query` semantics), then REST for ≤ 2 000
  *     expected rows (or `--limit`), Bulk 2.0 `queryAll` otherwise
- *     (PK chunking when the plan asks or after a count mismatch);
+ *     (PK chunking when the plan asks, when the scoped count exceeds
+ *     `pkChunkRowThreshold`, always on `init` for the §2.1.5 large objects,
+ *     and after a count mismatch);
  *  4. pages streamed to `{runDir}/{country}/{objectKey}/extract/*.csv`, one
  *     checkpoint per page (`extract_checkpoints`), FK id-sets collected per
  *     reference column keyed by target object key (`OwnerId` keeps `005`,
  *     records `00G` as queue owners);
- *  5. count reconciliation vs `COUNT()`: mismatch → warning + automatic
- *     re-run with PK chunking; second mismatch → blocking;
- *  6. partitions (`load.partitionBy`, two sequential jobs), external sort
- *     (`load.orderBy`), depth ordering (`load.depthOrderBy`);
- *  7. delete sources for delta modes (`getDeleted` feed when replicateable,
- *     key-set reconciliation otherwise) and the `getUpdated` cross-check.
+ *  5. count reconciliation vs `COUNT()` (also for pages reused from a
+ *     resumed job): mismatch → warning + automatic re-run with PK chunking;
+ *     second mismatch → blocking;
+ *  6. delete sources for delta modes (`getDeleted` feed when replicateable,
+ *     key-set reconciliation otherwise) and the `getUpdated` cross-check —
+ *     rows re-queried by id join the page set *before* ordering;
+ *  7. partitions (`load.partitionBy`, two sequential jobs), external sort
+ *     (`load.orderBy`), depth ordering (`load.depthOrderBy`).
+ *
+ * Memory: FK id-sets are held per unit as the spec requires; the per-id
+ * `SystemModstamp` map and the de-duplication set are kept only for delta
+ * modes (small windows) — an `init` extract of a multi-million-row object
+ * streams pages to disk without a per-row in-memory index.
  */
 import path from "node:path";
 import { getLogger } from "../logger";
@@ -83,6 +92,27 @@ import type {
 /** §2.1.5 selection rule: Bulk 2.0 above this many expected rows. */
 export const REST_THRESHOLD = 2000;
 
+/** §2.1.5: PK chunking whenever the object exceeds ~1M rows. */
+export const PK_CHUNK_ROW_THRESHOLD = 1_000_000;
+
+/**
+ * §2.1.5: source objects always PK-chunked on `init` (`Call2_vod__c` and its
+ * children, samples, emails, multichannel activity, accounts, addresses) —
+ * the documented missing-rows behaviour on large unchunked jobs.
+ */
+export const PK_CHUNK_INIT_SOURCES: ReadonlySet<string> = new Set([
+  "Call2_vod__c",
+  "Call2_Detail_vod__c",
+  "Call2_Discussion_vod__c",
+  "Call2_Key_Message_vod__c",
+  "Call2_Sample_vod__c",
+  "Sample_Transaction_vod__c",
+  "Sent_Email_vod__c",
+  "Multichannel_Activity_vod__c",
+  "Account",
+  "Address_vod__c",
+]);
+
 export interface ExtractorOptions extends CountryStrategyOptions {
   /** Expected rows at/below which REST is used (default 2 000). */
   restThreshold?: number;
@@ -92,6 +122,10 @@ export interface ExtractorOptions extends CountryStrategyOptions {
   bulkMaxRecords?: number;
   /** Parent id-set size at/below which `field IN (…)` REST chunks are used instead of a client filter (default 2 000). */
   idSetRestMax?: number;
+  /** Scoped `COUNT()` above which a Bulk job is PK-chunked on the first pass (default 1 000 000, §2.1.5). */
+  pkChunkRowThreshold?: number;
+  /** Source objects always PK-chunked on `init` (default `PK_CHUNK_INIT_SOURCES`). */
+  pkChunkInitSources?: Iterable<string>;
   /** `performance.sortChunkRows` (default 500 000). */
   sortChunkRows?: number;
   /** Depth-ordering round cap (default 20). */
@@ -118,7 +152,12 @@ export interface SfdcExtractManifest extends ExtractManifest {
   countryStrategy: CountryStrategy["kind"];
   /** Rows dropped by the client-side country filter (id-set strategy). */
   filteredOut: number;
-  /** `SystemModstamp` per live id streamed (last-wins delete routing, §4.3 step 5). */
+  /**
+   * `SystemModstamp` per live id streamed (last-wins delete routing, §4.3
+   * step 5). Populated for delta modes only (`delta`, `final-delta`, or a
+   * plan with `deletedSince`) — on `init` there is no delete to supersede
+   * and the map would hold one entry per row of the whole object.
+   */
   liveModstamps: Map<string, string>;
   /** Rows in a depth cycle: their parent field must be deferred to pass 2. */
   deferredParentIds: Set<string>;
@@ -129,7 +168,16 @@ export interface SfdcExtractManifest extends ExtractManifest {
 }
 
 interface PartitionCounters {
+  /** Live rows delivered by the source (before the client filter) — compared with `COUNT()`. */
   streamedLive: number;
+  /** Rows (live + deleted) dropped by the client-side country filter. */
+  filteredOut: number;
+  /** Live rows dropped by the client-side country filter (netted from `sfdcScopeCount`). */
+  filteredOutLive: number;
+}
+
+function newCounters(): PartitionCounters {
+  return { streamedLive: 0, filteredOut: 0, filteredOutLive: 0 };
 }
 
 function isDeletedRow(row: SourceRow): boolean {
@@ -297,12 +345,17 @@ export class SfdcExtractor implements Extractor {
     manifest.predicate = basePredicate ?? "";
 
     // 2. streaming state
+    const deltaMode = plan.mode === "delta" || plan.mode === "final-delta";
+    // per-id bookkeeping (de-duplication set + modstamp map) is bounded by
+    // the delta window; on `init` it would index the whole object in memory
+    const trackLive = deltaMode || Boolean(plan.deletedSince);
     const liveSeen = new Set<string>();
     const counters = new Map<number, PartitionCounters>();
     let limitReached = false;
     let usedBulk = false;
     let usedRest = false;
     let restOrdered = false;
+    let recheckRows = 0;
 
     const routeRows = async (
       rows: SourceRow[],
@@ -312,7 +365,7 @@ export class SfdcExtractor implements Extractor {
       nextLocator: string | null,
       persist: boolean,
     ) => {
-      const pc = counters.get(partition ?? 0) ?? { streamedLive: 0 };
+      const pc = counters.get(partition ?? 0) ?? newCounters();
       counters.set(partition ?? 0, pc);
       const live: SourceRow[] = [];
       const deleted: SourceRow[] = [];
@@ -327,6 +380,8 @@ export class SfdcExtractor implements Extractor {
         if (!isDel) pc.streamedLive++;
         if (clientFilter && !clientFilter(row)) {
           manifest.filteredOut++;
+          pc.filteredOut++;
+          if (!isDel) pc.filteredOutLive++;
           continue;
         }
         if (isDel) {
@@ -337,7 +392,9 @@ export class SfdcExtractor implements Extractor {
             deletedDate:
               typeof row.SystemModstamp === "string" && row.SystemModstamp
                 ? row.SystemModstamp
-                : (plan.window?.wmHi ?? now().toISOString()),
+                : (plan.window?.wmHi ??
+                  plan.deletedUntil ??
+                  now().toISOString()),
             source: "queryAll",
             partition: partition ?? 0,
             ...(master ? { masterRecordId: to18(String(master)) } : {}),
@@ -345,11 +402,13 @@ export class SfdcExtractor implements Extractor {
           deleted.push(row);
           continue;
         }
-        if (liveSeen.has(id)) continue; // overlapping chunk/page re-delivery
-        liveSeen.add(id);
+        if (trackLive) {
+          if (liveSeen.has(id)) continue; // re-delivered in the window
+          liveSeen.add(id);
+          if (typeof row.SystemModstamp === "string")
+            manifest.liveModstamps.set(id, row.SystemModstamp);
+        }
         collectRowFks(row, fkColumns, manifest.fkSets, manifest.queueOwners);
-        if (typeof row.SystemModstamp === "string")
-          manifest.liveModstamps.set(id, row.SystemModstamp);
         manifest.extractedLive++;
         live.push(row);
       }
@@ -459,13 +518,25 @@ export class SfdcExtractor implements Extractor {
         plan.limit !== undefined ||
         idSetChunks !== undefined ||
         expected <= (this.opts.restThreshold ?? REST_THRESHOLD);
-      const pkChunking = attempt > 0 || plan.pkChunking === true;
+      const pkChunking =
+        attempt > 0 ||
+        plan.pkChunking === true ||
+        count > (this.opts.pkChunkRowThreshold ?? PK_CHUNK_ROW_THRESHOLD) ||
+        (plan.mode === "init" &&
+          new Set(this.opts.pkChunkInitSources ?? PK_CHUNK_INIT_SOURCES).has(
+            source,
+          ));
       let pageNo = 0;
 
       if (useRest) {
         usedRest = true;
+        // SOQL ORDER BY only yields a globally ordered stream for a single
+        // query; id-set IN chunks are each ordered on their own, so the
+        // external sort must still run over the concatenated pages
         const orderBy =
-          mapping.load.orderBy && partitions.length === 0
+          mapping.load.orderBy &&
+          partitions.length === 0 &&
+          predicates.length === 1
             ? mapping.load.orderBy
             : undefined;
         if (orderBy) restOrdered = true;
@@ -513,6 +584,7 @@ export class SfdcExtractor implements Extractor {
         let resume:
           | { jobId: string; locator: string | null; pageNo: number }
           | undefined;
+        let reused = false;
         if (cps.length && attempt === 0) {
           const byJob = new Map<string, typeof cps>();
           for (const c of cps) {
@@ -538,53 +610,68 @@ export class SfdcExtractor implements Extractor {
             );
             pageNo = last.pageNo + 1;
             if (complete) {
+              // the pages are reused, but the §2.2 step 8 count check below
+              // still runs: a crashed-and-resumed run is exactly the one
+              // most likely to have lost a page
+              reused = true;
               log.info(
                 { jobId: last.jobId, pages: best.length },
                 "extract already complete on disk; reusing pages",
               );
-              return;
+            } else {
+              resume = {
+                jobId: last.jobId,
+                locator: last.locator ?? null,
+                pageNo,
+              };
+              log.info(resume, "resuming Bulk job from checkpoint");
             }
-            resume = {
-              jobId: last.jobId,
-              locator: last.locator ?? null,
-              pageNo,
-            };
-            log.info(resume, "resuming Bulk job from checkpoint");
           }
         }
-        const soql = buildSelect({
-          object: source,
-          columns,
-          where: predicates[0],
-        });
-        log.info(
-          { soql, partition, attempt, pkChunking },
-          "Bulk queryAll extract",
-        );
-        const result = this.deps.sfdc.bulkQuery(soql, {
-          all: true,
-          pkChunking,
-          resume,
-          maxRecords: this.opts.bulkMaxRecords,
-        });
-        for await (const page of result) {
-          await routeRows(
-            page.records,
-            partition,
-            page.jobId,
-            page.pageNo,
-            page.nextLocator,
-            true,
+        if (!reused) {
+          const soql = buildSelect({
+            object: source,
+            columns,
+            where: predicates[0],
+          });
+          log.info(
+            { soql, partition, attempt, pkChunking },
+            "Bulk queryAll extract",
           );
-          if (limitReached) break;
+          const result = this.deps.sfdc.bulkQuery(soql, {
+            all: true,
+            pkChunking,
+            resume,
+            maxRecords: this.opts.bulkMaxRecords,
+          });
+          for await (const page of result) {
+            await routeRows(
+              page.records,
+              partition,
+              page.jobId,
+              page.pageNo,
+              page.nextLocator,
+              true,
+            );
+            if (limitReached) break;
+          }
+          await result.job;
         }
-        await result.job;
       }
 
-      // 5. count reconciliation (§2.2 step 8, §2.8)
+      // 5. count reconciliation (§2.2 step 8, §2.8): the raw COUNT() is
+      // compared with the rows the source delivered (before the client
+      // filter); the reported scope count is then netted of the rows the
+      // client-side country filter dropped so that it counts the same
+      // population as `extractedLive` (§2.8 gate, tolerance 0)
       if (plan.limit !== undefined) return;
-      const streamed = counters.get(partition ?? 0)?.streamedLive ?? 0;
-      if (streamed === count) return;
+      const pc = counters.get(partition ?? 0) ?? newCounters();
+      const streamed = pc.streamedLive;
+      if (streamed === count) {
+        manifest.sfdcScopeCount =
+          (manifest.sfdcScopeCount ?? 0) - pc.filteredOutLive;
+        return;
+      }
       if (attempt === 0) {
         findings.push({
           severity: "warning",
@@ -596,18 +683,22 @@ export class SfdcExtractor implements Extractor {
         });
         // reset this partition and retry
         manifest.sfdcScopeCount = (manifest.sfdcScopeCount ?? 0) - count;
+        manifest.filteredOut -= pc.filteredOut;
         await this.resetPartition(
           manifest,
           partition,
           dir,
           liveSeen,
           fkColumns,
+          trackLive,
         );
-        counters.set(partition ?? 0, { streamedLive: 0 });
+        counters.set(partition ?? 0, newCounters());
         await removeDir(dir);
         await extractPartition(predicates, partition, 1);
         return;
       }
+      manifest.sfdcScopeCount =
+        (manifest.sfdcScopeCount ?? 0) - pc.filteredOutLive;
       findings.push({
         severity: "blocking",
         code: "EXTRACT_COUNT_MISMATCH",
@@ -636,48 +727,12 @@ export class SfdcExtractor implements Extractor {
     }
     manifest.strategy = usedBulk ? "bulk" : usedRest ? "rest" : "empty";
 
-    // 6. client-side ordering
-    if (mapping.load.orderBy?.length && !(restOrdered && !usedBulk)) {
-      const out = sortedDir(plan.runDir, unit.country, unit.objectKey);
-      await removeDir(out);
-      manifest.files = await externalSort(
-        manifest.files,
-        mapping.load.orderBy,
-        columns,
-        out,
-        {
-          chunkRows: this.opts.sortChunkRows,
-          jobId: "sorted",
-        },
-      );
-    }
-    const depthField = mapping.load.depthOrderBy;
-    const depthEnabled =
-      depthField &&
-      (unit.objectKey !== "account" || mapping.options.depthOrder === true);
-    if (depthEnabled && manifest.files.length) {
-      const out = depthDir(plan.runDir, unit.country, unit.objectKey);
-      await removeDir(out);
-      const r = await depthPartitionFiles(
-        manifest.files,
-        depthField,
-        columns,
-        out,
-        {
-          objectKey: unit.objectKey,
-          country: unit.country,
-          maxDepth: this.opts.maxDepth,
-        },
-      );
-      manifest.files = r.files;
-      manifest.deferredParentIds = r.unresolved;
-      findings.push(...r.findings);
-    }
-
-    // 7. delete sources (§4.4) + update feed cross-check (§4.1)
-    const deltaMode = plan.mode === "delta" || plan.mode === "final-delta";
-    if (deltaMode || plan.deletedSince) {
-      const wmHi = plan.window?.wmHi ?? now().toISOString();
+    // 6. delete sources (§4.4) + update feed cross-check (§4.1) — before the
+    // ordering step so rows re-queried by id take part in the sort / depth
+    // partitioning instead of being appended after it
+    if (trackLive) {
+      const wmHi =
+        plan.window?.wmHi ?? plan.deletedUntil ?? now().toISOString();
       if (target.replicateable) {
         const start = plan.deletedSince ?? plan.window?.wmLo;
         findings.push(...checkDeleteWindow(start, wmHi, plan.mode, unit));
@@ -721,7 +776,9 @@ export class SfdcExtractor implements Extractor {
               columns,
             ))
               rows.push(row);
+            const before = manifest.extractedLive;
             await routeRows(rows, undefined, "updated-recheck", 0, null, true);
+            recheckRows += manifest.extractedLive - before;
           }
         }
       } else {
@@ -742,6 +799,46 @@ export class SfdcExtractor implements Extractor {
         );
         manifest.deletedIds.push(...gone);
       }
+    }
+
+    // 7. client-side ordering (§2.2 step 9); an ordered REST stream stays
+    // as-is unless re-checked rows were added out of order
+    const sortedAtSource = restOrdered && !usedBulk && recheckRows === 0;
+    if (mapping.load.orderBy?.length && !sortedAtSource) {
+      const out = sortedDir(plan.runDir, unit.country, unit.objectKey);
+      await removeDir(out);
+      manifest.files = await externalSort(
+        manifest.files,
+        mapping.load.orderBy,
+        columns,
+        out,
+        {
+          chunkRows: this.opts.sortChunkRows,
+          jobId: "sorted",
+        },
+      );
+    }
+    const depthField = mapping.load.depthOrderBy;
+    const depthEnabled =
+      depthField &&
+      (unit.objectKey !== "account" || mapping.options.depthOrder === true);
+    if (depthEnabled && manifest.files.length) {
+      const out = depthDir(plan.runDir, unit.country, unit.objectKey);
+      await removeDir(out);
+      const r = await depthPartitionFiles(
+        manifest.files,
+        depthField,
+        columns,
+        out,
+        {
+          objectKey: unit.objectKey,
+          country: unit.country,
+          maxDepth: this.opts.maxDepth,
+        },
+      );
+      manifest.files = r.files;
+      manifest.deferredParentIds = r.unresolved;
+      findings.push(...r.findings);
     }
 
     log.info(
@@ -765,6 +862,7 @@ export class SfdcExtractor implements Extractor {
     dir: string,
     liveSeen: Set<string>,
     fkColumns: readonly FkColumn[],
+    trackLive: boolean,
   ): Promise<void> {
     // drop this partition's files, deleted rows and FK contributions, then
     // rebuild the live bookkeeping from the pages of the other partitions
@@ -782,10 +880,11 @@ export class SfdcExtractor implements Extractor {
     liveSeen.clear();
     for (const f of manifest.files)
       for await (const row of readCsvFile(f.path)) {
-        const id = to18(row.Id);
-        liveSeen.add(id);
         manifest.extractedLive++;
         collectRowFks(row, fkColumns, manifest.fkSets, manifest.queueOwners);
+        if (!trackLive) continue;
+        const id = to18(row.Id);
+        liveSeen.add(id);
         if (typeof row.SystemModstamp === "string")
           manifest.liveModstamps.set(id, row.SystemModstamp);
       }

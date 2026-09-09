@@ -281,7 +281,10 @@ export class PostgresStateStore implements StateStore {
       ),
     update: async (runId, patch) => {
       const set: Rec = {};
-      for (const [k, v] of Object.entries(patch)) if (k !== "runId") set[k] = v;
+      // `undefined` means "leave as is" (the memory/file stores drop it via
+      // JSON clone); only an explicit `null` clears a nullable column
+      for (const [k, v] of Object.entries(patch))
+        if (k !== "runId" && v !== undefined) set[k] = v;
       if (Object.keys(set).length === 0) {
         const cur = await this.runs.get(runId);
         if (!cur) throw new Error(`run ${runId} not found`);

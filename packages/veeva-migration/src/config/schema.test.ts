@@ -188,6 +188,45 @@ describe("MigrationConfigSchema (§7.2.1)", () => {
       "CONFIG_REGION_UNKNOWN",
     );
   });
+  it("accepts the §7.3 bare-null partitionBy order and normalises it", () => {
+    const c = parseConfig({
+      ...minimal,
+      objects: {
+        call2: {
+          load: {
+            partitionBy: {
+              field: "Parent_Call_vod__c",
+              order: [null, "notNull"],
+            },
+          },
+        },
+      },
+    });
+    expect(c.objects?.call2?.load?.partitionBy?.order).toEqual([
+      "null",
+      "notNull",
+    ]);
+  });
+  it("validates overlay transform strings at load time (MAP_TRANSFORM_INVALID)", () => {
+    const bad = (transform: string) =>
+      MigrationConfigSchema.safeParse({
+        ...minimal,
+        objects: {
+          account: {
+            fields: { add: [{ source: "X__c", target: "x__v", transform }] },
+          },
+        },
+      });
+    for (const t of ["picklsit(account.x)", "text(abc)", "number(x)"]) {
+      const r = bad(t);
+      expect(r.success, t).toBe(false);
+      expect(JSON.stringify(r.success ? "" : r.error.issues)).toContain(
+        "MAP_TRANSFORM_INVALID",
+      );
+    }
+    expect(bad("text(128)").success).toBe(true);
+    expect(bad("picklist(account.x)").success).toBe(true);
+  });
   it("allows per-country target/staging (CN) and object-specific flags", () => {
     const c = parseConfig({
       ...minimal,

@@ -4,6 +4,9 @@ import {
   buildVaultMetadata,
   IDS,
   resolveMetadata,
+  SAMPLE_QUEUE_ID,
+  SAMPLE_USER_ID,
+  SAMPLE_USER_ID_2,
   sampleAccountRows,
   sampleCall2Describe,
   sampleCall2Rows,
@@ -75,6 +78,15 @@ describe("fixtures", () => {
   it("sample rows use checksum-correct ids matching their describes", () => {
     for (const r of [...sampleAccountRows(), ...sampleCall2Rows()])
       expect(to18(r.Id)).toBe(r.Id);
+    // every exported id must survive normalisation unchanged (CONTRACTS: never hand-write a suffix)
+    for (const id of [
+      SAMPLE_USER_ID,
+      SAMPLE_USER_ID_2,
+      SAMPLE_QUEUE_ID,
+      ...Object.values(IDS),
+    ])
+      expect(to18(id), id).toBe(id);
+    expect(SAMPLE_QUEUE_ID).toBe("00G000000000001EAA");
     expect(IDS.call1.slice(0, 15)).toBe("a0K000000000001");
     const cols = new Set(sampleCall2Describe().fields.map((f) => f.name));
     for (const r of sampleCall2Rows())

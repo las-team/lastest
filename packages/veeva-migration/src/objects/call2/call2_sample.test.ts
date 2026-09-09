@@ -197,10 +197,10 @@ describe("call2_sample module", () => {
     expect(call2_sample.deletePolicy).toBe("delete");
     expect(call2_sample.inactivate).toEqual([]);
     expect(call2_sample.createPolicy).toBe("create");
-    expect(call2_sample.load).toMatchObject({
-      noTriggers: true,
-      sampleStrategy: "noTriggersRecalc",
-    });
+    expect(call2_sample.load).toMatchObject({ noTriggers: true });
+    // the strategy lives on objects.sample_transaction.load only (§6.3.34)
+    expect(call2_sample.load.sampleStrategy).toBeUndefined();
+    expect(call2_sample.load.fallbackStrategy).toBeUndefined();
     expect(call2_sample.blockS).toMatchObject({
       name: "autoNumber",
       ownerId: false,

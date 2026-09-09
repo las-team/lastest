@@ -4,9 +4,17 @@
  * blobs, `row_results` (`transformed` | `skipped` | `failed`) and the
  * `fk_index` (§4.2), and reports diagnostics by code for the report.
  */
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import type { ExtractFile, Extractor } from "../extract/types";
 import { getLogger } from "../logger";
-import { blobsDir, payloadDir, writePayloadFiles } from "../load/paths";
+import {
+  PAYLOAD_FILE_ROWS,
+  batchFileName,
+  blobsDir,
+  payloadDir,
+  writePayloadFiles,
+} from "../load/paths";
 import type { PayloadRow } from "../load/types";
 import type { StateStore } from "../store/types";
 import {
@@ -45,6 +53,13 @@ export interface TransformUnitInput {
   dryRun?: boolean;
   /** Restrict to these ids (`retry-failed`). */
   onlyIds?: ReadonlySet<string>;
+  /**
+   * Ids whose `SystemModstamp` is needed for delete last-wins (§4.3 step 5)
+   * — the delete queue of the unit. Absent → every row's modstamp is kept
+   * (tests); the engine always passes the set so a 10M-row unit does not
+   * pin one string per row for the whole run.
+   */
+  modstampIds?: ReadonlySet<string>;
   /** Attach the raw source row to payload rows (match keys, §3.3). */
   keepSource?: boolean;
   /** Payload file prefix (`closure-r1-`, `p1-`) so several passes share one unit directory. */
@@ -90,6 +105,36 @@ export function toPayloadRow(
   };
   if (keepSource) out.source = row;
   return out;
+}
+
+/** Incremental `[prefix]batch-{n}.json` writer (same layout as `writePayloadFiles`). */
+class BatchFileWriter {
+  private buf: PayloadRow[] = [];
+  private n = 0;
+  private readonly files: string[] = [];
+  private ready?: Promise<void>;
+  constructor(
+    private readonly dir: string,
+    private readonly prefix = "",
+    private readonly rowsPerFile = PAYLOAD_FILE_ROWS,
+  ) {}
+  async push(row: PayloadRow): Promise<void> {
+    this.buf.push(row);
+    if (this.buf.length >= this.rowsPerFile) await this.flush();
+  }
+  private async flush(): Promise<void> {
+    if (!this.buf.length) return;
+    this.ready ??= fs.mkdir(this.dir, { recursive: true }).then(() => {});
+    await this.ready;
+    const file = path.join(this.dir, batchFileName(this.n++, this.prefix));
+    await fs.writeFile(file, JSON.stringify(this.buf), "utf8");
+    this.files.push(file);
+    this.buf = [];
+  }
+  async finish(): Promise<string[]> {
+    await this.flush();
+    return this.files;
+  }
 }
 
 export async function transformUnit(
@@ -138,13 +183,20 @@ export async function transformUnit(
   };
   const bump = (rec: Record<string, number>, key: string) =>
     (rec[key] = (rec[key] ?? 0) + 1);
-  const blobRows: Array<{ sfdcId: string; blobs: PayloadRow["payload"] }> = [];
+  // deferred blobs stream to `blobs/` files as rows pass (§8.6) — never buffered for the unit
+  const blobWriter = new BatchFileWriter(
+    blobsDir(input.runDir, input.unit),
+    input.filePrefix,
+  );
 
   const payloadRows = (async function* (): AsyncGenerator<PayloadRow> {
     for await (const { row, file } of input.extractor.readRows(input.files)) {
       if (input.onlyIds && !input.onlyIds.has(row.Id)) continue;
       const r = applyMapping(row, input.mapping, ctx);
-      if (typeof row.SystemModstamp === "string")
+      if (
+        typeof row.SystemModstamp === "string" &&
+        (!input.modstampIds || input.modstampIds.has(r.sfdcId))
+      )
         result.seenModstamps.set(r.sfdcId, row.SystemModstamp);
       for (const d of r.diagnostics) bump(result.diagnostics, d.code ?? d.kind);
       if (file.closure) result.closureRows++;
@@ -190,7 +242,12 @@ export async function transformUnit(
             runId: input.runId,
           });
         if (Object.keys(r.blobs).length)
-          blobRows.push({ sfdcId: r.sfdcId, blobs: r.blobs });
+          await blobWriter.push({
+            sfdcId: r.sfdcId,
+            payload: r.blobs,
+            sourceHash: "",
+            diagnostics: [],
+          });
         yield toPayloadRow(
           r,
           row,
@@ -209,23 +266,7 @@ export async function transformUnit(
     input.filePrefix,
   );
   await flushStore();
-  if (blobRows.length) {
-    const rows = blobRows.map(
-      (b) =>
-        ({
-          sfdcId: b.sfdcId,
-          payload: b.blobs,
-          sourceHash: "",
-          diagnostics: [],
-        }) satisfies PayloadRow,
-    );
-    result.blobFiles = await writePayloadFiles(
-      blobsDir(input.runDir, input.unit),
-      rows,
-      undefined,
-      input.filePrefix,
-    );
-  }
+  result.blobFiles = await blobWriter.finish();
   log.info(
     {
       transformed: result.transformed,

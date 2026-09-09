@@ -2,8 +2,11 @@
  * Salesforce OAuth token exchange (§2.1.1).
  *
  * - JWT Bearer (default): RS256 assertion signed with `node:crypto`
- *   (`iss` = consumer key, `sub` = integration username, `aud` = configured
- *   login URL, `exp` = now + ≤ 3 min). No refresh token — the exchange is
+ *   (`iss` = consumer key, `sub` = integration username, `aud` =
+ *   `source.auth.aud` or, by default, the origin of `source.loginUrl` —
+ *   Salesforce validates the audience against the token endpoint host, so a
+ *   sandbox on `test.salesforce.com` must not send `login.salesforce.com`;
+ *   `exp` = now + ≤ 3 min). No refresh token — the exchange is
  *   simply re-run when a request comes back `401 INVALID_SESSION_ID`.
  * - Client credentials: `grant_type=client_credentials` with
  *   `client_id`/`client_secret` form fields on the **My Domain** token URL.
@@ -25,7 +28,11 @@ export interface SfdcJwtAuthConfig {
   kind: "jwt";
   clientId: string;
   username: string;
-  /** `aud` claim (login/test/My Domain login URL). Default `https://login.salesforce.com`. */
+  /**
+   * `aud` claim (login/test/My Domain login URL, §2.1.1). Default: the
+   * origin of `loginUrl`, so sandboxes (`test.salesforce.com`) and My Domain
+   * token endpoints get a matching audience without extra config.
+   */
   aud?: string;
   privateKeyPath?: string;
   /** PEM private key text (wins over `privateKeyPath`). */
@@ -180,6 +187,19 @@ function isMyDomain(loginUrl: string): boolean {
   }
 }
 
+/**
+ * Default JWT `aud`: the origin of the configured login URL (§2.1.1 —
+ * `login` | `test` | My Domain). Falls back to the trimmed URL when it does
+ * not parse (the token exchange will then surface the real error).
+ */
+export function defaultAudience(loginUrl: string): string {
+  try {
+    return new URL(loginUrl).origin;
+  } catch {
+    return loginUrl.replace(/\/+$/, "");
+  }
+}
+
 function tokenUrl(loginUrl: string): string {
   return `${loginUrl.replace(/\/+$/, "")}/services/oauth2/token`;
 }
@@ -254,7 +274,7 @@ export function createSfdcAuthenticator(
       const assertion = buildJwtAssertion({
         clientId: cfg.clientId,
         username: cfg.username,
-        aud: cfg.aud ?? "https://login.salesforce.com",
+        aud: cfg.aud ?? defaultAudience(opts.loginUrl),
         privateKey: await loadPrivateKey(cfg),
         nowMs: now(),
         lifetimeSec: opts.jwtLifetimeSec,

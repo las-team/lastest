@@ -136,6 +136,7 @@ export async function runPreflight(
       config,
       target: ccOf(unit.country).target,
       findings: fc,
+      flags,
     });
   }
 
@@ -264,7 +265,17 @@ export async function runPreflight(
       dns === config.target.vaultDns
         ? unit.objectKey
         : `${unit.objectKey}@${dns}`;
-    if (!resolvedTargets.has(key)) resolvedTargets.set(key, tr.resolved);
+    // One entry per object (per vault): the first unit resolves the target;
+    // later countries only widen the SELECT list, because the per-country
+    // materialised mapping may add rows (fieldLayers, enabledBy/disabledBy,
+    // countryOf overrides) whose source columns the first country never
+    // mapped and `SimpleExtractor.columnsFor` selects `columns` verbatim.
+    const existing = resolvedTargets.get(key);
+    if (!existing) resolvedTargets.set(key, tr.resolved);
+    else
+      existing.columns = [
+        ...new Set([...existing.columns, ...tr.resolved.columns]),
+      ];
     pruned.set(id, tr.mapping);
 
     // MAP_HASH_CHANGED against the last snapshot of the unit

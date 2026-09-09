@@ -139,6 +139,32 @@ describe("MDL execution", () => {
     });
   });
 
+  it("mdlResults re-authenticates on INVALID_SESSION_ID instead of reporting the job as failed", async () => {
+    const t = makeTestClient([
+      ...authRoutes(),
+      {
+        method: "GET",
+        path: "/api/mdl/execute_async/5/results",
+        body: failureBody("INVALID_SESSION_ID"),
+      },
+      {
+        method: "GET",
+        path: "/api/mdl/execute_async/5/results",
+        body: { responseStatus: "SUCCESS", job_status: "RUNNING" },
+      },
+    ]);
+    await t.client.authenticate();
+    const authsBefore = t.fetch.calls.filter((c) =>
+      c.pathname.endsWith("/auth"),
+    ).length;
+    expect(await t.client.mdlResults("5")).toMatchObject({
+      status: "running",
+    });
+    expect(
+      t.fetch.calls.filter((c) => c.pathname.endsWith("/auth")),
+    ).toHaveLength(authsBefore + 1);
+  });
+
   it("readObjectMdl returns the raw script", async () => {
     const t = makeTestClient([
       ...authRoutes(),

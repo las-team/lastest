@@ -72,6 +72,25 @@ function ms(iso: string): number {
   return t;
 }
 
+/**
+ * `a` is strictly later than `b`. Datetimes arrive in mixed formats — the
+ * `/deleted/` feed renders `…T10:00:00.000+0000`, `queryAll`/Bulk CSV
+ * `…T10:00:00.000Z` — so instants are compared, never strings; an
+ * unparseable value falls back to a lexical comparison rather than throwing.
+ */
+export function isLater(a: string, b: string): boolean {
+  const x = new Date(a).getTime();
+  const y = new Date(b).getTime();
+  if (Number.isNaN(x) || Number.isNaN(y)) return a > b;
+  return x > y;
+}
+
+/** Canonical ISO-8601 UTC (`…Z`) when parseable, the input otherwise. */
+export function toIsoZ(v: string): string {
+  const t = new Date(v).getTime();
+  return Number.isNaN(t) ? v : new Date(t).toISOString();
+}
+
 /** §4.1 window math; literals are rendered with `soqlDateTime`. */
 export function planDeltaWindow(input: DeltaWindowInput): DeltaWindow {
   const overlap = input.overlapMinutes ?? 10;
@@ -174,7 +193,10 @@ export async function fetchDeletedFeed(
   return {
     rows: r.deletedRecords.map((d) => ({
       id: to18(d.id),
-      deletedDate: d.deletedDate,
+      // the feed renders `+0000` offsets; normalise so every deletedDate
+      // in the queue shares the CSV `…Z` form (last-wins compares instants
+      // anyway, but the report and the store should not carry two forms)
+      deletedDate: toIsoZ(d.deletedDate),
       source: "feed",
     })),
     latestDateCovered: r.latestDateCovered,
@@ -241,7 +263,7 @@ export function routeDeletes(
   for (const d of deleted) {
     const id = to18(d.id);
     const prev = byId.get(id);
-    if (!prev || prev.deletedDate < d.deletedDate)
+    if (!prev || isLater(d.deletedDate, prev.deletedDate))
       byId.set(id, {
         ...d,
         id,
@@ -255,7 +277,7 @@ export function routeDeletes(
   const superseded: DeletedRow[] = [];
   for (const d of byId.values()) {
     const live = liveModstamps.get(d.id);
-    if (live !== undefined && live > d.deletedDate) {
+    if (live !== undefined && isLater(live, d.deletedDate)) {
       superseded.push(d);
       continue;
     }

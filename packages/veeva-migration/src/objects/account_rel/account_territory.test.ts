@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  ACCOUNT_TERRITORY_EXTRA_COLUMNS,
+  ACCOUNT_TERRITORY_NAME_SOURCE,
   ACCOUNT_TERRITORY_NAME_TEMPLATE,
   ACCOUNT_TERRITORY_SOURCE_FILTER,
   account_territory,
@@ -11,11 +11,13 @@ import { validateObjectModule } from "../types";
 import { materialise, resolveCountry } from "../../config/resolve";
 import { parseConfig } from "../../config/schema";
 import { applyMapping } from "../../transform/apply";
+import { buildColumnList } from "../../extract/columns";
 import { buildScopePredicate } from "../../extract/scope";
 import {
   IDS,
   SAMPLE_USER_ID,
   buildCountryContext,
+  buildDescribe,
   buildIdResolver,
   buildTransformContext,
   buildVaultMetadata,
@@ -167,7 +169,7 @@ describe("account_territory module", () => {
       "territory__v",
     ]);
     expect(ACCOUNT_TERRITORY_SOURCE_FILTER).toBe("SobjectType = 'Account'");
-    expect(ACCOUNT_TERRITORY_EXTRA_COLUMNS).toEqual(["Territory2.Name"]);
+    expect(ACCOUNT_TERRITORY_NAME_SOURCE).toBe("Territory2.Name");
     expect(account_territory.notes).not.toContain("STUB");
   });
 
@@ -192,7 +194,9 @@ describe("account_territory module", () => {
       required: "Y",
       evidence: "DOC",
     });
+    // the name row's source is the relationship column itself, so it is selected
     expect(byTarget.get("name__v")).toMatchObject({
+      source: "Territory2.Name",
       transform: { kind: "custom", fnName: "accountTerritoryName" },
       required: "y?",
       evidence: "UNV",
@@ -278,14 +282,59 @@ describe("account_territory module", () => {
     expect(result.payload.name__v).toBe(`${ACCOUNT_ID}/Northeast`);
   });
 
-  it("omits name__v (non-fatal) when Territory2.Name was not selected", () => {
-    const { result } = run(sampleRow({ "Territory2.Name": undefined }));
+  it("selects Territory2.Name as a mapped relationship column", () => {
+    const { mapping } = run(sampleRow());
+    const describe = buildDescribe(
+      "ObjectTerritory2Association",
+      [
+        {
+          name: "ObjectId",
+          type: "reference",
+          referenceTo: ["Account"],
+          relationshipName: "Object",
+        },
+        {
+          name: "Territory2Id",
+          type: "reference",
+          referenceTo: ["Territory2"],
+          relationshipName: "Territory2",
+        },
+        { name: "AssociationCause", type: "picklist" },
+        { name: "SobjectType", type: "picklist" },
+      ],
+      { systemFields: { name: false, owner: false } },
+    );
+    const { columns } = buildColumnList(mapping, { describe, columns: [] });
+    expect(columns).toContain("Territory2.Name");
+    expect(columns).toContain("ObjectId");
+    expect(columns).toContain("Territory2Id");
+    // a describe without the Territory2 relationship (legacy TM org) drops it
+    const legacy = buildDescribe(
+      "ObjectTerritory2Association",
+      [
+        { name: "ObjectId", type: "reference", referenceTo: ["Account"] },
+        {
+          name: "Territory2Id",
+          type: "reference",
+          referenceTo: ["Territory2"],
+        },
+      ],
+      { systemFields: { name: false, owner: false } },
+    );
+    const dropped = buildColumnList(mapping, { describe: legacy, columns: [] });
+    expect(dropped.columns).not.toContain("Territory2.Name");
+    expect(dropped.dropped).toContain("Territory2.Name");
+  });
+
+  it("omits name__v (non-fatal) when Territory2.Name is empty", () => {
+    const { result } = run(sampleRow({ "Territory2.Name": "" }));
     expect(result.status).toBe("ok");
     expect(result.payload.name__v).toBeUndefined();
     expect(result.diagnostics).toContainEqual(
       expect.objectContaining({
         kind: "custom",
         code: "ACCOUNT_TERRITORY_NAME_INCOMPLETE",
+        detail: "Territory2.Name missing",
       }),
     );
   });
@@ -312,12 +361,12 @@ describe("account_territory module", () => {
     });
     const ctx = buildTransformContext({
       objectKey: "account_territory",
-      field: { source: "ObjectId", target: "name__v" },
+      field: { source: "Territory2.Name", target: "name__v" },
       targetField: { maxLength: 10 },
     });
     expect(
       accountTerritoryName(
-        undefined,
+        "West",
         { Id: ROW_ID, ObjectId: ACCOUNT_ID, "Territory2.Name": "West" },
         ctx,
       ),
@@ -325,6 +374,15 @@ describe("account_territory module", () => {
       value: `West:${ACCOUNT_ID}`.slice(0, 10),
       diagnostic: { kind: "truncated" },
     });
+    // the account always comes from ObjectId, the territory from the source value
+    const wide = buildTransformContext({
+      objectKey: "account_territory",
+      field: { source: "Territory2.Name", target: "name__v" },
+      targetField: { maxLength: 128 },
+    });
+    expect(
+      accountTerritoryName("East", { Id: ROW_ID, ObjectId: ACCOUNT_ID }, wide),
+    ).toBe(`East:${ACCOUNT_ID}`);
   });
 
   it("is full scope (no predicate)", () => {

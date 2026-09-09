@@ -17,6 +17,17 @@
  * same source; preflight drops the spelling the vault does not have
  * (`VT_FIELD_MISSING`), never the transform.
  *
+ * `IsPersonAccount` and `PersonContactId` are `skip` rows (never loaded) but
+ * are still **selected**: `skip` rows contribute no SELECT column, so they are
+ * declared through `objects.account.extraColumns` (`ACCOUNT_EXTRA_COLUMNS`,
+ * resolved by preflight like `user_territory`'s relationship columns). The
+ * flag feeds `isPersonAccount`; the contact id is the source side of the
+ * `objects.account.contactToPersonAccount` bridge (§3.4 c).
+ *
+ * Depth ordering by `Primary_Parent_vod__c` (§2.2 step 9) is declared here
+ * (`depthOrderBy`) and switched on by `objects.account.depthOrder = true`
+ * (the extractor gates the account depth pass on that option).
+ *
  * Custom transforms (pure, unit-tested in `account.test.ts`):
  *  - `accountName`      `name__v`: `nameTemplate(person)` for person accounts
  *                       (template per country, §7.3), `text(128)` of `Name`
@@ -87,8 +98,15 @@ export const DEFAULT_PERSON_RECORD_TYPES = [
 ] as const;
 
 /**
- * Person-account detection: `IsPersonAccount` when selected, else the record
- * type against `objects.account.personRecordTypes`, else "has a LastName".
+ * Person-account detection, most reliable signal first:
+ *  1. `IsPersonAccount` when the column was selected (`ACCOUNT_EXTRA_COLUMNS`);
+ *  2. `LastName` presence when that column was selected (the org has person
+ *     accounts): SFDC keeps `Account.LastName` non-null on every person
+ *     account and null on every business account, so it beats any
+ *     hand-maintained record-type list;
+ *  3. the record type against `objects.account.personRecordTypes` (last
+ *     resort — a customer person record type that is not listed would
+ *     otherwise be classified as business).
  */
 export function isPersonAccount(
   row: SourceRow,
@@ -96,6 +114,7 @@ export function isPersonAccount(
 ): boolean {
   const flag = readFlag(row.IsPersonAccount);
   if (flag !== undefined) return flag;
+  if ("LastName" in row) return !isEmpty(row.LastName);
   const devName = row["RecordType.DeveloperName"];
   if (!isEmpty(devName)) {
     const configured = ctx.mapping.options.personRecordTypes;
@@ -104,7 +123,7 @@ export function isPersonAccount(
       : [...DEFAULT_PERSON_RECORD_TYPES];
     return personTypes.includes(asString(devName).trim());
   }
-  return !isEmpty(row.LastName);
+  return false;
 }
 
 /** `country(auto)` (§6.3.7/§6.3.8): the mode follows the target field's metadata type. */
@@ -146,30 +165,47 @@ export const CALLING_CODES: Record<string, string> = {
   IN: "91",
 };
 
+/** Regions whose trunk `0` is part of the E.164 number (never stripped). */
+export const KEEP_TRUNK_ZERO: ReadonlySet<string> = new Set(["IT"]);
+
+/** `+<body>` when the body is a plausible E.164 length (7–15 digits), else undefined. */
+function e164(body: string): string | undefined {
+  return body.length >= 7 && body.length <= 15 ? `+${body}` : undefined;
+}
+
 /**
  * E.164 when unambiguous, pass-through otherwise (§7.2.1 `phone.normalise`):
- * `+49 (30) 1234-567` → `+49301234567`; a national number is prefixed with the
- * calling code of `phone.defaultRegion` after dropping one trunk `0`; numbers
- * with extensions or letters are left as typed.
+ * `+49 (30) 1234-567` → `+49301234567`; `0049 …` → `+49 …`; a national number
+ * is prefixed with the calling code of `phone.defaultRegion` after dropping
+ * one trunk `0` (kept for `KEEP_TRUNK_ZERO` regions). NANP regions (`+1`)
+ * accept exactly 10 national digits or 11 digits led by `1` — area codes
+ * never start with 0/1, so `1-415-555-0100` is unambiguously `+14155550100`.
+ * Elsewhere a number that already starts with the calling code but has no
+ * `+`/`00` (`49 30 1234567`) is ambiguous and left as typed, as are numbers
+ * with extensions or letters and anything outside the 7–15 digit envelope.
  */
 export function normalisePhone(raw: string, defaultRegion?: string): string {
   const text = raw.trim();
   if (!text) return text;
   if (/[a-zA-Z]/.test(text) || /(ext|x)\s*\d+$/i.test(text)) return text;
   const digits = text.replace(/[^\d+]/g, "");
-  if (digits.startsWith("+")) {
-    const body = digits.slice(1).replace(/\+/g, "");
-    return body.length >= 7 && body.length <= 15 ? `+${body}` : text;
-  }
-  if (digits.startsWith("00")) {
-    const body = digits.slice(2);
-    return body.length >= 7 && body.length <= 15 ? `+${body}` : text;
-  }
-  const cc = defaultRegion ? CALLING_CODES[defaultRegion.toUpperCase()] : "";
+  if (digits.startsWith("+"))
+    return e164(digits.slice(1).replace(/\+/g, "")) ?? text;
+  if (digits.startsWith("00")) return e164(digits.slice(2)) ?? text;
+  const region = defaultRegion?.toUpperCase() ?? "";
+  const cc = CALLING_CODES[region];
   if (!cc || !digits) return text;
-  const national = digits.replace(/^0/, "");
-  const full = `${cc}${national}`;
-  return full.length >= 7 && full.length <= 15 ? `+${full}` : text;
+  if (cc === "1") {
+    if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+    if (digits.length === 10 && !/^[01]/.test(digits)) return `+1${digits}`;
+    return text;
+  }
+  if (digits.startsWith("0")) {
+    const national = KEEP_TRUNK_ZERO.has(region) ? digits : digits.slice(1);
+    return e164(`${cc}${national}`) ?? text;
+  }
+  if (digits.startsWith(cc)) return text;
+  return e164(`${cc}${digits}`) ?? text;
 }
 
 /** `text` with optional E.164 normalisation from the country context (`phone.normalise`). */
@@ -368,6 +404,20 @@ const STANDARD_B2B_SKIPPED = [
   "Jigsaw",
 ];
 
+/**
+ * Source columns read beyond the mapping rows' `source`s (`skip` rows select
+ * nothing): `IsPersonAccount` feeds `isPersonAccount`; `PersonContactId` is
+ * the `Contact.Id → person account` bridge input (§3.4 c,
+ * `objects.account.contactToPersonAccount`). Declared as the module default of
+ * `objects.account.extraColumns` (preflight resolves them against the
+ * describe; absent on orgs without person accounts → `SF_FIELD_MISSING`
+ * warning, rows then fall back to the `LastName` / record-type signals).
+ */
+export const ACCOUNT_EXTRA_COLUMNS = [
+  "IsPersonAccount",
+  "PersonContactId",
+] as const;
+
 const PERSON_AND_INTERNAL_SKIPPED = [
   "IsPersonAccount",
   "PersonContactId",
@@ -403,6 +453,10 @@ export const account = defineObject({
       source: "Business_Professional_Person_vod__c",
     },
   ],
+  // §2.2 step 9: depth-ordered by the primary parent only when
+  // objects.account.depthOrder = true (the extractor gates the account pass
+  // on that option; the field stays a pass-2 selfRef either way)
+  depthOrderBy: "Primary_Parent_vod__c",
   // Block S: Name is replaced by the person/business row below; Account has
   // OwnerId, audit, External_ID_vod__c and Mobile_ID_vod__c; no currency
   // fields are loaded (AnnualRevenue is skipped), so local_currency__sys stays off.
@@ -1035,7 +1089,7 @@ export const account = defineObject({
     },
     ...skipRows(
       PERSON_AND_INTERNAL_SKIPPED,
-      "skipped (§6.3.7): IsPersonAccount drives object-type choice only; compounds, search helpers and internal flags are never loaded",
+      "skipped (§6.3.7): IsPersonAccount drives object-type choice only and PersonContactId the contact bridge (both still selected via ACCOUNT_EXTRA_COLUMNS); compounds, search helpers and internal flags are never loaded",
     ),
   ],
   objectTypes: ACCOUNT_OBJECT_TYPES,
@@ -1112,6 +1166,8 @@ export const account = defineObject({
     loadFormattedName: false,
     depthOrder: false,
     personRecordTypes: [...DEFAULT_PERSON_RECORD_TYPES],
+    // columns read by isPersonAccount / the contact bridge beyond row sources
+    extraColumns: [...ACCOUNT_EXTRA_COLUMNS],
   },
   notes:
     "Master data (§6.2): full scope, country from Country_vod__r.Alpha_2_Code_vod__c, inactivated on delete (status__v = inactive__v), merged SFDC losers (MasterRecordId) map to the survivor with merged_into (§3.4).",

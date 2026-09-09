@@ -52,15 +52,22 @@ export function collectRefs(
   for (const v of Object.values(payload)) visit(v);
 }
 
+export interface RefIndexOptions {
+  /** Dry run (§8.9): rows simulated in a dry run (`dryRun = true`) resolve like real ones. */
+  dryRun?: boolean;
+}
+
 /** Snapshot of id-map rows for a batch, with one-hop merge following. */
 export class RefIndex {
   private readonly rows = new Map<RefKey, Map<string, IdMapRow>>();
+  private constructor(private readonly opts: RefIndexOptions = {}) {}
 
   static async build(
     store: StateStore,
     refs: Map<RefKey, Set<string>>,
+    opts: RefIndexOptions = {},
   ): Promise<RefIndex> {
-    const idx = new RefIndex();
+    const idx = new RefIndex(opts);
     for (const [key, ids] of refs) {
       const got = await store.idMap.bulkGet(key as ObjectKey, [...ids]);
       // one-hop merge follow: losers point at survivors
@@ -88,7 +95,7 @@ export class RefIndex {
   vaultId(key: RefKey, sfdcId: string): string | number | undefined {
     const r = this.get(key, sfdcId);
     if (!r) return undefined;
-    if (r.dryRun) return undefined;
+    if (r.dryRun && !this.opts.dryRun) return undefined;
     return key === "user" ? Number(r.vaultId) : r.vaultId;
   }
 }

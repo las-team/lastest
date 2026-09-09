@@ -4,7 +4,7 @@
  * referenced rows exist in the id map. Idempotent (§8.2): only the deferred
  * fields are sent, addressed by id.
  */
-import type { RowResult } from "../types";
+import type { PendingFk, RowResult } from "../types";
 import type { VaultRow } from "../vault/types";
 import { cutBatches } from "./batcher";
 import type { LoaderRuntime } from "./context";
@@ -28,33 +28,55 @@ export async function runSecondPass(
     patched: 0,
     failed: 0,
     unresolved: 0,
+    unresolvedIds: [],
   };
   const withPatches = (async function* () {
     for await (const r of rows)
       if (r.secondPass && Object.keys(r.secondPass).length) yield r;
   })();
   const size = plan.mapping.load.batchSize ?? plan.batchSize;
-  let batchNo = 0;
   for await (const batch of cutBatches(withPatches, () => size)) {
-    batchNo++;
+    const batchNo = await rt.nextBatchNo(plan);
     const own = await rt.deps.store.idMap.bulkGet(
       plan.unit.objectKey,
       batch.map((r) => r.sfdcId),
     );
     const refs = new Map<RefKey, Set<string>>();
     for (const r of batch) collectRefs(r.secondPass!, refs);
-    const index = await RefIndex.build(rt.deps.store, refs);
+    const index = await RefIndex.build(rt.deps.store, refs, {
+      dryRun: plan.dryRun,
+    });
 
-    const sent: Array<{ row: PayloadRow; vaultRow: VaultRow }> = [];
+    const sent: Array<{
+      row: PayloadRow;
+      vaultRow: VaultRow;
+      fields: string[];
+    }> = [];
+    const pending: PendingFk[] = [];
     for (const row of batch) {
       const me = own.get(row.sfdcId);
-      if (!me || me.dryRun) {
+      if (!me || (me.dryRun && !plan.dryRun)) {
         result.unresolved++;
+        result.unresolvedIds.push(row.sfdcId);
         continue;
       }
       const resolved = resolvePayload(row.secondPass!, index);
       if (resolved.unresolved.length) {
+        // §3.5: recorded as `pending_fk` diagnostics (field level) — the row itself stays loaded;
+        // the engine re-tries once every unit landed, `verify --fk` re-points later
         result.unresolved++;
+        result.unresolvedIds.push(row.sfdcId);
+        for (const u of resolved.unresolved)
+          pending.push({
+            runId: plan.runId,
+            objectKey: plan.unit.objectKey,
+            country: plan.unit.country,
+            sfdcId: row.sfdcId,
+            field: u.field,
+            targetObjectKey: u.objectKey,
+            targetSfdcId: u.sfdcId,
+            attempts: 1,
+          });
         log.debug(
           {
             sfdc_id: row.sfdcId,
@@ -70,8 +92,11 @@ export async function runSecondPass(
       sent.push({
         row,
         vaultRow: { id: me.vaultId, ...Object.fromEntries(fields) },
+        fields: fields.map(([k]) => k),
       });
     }
+    if (pending.length && !plan.dryRun)
+      await rt.deps.store.pendingFk.add(pending);
     if (!sent.length) continue;
     if (plan.dryRun) {
       result.patched += sent.length;
@@ -100,6 +125,7 @@ export async function runSecondPass(
       continue;
     }
     const failures: RowResult[] = [];
+    const patched: Array<{ sfdcId: string; fields: string[] }> = [];
     response.data.forEach((rr, i) => {
       const s = sent[i];
       if (!s) return;
@@ -115,9 +141,23 @@ export async function runSecondPass(
             rt.now(),
           ),
         );
-      } else result.patched++;
+      } else {
+        result.patched++;
+        patched.push({ sfdcId: s.row.sfdcId, fields: s.fields });
+      }
     });
     await rt.rowResults(failures);
+    // a field patched on a retry closes its earlier pending_fk diagnostic
+    const now = rt.now();
+    for (const p of patched)
+      for (const f of p.fields)
+        await rt.deps.store.pendingFk.resolve(
+          plan.runId,
+          plan.unit.objectKey,
+          p.sfdcId,
+          f,
+          now,
+        );
     rt.noteBurst(plan);
     log.info(
       { batch_no: batchNo, rows: sent.length, failed: failures.length },

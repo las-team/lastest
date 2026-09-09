@@ -10,9 +10,17 @@
  * `deletePolicy = inactivate` writes `status__v = inactive__v` +
  * `isactive__v = false`.
  *
+ * The unit is `GLOBAL` (§3.4, §6.1 step 0): users are extracted once, not
+ * per wave country — a per-country unit would `skipped(country_unresolved)`
+ * every user without a `Country_vod__c` (integration/admin users, users of
+ * countries outside the wave) and they would never enter the user map. The
+ * row's own country still lands in `country__v`/`country_code__v`/
+ * `vcountry__v` through `userCountry`.
+ *
  * Custom transforms (pure, unit-tested in `user.test.ts`):
  *  - `userStatus`         IsActive → `status__v` (`active__v` / `inactive__v`)
- *  - `userCountry`        Country_vod__c (picklist **or** lookup) / Country →
+ *  - `userCountry`        Country_vod__c (picklist **or** lookup), else
+ *                         `User.Country` when it holds an ISO-2 code →
  *                         ISO-2 text or `country__v` reference, chosen by the
  *                         target field type (`country__v`, `country_code__v`,
  *                         `vcountry__v` — "write all three that exist")
@@ -94,11 +102,21 @@ export const userStatus: CustomTransformFn = (value) => {
 };
 
 /**
+ * Source columns `userCountry` reads beyond its `source` (`objects.user
+ * .extraColumns`, consumed by preflight / the column builder as
+ * `ColumnOptions.extra`): the standard `User.Country` fallback.
+ */
+export const USER_EXTRA_COLUMNS = ["Country"] as const;
+
+/**
  * `Country_vod__c` (picklist holding ISO-2 **or** lookup holding a
- * `Country_vod__c` id — type resolved at preflight) with `Country` as
- * fallback. Emits the ISO-2 text for String targets and the `country__v`
- * reference (Vault id from the crosswalk, else a deferred `$fk`) for Object
- * targets or `vcountry__v`.
+ * `Country_vod__c` id — type resolved at preflight). When it is empty the
+ * standard `User.Country` column (`USER_EXTRA_COLUMNS`) is consulted, but
+ * only when it holds an ISO-2 code: free text (`United States`) is not
+ * resolved (the crosswalk exposes no name lookup) and reports
+ * `USER_COUNTRY_UNRESOLVED` with the value. Emits the ISO-2 text for String
+ * targets and the `country__v` reference (Vault id from the crosswalk, else a
+ * deferred `$fk`) for Object targets or `vcountry__v`.
  */
 export const userCountry: CustomTransformFn = (value, row, ctx) => {
   const raw = isEmpty(value) ? row.Country : value;
@@ -117,6 +135,10 @@ export const userCountry: CustomTransformFn = (value, row, ctx) => {
         field: ctx.field.target,
         code: "USER_COUNTRY_UNRESOLVED",
         value: isSfdcId(raw) ? to18(text) : text.slice(0, 64),
+        detail:
+          !isSfdcId(raw) && text.length !== 2
+            ? "not an ISO-2 code (User.Country free text is not resolved)"
+            : undefined,
       },
     } satisfies TransformResult;
   const asReference =
@@ -166,15 +188,31 @@ export const usernameCreateOnly: CustomTransformFn = (value, row, ctx) => {
  * Explicit-only profile crosswalk: `objects.user.<configKey>` map → layered
  * `user.<mapKey>` picklist maps → module defaults. Unmapped names are omitted
  * (non-fatal) in match mode; fatal in create mode when `requiredOnCreate`.
+ * An **empty** source is likewise fatal (`REQUIRED_MISSING`) in create mode
+ * when `requiredOnCreate` — `security_profile__sys` is `Y (create)` (§6.3.2,
+ * `USER_SYS_CREATE_REQUIRED`) and the mapping row is `n`, so `applyMapping`
+ * would otherwise let a profile-less user through to a Vault row error.
  */
 function profileCrosswalk(
   mapKey: string,
   opts: { configKey?: string; requiredOnCreate: boolean },
 ): CustomTransformFn {
   return (value, _row, ctx) => {
-    if (isEmpty(value)) return undefined;
-    const name = asString(value).trim();
-    if (!name) return undefined;
+    const name = isEmpty(value) ? "" : asString(value).trim();
+    if (!name) {
+      if (opts.requiredOnCreate && isCreateMode(ctx))
+        return {
+          omit: true,
+          diagnostic: {
+            kind: "required_missing",
+            field: ctx.field.target,
+            code: "REQUIRED_MISSING",
+            detail: `${ctx.field.source || "Profile.Name"} is empty (required on create)`,
+            fatal: true,
+          },
+        } satisfies TransformResult;
+      return undefined;
+    }
     const fromConfig = opts.configKey
       ? (
           ctx.mapping.options[opts.configKey] as
@@ -305,8 +343,10 @@ export const user = defineObject({
   target: "user__sys",
   targetEvidence: "OBS",
   scope: { kind: "full" },
-  // `User.Country_vod__c` may be a picklist (ISO-2) or a lookup — the SOQL path is resolved at preflight (§6.0.5)
-  countryOf: "field:Country_vod__c",
+  // §3.4 / §6.1 step 0: one GLOBAL unit — every SFDC user incl. inactive and
+  // country-less ones (§6.2's `field:Country_vod__c` cell describes the row's
+  // own country attribution, written by `userCountry`, not the unit scoping)
+  countryOf: "global",
   dependsOn: ["country"],
   selfRefs: [{ target: "manager__sys", source: "ManagerId" }],
   // User has no Name (compound formula), OwnerId or Veeva lock/mobile stamps; External_ID_vod__c maps to user_identifier__v below
@@ -558,7 +598,7 @@ export const user = defineObject({
       evidence: "OBS",
       optionalSource: true,
       notes:
-        "ISO-2 text (or reference when the target is an Object — type UNV, layouts differ per customer); Vault CRM requires country__v on users for record detail pages [DOC]; falls back to User.Country",
+        "ISO-2 text (or reference when the target is an Object — type UNV, layouts differ per customer); Vault CRM requires country__v on users for record detail pages [DOC]; falls back to User.Country (USER_EXTRA_COLUMNS) when it holds an ISO-2 code",
     },
     {
       source: "Country_vod__c",
@@ -809,6 +849,8 @@ export const user = defineObject({
     licenseType: "full__v",
     securityProfile: {},
     unmappedUserPolicy: "omit",
+    // relationship/standard columns read by custom transforms beyond their `source`
+    extraColumns: [...USER_EXTRA_COLUMNS],
   },
   notes:
     "Match by default (objects.user.mode); create mode uses the Users API (buildUsersApiRow) and needs securityPolicyId + vault_membership. Users cannot be deleted: deletePolicy=inactivate (status__v = inactive__v, isactive__v = false). CRM licence flags (USER_LICENSE_FIELDS) are Vault-admin owned and reported only.",

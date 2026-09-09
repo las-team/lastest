@@ -46,6 +46,8 @@ export interface MatchHit {
   method: MatchMethod;
   /** Set when the Vault record was already mapped to another SFDC id (many→one, §3.4). */
   mergedInto?: string;
+  /** `object_type__v` Vault reports for the matched record (typed objects only; §2.5.6 routing). */
+  objectType?: string;
 }
 
 export interface MatchOutcome {
@@ -122,11 +124,17 @@ export async function matchRows(
 
   const refs = new Map<RefKey, Set<string>>();
   for (const r of rows) collectRefs(r.payload, refs);
-  const index = await RefIndex.build(deps.store, refs);
+  const index = await RefIndex.build(deps.store, refs, {
+    dryRun: plan.dryRun,
+  });
   const object = plan.target.targetObject;
   const fields = plan.target.metadata.fields;
   const hasStatus = Boolean(fields.status__v);
   const hasType = Boolean(fields.object_type__v);
+  // `sameCountry` (§3.3): candidates are restricted to the row's crosswalked
+  // `country__v` when the target carries one; a candidate without a country
+  // is kept (the field may be optional on the target).
+  const hasCountry = Boolean(fields.country__v);
 
   let remaining = rows.filter((r) => !hits.has(r.sfdcId));
   for (const rule of plan.mapping.match) {
@@ -149,11 +157,14 @@ export async function matchRows(
     if (!values.size) continue;
     const first = keys[0];
     const firstValues = [...new Set([...values.values()].map((v) => v[0]))];
+    const sameCountry = Boolean(rule.sameCountry && hasCountry);
     const select = [
       "id",
       ...keys.map((k) => k.target),
       ...(hasStatus ? ["status__v"] : []),
-      ...(hasType && rule.sameObjectType ? ["object_type__v"] : []),
+      ...(sameCountry ? ["country__v"] : []),
+      // always read the type back: a type difference must go through changetype, never a plain PUT (§2.5.6)
+      ...(hasType ? ["object_type__v"] : []),
     ];
     const selectList = [...new Set(select)].join(", ");
     const candidates: Array<Record<string, unknown>> = [];
@@ -180,6 +191,15 @@ export async function matchRows(
             scalar(c.object_type__v) === undefined ||
             scalar(c.object_type__v) === r.objectType,
         );
+      if (sameCountry) {
+        const wantCountry = scalar(r.payload.country__v);
+        if (wantCountry)
+          usable = usable.filter(
+            (c) =>
+              scalar(c.country__v) === undefined ||
+              scalar(c.country__v) === wantCountry,
+          );
+      }
       if (!usable.length) continue;
       if (
         usable.length > 1 &&
@@ -191,7 +211,13 @@ export async function matchRows(
       const vaultId = scalar(usable[0].id);
       if (!vaultId) continue;
       ruleHits++;
-      hits.set(r.sfdcId, { sfdcId: r.sfdcId, vaultId, method: rule.method });
+      const objectType = hasType ? scalar(usable[0].object_type__v) : undefined;
+      hits.set(r.sfdcId, {
+        sfdcId: r.sfdcId,
+        vaultId,
+        method: rule.method,
+        ...(objectType ? { objectType } : {}),
+      });
     }
     if (ambiguous)
       findings.push({
@@ -241,6 +267,7 @@ export async function matchRows(
       matchMethod: hit.method,
       firstSeenRun: plan.runId,
       lastSeenRun: plan.runId,
+      objectType: hit.objectType ?? null,
       ...(plan.dryRun ? { dryRun: true } : {}),
     };
     await deps.store.idMap.put(row);

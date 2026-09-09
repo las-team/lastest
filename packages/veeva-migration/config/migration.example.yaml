@@ -27,7 +27,7 @@ source:
     kind: jwt # jwt | clientCredentials
     clientId: "${SF_CLIENT_ID}"
     username: migration@acme.com
-    aud: https://login.salesforce.com # login / test / My Domain URL (§2.1.1)
+    # aud: https://acme.my.salesforce.com # optional; default = origin of loginUrl (§2.1.1)
     privateKeyPath: ./sf.key # or privateKey: "${SF_PRIVATE_KEY}"
     # clientCredentials form:
     # auth: { kind: clientCredentials, clientId: "${SF_CLIENT_ID}", clientSecret: "${SF_CLIENT_SECRET}" }
@@ -73,6 +73,7 @@ delta: { overlapMinutes: 10, safetyLagMinutes: 5 }
 # --- Throughput (§2.1.7, §2.5.2, §8.1, §2.2) --------------------------------
 performance:
   sfdcBulkConcurrency: 4
+  sfdcBulkMaxRecords: 100000 # Bulk 2.0 maxRecords per results page (§2.1.5)
   sfdcRestConcurrency: 2
   vaultConcurrency: 4
   vaultBatch: 500
@@ -167,7 +168,7 @@ objects:
     deletePolicy: ignore
     load:
       noTriggers: true
-      partitionBy: { field: Parent_Call_vod__c, order: ["null", notNull] } # quote "null" — a bare YAML null is not the literal
+      partitionBy: { field: Parent_Call_vod__c, order: ["null", notNull] } # the §7.3 bare `[null, notNull]` is accepted too
     loadCallType: false
     loadDeviceFields: false
   country: { targetKeyField: abbreviation__v }

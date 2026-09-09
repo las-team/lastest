@@ -81,6 +81,30 @@ export function legacyIdMdl(targetObject: string, field = "legacy_crm_id__c") {
   ].join("\n");
 }
 
+/**
+ * MDL repairing an existing `legacy_crm_id__c` that fails step 5 for a fixable
+ * reason (not unique, inactive, too short). `undefined` when the field cannot
+ * be repaired by MDL (wrong type) — the customer must pick another field.
+ */
+export function legacyIdRepairMdl(
+  targetObject: string,
+  field: ResolvedField,
+  minLength: number,
+): string | undefined {
+  if (field.type !== "string") return undefined;
+  const attrs: string[] = [];
+  if (!field.active) attrs.push("active(true)");
+  if (!field.unique) attrs.push("unique(true)");
+  if (field.maxLength !== undefined && field.maxLength < minLength)
+    attrs.push(`max_length(${minLength})`);
+  if (!attrs.length) return undefined;
+  return [
+    `ALTER Object ${targetObject} (`,
+    `  MODIFY Field ${field.name}(${attrs.join(", ")})`,
+    `);`,
+  ].join("\n");
+}
+
 function candidateProblem(
   f: ResolvedField | undefined,
   name: string,
@@ -196,20 +220,32 @@ export function resolveLegacyIdField(input: LegacyIdInput): LegacyIdResolution {
     rejected.push({ field: name, reason: p });
   }
 
-  // step 6: create legacy_crm_id__c via MDL
-  if (input.allowMdl && !fields.legacy_crm_id__c) {
+  // step 6: create legacy_crm_id__c via MDL — or repair the customer's
+  // existing one (ADD Field on an existing field is rejected by Vault)
+  const existingCustom = fields.legacy_crm_id__c;
+  const mdl = existingCustom
+    ? legacyIdRepairMdl(
+        input.targetObject,
+        existingCustom,
+        formatLength(baseFormat),
+      )
+    : legacyIdMdl(input.targetObject);
+  if (input.allowMdl && mdl) {
     return {
       field: "legacy_crm_id__c",
       format: baseFormat,
       step: 6,
       traceabilityField,
-      mdl: legacyIdMdl(input.targetObject),
+      mdl,
       rejected,
       findings,
     };
   }
 
   // step 7: none
+  const hint = mdl
+    ? `no unique String field to use as idParam; set objects.${objectKey}.legacyIdField, or run with --allow-mdl to ${existingCustom ? "make legacy_crm_id__c usable (MODIFY Field)" : "create legacy_crm_id__c"}`
+    : `no unique String field to use as idParam and legacy_crm_id__c exists as ${existingCustom?.rawType} (not repairable by MDL); set objects.${objectKey}.legacyIdField to a unique String field`;
   findings.push({
     severity: "blocking",
     code: "VT_LEGACY_ID_FIELD_MISSING",
@@ -217,8 +253,8 @@ export function resolveLegacyIdField(input: LegacyIdInput): LegacyIdResolution {
     detail: {
       targetObject: input.targetObject,
       rejected,
-      hint: `no unique String field to use as idParam; set objects.${objectKey}.legacyIdField, or run with --allow-mdl to create legacy_crm_id__c`,
-      mdl: legacyIdMdl(input.targetObject),
+      hint,
+      ...(mdl ? { mdl } : {}),
     },
   });
   return { format: baseFormat, step: 7, traceabilityField, rejected, findings };

@@ -1,19 +1,26 @@
 import { describe, expect, it } from "vitest";
 import {
   EM_BUDGET_REF_DROPPED,
+  EXPENSE_LINE_OPEN_PREDICATE,
   EXPENSE_LINE_TYPE_MAP_KEY,
   HEADER_EVENT_COLUMN,
+  LINE_EVENT_PREFIX,
   budgetRefDropped,
-  eventRef,
-  expenseTypeAuto,
   expense_line,
 } from "./expense_line";
-import { expense_header } from "./expense_header";
+import {
+  EXPENSE_HEADER_OPEN_PREDICATE,
+  expense_header,
+} from "./expense_header";
+import { EM_EVENT_CLOSED_STATUSES } from "../em_event/em_event";
 import { validateObjectModule } from "../types";
 import { materialise, resolveCountry } from "../../config/resolve";
 import { parseConfig } from "../../config/schema";
 import { applyMapping } from "../../transform/apply";
+import { buildColumnList, mappingFkColumns } from "../../extract/columns";
 import { buildScopePredicate } from "../../extract/scope";
+import { referenceColumns } from "../../run/context";
+import { refTarget } from "../../transform/spec";
 import {
   SAMPLE_USER_ID,
   buildCountryContext,
@@ -127,7 +134,6 @@ function row(extra: Record<string, unknown> = {}): SourceRow {
     Name: "EL-000456",
     Expense_Header_vod__c: HEADER_1,
     [HEADER_EVENT_COLUMN]: EVENT_1,
-    Event_vod__c: EVENT_1,
     Event_Budget_vod__c: BUDGET_1,
     Expense_Type_vod__c: CATALOG_1,
     Expense_Type_Name_vod__c: "Catering",
@@ -236,11 +242,12 @@ describe("expense_line module", () => {
       sourceType: "reference",
     });
     expect(byTarget.get("event__v")).toMatchObject({
-      source: "Event_vod__c",
-      transform: { kind: "custom", fnName: "eventRef" },
+      source: HEADER_EVENT_COLUMN,
+      transform: { kind: "ref", objectKey: "em_event" },
       required: "y?",
       evidence: "OBS",
       unverifiedSource: true,
+      sourceType: "reference",
     });
     expect(byTarget.get("event_budget__v")).toMatchObject({
       transform: { kind: "custom", fnName: "budgetRefDropped" },
@@ -249,11 +256,13 @@ describe("expense_line module", () => {
       unverifiedSource: true,
     });
     expect(byTarget.get("expense_type__v")).toMatchObject({
-      transform: { kind: "custom", fnName: "expenseTypeAuto" },
+      source: "Expense_Type_vod__c",
+      transform: { kind: "ref", objectKey: "em_catalog" },
       required: "y?",
       evidence: "OBS",
       countryConfigurable: true,
       unverifiedSource: true,
+      sourceType: "reference",
     });
     expect(byTarget.get("expense_type_name__v")).toMatchObject({
       transform: { kind: "text" },
@@ -296,7 +305,7 @@ describe("expense_line module", () => {
         expect(f.evidence, `${f.target} has an evidence tag`).toBeDefined();
   });
 
-  it("is scoped via the header: both header date terms mirrored through Expense_Header_vod__r", () => {
+  it("is scoped via the header: every header term (dates + event open-item term) mirrored through Expense_Header_vod__r", () => {
     expect(expense_line.scope).toEqual({
       kind: "dated",
       predicates: [
@@ -306,8 +315,22 @@ describe("expense_line module", () => {
         },
         { field: "Expense_Header_vod__r.Payment_Date_vod__c", type: "date" },
       ],
+      openPredicate: EXPENSE_LINE_OPEN_PREDICATE,
       retentionFamily: "tov",
     });
+    expect(LINE_EVENT_PREFIX).toBe("Expense_Header_vod__r.Event_vod__r.");
+    // §1.1 #4 open term of the header's event, one hop further than the header's
+    expect(EXPENSE_LINE_OPEN_PREDICATE).toBe(
+      `(Expense_Header_vod__r.Event_vod__r.End_Time_vod__c >= {cutoffDateTime}) OR (Expense_Header_vod__r.Event_vod__r.Status_vod__c NOT IN (${EM_EVENT_CLOSED_STATUSES.map(
+        (st) => `'${st}'`,
+      ).join(", ")}))`,
+    );
+    expect(EXPENSE_LINE_OPEN_PREDICATE).toBe(
+      EXPENSE_HEADER_OPEN_PREDICATE.replaceAll(
+        "Event_vod__r.",
+        "Expense_Header_vod__r.Event_vod__r.",
+      ),
+    );
     // a line is in scope exactly when its header is: same predicates, prefixed
     expect(expense_header.scope.kind).toBe("dated");
     if (
@@ -323,14 +346,72 @@ describe("expense_line module", () => {
     const m = mapping();
     expect(m.scope.retentionFamily).toBe("tov");
     expect(m.scope.cutoffDate).toBe("2024-09-07");
-    expect(buildScopePredicate(m.scope).predicate).toBe(
-      "Expense_Header_vod__r.Event_vod__r.Start_Time_vod__c >= 2024-09-07T00:00:00Z OR Expense_Header_vod__r.Payment_Date_vod__c >= 2024-09-07",
+    const built = buildScopePredicate(m.scope);
+    expect(built.kind).toBe("dated");
+    expect(built.openTerm).toBe(
+      "(Expense_Header_vod__r.Event_vod__r.End_Time_vod__c >= 2024-09-07T00:00:00Z) OR (Expense_Header_vod__r.Event_vod__r.Status_vod__c NOT IN ('Closed_vod', 'Canceled_vod', 'Cancelled_vod'))",
     );
+    expect(built.predicate).toBe(
+      "(Expense_Header_vod__r.Event_vod__r.Start_Time_vod__c >= 2024-09-07T00:00:00Z OR Expense_Header_vod__r.Payment_Date_vod__c >= 2024-09-07) OR ((Expense_Header_vod__r.Event_vod__r.End_Time_vod__c >= 2024-09-07T00:00:00Z) OR (Expense_Header_vod__r.Event_vod__r.Status_vod__c NOT IN ('Closed_vod', 'Canceled_vod', 'Cancelled_vod')))",
+    );
+    // the token is rendered, never mangled by a prefix pass
+    expect(built.predicate).not.toContain("{cutoff");
+    expect(built.predicate).not.toContain("Expense_Header_vod__r.cutoff");
     // widened by the tov family, exactly like the header
     const wide = mapping(config({ scope: { tovRetentionMonths: 60 } }));
     expect(wide.scope.cutoffDate).toBe("2021-09-07");
+    expect(buildScopePredicate(wide.scope).predicate).toContain(
+      "Expense_Header_vod__r.Event_vod__r.End_Time_vod__c >= 2021-09-07T00:00:00Z",
+    );
     expect(wide.options.deletePolicy).toBe("delete");
     expect(wide.options.optional).toBe(true);
+  });
+
+  it("exposes every FK as a plain ref the engine can see: id-map snapshot, closure columns, SELECT list, lint", () => {
+    const m = mapping();
+    // transform-time id resolver snapshot (run/context.ts buildUnitResolver)
+    const refs = referenceColumns(m);
+    expect(refs).toContainEqual({
+      key: "expense_header",
+      source: "Expense_Header_vod__c",
+    });
+    expect(refs).toContainEqual({
+      key: "em_event",
+      source: HEADER_EVENT_COLUMN,
+    });
+    expect(refs).toContainEqual({
+      key: "em_catalog",
+      source: "Expense_Type_vod__c",
+    });
+    // §2.2 step 5 closure id-sets (plain columns only; the header's event is
+    // pulled by the header unit's own Event_vod__c)
+    expect(mappingFkColumns(m)).toEqual(
+      expect.arrayContaining([
+        { column: "Expense_Header_vod__c", targetObjectKey: "expense_header" },
+        { column: "Expense_Type_vod__c", targetObjectKey: "em_catalog" },
+      ]),
+    );
+    // the SELECT list carries the header's event relationship column
+    const cols = buildColumnList(m, undefined).columns;
+    expect(cols).toContain(HEADER_EVENT_COLUMN);
+    expect(cols).toContain("Expense_Type_vod__c");
+    expect(cols).toContain("Expense_Header_vod__c");
+    expect(cols).not.toContain("Event_vod__c");
+    // MAP_FK_PARENT_NOT_IN_PLAN / preflight FK checks read refTarget()
+    const byTarget = new Map(m.fields.map((f) => [f.target, f]));
+    expect(refTarget(byTarget.get("event__v")!.transform)).toBe("em_event");
+    expect(refTarget(byTarget.get("expense_type__v")!.transform)).toBe(
+      "em_catalog",
+    );
+    expect(refTarget(byTarget.get("expense_header__v")!.transform)).toBe(
+      "expense_header",
+    );
+    // no custom row hides a reference
+    for (const f of m.fields)
+      if (f.transform.kind === "custom")
+        expect(f.target, `${f.target} is not a reference`).toBe(
+          "event_budget__v",
+        );
   });
 
   it("transforms a row: header + event FKs, budget dropped and counted, catalog ref, amounts, currency, longtext", () => {
@@ -392,33 +473,72 @@ describe("expense_line module", () => {
     );
   });
 
-  it("derives event__v from the header when the line's own Event_vod__c is absent", () => {
-    const derived = applyMapping(
-      row({ Event_vod__c: "", [HEADER_EVENT_COLUMN]: EVENT_2 }),
+  it("reads event__v from the header's event (flattened bulk column or nested REST shape), ignoring a line-level Event_vod__c", () => {
+    const flat = applyMapping(
+      row({ [HEADER_EVENT_COLUMN]: EVENT_2, Event_vod__c: EVENT_1 }),
       mapping(),
       applyCtx(),
     );
-    expect(derived.status).toBe("ok");
-    expect(derived.payload.event__v).toEqual({
+    expect(flat.status).toBe("ok");
+    expect(flat.payload.event__v).toEqual({
       $fk: { object: "em_event", sfdcId: EVENT_2 },
     });
-    // own value wins over the header's
-    const own = applyMapping(
-      row({ Event_vod__c: EVENT_1, [HEADER_EVENT_COLUMN]: EVENT_2 }),
+    const base = row();
+    delete base[HEADER_EVENT_COLUMN];
+    const nested = applyMapping(
+      { ...base, Expense_Header_vod__r: { Event_vod__c: EVENT_2 } },
       mapping(),
       applyCtx(),
     );
-    expect(own.payload.event__v).toEqual({
-      $fk: { object: "em_event", sfdcId: EVENT_1 },
+    expect(nested.status).toBe("ok");
+    expect(nested.payload.event__v).toEqual({
+      $fk: { object: "em_event", sfdcId: EVENT_2 },
     });
-    // neither present: optional lookup (target not required) → omitted, row still loads
+    // header event unmapped: optional lookup → omitted + reported, row still loads
+    const unknown = to18("a0E000000000077");
+    const unresolved = applyMapping(
+      row({ [HEADER_EVENT_COLUMN]: unknown }),
+      mapping(),
+      applyCtx(),
+    );
+    expect(unresolved.status).toBe("ok");
+    expect(unresolved.unresolvedOptionalFks).toEqual([
+      { field: "event__v", objectKey: "em_event", sfdcId: unknown },
+    ]);
+    // absent: optional lookup (target not required) → omitted, row still loads
     const none = applyMapping(
-      row({ Event_vod__c: "", [HEADER_EVENT_COLUMN]: "" }),
+      row({ [HEADER_EVENT_COLUMN]: "" }),
       mapping(),
       applyCtx(),
     );
     expect(none.status).toBe("ok");
     expect(none.payload.event__v).toBeUndefined();
+    // an org whose lines carry an authoritative own event overrides the source
+    const own = mapping(
+      config({
+        objects: {
+          expense_line: {
+            fields: {
+              override: [
+                {
+                  source: "Event_vod__c",
+                  target: "event__v",
+                  transform: "ref(em_event)",
+                },
+              ],
+            },
+          },
+        },
+      }),
+    );
+    expect(referenceColumns(own)).toContainEqual({
+      key: "em_event",
+      source: "Event_vod__c",
+    });
+    expect(
+      applyMapping(row({ Event_vod__c: EVENT_1 }), own, applyCtx()).payload
+        .event__v,
+    ).toEqual({ $fk: { object: "em_event", sfdcId: EVENT_1 } });
   });
 
   it("reports an unresolved required header as pending_fk and fails on a missing header", () => {
@@ -450,17 +570,45 @@ describe("expense_line module", () => {
     });
   });
 
-  it("resolves expense_type__v as a picklist or text when the target is not an em_catalog reference", () => {
+  it("resolves expense_type__v through the documented override when the target is a picklist or text", () => {
+    const withTransform = (transform: string) =>
+      mapping(
+        config({
+          objects: {
+            expense_line: {
+              fields: {
+                override: [
+                  {
+                    source: "Expense_Type_vod__c",
+                    target: "expense_type__v",
+                    transform,
+                  },
+                ],
+              },
+            },
+          },
+        }),
+      );
+    const picklist = withTransform(`picklist(${EXPENSE_LINE_TYPE_MAP_KEY})`);
+    expect(picklist.findings.map((f) => f.code)).not.toContain(
+      "MAP_OVERRIDE_TARGET_UNKNOWN",
+    );
+    // the crosswalk key is registered on the module for exactly this override
+    expect(picklist.picklists[EXPENSE_LINE_TYPE_MAP_KEY]).toEqual({});
     const pick = applyMapping(
       row({ Expense_Type_vod__c: "Catering_vod" }),
-      mapping(),
+      picklist,
       applyCtx({ metadata: metadata({ expenseType: "Picklist" }) }),
     );
     expect(pick.status).toBe("ok");
     expect(pick.payload.expense_type__v).toBe("catering__v");
+    // the catalog reference is gone from the resolver's column set
+    expect(referenceColumns(picklist).map((c) => c.key)).not.toContain(
+      "em_catalog",
+    );
     const text = applyMapping(
       row({ Expense_Type_vod__c: " Catering " }),
-      mapping(),
+      withTransform("text"),
       applyCtx({ metadata: metadata({ expenseType: "String" }) }),
     );
     expect(text.status).toBe("ok");
@@ -468,11 +616,22 @@ describe("expense_line module", () => {
     // unmapped picklist value under the error policy fails the row
     const bad = applyMapping(
       row({ Expense_Type_vod__c: "Bogus_vod" }),
-      mapping(),
+      picklist,
       applyCtx({ metadata: metadata({ expenseType: "Picklist" }) }),
     );
     expect(bad.status).toBe("failed");
     expect(bad.failure?.field).toBe("expense_type__v");
+    // default mapping, catalog id unmapped: optional lookup → omitted + reported
+    const unknown = to18("a0T000000000077");
+    const unresolved = applyMapping(
+      row({ Expense_Type_vod__c: unknown }),
+      mapping(),
+      applyCtx(),
+    );
+    expect(unresolved.status).toBe("ok");
+    expect(unresolved.unresolvedOptionalFks).toEqual([
+      { field: "expense_type__v", objectKey: "em_catalog", sfdcId: unknown },
+    ]);
   });
 
   it("fails on a missing required amount, carries the Name only with preserveAutoNumberName, hashes deterministically", () => {
@@ -511,34 +670,6 @@ describe("expense_line module", () => {
 describe("expense_line custom transforms", () => {
   const base = { Id: LINE_1 };
 
-  it("eventRef prefers the own event, falls back to the header's (flattened or nested), and reports unresolved", () => {
-    const ctx = buildTransformContext({
-      objectKey: "expense_line",
-      field: { source: "Event_vod__c", target: "event__v" },
-      targetField: { name: "event__v", type: "object" },
-      ids,
-    });
-    expect(
-      eventRef(EVENT_1, { ...base, [HEADER_EVENT_COLUMN]: EVENT_2 }, ctx),
-    ).toEqual({ value: { $fk: { object: "em_event", sfdcId: EVENT_1 } } });
-    expect(
-      eventRef("", { ...base, [HEADER_EVENT_COLUMN]: EVENT_2 }, ctx),
-    ).toEqual({ value: { $fk: { object: "em_event", sfdcId: EVENT_2 } } });
-    expect(
-      eventRef(
-        undefined,
-        { ...base, Expense_Header_vod__r: { Event_vod__c: EVENT_2 } },
-        ctx,
-      ),
-    ).toEqual({ value: { $fk: { object: "em_event", sfdcId: EVENT_2 } } });
-    expect(eventRef(null, base, ctx)).toBeUndefined();
-    const unknown = to18("a0E000000000077");
-    expect(eventRef(unknown, base, ctx)).toMatchObject({
-      value: { $fk: { object: "em_event", sfdcId: unknown } },
-      unresolved: { objectKey: "em_event", sfdcId: unknown },
-    });
-  });
-
   it("budgetRefDropped omits with a non-fatal EM_BUDGET_REF_DROPPED diagnostic and ignores blanks", () => {
     const ctx = buildTransformContext({
       objectKey: "expense_line",
@@ -559,55 +690,5 @@ describe("expense_line custom transforms", () => {
     ).toBeUndefined();
     expect(budgetRefDropped("", base, ctx)).toBeUndefined();
     expect(budgetRefDropped(undefined, base, ctx)).toBeUndefined();
-  });
-
-  it("expenseTypeAuto picks ref / picklist / text by target type and refuses a foreign object reference", () => {
-    const refCtx = buildTransformContext({
-      objectKey: "expense_line",
-      field: { source: "Expense_Type_vod__c", target: "expense_type__v" },
-      targetField: {
-        name: "expense_type__v",
-        type: "object",
-        referenceObject: "em_catalog__v",
-      },
-      ids,
-    });
-    expect(expenseTypeAuto(CATALOG_1, base, refCtx)).toEqual({
-      value: { $fk: { object: "em_catalog", sfdcId: CATALOG_1 } },
-    });
-    const pickCtx = buildTransformContext({
-      objectKey: "expense_line",
-      field: { source: "Expense_Type_vod__c", target: "expense_type__v" },
-      targetField: {
-        name: "expense_type__v",
-        type: "picklist",
-        picklistValues: ["travel__v"],
-      },
-    });
-    expect(expenseTypeAuto("Travel_vod", base, pickCtx)).toMatchObject({
-      value: "travel__v",
-    });
-    const textCtx = buildTransformContext({
-      objectKey: "expense_line",
-      field: { source: "Expense_Type_vod__c", target: "expense_type__v" },
-      targetField: { name: "expense_type__v", type: "string", maxLength: 100 },
-    });
-    expect(expenseTypeAuto(" Travel ", base, textCtx)).toEqual({
-      value: "Travel",
-    });
-    const foreignCtx = buildTransformContext({
-      objectKey: "expense_line",
-      field: { source: "Expense_Type_vod__c", target: "expense_type__v" },
-      targetField: {
-        name: "expense_type__v",
-        type: "object",
-        referenceObject: "expense_type__v",
-      },
-    });
-    expect(expenseTypeAuto(CATALOG_1, base, foreignCtx)).toMatchObject({
-      omit: true,
-      diagnostic: { code: "EXPENSE_TYPE_TARGET_UNSUPPORTED" },
-    });
-    expect(expenseTypeAuto("", base, refCtx)).toBeUndefined();
   });
 });

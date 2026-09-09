@@ -11,16 +11,34 @@
  * `Product_Group_vod__c` is a lookup to **Product** (the detail-group product
  * row), so the default transform is `ref(product)`. When the target field
  * `product_group__v` references `product_group__v` instead, the transform
- * switches to `ref(product_group)` (resolved through the
- * `(product__v, detail_group__v)` pair by the product_group module's match
- * rule) — `custom(productGroupRef)` reads the resolved target metadata and
- * reports the switch as an `info`-level `FK_TARGET_SWITCHED` diagnostic.
+ * switches to `ref(product_group)` — but the product_group id map is keyed
+ * by `Product_Group_vod__c.Id`, which an order line never carries, so the
+ * reference has to be resolved through the `(product__v, detail_group__v)`
+ * pair (§6.3.39): `custom(productGroupRef)` asks the id resolver for the
+ * optional `resolveProductGroupPair(productSfdcId, detailGroupSfdcId)` hook
+ * (`ProductGroupPairResolver`, expected to return the `Product_Group_vod__c`
+ * id of the pair) and hands the result to the ordinary `ref(product_group)`
+ * transform, reporting the switch as an `info`-level `FK_TARGET_SWITCHED`
+ * diagnostic. Without the hook (or without a pair row) the field is omitted
+ * and counted under `PRODUCT_GROUP_PAIR_UNRESOLVED` — never a dead id-map
+ * lookup with a Product id. A target that references neither `product__v`
+ * nor `product_group__v` is a mapping error: the row fails with
+ * `FK_TARGET_MISMATCH` (preflight's `VT_FK_TARGET_MISMATCH` lint covers
+ * `ref` rows only).
  *
  * Amount fields are currency fields → Block S `CurrencyIsoCode →
  * local_currency__sys` is enabled.
  */
+import { isSfdcId, to18 } from "../../transform/ids";
 import { applyTransform } from "../../transform/registry";
-import type { CustomTransformFn, TransformResult } from "../../types";
+import { readSource } from "../../transform/source";
+import type {
+  CustomTransformFn,
+  IdResolver,
+  SourceRow,
+  TransformContext,
+  TransformResult,
+} from "../../types";
 import { defineObject, type ObjectModuleInput } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -33,6 +51,39 @@ export const ORDER_LINE_PRODUCT_GROUP_FIELD = "Product_Group_vod__c";
 export const ORDER_LINE_PRODUCT_GROUP_TARGET = "product_group__v";
 
 export const FK_TARGET_SWITCHED_CODE = "FK_TARGET_SWITCHED";
+/** The target references neither `product__v` nor `product_group__v` (row failed). */
+export const FK_TARGET_MISMATCH_CODE = "FK_TARGET_MISMATCH";
+/** Switched target but no `(product, detail group)` → product_group resolution available (field omitted). */
+export const PRODUCT_GROUP_PAIR_UNRESOLVED_CODE =
+  "PRODUCT_GROUP_PAIR_UNRESOLVED";
+
+/** Vault objects `product_group__v` may reference (§6.3.39). */
+export const PRODUCT_GROUP_REF_TARGETS: ReadonlyArray<string> = [
+  "product__v",
+  "product_group__v",
+];
+
+/**
+ * Optional id-resolver hook used by the switched branch of
+ * `custom(productGroupRef)`: the `Product_Group_vod__c.Id` of the association
+ * row whose `Product_vod__c` / `Detail_Group_vod__c` equal the given 18-char
+ * ids, or `undefined` when no such row exists. Duck-typed so the module does
+ * not depend on the hook being part of `IdResolver` yet.
+ */
+export interface ProductGroupPairResolver {
+  resolveProductGroupPair(
+    productSfdcId: string,
+    detailGroupSfdcId: string,
+  ): string | undefined;
+}
+
+/** The pair hook of an id resolver when it exposes one. */
+export function productGroupPairResolver(
+  ids: IdResolver,
+): ProductGroupPairResolver["resolveProductGroupPair"] | undefined {
+  const fn = (ids as Partial<ProductGroupPairResolver>).resolveProductGroupPair;
+  return typeof fn === "function" ? fn.bind(ids) : undefined;
+}
 
 /** `U_M_vod__c` → `u_m__v` (`[UNV]`, country-configurable). */
 export const ORDER_LINE_UM: Record<string, string> = {
@@ -50,9 +101,80 @@ function isEmpty(v: unknown): boolean {
 }
 
 /**
+ * Switched branch (§6.3.39): resolve `(Product_vod__c, Product_Group_vod__c)`
+ * to the `Product_Group_vod__c` row through the resolver hook, then defer it
+ * like any `ref(product_group)`; omit + count when that is not possible.
+ */
+function switchedProductGroupRef(
+  value: unknown,
+  row: SourceRow,
+  ctx: TransformContext,
+): TransformResult {
+  const target = ctx.field.target;
+  const detailGroup = String(value).trim();
+  if (!isSfdcId(detailGroup))
+    return {
+      omit: true,
+      diagnostic: {
+        kind: "invalid_value",
+        field: target,
+        code: "INVALID_ID",
+        value: detailGroup,
+      },
+    };
+  const detailGroupId = to18(detailGroup);
+  const product = readSource(row, ORDER_LINE_PRODUCT_FIELD);
+  const productRaw = typeof product === "string" ? product.trim() : "";
+  const unresolved = (detail: string): TransformResult => ({
+    omit: true,
+    diagnostic: {
+      kind: "unresolved_fk",
+      field: target,
+      objectKey: "product_group",
+      code: PRODUCT_GROUP_PAIR_UNRESOLVED_CODE,
+      value: detailGroupId,
+      detail,
+    },
+  });
+  if (!isSfdcId(productRaw))
+    return unresolved(
+      `${target} references product_group__v but ${ORDER_LINE_PRODUCT_FIELD} is empty — the (product, detail group) pair cannot be formed; field omitted`,
+    );
+  const productId = to18(productRaw);
+  const resolvePair = productGroupPairResolver(ctx.ids);
+  if (!resolvePair)
+    return unresolved(
+      `${target} references product_group__v but the id resolver has no resolveProductGroupPair hook — (product__v, detail_group__v) pair resolution unavailable (§6.3.39); field omitted`,
+    );
+  const groupId = resolvePair(productId, detailGroupId);
+  if (groupId === undefined)
+    return unresolved(
+      `no Product_Group_vod__c row for (${ORDER_LINE_PRODUCT_FIELD} ${productId}, ${ORDER_LINE_PRODUCT_GROUP_FIELD} ${detailGroupId}); field omitted`,
+    );
+  const r = applyTransform(
+    { kind: "ref", objectKey: "product_group" },
+    groupId,
+    row,
+    ctx,
+  );
+  if (r.diagnostic) return r;
+  return {
+    ...r,
+    diagnostic: {
+      kind: "custom",
+      field: target,
+      code: FK_TARGET_SWITCHED_CODE,
+      detail: `${target} references product_group__v — resolved as ref(product_group) through the (product__v, detail_group__v) pair instead of ref(product)`,
+    },
+  };
+}
+
+/**
  * `custom(productGroupRef)`: `ref(product)` by default (§6.3.39 — the
- * detail-group *product* row); `ref(product_group)` when the resolved target
- * field references `product_group__v` (`info FK_TARGET_SWITCHED`).
+ * detail-group *product* row); `ref(product_group)` resolved through the
+ * `(product__v, detail_group__v)` pair when the resolved target field
+ * references `product_group__v` (`info FK_TARGET_SWITCHED`); a fatal
+ * `FK_TARGET_MISMATCH` when the target is not a reference to either object.
  */
 export const productGroupRef: CustomTransformFn = (
   value,
@@ -60,25 +182,28 @@ export const productGroupRef: CustomTransformFn = (
   ctx,
 ): TransformResult | undefined => {
   if (isEmpty(value)) return undefined;
-  const referenced = ctx.targetField?.referenceObject;
-  if (referenced === "product_group__v") {
-    const r = applyTransform(
-      { kind: "ref", objectKey: "product_group" },
-      value,
-      row,
-      ctx,
-    );
-    if (r.diagnostic) return r;
+  const tf = ctx.targetField;
+  const referenced = tf?.referenceObject;
+  const notAReference = tf && tf.type !== "object" && tf.type !== "unknown";
+  if (
+    notAReference ||
+    (referenced !== undefined &&
+      !PRODUCT_GROUP_REF_TARGETS.includes(referenced))
+  )
     return {
-      ...r,
+      omit: true,
       diagnostic: {
-        kind: "custom",
+        kind: "invalid_value",
         field: ctx.field.target,
-        code: FK_TARGET_SWITCHED_CODE,
-        detail: `${ctx.field.target} references product_group__v — resolved as ref(product_group) instead of ref(product)`,
+        code: FK_TARGET_MISMATCH_CODE,
+        fatal: true,
+        detail: notAReference
+          ? `${ctx.field.target} is a ${tf.rawType} field, not a reference to product__v or product_group__v (§6.3.39)`
+          : `${ctx.field.target} references ${referenced}; §6.3.39 expects product__v (or product_group__v via the pair switch)`,
       },
     };
-  }
+  if (referenced === "product_group__v")
+    return switchedProductGroupRef(value, row, ctx);
   return applyTransform({ kind: "ref", objectKey: "product" }, value, row, ctx);
 };
 
@@ -185,7 +310,7 @@ export const order_line = defineObject({
       evidence: "UNV",
       sourceType: "reference",
       notes:
-        "ref → Product (detail-group product row) → product__v [INFER]; switches to ref(product_group) when the target references product_group__v (info FK_TARGET_SWITCHED); Y in §6.3.39 for the row group, optional in practice",
+        "ref → Product (detail-group product row) → product__v [INFER]; switches to ref(product_group) resolved through the (product__v, detail_group__v) pair when the target references product_group__v (info FK_TARGET_SWITCHED; PRODUCT_GROUP_PAIR_UNRESOLVED when no pair resolver/row); any other target fails the row (FK_TARGET_MISMATCH); Y in §6.3.39 for the row group, optional in practice",
     },
     // --- quantities / prices / amounts (row 2)
     unv("Quantity_vod__c", "quantity__v", "number"),

@@ -23,22 +23,42 @@
  *  - `cobrowse_mc_activity__v` → `ref(multichannel_activity) secondPass` with
  *    `selfRefs.objectKey = 'multichannel_activity'` — `multichannel_activity`
  *    depends on `call2` (step 22), so `multichannel_activity` is listed in
- *    `dependsOn` and the DAG edge is removed by the selfRef;
+ *    `dependsOn` and the DAG edge is removed by the selfRef. The pass-2 patch
+ *    runs with step 16 (before the activities exist), is reported
+ *    `SECOND_PASS_UNRESOLVED` there and is re-tried by the engine after every
+ *    unit landed (`retrySecondPass`, §3.5) — the field is populated late, not
+ *    lost;
  *  - `medical_inquiry__v` is a direct `ref(medical_inquiry)`: the
  *    `medical_inquiry` module already breaks the cycle by deferring its
  *    `call2__v` to pass 2 (§6.1 step 15), so inquiries precede calls.
  *
  * Business status `Status_vod__c` {Planned_vod, Saved_vod, Submitted_vod} →
- * `call2_status__v` (pattern field, preflight may re-point to `status__v` when
- * the platform status carries the submitted-like values) **and** the lifecycle
- * `state__v` when `available_lifecycles` is non-empty (`call2.state`
- * crosswalk, `<status>_state__v` `[UNV]`).
+ * `call2_status__v` **and** the lifecycle `state__v` when
+ * `available_lifecycles` is non-empty (`call2.state` crosswalk,
+ * `<status>_state__v` `[UNV]`). `call2_status__v` is the §6.0.2 pattern name
+ * and `[UNV]`; §6.3.30 lets a vault carry the values on the platform
+ * `status__v` instead, but no preflight picker implements that choice yet, so
+ * the row is `y?` (the target metadata decides the requirement) and a missing
+ * `call2_status__v` degrades to `VT_FIELD_MISSING` **warning** + row dropped
+ * (CONTRACTS §0) rather than blocking the unit and its four children. A vault
+ * that models the call status on `status__v` re-points the row through
+ * `objects.call2.fields` (`remove: ["call2_status__v"]` + `add: [{ source:
+ * "Status_vod__c", target: "status__v", transform: "picklist(call2.status)"
+ * }]`).
  *
  * Custom transforms (pure, unit-tested):
  *  - `contactRef` — `Contact_vod__c` has no Vault equivalent (§3.4): dropped
  *    and counted (`CONTACT_REF_DROPPED`) unless the id map already carries a
  *    person account for the contact (`objects.account.contactToPersonAccount`),
- *    and only when `Account_vod__c` is empty; emits into `account__v`.
+ *    and only when `Account_vod__c` is empty; emits into `account__v`. The
+ *    `Account_vod__c → account__v` row stays a plain `ref(account)` on purpose:
+ *    the closure (`mappingFkColumns`), the transform-time id snapshot
+ *    (`referenceColumns`) and the preflight FK checks only see `ref` rows, so a
+ *    `custom(...)` there would hide every call's account. Known engine limit:
+ *    when the vault marks `account__v` required, `applyMapping` latches
+ *    `REQUIRED_MISSING` on the empty `ref` row before this row can fill the
+ *    field (contact-only rows fail although the mapping is known) — the fix
+ *    belongs in `transform/apply.ts` (decide the requirement after all rows).
  *  - `addressSnapshot` — `Address_vod__c` is the PDMA **text snapshot** of the
  *    address at signature time; loaded verbatim as text (500) when the target
  *    is a text field, omitted with `CALL2_ADDRESS_TARGET_IS_OBJECT` when the
@@ -633,10 +653,13 @@ export const call2 = defineObject({
     },
     // --- status: business picklist + lifecycle state (migration mode)
     unv(CALL2_STATUS_FIELD, "call2_status__v", "picklist(call2.status)", {
-      required: "Y",
+      // `y?`, not `Y`: the name is [UNV] and preflight has no picker for the
+      // §6.3.30 `call2_status__v` / `status__v` alternative — `Y` would make a
+      // describe miss blocking for call2 and (via-parent) every call child.
+      required: "y?",
       sourceType: "picklist",
       notes:
-        "{Planned_vod, Saved_vod, Submitted_vod} → planned__v/saved__v/submitted__v; preflight re-points to status__v when that picklist carries the submitted-like values",
+        "{Planned_vod, Saved_vod, Submitted_vod} → planned__v/saved__v/submitted__v; [UNV] name — a miss is VT_FIELD_MISSING warning + row dropped; re-point to status__v via objects.call2.fields (remove + add) when that picklist carries the call values (no preflight picker yet)",
     }),
     unv(CALL2_STATUS_FIELD, "state__v", "state(call2.state)", {
       required: "Y",
@@ -808,7 +831,7 @@ export const call2 = defineObject({
       {
         sourceType: "reference",
         notes:
-          "cyclic with multichannel_activity (step 22) — omitted in pass 1, patched after the activities",
+          "cyclic with multichannel_activity (step 22) — omitted in pass 1; the step-16 pass 2 reports it SECOND_PASS_UNRESOLVED and the engine re-tries the patch once every unit landed (retrySecondPass, §3.5)",
       },
     ),
     unv(

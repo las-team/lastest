@@ -45,11 +45,18 @@ const clone = <T>(v: T): T =>
   v === undefined ? v : (JSON.parse(JSON.stringify(v)) as T);
 const nowIso = () => new Date().toISOString();
 
+/** A row that occupies its (vaultObject, vaultId) slot per `id_map_vault_uidx`. */
+const isLive = (r: IdMapRow): boolean => !r.mergedInto && !r.deletedAt;
+const vaultKey = (r: Pick<IdMapRow, "vaultObject" | "vaultId">): string =>
+  `${r.vaultObject}|${r.vaultId}`;
+
 export class MemoryStateStore implements StateStore {
   readonly vaultDns: string;
   private runsMap = new Map<string, RunRecord>();
   private wmMap = new Map<string, Watermark>();
   private idMapRows = new Map<string, IdMapRow>();
+  /** `vaultObject|vaultId` → id-map key, live rows only (`id_map_vault_uidx`). */
+  private liveByVault = new Map<string, string>();
   private rowResultRows = new Map<string, RowResult>();
   private pendingRows = new Map<string, PendingFk>();
   private fkRows = new Map<string, FkIndexRow>();
@@ -70,6 +77,19 @@ export class MemoryStateStore implements StateStore {
 
   private idKey(objectKey: ObjectKey, sfdcId: string): string {
     return `${objectKey}|${to18(sfdcId)}`;
+  }
+
+  /**
+   * Call before mutating the row stored under `key` (or deleting it) with
+   * the row's state after the mutation; keeps `liveByVault` exact.
+   */
+  private reindexIdMap(key: string, next: IdMapRow | undefined): void {
+    const prev = this.idMapRows.get(key);
+    if (prev && isLive(prev)) {
+      const vk = vaultKey(prev);
+      if (this.liveByVault.get(vk) === key) this.liveByVault.delete(vk);
+    }
+    if (next && isLive(next)) this.liveByVault.set(vaultKey(next), key);
   }
 
   runs: RunsRepo = {
@@ -131,21 +151,14 @@ export class MemoryStateStore implements StateStore {
         firstSeenRun: existing?.firstSeenRun ?? row.firstSeenRun,
       };
       // unique (vault_object, vault_id) among live rows
-      for (const other of this.idMapRows.values()) {
-        if (
-          other !== existing &&
-          other.vaultObject === next.vaultObject &&
-          other.vaultId === next.vaultId &&
-          !other.mergedInto &&
-          !other.deletedAt &&
-          !next.mergedInto &&
-          !next.deletedAt &&
-          other.sfdcId !== next.sfdcId
-        )
+      if (isLive(next)) {
+        const otherKey = this.liveByVault.get(vaultKey(next));
+        if (otherKey !== undefined && otherKey !== key)
           throw new Error(
-            `id_map_vault_uidx violation: ${next.vaultObject}/${next.vaultId} already mapped to ${other.sfdcId}`,
+            `id_map_vault_uidx violation: ${next.vaultObject}/${next.vaultId} already mapped to ${this.idMapRows.get(otherKey)?.sfdcId ?? otherKey}`,
           );
       }
+      this.reindexIdMap(key, next);
       this.idMapRows.set(key, next);
     },
     putMany: async (rows) => {
@@ -159,32 +172,36 @@ export class MemoryStateStore implements StateStore {
       }
       return out;
     },
-    byVaultId: async (vaultObject, vaultId) =>
-      clone(
-        [...this.idMapRows.values()].find(
-          (r) =>
-            r.vaultObject === vaultObject &&
-            r.vaultId === vaultId &&
-            !r.mergedInto &&
-            !r.deletedAt,
-        ),
-      ),
+    byVaultId: async (vaultObject, vaultId) => {
+      const key = this.liveByVault.get(vaultKey({ vaultObject, vaultId }));
+      return key === undefined ? undefined : clone(this.idMapRows.get(key));
+    },
     markDeleted: async (objectKey, sfdcId, deletedAt) => {
-      const row = this.idMapRows.get(this.idKey(objectKey, sfdcId));
-      if (row) row.deletedAt = deletedAt;
+      const key = this.idKey(objectKey, sfdcId);
+      const row = this.idMapRows.get(key);
+      if (!row) return;
+      const next = { ...row, deletedAt };
+      this.reindexIdMap(key, next);
+      this.idMapRows.set(key, next);
     },
     merge: async (objectKey, loser, survivor, runId) => {
-      const l = this.idMapRows.get(this.idKey(objectKey, loser));
+      const lKey = this.idKey(objectKey, loser);
+      const l = this.idMapRows.get(lKey);
       const s = this.idMapRows.get(this.idKey(objectKey, survivor));
       if (!s) throw new Error(`merge survivor ${survivor} not in id map`);
       const survivorId = to18(survivor);
       if (l) {
-        l.mergedInto = survivorId;
-        l.vaultId = s.vaultId;
-        l.matchMethod = "merged";
-        l.lastSeenRun = runId;
+        const next: IdMapRow = {
+          ...l,
+          mergedInto: survivorId,
+          vaultId: s.vaultId,
+          matchMethod: "merged",
+          lastSeenRun: runId,
+        };
+        this.reindexIdMap(lKey, next);
+        this.idMapRows.set(lKey, next);
       } else {
-        this.idMapRows.set(this.idKey(objectKey, loser), {
+        this.idMapRows.set(lKey, {
           ...clone(s),
           sfdcId: to18(loser),
           mergedInto: survivorId,
@@ -231,6 +248,7 @@ export class MemoryStateStore implements StateStore {
       let n = 0;
       for (const [k, r] of this.idMapRows)
         if (r.dryRun) {
+          this.reindexIdMap(k, undefined);
           this.idMapRows.delete(k);
           n++;
         }

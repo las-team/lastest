@@ -156,6 +156,12 @@ export function testDescribes() {
     Account: buildDescribe("Account", [
       { name: "Inactive_vod__c", type: "boolean" },
       {
+        name: "MasterRecordId",
+        type: "reference",
+        referenceTo: ["Account"],
+        relationshipName: "MasterRecord",
+      },
+      {
         name: "Primary_Parent_vod__c",
         type: "reference",
         referenceTo: ["Account"],

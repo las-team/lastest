@@ -460,8 +460,10 @@ export class SfdcRest {
     string,
     DescribeCacheEntry<SfdcObjectDescribe>
   >();
-  private globalCache: DescribeCacheEntry<SfdcGlobalDescribeEntry[]> | null =
-    null;
+  /** Stored in the exact shape `cachedGet` mutates on 304 (`fetchedAt` refresh). */
+  private globalCache: DescribeCacheEntry<{
+    sobjects: SfdcGlobalDescribeEntry[];
+  }> | null = null;
   private recordTypeCache: SfdcRecordType[] | null = null;
   private versionsCache: string[] | null = null;
 
@@ -541,16 +543,10 @@ export class SfdcRest {
   async describeGlobal(): Promise<SfdcGlobalDescribeEntry[]> {
     const list = await this.cachedGet<{ sobjects: SfdcGlobalDescribeEntry[] }>(
       "/sobjects",
-      this.globalCache
-        ? {
-            value: { sobjects: this.globalCache.value },
-            lastModified: this.globalCache.lastModified,
-            fetchedAt: this.globalCache.fetchedAt,
-          }
-        : null,
+      this.globalCache,
       (body, lastModified) => {
         this.globalCache = {
-          value: body.sobjects ?? [],
+          value: { sobjects: body.sobjects ?? [] },
           lastModified,
           fetchedAt: this.now(),
         };

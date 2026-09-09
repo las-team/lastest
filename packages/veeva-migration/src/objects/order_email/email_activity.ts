@@ -11,10 +11,18 @@
  * `URL_vod__c`, `User_Agent_vod__c` and `IP_Address_vod__c` are
  * `[UNVERIFIED-SOURCE]`: a describe miss is `info` and the row is dropped
  * silently. The IP address is PII: the row is gated by
- * `objects.email_activity.loadIpAddress` (module default `true`; the
- * `regions.EU` overlay sets it to `false`, §7.2.1/§7.4) and erased ids are
- * skipped by `applyMapping` (`privacy.erasureListPath`).
+ * `objects.email_activity.loadIpAddress` — `true` outside the EU, **`false`
+ * by default in `regions.EU`** (§6.3.41, §7.4.9). An explicit `false`
+ * removes the row at materialise time (`disabledBy`); when the flag is not
+ * set the `custom(ipAddress)` transform applies the region default
+ * (`EMAIL_ACTIVITY_IP_REGION_DEFAULTS`) from the unit's `country.region`, so
+ * a DE/FR unit whose YAML does not carry the §7.3 `regions.EU` block still
+ * never loads `ip_address__v` (omitted and counted `PII_IP_ADDRESS_OMITTED`,
+ * value never echoed). Erased ids are skipped by `applyMapping`
+ * (`privacy.erasureListPath`).
  */
+import { applyTransform } from "../../transform/registry";
+import type { CustomTransformFn, TransformResult } from "../../types";
 import { defineObject, type ObjectModuleInput } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -24,6 +32,57 @@ import { defineObject, type ObjectModuleInput } from "../types";
 export const EMAIL_ACTIVITY_PARENT_FIELD = "Sent_Email_vod__c";
 export const EMAIL_ACTIVITY_IP_FIELD = "IP_Address_vod__c";
 export const EMAIL_ACTIVITY_LOAD_IP_FLAG = "loadIpAddress";
+/** Region defaults of `loadIpAddress` when the flag is not set (§6.3.41: `false` in `regions.EU`); any other region → `true` (§7.2.1). */
+export const EMAIL_ACTIVITY_IP_REGION_DEFAULTS: Readonly<
+  Record<string, boolean>
+> = { EU: false };
+export const PII_IP_ADDRESS_OMITTED_CODE = "PII_IP_ADDRESS_OMITTED";
+
+// ---------------------------------------------------------------------------
+// custom transforms (pure)
+// ---------------------------------------------------------------------------
+
+function isEmpty(v: unknown): boolean {
+  return v === null || v === undefined || v === "";
+}
+
+/**
+ * Effective `loadIpAddress`: an explicit boolean wins; otherwise the region
+ * default (`EU → false`), `true` everywhere else (§6.3.41, §7.2.1).
+ */
+export function loadIpAddressEffective(
+  option: unknown,
+  region: string | undefined,
+): boolean {
+  if (typeof option === "boolean") return option;
+  if (region === undefined) return true;
+  return EMAIL_ACTIVITY_IP_REGION_DEFAULTS[region] ?? true;
+}
+
+/**
+ * `custom(ipAddress)`: `text` when `loadIpAddress` is effectively on; else
+ * omitted and counted (`PII_IP_ADDRESS_OMITTED`, the value is PII and is
+ * never echoed in the diagnostic).
+ */
+export const ipAddress: CustomTransformFn = (
+  value,
+  row,
+  ctx,
+): TransformResult | undefined => {
+  if (isEmpty(value)) return undefined;
+  const option = ctx.mapping.options[EMAIL_ACTIVITY_LOAD_IP_FLAG];
+  if (!loadIpAddressEffective(option, ctx.country.region))
+    return {
+      omit: true,
+      diagnostic: {
+        kind: "custom",
+        field: ctx.field.target,
+        code: PII_IP_ADDRESS_OMITTED_CODE,
+        detail: `${ctx.field.target} omitted: objects.email_activity.loadIpAddress is ${option === undefined ? `unset and defaults to false in region ${ctx.country.region}` : "false"} (§6.3.41)`,
+      },
+    };
+  return applyTransform({ kind: "text" }, value, row, ctx);
+};
 
 /** `Event_Type_vod__c` → `event_type__v` (`[UNV]` values by the rename rule; others derive). */
 export const EMAIL_ACTIVITY_EVENT_TYPE: Record<string, string> = {
@@ -111,12 +170,12 @@ export const email_activity = defineObject({
       unverifiedSource: true,
       optionalSource: true,
     }),
-    unv(EMAIL_ACTIVITY_IP_FIELD, "ip_address__v", "text", {
+    unv(EMAIL_ACTIVITY_IP_FIELD, "ip_address__v", "custom(ipAddress)", {
       unverifiedSource: true,
       optionalSource: true,
       disabledBy: EMAIL_ACTIVITY_LOAD_IP_FLAG,
       notes:
-        "PII — objects.email_activity.loadIpAddress (default true; false in regions.EU); erasure list respected by applyMapping",
+        "PII — objects.email_activity.loadIpAddress (true outside the EU, false by default in regions.EU: custom(ipAddress) applies the region default when the flag is unset; an explicit false removes the row); erasure list respected by applyMapping",
     }),
   ],
   picklists: {
@@ -134,7 +193,9 @@ export const email_activity = defineObject({
       evidence: "UNV",
     },
   ],
-  optionDefaults: { [EMAIL_ACTIVITY_LOAD_IP_FLAG]: true },
+  // `loadIpAddress` deliberately has no static default: unset means "region
+  // default" (EU → false, else true), resolved by custom(ipAddress).
+  custom: { ipAddress },
   notes:
-    "Email activities (§6.3.41): child of sent_email, scoped and attributed through the parent; URL/User_Agent/IP_Address sources unverified (describe miss = info); ip_address__v gated by loadIpAddress (false in EU); deleted with the parent (§4.4).",
+    "Email activities (§6.3.41): child of sent_email, scoped and attributed through the parent; URL/User_Agent/IP_Address sources unverified (describe miss = info); ip_address__v gated by loadIpAddress (unset → false in regions.EU, true elsewhere); deleted with the parent (§4.4).",
 });

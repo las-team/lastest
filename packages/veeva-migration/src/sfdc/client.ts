@@ -46,6 +46,8 @@ export interface SfdcClientConfig {
     sfdcBulkConcurrency?: number;
     sfdcRestConcurrency?: number;
     sfdcApiFloorPct?: number;
+    /** Bulk 2.0 `maxRecords` per results page (default `DEFAULT_BULK_MAX_RECORDS`). */
+    sfdcBulkMaxRecords?: number;
   };
   extract?: {
     closureStrategy?: "soqlIn" | "composite";
@@ -212,6 +214,7 @@ export async function createSfdcClient(
   });
   const bulk = new SfdcBulk(transport, {
     ...deps.bulk,
+    maxRecords: deps.bulk?.maxRecords ?? config.performance?.sfdcBulkMaxRecords,
     concurrency: config.performance?.sfdcBulkConcurrency ?? 4,
     sleep: deps.sleep,
     random: deps.random,

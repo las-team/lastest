@@ -162,6 +162,8 @@ export interface VaultClientImpl extends VaultClient {
   ): Promise<void>;
   /** Cached object metadata (used by action probes); `objectMetadata()` always fetches. */
   cachedObjectMetadata(objectName: string): Promise<VaultObjectMetadata>;
+  /** `objectTypes()` plus the types whose configuration could not be read (§2.5.6). */
+  objectTypesDetailed(objectName: string): Promise<metadata.ObjectTypesResult>;
 }
 
 export function createVaultClient(config: VaultClientConfig): VaultClientImpl {
@@ -203,8 +205,10 @@ export function createVaultClient(config: VaultClientConfig): VaultClientImpl {
     authRateLimit: config.authRateLimit,
     keepAliveIntervalMs: config.keepAliveIntervalMs,
     versionFallback: config.versionFallback,
+    retry: config.retry,
     now: config.now,
     sleep: config.sleep,
+    random: config.random,
     logger: log,
   });
 
@@ -277,16 +281,16 @@ export function createVaultClient(config: VaultClientConfig): VaultClientImpl {
       metadata.createPicklistValues(http, name, labels),
     setPicklistValueStatus: (name, value, status) =>
       metadata.setPicklistValueStatus(http, name, value, status),
-    objectTypes: async (
-      objectName: string,
-    ): Promise<VaultObjectTypeConfig[]> => {
+    objectTypes: async (objectName: string): Promise<VaultObjectTypeConfig[]> =>
+      (await client.objectTypesDetailed(objectName)).types,
+    objectTypesDetailed: async (objectName: string) => {
       let meta: VaultObjectMetadata | undefined;
       try {
         meta = await cachedObjectMetadata(objectName);
       } catch {
         meta = undefined;
       }
-      return metadata.objectTypes(http, objectName, meta);
+      return metadata.objectTypesDetailed(http, objectName, meta);
     },
     lifecycleStates: (name: string): Promise<VaultLifecycle> =>
       metadata.lifecycleStates(http, name),

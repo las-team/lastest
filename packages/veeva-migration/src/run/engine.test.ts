@@ -172,7 +172,10 @@ describe("DefaultRunEngine", () => {
       ),
     ).toHaveLength(0);
     expect(await h.store.watermarks.list()).toEqual([]);
-    expect(await h.store.idMap.get("account", ACC[0])).toBeUndefined();
+    // §8.9: the only id-map rows are flagged dry_run (purged by the next real run)
+    expect(await h.store.idMap.get("account", ACC[0])).toMatchObject({
+      dryRun: true,
+    });
     expect(
       existsSync(
         path.join(
@@ -194,6 +197,200 @@ describe("DefaultRunEngine", () => {
       reconciliation: Array<{ objectKey: string; created: number }>;
     };
     expect(report.dryRun).toBe(true);
+    // children simulated against parents simulated in the same run: would_create, nothing pending or re-fetched
+    const recon = await h.store.reconciliation.list(summary.runId);
+    for (const key of ["account", "address", "call2"]) {
+      const r = recon.find((x) => x.objectKey === key)!;
+      expect(r).toMatchObject({
+        created: 2,
+        pendingFk: 0,
+        failed: 0,
+        closure: 0,
+        status: "pass",
+      });
+    }
+    expect(
+      (await h.store.findings.list(summary.runId)).map((f) => f.code),
+    ).not.toContain("UNRESOLVED_FK");
+    // the next real run purges the dry-run rows and loads for real
+    const real = await init();
+    expect(real.exitCode).toBe(0);
+    expect(await h.store.idMap.get("account", ACC[0])).toMatchObject({
+      matchMethod: "created",
+    });
+    expect((await h.store.idMap.get("account", ACC[0]))!.dryRun).toBeFalsy();
+    expect(h.vault.records("address__v")).toHaveLength(2);
+  });
+
+  it("extract count mismatch: re-extracts with PK chunking, a second mismatch fails the unit and keeps the watermark (§2.8)", async () => {
+    const orig = h.sfdc.count.bind(h.sfdc);
+    h.sfdc.count = async (object, where) =>
+      (await orig(object, where)) + (object === "Account" ? 1 : 0);
+    const summary = await init();
+    expect(summary.exitCode).toBe(EXIT_CODES.unitFailures);
+    expect(
+      summary.units.find((u) => u.unit.objectKey === "account"),
+    ).toMatchObject({ status: "failed" });
+    expect(
+      h.sfdc.calls.filter(
+        (c) => c.method === "count" && c.args[0] === "Account",
+      ).length,
+    ).toBeGreaterThanOrEqual(2);
+    const findings = await h.store.findings.list(summary.runId);
+    expect(
+      findings.some(
+        (f) => f.code === "EXTRACT_COUNT_MISMATCH" && f.severity === "blocking",
+      ),
+    ).toBe(true);
+    expect(
+      summary.units.find((u) => u.unit.objectKey === "account")?.reason,
+    ).toMatch(/EXTRACT_COUNT_MISMATCH/);
+    expect(
+      await h.store.watermarks.get("account", "US", "modstamp"),
+    ).toBeUndefined();
+    // the other units are unaffected
+    expect(
+      (await h.store.watermarks.get("address", "US", "modstamp"))?.value,
+    ).toBe("2026-09-07T11:55:00.000Z");
+  });
+
+  it("closure never writes into a parent unit that preflight blocked", async () => {
+    h.preflight.blockedUnits.push({ objectKey: "account", country: "US" });
+    const summary = await init();
+    expect(h.vault.records("account__v")).toHaveLength(0);
+    const findings = await h.store.findings.list(summary.runId);
+    const unavailable = findings.filter(
+      (f) => f.code === "CLOSURE_PARENT_UNAVAILABLE",
+    );
+    expect(unavailable.length).toBeGreaterThan(0);
+    expect(unavailable[0].objectKey).toBe("account");
+    // children could not resolve their parents → pending, then UNRESOLVED_FK
+    const addr = (await h.store.reconciliation.list(summary.runId)).find(
+      (r) => r.objectKey === "address",
+    )!;
+    expect(addr.failedByType).toMatchObject({ UNRESOLVED_FK: 2 });
+  });
+
+  it("pass 2 also patches parents loaded by closure after their step (§6.1)", async () => {
+    // a US address references the DE account (outside the wave); that account's own
+    // self reference points at a US account loaded in step 1
+    h.sfdc.upsertRow("Account", {
+      ...h.sfdc.getRows("Account")[2],
+      Primary_Parent_vod__c: ACC[0],
+    });
+    const addr3 = "a0A000000000003";
+    h.sfdc.addRows("Address_vod__c", [
+      {
+        Id: addr3,
+        IsDeleted: false,
+        SystemModstamp: T0,
+        CreatedDate: T0,
+        CreatedById: "005000000000001AAA",
+        LastModifiedDate: T0,
+        LastModifiedById: "005000000000001AAA",
+        Name: "3 Cross St",
+        Account_vod__c: ACC[2],
+        City_vod__c: "Boston",
+        "Account_vod__r.Country_vod__r.Alpha_2_Code_vod__c": "US",
+      },
+    ]);
+    const summary = await init();
+    expect(summary.exitCode).toBe(0);
+    const acc0 = (await h.store.idMap.get("account", ACC[0]))!;
+    const acc2 = (await h.store.idMap.get("account", ACC[2]))!;
+    expect(h.vault.record("account__v", acc2.vaultId)?.primary_parent__v).toBe(
+      acc0.vaultId,
+    );
+    const recon = (await h.store.reconciliation.list(summary.runId)).find(
+      (r) => r.objectKey === "account",
+    )!;
+    expect(recon).toMatchObject({ extracted: 2, closure: 1, created: 3 });
+  });
+
+  it("delta: an SFDC account merge maps the loser to the survivor and re-points its children (§3.4 a, §4.2)", async () => {
+    await init();
+    const acc0 = (await h.store.idMap.get("account", ACC[0]))!;
+    const acc1 = (await h.store.idMap.get("account", ACC[1]))!;
+    const addr1 = (await h.store.idMap.get("address", ADDR[1]))!;
+    expect(h.vault.record("address__v", addr1.vaultId)?.account__v).toBe(
+      acc1.vaultId,
+    );
+    h.clock.now = "2026-09-08T12:00:00.000Z";
+    (h.sfdc as unknown as { opts: { now: string } }).opts.now =
+      "2026-09-08T12:00:00.000Z";
+    // ACC[1] merged into ACC[0]: deleted loser row carries MasterRecordId
+    h.sfdc.upsertRow("Account", {
+      ...h.sfdc.getRows("Account")[1],
+      IsDeleted: true,
+      MasterRecordId: ACC[0],
+      SystemModstamp: "2026-09-08T09:00:00.000Z",
+    });
+    h.sfdc.addDeleted("Account", ACC[1], "2026-09-08T09:00:00.000Z");
+    const delta = await h.engine.execute({
+      mode: "delta",
+      config: h.config,
+      wave: "w1",
+    });
+    expect(delta.exitCode).toBe(0);
+    const loser = (await h.store.idMap.get("account", ACC[1]))!;
+    expect(loser.mergedInto).toBe(ACC[0]);
+    expect(loser.deletedAt).toBeTruthy(); // inactivate policy applied first
+    expect(h.vault.record("address__v", addr1.vaultId)?.account__v).toBe(
+      acc0.vaultId,
+    );
+    const call1 = (await h.store.idMap.get("call2", CALL[1]))!;
+    expect(h.vault.record("call2__v", call1.vaultId)?.account__v).toBe(
+      acc0.vaultId,
+    );
+    expect(
+      (await h.store.idMap.get("address", ADDR[1]))?.sourceHash,
+    ).toBeFalsy();
+    const findings = await h.store.findings.list(delta.runId);
+    expect(
+      findings.find((f) => f.code === "ACCOUNT_MERGED")?.detail,
+    ).toMatchObject({ merged: 1, childrenRepointed: 2 });
+  });
+
+  it("a widened cutoff (SCOPE_CUTOFF_CHANGED) re-extracts in full but still consumes the delete feed", async () => {
+    await init();
+    h.clock.now = "2026-09-08T12:00:00.000Z";
+    (h.sfdc as unknown as { opts: { now: string } }).opts.now =
+      "2026-09-08T12:00:00.000Z";
+    h.sfdc.deleteRow("Address_vod__c", ADDR[1], "2026-09-08T09:30:00.000Z");
+    const h2 = makeHarness(
+      runDir,
+      {
+        store: h.store,
+        sfdc: h.sfdc,
+        vaults: h.deps.vaults,
+        preflight: h.preflight,
+      },
+      { scope: { cutoffDate: "2020-01-01" } },
+    );
+    h2.clock.now = "2026-09-08T12:00:00.000Z";
+    const delta = await h2.engine.execute({
+      mode: "delta",
+      config: h2.config,
+      wave: "w1",
+    });
+    expect(delta.exitCode).toBe(0);
+    const findings = await h.store.findings.list(delta.runId);
+    expect(findings.map((f) => f.code)).toContain("SCOPE_CUTOFF_CHANGED");
+    expect(
+      h.sfdc.calls.some(
+        (c) => c.method === "getDeleted" && c.args[0] === "Address_vod__c",
+      ),
+    ).toBe(true);
+    const addr = (await h.store.reconciliation.list(delta.runId)).find(
+      (r) => r.objectKey === "address",
+    )!;
+    expect(addr).toMatchObject({ deleted: 1, deletedApplied: 1 });
+    expect(
+      (await h.store.idMap.get("address", ADDR[1]))?.deletedAt,
+    ).toBeTruthy();
+    expect(
+      (await h.store.watermarks.get("address", "US", "modstamp"))?.cutoffDate,
+    ).toBe("2020-01-01");
   });
 
   it("delta: loads only the window, applies delete policies, advances watermarks only on success", async () => {

@@ -15,10 +15,14 @@
  *  - `inquiryState` — `state__v` from `Status_vod__c` **only when the target
  *    is lifecycled** (§6.3.29 "+ state__v if lifecycled"); the default
  *    `<status>_state__v` names are `[UNV]` and validated by preflight.
- *  - `inquiryText` — `Rich_Text_Inquiry__c` (`[UNVERIFIED-SOURCE]`) feeds
- *    `inquiry_text__v` when the documented `Inquiry_Text__c` is empty/absent
- *    (declared under the dotted selector `inquiry_text__v.rich` so the column
- *    is selected and preflight validates the base field).
+ *  - `inquiryText` — lives on the documented `Inquiry_Text__c` row:
+ *    `longtext` of the documented value, else `richtext` of
+ *    `Rich_Text_Inquiry__c` (`[UNVERIFIED-SOURCE]`). The fallback sits in
+ *    the primary row so a vault that marks `inquiry_text__v` required is
+ *    satisfied before `REQUIRED_MISSING` is evaluated (same pattern as
+ *    `em_event.eventCountry`). `Rich_Text_Inquiry__c` is declared under the
+ *    dotted selector `inquiry_text__v.rich` (`custom(richInquiryText)`, emits
+ *    nothing) only so the column is selected and preflight validates it.
  *  - `normaliseCountry` — `Country_vod__c` holds mixed codes/names; the value
  *    is normalised to ISO-2 first (alpha-2, alpha-3/aliases table, English
  *    display names) and then rendered per the target field type: object →
@@ -39,9 +43,9 @@
 import { applyTransform, crosswalkPicklist } from "../../transform/registry";
 import type {
   CustomTransformFn,
+  MatchRule,
   RowDiagnostic,
   SourceRow,
-  TransformContext,
   TransformResult,
 } from "../../types";
 import { defineObject, type ObjectModuleInput } from "../types";
@@ -98,6 +102,31 @@ export const MEDICAL_INQUIRY_DELIVERY_METHOD: Record<string, string> = {
 /** Diagnostic codes (counted in the run report). */
 export const MI_COUNTRY_UNNORMALISED_CODE = "MI_COUNTRY_UNNORMALISED";
 export const MI_INQUIRY_TEXT_FROM_RICH_CODE = "MI_INQUIRY_TEXT_FROM_RICH";
+
+export const GROUP_IDENTIFIER_SOURCE = "Group_Identifier_vod__c";
+export const GROUP_IDENTIFIER_TARGET = "group_identifier__v";
+
+/**
+ * Opt-in `group_identifier__v` match (§3.3 lists it as a secondary key).
+ * **Not in the default `match` list**: `Group_Identifier_vod__c` is by
+ * definition shared by every inquiry submitted as a group
+ * (`Group_Count_vod__c` carries the group size), so a bare single-field
+ * match hits the first member's Vault record for every other member —
+ * `requireUnique` only rejects >1 candidates, so once one member exists
+ * (earlier batch, earlier run, or a member added to an existing group on
+ * `delta`) the rest would be recorded as `mergedInto` it and never created.
+ * Append this rule to the object's `match` list only after preflight proves
+ * the column unique in scope (no `Group_Identifier_vod__c` with
+ * `COUNT(Id) > 1`).
+ */
+export const MEDICAL_INQUIRY_GROUP_IDENTIFIER_MATCH: MatchRule = {
+  method: "natural_key",
+  keys: [{ target: GROUP_IDENTIFIER_TARGET, source: GROUP_IDENTIFIER_SOURCE }],
+  requireUnique: true,
+  evidence: "UNV",
+  notes:
+    "group_identifier__v (§3.3) — shared by grouped inquiries; opt-in only after preflight proves the column unique in scope; reported as warning with counts",
+};
 
 // ---------------------------------------------------------------------------
 // helpers (pure)
@@ -317,33 +346,49 @@ export function documentedInquiryTextMissing(row: SourceRow): boolean {
 }
 
 /**
- * `custom(inquiryText)`: on the `inquiry_text__v.rich` selector row, emits
- * the rich-text alternative into `inquiry_text__v` only when the documented
- * `Inquiry_Text__c` is absent or empty (HTML is stripped when the target is
- * not RichText). Counted `MI_INQUIRY_TEXT_FROM_RICH` (non-fatal).
+ * `custom(inquiryText)` on the documented `Inquiry_Text__c → inquiry_text__v`
+ * row: `longtext` of the documented value when present, else `richtext` of
+ * `Rich_Text_Inquiry__c` (HTML stripped when the target is not RichText).
+ * The fallback lives in this row so a vault that marks `inquiry_text__v`
+ * required is satisfied before `REQUIRED_MISSING` is evaluated. A row taken
+ * from the rich column is always counted `MI_INQUIRY_TEXT_FROM_RICH`
+ * (non-fatal); when the rich value also truncates, the diagnostic keeps
+ * `kind: "truncated"` under that code and carries the truncation detail.
  */
 export const inquiryText: CustomTransformFn = (
   value,
   row,
   ctx,
 ): TransformResult | undefined => {
-  if (isEmpty(value)) return undefined;
-  if (!documentedInquiryTextMissing(row)) return undefined;
-  const target = ctx.metadata.fields[INQUIRY_TEXT_TARGET] ?? ctx.targetField;
-  const rctx: TransformContext = { ...ctx, targetField: target };
-  const r = applyTransform({ kind: "richtext" }, value, row, rctx);
+  if (!isEmpty(value)) {
+    const r = applyTransform({ kind: "longtext" }, value, row, ctx);
+    // whitespace-only documented text is "missing" (no diagnostic) → fall back
+    if (!("omit" in r) || r.diagnostic) return r;
+  }
+  const rich = row[RICH_INQUIRY_TEXT_SOURCE];
+  if (isEmpty(rich)) return undefined;
+  const r = applyTransform({ kind: "richtext" }, rich, row, ctx);
   if ("omit" in r) return r;
-  return {
-    ...r,
-    targetField: INQUIRY_TEXT_TARGET,
-    diagnostic: r.diagnostic ?? {
-      kind: "custom",
-      field: INQUIRY_TEXT_TARGET,
-      code: MI_INQUIRY_TEXT_FROM_RICH_CODE,
-      detail: `${INQUIRY_TEXT_TARGET} taken from ${RICH_INQUIRY_TEXT_SOURCE}`,
-    },
+  const inner = r.diagnostic;
+  const diagnostic: RowDiagnostic = {
+    ...(inner ?? {}),
+    kind: inner?.kind ?? "custom",
+    field: ctx.field.target,
+    code: MI_INQUIRY_TEXT_FROM_RICH_CODE,
+    detail: `${ctx.field.target} taken from ${RICH_INQUIRY_TEXT_SOURCE}${
+      inner ? ` (${inner.kind}${inner.detail ? `: ${inner.detail}` : ""})` : ""
+    }`,
   };
+  return { ...r, diagnostic };
 };
+
+/**
+ * `custom(richInquiryText)` on the `inquiry_text__v.rich` selector row:
+ * emits nothing — the row exists so `Rich_Text_Inquiry__c` is selected
+ * (`skip` rows are not) and preflight validates the `[UNVERIFIED-SOURCE]`
+ * column against the base field; `inquiryText` reads it from the row.
+ */
+export const richInquiryText: CustomTransformFn = (): undefined => undefined;
 
 // ---------------------------------------------------------------------------
 // module
@@ -415,24 +460,24 @@ export const medical_inquiry = defineObject({
     {
       source: INQUIRY_TEXT_SOURCE,
       target: INQUIRY_TEXT_TARGET,
-      transform: "longtext",
+      transform: "custom(inquiryText)",
       required: "y?",
       evidence: "UNV",
       unverifiedSource: true,
       sourceType: "textarea",
       notes:
-        "documented name without _vod (§6.3.29) — confirm via describe; target name [UNV]",
+        "documented name without _vod (§6.3.29) — confirm via describe; target name [UNV]; longtext, else richtext of Rich_Text_Inquiry__c (selector row inquiry_text__v.rich) — the fallback sits in this row so a required inquiry_text__v is satisfied before REQUIRED_MISSING",
     },
     {
       source: RICH_INQUIRY_TEXT_SOURCE,
       target: `${INQUIRY_TEXT_TARGET}.rich`,
-      transform: "custom(inquiryText)",
+      transform: "custom(richInquiryText)",
       required: "n",
       evidence: "UNV",
       unverifiedSource: true,
       optionalSource: true,
       notes:
-        "[UNVERIFIED-SOURCE] rich-text alternative; feeds inquiry_text__v when Inquiry_Text__c is empty (dotted target = base field for preflight)",
+        "[UNVERIFIED-SOURCE] rich-text alternative; selector row (emits nothing) read by the inquiry_text__v row when Inquiry_Text__c is empty (dotted target = base field for preflight)",
     },
     {
       source: "Product_vod__c",
@@ -516,9 +561,10 @@ export const medical_inquiry = defineObject({
         "mixed codes/names → ISO-2 first, then rendered per target type (reference / picklist / text)",
     }),
     // --- grouping / references
-    unv("Group_Identifier_vod__c", "group_identifier__v", "copy", {
+    unv(GROUP_IDENTIFIER_SOURCE, GROUP_IDENTIFIER_TARGET, "copy", {
       sourceType: "string",
-      notes: "EXTID 100; secondary match key (§3.3)",
+      notes:
+        "EXTID 100; shared by grouped inquiries — §3.3 secondary match key is opt-in (MEDICAL_INQUIRY_GROUP_IDENTIFIER_MATCH), never in the default match list",
     }),
     unv("Group_Count_vod__c", "group_count__v", "number", {
       sourceType: "double",
@@ -597,19 +643,13 @@ export const medical_inquiry = defineObject({
       keys: [{ target: "mobile_id__v", source: "Mobile_ID_vod__c" }],
       evidence: "UNV",
     },
-    {
-      method: "natural_key",
-      keys: [
-        { target: "group_identifier__v", source: "Group_Identifier_vod__c" },
-      ],
-      requireUnique: true,
-      evidence: "UNV",
-      notes:
-        "group_identifier__v (§3.3) — shared by grouped inquiries, so only a unique hit matches; reported as warning with counts",
-    },
+    // §3.3's `group_identifier__v` key is deliberately absent: the value is
+    // shared by every member of a grouped inquiry, so a bare match would
+    // merge the members into the first one loaded — see
+    // MEDICAL_INQUIRY_GROUP_IDENTIFIER_MATCH for the opt-in rule.
   ],
   blobs: { signature: "optional" },
-  custom: { normaliseCountry, inquiryState, inquiryText },
+  custom: { normaliseCountry, inquiryState, inquiryText, richInquiryText },
   notes:
-    "Medical inquiries (§6.3.29): 2y on CreatedDate or open; country of the account; call2__v patched in pass 2 (cycle with call2); state__v only when lifecycled; Country_vod__c normalised to ISO-2; signature blob; deletes ignored (§4.4).",
+    "Medical inquiries (§6.3.29): 2y on CreatedDate or open; country of the account; call2__v patched in pass 2 (cycle with call2); state__v only when lifecycled; Country_vod__c normalised to ISO-2; signature blob; deletes ignored (§4.4); group_identifier__v match opt-in only (shared by grouped inquiries).",
 });

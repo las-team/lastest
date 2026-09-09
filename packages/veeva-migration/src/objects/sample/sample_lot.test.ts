@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  SAMPLE_LOT_EXPECTED_ROLLUP_CODE,
   SAMPLE_LOT_ROLLUP_SOURCE,
   SAMPLE_LOT_UM_DEFAULTS,
-  expectedRollup,
+  SAMPLE_LOT_VERIFICATION_COLUMNS,
   readExpectedRollup,
   sample_lot,
 } from "./sample_lot";
@@ -11,12 +10,21 @@ import { validateObjectModule } from "../types";
 import { materialise, resolveCountry } from "../../config/resolve";
 import { parseConfig } from "../../config/schema";
 import { applyMapping } from "../../transform/apply";
+import { buildColumnList, rowSources } from "../../extract/columns";
 import { buildScopePredicate } from "../../extract/scope";
 import {
+  checkSourceUnit,
+  classifyRow,
+  createSourceContext,
+  extraColumnsOf,
+} from "../../preflight/source";
+import { FindingCollector } from "../../preflight/findings";
+import {
+  FakeSfdcClient,
   SAMPLE_USER_ID,
   buildCountryContext,
+  buildDescribe,
   buildIdResolver,
-  buildTransformContext,
   buildVaultMetadata,
   resolveMetadata,
 } from "../../testkit";
@@ -239,12 +247,18 @@ describe("sample_lot module", () => {
       evidence: "UNV",
       transform: { kind: "refUser" },
     });
+    // §6.3.18: the roll-up row is `skip`; the column travels via extraColumns
     expect(byTarget.get("calculated_quantity__v")).toMatchObject({
       source: SAMPLE_LOT_ROLLUP_SOURCE,
       required: "-",
       evidence: "DOC",
-      transform: { kind: "custom", fnName: "expectedRollup" },
+      transform: { kind: "skip" },
     });
+    expect(sample_lot.custom).toBeUndefined();
+    expect(sample_lot.optionDefaults?.extraColumns).toEqual([
+      SAMPLE_LOT_ROLLUP_SOURCE,
+    ]);
+    expect(SAMPLE_LOT_VERIFICATION_COLUMNS).toEqual([SAMPLE_LOT_ROLLUP_SOURCE]);
     // Block S status derivation present
     expect(byTarget.get("status__v")).toMatchObject({
       transform: { kind: "statusFromFlag", sourceFlag: "Active_vod__c" },
@@ -277,16 +291,10 @@ describe("sample_lot module", () => {
     });
     // active lot: platform status omitted (Vault defaults active__v)
     expect(result.payload.status__v).toBeUndefined();
-    // roll-up never loaded, but carried as the expected value
+    // roll-up never loaded and never diagnosed; the reader carries the value
     expect(result.payload.calculated_quantity__v).toBeUndefined();
-    expect(result.diagnostics).toContainEqual(
-      expect.objectContaining({
-        kind: "custom",
-        code: SAMPLE_LOT_EXPECTED_ROLLUP_CODE,
-        field: "calculated_quantity__v",
-        value: "42",
-      }),
-    );
+    expect(result.diagnostics).toEqual([]);
+    expect(readExpectedRollup(sampleRow())).toBe(42);
     expect(result.fkEdges).toContainEqual({
       field: "product__v",
       targetObjectKey: "product",
@@ -348,27 +356,72 @@ describe("sample_lot module", () => {
         readExpectedRollup({ Id: "x", [SAMPLE_LOT_ROLLUP_SOURCE]: "n/a" }),
       ).toBeUndefined();
     });
-    it("never emits a value; records a non-fatal diagnostic when present", () => {
-      const ctx = buildTransformContext({
-        objectKey: "sample_lot",
-        field: {
-          source: SAMPLE_LOT_ROLLUP_SOURCE,
-          target: "calculated_quantity__v",
+    it("is extracted although its mapping row is skip (§6.3.18 'extracted anyway')", async () => {
+      const { mapping } = run(sampleRow());
+      expect(extraColumnsOf(mapping)).toEqual([SAMPLE_LOT_ROLLUP_SOURCE]);
+      // the skip row itself selects nothing and is never classified as a mapped field
+      const row = mapping.fields.find(
+        (f) => f.target === "calculated_quantity__v",
+      )!;
+      expect(rowSources(row)).toEqual([]);
+      expect(classifyRow(row, mapping)).toMatchObject({
+        legacy: false,
+        fk: false,
+        requiredTarget: false,
+      });
+      const describe = buildDescribe("Sample_Lot_vod__c", [
+        { name: "Name", type: "string" },
+        {
+          name: "Product_vod__c",
+          type: "reference",
+          referenceTo: ["Product_vod__c"],
         },
-      });
-      const r = expectedRollup(
-        "7",
-        { Id: "x", [SAMPLE_LOT_ROLLUP_SOURCE]: "7" },
-        ctx,
+        { name: "Sample_vod__c", type: "string" },
+        { name: "Sample_Lot_Id_vod__c", type: "string" },
+        { name: "Expiration_Date_vod__c", type: "date" },
+        { name: "Active_vod__c", type: "boolean" },
+        { name: "Suppress_Lot_vod__c", type: "boolean" },
+        { name: "Allocated_Quantity_vod__c", type: "double" },
+        { name: "U_M_vod__c", type: "picklist" },
+        { name: "OwnerId", type: "reference", referenceTo: ["User"] },
+        // roll-up summary: `calculated: true` drops any mapped row (SF_FIELD_CALCULATED)
+        {
+          name: SAMPLE_LOT_ROLLUP_SOURCE,
+          type: "double",
+          calculated: true,
+        },
+      ]);
+      // source preflight: no SF_FIELD_CALCULATED drop, column resolved through extraColumns
+      const sfdc = new FakeSfdcClient().addDescribe(describe);
+      const findings = new FindingCollector();
+      const unit = { objectKey: "sample_lot" as const, country: "US" };
+      const res = await checkSourceUnit(
+        createSourceContext(sfdc),
+        unit,
+        mapping,
+        findings,
       );
-      expect(r).toMatchObject({
-        omit: true,
-        diagnostic: { code: SAMPLE_LOT_EXPECTED_ROLLUP_CODE, value: "7" },
-      });
+      expect(res.drops.get("calculated_quantity__v")).toBeUndefined();
       expect(
-        (r as { diagnostic?: { fatal?: boolean } }).diagnostic?.fatal,
-      ).toBeFalsy();
-      expect(expectedRollup("", { Id: "x" }, ctx)).toEqual({ omit: true });
+        findings.findings.filter(
+          (f) =>
+            f.code === "SF_FIELD_CALCULATED" ||
+            (f.code === "SF_FIELD_MISSING" &&
+              f.field === SAMPLE_LOT_ROLLUP_SOURCE),
+        ),
+      ).toEqual([]);
+      expect(res.columns).toContain(SAMPLE_LOT_ROLLUP_SOURCE);
+      // the SELECT list of the run (mapped ∪ extraColumns) carries the column
+      const { columns } = buildColumnList(
+        mapping,
+        { describe, columns: res.columns },
+        { extra: extraColumnsOf(mapping) },
+      );
+      expect(columns).toContain(SAMPLE_LOT_ROLLUP_SOURCE);
+      // ... and only through the declaration: the skip row alone selects nothing
+      const bare = buildColumnList(mapping, { describe, columns: [] });
+      expect(bare.columns).not.toContain(SAMPLE_LOT_ROLLUP_SOURCE);
+      expect(bare.columns).toContain("Product_vod__c");
     });
   });
 });

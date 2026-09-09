@@ -35,7 +35,12 @@ import {
   readUnitPayloads,
 } from "../load/paths";
 import { isRetryableRowErrorType } from "../load/retry";
-import type { DeleteResult, LoadPlan, LoadResult } from "../load/types";
+import type {
+  DeleteResult,
+  LoadPlan,
+  LoadResult,
+  PayloadRow,
+} from "../load/types";
 import type { LoaderOptions } from "../load/context";
 import type { DeleteOutcome } from "../load/deletes";
 import { orderedKeys } from "../objects/registry";
@@ -75,7 +80,9 @@ import type { VaultClient } from "../vault/types";
 import {
   buildUnitResolver,
   loadErasureList,
+  loadTerritoryNames,
   makeCountryContext,
+  needsTerritoryNames,
 } from "./context";
 import { mapLimit, pLimit, type Limit } from "./p-limit";
 import { buildPlan, planMappingHash, unitsOf, type PlanDeps } from "./plan";
@@ -147,10 +154,19 @@ interface UnitState {
   pendingRounds: number;
   timing: UnitTiming;
   seenModstamps: Map<string, string>;
-  deletedIds: Array<{ sfdcId: string; deletedDate: string }>;
+  deletedIds: Array<{
+    sfdcId: string;
+    deletedDate: string;
+    /** SFDC merge loser → survivor (`MasterRecordId`, §3.4 a). */
+    masterRecordId?: string;
+  }>;
   pendingTargets?: Record<string, string[]>;
   sampleDiffs?: number;
   blobFiles: string[];
+  /** Payload files written by closure loads after the unit's own step (pass 2 still owed, §6.1). */
+  closureFiles: string[];
+  /** Rows whose pass-2 reference was unresolved when the step ran (re-tried at run end, §3.5). */
+  secondPassUnresolved: Set<string>;
 }
 
 class RunAbort extends Error {
@@ -210,6 +226,11 @@ class RunExecution {
   private keepAlive?: NodeJS.Timeout;
   private exceptions?: GateExceptions;
   private currencies = new Map<string, Map<string, string> | undefined>();
+  /** `territory__v` name → id per vault DNS (`territoryRef`), loaded once per run. */
+  private readonly territoryNames = new Map<
+    string,
+    Promise<ReadonlyMap<string, string>>
+  >();
   private readonly dryRun: boolean;
   private readonly writes: boolean;
 
@@ -340,7 +361,7 @@ class RunExecution {
         this.deps.extractor ??
         new SimpleExtractor(
           { sfdc: this.deps.sfdc, store },
-          { mappings: this.mappingsByKey() },
+          { mappings: this.mappingsByKey(), feedEnd: () => this.wmHi },
         );
       if (this.writes) {
         const purged = await store.idMap.purgeDryRun();
@@ -484,6 +505,8 @@ class RunExecution {
       seenModstamps: new Map(),
       deletedIds: [],
       blobFiles: [],
+      closureFiles: [],
+      secondPassUnresolved: new Set(),
     };
   }
 
@@ -549,6 +572,7 @@ class RunExecution {
         allowPicklistCreate: this.opts.allowPicklistCreate,
         allowPicklistReactivate: this.opts.allowPicklistReactivate,
         acceptMappingChange: this.opts.acceptMappingChange,
+        reprobe: this.opts.reprobe,
       },
     });
     this.preflight = result;
@@ -760,6 +784,49 @@ class RunExecution {
     return s;
   }
 
+  /** `territoryRef` input (§6.3.12): the vault's `territory__v` names, loaded once per DNS. */
+  private territoriesFor(
+    ctx: UnitContext,
+  ): Promise<ReadonlyMap<string, string>> | undefined {
+    if (!needsTerritoryNames(ctx.mapping)) return undefined;
+    let p = this.territoryNames.get(ctx.dns);
+    if (!p) {
+      const object =
+        this.targetOf({ objectKey: "territory", country: ctx.unit.country })
+          ?.targetObject ?? "territory__v";
+      p = loadTerritoryNames(ctx.vault, object)
+        .then((r) => {
+          if (r.duplicates.length)
+            this.findings.push({
+              severity: "warning",
+              code: "TERRITORY_NAME_AMBIGUOUS",
+              objectKey: "territory",
+              detail: {
+                duplicates: r.duplicates.length,
+                sample: r.duplicates.slice(0, 10),
+              },
+              count: r.duplicates.length,
+            });
+          this.log.info(
+            { dns: ctx.dns, territories: r.byName.size },
+            "territory names loaded",
+          );
+          return r.byName;
+        })
+        .catch((e: Error) => {
+          this.findings.push({
+            severity: "warning",
+            code: "TERRITORY_NAMES_UNAVAILABLE",
+            objectKey: "territory",
+            detail: e.message,
+          });
+          return new Map<string, string>();
+        });
+      this.territoryNames.set(ctx.dns, p);
+    }
+    return p;
+  }
+
   // ------------------------------------------------------------ load modes
 
   private async runLoadModes(): Promise<void> {
@@ -781,40 +848,23 @@ class RunExecution {
           const s = this.state(u);
           if (s.status !== "succeeded") continue;
           const ctx = this.unitContext(u)!;
-          try {
-            const r = await ctx.loader.secondPass(
-              readUnitPayloads(this.runDir, u),
-              ctx.loadPlan,
-            );
-            if (r.unresolved)
-              this.findings.push({
-                severity: "warning",
-                code: "SECOND_PASS_UNRESOLVED",
-                objectKey: u.objectKey,
-                country: u.country,
-                field: p.target,
-                detail: { unresolved: r.unresolved, patched: r.patched },
-                count: r.unresolved,
-              });
-            if (r.failed)
-              this.findings.push({
-                severity: "warning",
-                code: "SECOND_PASS_FAILED",
-                objectKey: u.objectKey,
-                country: u.country,
-                field: p.target,
-                detail: { failed: r.failed },
-                count: r.failed,
-              });
-          } catch (e) {
-            this.failUnit(s, `second pass: ${(e as Error).message}`);
-          }
+          // the unit directory holds this step's closure files too
+          s.closureFiles.length = 0;
+          await this.secondPass(
+            ctx,
+            s,
+            readUnitPayloads(this.runDir, u),
+            p.target,
+          );
         }
       }
+      // parents of earlier steps that received closure rows in this step still owe their pass 2
+      await this.closureSecondPass(step.index);
       // pending FK rounds for earlier units (§8.4)
       await this.pendingRound();
     }
     await this.pendingRound(true);
+    await this.retrySecondPass();
     for (const s of this.units.values())
       if (s.status === "succeeded") await this.applyUnitDeletes(s);
     for (const s of this.units.values())
@@ -825,6 +875,93 @@ class RunExecution {
     await this.postLoad();
     for (const l of this.loaders.values())
       this.findings.push(...l.drainFindings());
+  }
+
+  /** One pass-2 run over `rows` for a unit; findings + unresolved bookkeeping (§6.1, §3.5). */
+  private async secondPass(
+    ctx: UnitContext,
+    s: UnitState,
+    rows: AsyncIterable<PayloadRow>,
+    field?: string,
+  ): Promise<void> {
+    try {
+      const r = await ctx.loader.secondPass(rows, ctx.loadPlan);
+      for (const id of r.unresolvedIds) s.secondPassUnresolved.add(id);
+      if (r.unresolved)
+        this.findings.push({
+          severity: "warning",
+          code: "SECOND_PASS_UNRESOLVED",
+          objectKey: s.unit.objectKey,
+          country: s.unit.country,
+          field,
+          detail: { unresolved: r.unresolved, patched: r.patched },
+          count: r.unresolved,
+        });
+      if (r.failed)
+        this.findings.push({
+          severity: "warning",
+          code: "SECOND_PASS_FAILED",
+          objectKey: s.unit.objectKey,
+          country: s.unit.country,
+          field,
+          detail: { failed: r.failed },
+          count: r.failed,
+        });
+    } catch (e) {
+      this.failUnit(s, `second pass: ${(e as Error).message}`);
+    }
+  }
+
+  private pass2Targets(key: ObjectKey): string[] {
+    return this.plan.steps
+      .flatMap((st) => st.pass2)
+      .filter((p) => p.objectKey === key)
+      .map((p) => p.target);
+  }
+
+  /**
+   * Closure rows land in parent units *after* the parent's step ran its pass 2
+   * (children of later steps fetch them), so their self references would never
+   * be patched — and the hash skip would hide them from every later run.
+   */
+  private async closureSecondPass(stepIndex: number): Promise<void> {
+    for (const s of this.units.values()) {
+      if (!s.closureFiles.length || s.status !== "succeeded") continue;
+      const inStep = this.plan.steps.some(
+        (st) => st.index === stepIndex && st.keys.includes(s.unit.objectKey),
+      );
+      if (inStep) continue; // covered by the step's own pass 2 (whole unit dir)
+      const targets = this.pass2Targets(s.unit.objectKey);
+      const files = s.closureFiles.splice(0);
+      if (!targets.length) continue;
+      const ctx = this.unitContext(s.unit);
+      if (!ctx) continue;
+      this.log.info(
+        { unit: unitId(s.unit), files: files.length, fields: targets },
+        "pass 2 for closure-loaded rows",
+      );
+      await this.secondPass(ctx, s, readPayloadFiles(files), targets[0]);
+    }
+  }
+
+  /** §3.5: pass-2 references unresolved at step time are re-tried once every unit landed. */
+  private async retrySecondPass(): Promise<void> {
+    for (const s of this.units.values()) {
+      if (!s.secondPassUnresolved.size || s.status !== "succeeded") continue;
+      const ctx = this.unitContext(s.unit);
+      if (!ctx) continue;
+      const ids = new Set(s.secondPassUnresolved);
+      s.secondPassUnresolved.clear();
+      const rows = (async function* (runDir: string, unit: Unit) {
+        for await (const r of readUnitPayloads(runDir, unit))
+          if (ids.has(r.sfdcId)) yield r;
+      })(this.runDir, s.unit);
+      this.log.info(
+        { unit: unitId(s.unit), rows: ids.size },
+        "retrying unresolved pass-2 references",
+      );
+      await this.secondPass(ctx, s, rows);
+    }
   }
 
   private failUnit(s: UnitState, reason: string): void {
@@ -859,13 +996,59 @@ class RunExecution {
       const extractPlan = await this.extractPlan(ctx, s);
       if (!extractPlan) return;
       const t0 = Date.now();
-      const manifest = await this.extractor.extractUnit(unit, extractPlan);
+      let manifest = await this.extractor.extractUnit(unit, extractPlan);
+      // §2.8 extract completeness: mismatch → re-run with PK chunking; a second mismatch is blocking
+      if (countMismatch(manifest, extractPlan)) {
+        this.findings.push({
+          severity: "warning",
+          code: "EXTRACT_COUNT_MISMATCH",
+          objectKey: unit.objectKey,
+          country: unit.country,
+          detail: {
+            sfdcScopeCount: manifest.sfdcScopeCount,
+            extractedLive: manifest.extractedLive,
+            action: "re-extract with PK chunking",
+          },
+        });
+        log.warn(
+          {
+            scope_count: manifest.sfdcScopeCount,
+            extracted: manifest.extractedLive,
+          },
+          "extract count mismatch — re-extracting with PK chunking",
+        );
+        manifest = await this.extractor.extractUnit(unit, {
+          ...extractPlan,
+          pkChunking: true,
+        });
+        if (countMismatch(manifest, extractPlan)) {
+          this.findings.push({
+            severity: "blocking",
+            code: "EXTRACT_COUNT_MISMATCH",
+            objectKey: unit.objectKey,
+            country: unit.country,
+            detail: {
+              sfdcScopeCount: manifest.sfdcScopeCount,
+              extractedLive: manifest.extractedLive,
+              action: "unit failed; watermark not advanced",
+            },
+          });
+          s.manifest = manifest;
+          s.timing.extractMs = Date.now() - t0;
+          this.failUnit(
+            s,
+            `EXTRACT_COUNT_MISMATCH: COUNT() = ${manifest.sfdcScopeCount} but ${manifest.extractedLive} live rows extracted after PK chunking`,
+          );
+          return;
+        }
+      }
       s.manifest = manifest;
       s.timing.extractMs = Date.now() - t0;
       s.deletedIds.push(
         ...manifest.deletedIds.map((d) => ({
           sfdcId: d.id,
           deletedDate: d.deletedDate,
+          masterRecordId: masterOf(d),
         })),
       );
       s.deletedLatestCovered = manifest.deletedLatestCovered;
@@ -877,21 +1060,6 @@ class RunExecution {
           country: unit.country,
           detail: { queues: manifest.queueOwners.size },
           count: manifest.queueOwners.size,
-        });
-      if (
-        manifest.sfdcScopeCount !== undefined &&
-        manifest.sfdcScopeCount !== manifest.extractedLive &&
-        !extractPlan.limit
-      )
-        this.findings.push({
-          severity: "warning",
-          code: "EXTRACT_COUNT_MISMATCH",
-          objectKey: unit.objectKey,
-          country: unit.country,
-          detail: {
-            sfdcScopeCount: manifest.sfdcScopeCount,
-            extractedLive: manifest.extractedLive,
-          },
         });
       // §2.2 step 5 closure
       await this.closure(ctx, manifest);
@@ -976,6 +1144,16 @@ class RunExecution {
             action: "full re-extract",
           },
         });
+        // the delete feed still covers only the window since the last run (§4.3 step 1):
+        // without it the `deleted` watermark would jump to wm_hi and lose those deletes
+        const del = await this.deps.store.watermarks.get(
+          unit.objectKey,
+          unit.country,
+          "deleted",
+        );
+        plan.deletedSince =
+          del?.value ?? shiftMinutes(wm.value, -cfg.delta.overlapMinutes);
+        plan.deletedUntil = this.wmHi;
       } else {
         const wmLo = shiftMinutes(wm.value, -cfg.delta.overlapMinutes);
         if (wmLo >= this.wmHi) {
@@ -1043,6 +1221,19 @@ class RunExecution {
       for await (const { row } of this.extractor.readRows(manifest.files))
         own.delete(row.Id);
     }
+    // dry run (§8.9): parents simulated earlier in this run carry `dry_run` id-map rows,
+    // which the extractor's own id-map subtraction deliberately ignores
+    if (this.dryRun)
+      for (const [key, ids] of needed) {
+        const list = [...ids];
+        for (let i = 0; i < list.length; i += 500) {
+          const got = await this.deps.store.idMap.bulkGet(
+            key as ObjectKey,
+            list.slice(i, i + 500),
+          );
+          for (const r of got.values()) if (r.dryRun) ids.delete(r.sfdcId);
+        }
+      }
     const country = ctx.unit.country;
     const mappings = this.mappingsByKey(country);
     const targets = new Map<ObjectKey, ResolvedTarget>();
@@ -1102,7 +1293,16 @@ class RunExecution {
           : GLOBAL_COUNTRY,
       };
       const pctx = this.unitContext(parentUnit);
-      if (!pctx) {
+      const pstate = this.units.get(unitId(parentUnit));
+      const unavailable = !pctx
+        ? "no resolved target"
+        : pstate?.status === "blocked"
+          ? (pstate.reason ?? "blocked by preflight")
+          : pstate?.status === "skipped" && pstate.reason
+            ? pstate.reason
+            : undefined;
+      if (!pctx || unavailable) {
+        // a blocked/frozen parent unit never receives writes (§4.5, preflight blocking)
         this.findings.push({
           severity: "warning",
           code: "CLOSURE_PARENT_UNAVAILABLE",
@@ -1110,6 +1310,7 @@ class RunExecution {
           country,
           detail: {
             referencedBy: ctx.unit.objectKey,
+            reason: unavailable,
             rows: files.reduce((a, f) => a + f.rows, 0),
           },
         });
@@ -1126,6 +1327,7 @@ class RunExecution {
           prefix: `closure-${ctx.unit.objectKey}-${result.rounds}-${Date.now().toString(36)}-`,
         });
         ps.load = ps.load ? mergeLoad(ps.load, r.load) : r.load;
+        ps.closureFiles.push(...r.transform.payloadFiles);
         if (ps.manifest) ps.manifest.closureRows += r.transform.closureRows;
         else
           ps.manifest = {
@@ -1155,6 +1357,7 @@ class RunExecution {
       mapping,
       files,
       this.extractor,
+      { territories: await this.territoriesFor(ctx), dryRun: this.dryRun },
     );
     const transform = await transformUnit({
       runId: this.runId,
@@ -1173,6 +1376,8 @@ class RunExecution {
       orgId15: to15(this.deps.sfdc.orgId),
       dryRun: this.dryRun,
       onlyIds: o.onlyIds,
+      // last-wins (§4.3 step 5) only needs the modstamps of ids in the delete queue
+      modstampIds: new Set(s.deletedIds.map((d) => d.sfdcId)),
       filePrefix: o.prefix,
       now: this.now,
     });
@@ -1248,6 +1453,42 @@ class RunExecution {
         },
         ctx.loadPlan,
       );
+      // §3.4 a / §4.2: SFDC merges — loser → survivor in the id map, children re-pointed
+      const merges = s.deletedIds
+        .filter((d) => d.masterRecordId)
+        .map((d) => ({
+          loser: d.sfdcId,
+          survivor: d.masterRecordId!,
+          deletedDate: d.deletedDate,
+        }));
+      if (merges.length) {
+        const m = await ctx.loader.applyMerges(
+          { unit: s.unit, merges, seenModstamps: s.seenModstamps },
+          ctx.loadPlan,
+        );
+        this.findings.push({
+          severity: "info",
+          code: "ACCOUNT_MERGED",
+          objectKey: s.unit.objectKey,
+          country: s.unit.country,
+          detail: {
+            merged: m.merged,
+            childrenRepointed: m.childrenRepointed,
+            childrenFailed: m.childrenFailed,
+            skipped: m.skipped,
+          },
+          count: m.merged,
+        });
+        if (m.childrenFailed)
+          this.findings.push({
+            severity: "warning",
+            code: "MERGE_FANOUT_FAILED",
+            objectKey: s.unit.objectKey,
+            country: s.unit.country,
+            detail: { childrenFailed: m.childrenFailed },
+            count: m.childrenFailed,
+          });
+      }
       if (s.deletes.ignored)
         this.findings.push({
           severity: "info",
@@ -1490,6 +1731,7 @@ class RunExecution {
               ctx.mapping,
               manifest.files,
               this.extractor,
+              { territories: await this.territoriesFor(ctx) },
             );
             const t = await transformUnit({
               runId: this.runId,
@@ -1890,6 +2132,21 @@ function mergeTransform(
     failedByCode: sum(a.failedByCode, b.failedByCode),
     secondPassRows: a.secondPassRows + b.secondPassRows,
   };
+}
+
+/** §2.8 extract completeness (`--limit` runs are never complete by design). */
+function countMismatch(manifest: ExtractManifest, plan: ExtractPlan): boolean {
+  return (
+    manifest.sfdcScopeCount !== undefined &&
+    manifest.sfdcScopeCount !== manifest.extractedLive &&
+    !plan.limit
+  );
+}
+
+/** `MasterRecordId` of a deleted-id entry when the extractor recorded one (Bulk path, §3.4 a). */
+function masterOf(d: { id: string; deletedDate: string }): string | undefined {
+  const m = (d as { masterRecordId?: unknown }).masterRecordId;
+  return typeof m === "string" && m ? m : undefined;
 }
 
 function emptyManifest(unit: Unit): ExtractManifest {

@@ -1425,3 +1425,453 @@ describe("runPreflight — probes (§5.3)", () => {
     expect(fx3.vault.calls.some((c) => c.method === "upsert")).toBe(false);
   });
 });
+
+describe("runPreflight — review fixes", () => {
+  const probeMeta = () =>
+    buildVaultMetadata(
+      "migration_probe__c",
+      [
+        {
+          name: "legacy_crm_id__c",
+          type: "String",
+          max_length: 40,
+          unique: true,
+        },
+        { name: "amount__c", type: "Currency" },
+        { name: "note__c", type: "String" },
+      ],
+      { legacyIdField: null },
+    );
+
+  it("unions the SELECT list across the countries of one object", async () => {
+    const fx = fixture();
+    fx.config.countries.DE = fx.config.countries.US;
+    const us = call2Mapping();
+    const de = call2Mapping({ country: "DE" });
+    // a per-country fieldLayers add that only DE maps
+    de.fields.push(
+      F({
+        source: "Unlock_vod__c",
+        target: "unlock__v",
+        transform: { kind: "bool" },
+      }),
+    );
+    const r = await runPreflight(inputFor(fx, [us, de]), { sampleSize: 0 });
+    const rt = r.resolvedTargets.get("call2")!;
+    expect(rt.columns).toContain("Unlock_vod__c");
+    expect(rt.columns.filter((c) => c === "Id").length).toBe(1);
+    expect(
+      r.mappings.get("call2:US")!.fields.map((f) => f.target),
+    ).not.toContain("unlock__v");
+  });
+
+  it("blob rows: attachment keeps the row without a target field; required blocks; attachments disabled + required row blocks", async () => {
+    const meta = sampleCall2VaultMetadata();
+    meta.fields = meta.fields.filter((f) => f.name !== "signature__v");
+    meta.allow_attachments = true;
+    const attach = call2Mapping({
+      options: {
+        ...OBJECT_OPTION_DEFAULTS,
+        blobs: { signature: "attachment" },
+      },
+    });
+    const r = await runPreflight(
+      inputFor(fixture({ call2Meta: meta }), [attach]),
+      {
+        sampleSize: 10,
+      },
+    );
+    expect(
+      find(r.findings, "VT_FIELD_MISSING", (f) => f.field === "signature__v"),
+    ).toEqual([]);
+    expect(codes(r.findings, "blocking")).toEqual([]);
+    expect(r.mappings.get("call2:US")!.fields.map((f) => f.target)).toContain(
+      "signature__v",
+    );
+    expect(r.mappings.get("call2:US")!.options.blobs.signature).toBe(
+      "attachment",
+    );
+
+    const required = call2Mapping({
+      options: { ...OBJECT_OPTION_DEFAULTS, blobs: { signature: "required" } },
+    });
+    const r2 = await runPreflight(
+      inputFor(fixture({ call2Meta: meta }), [required]),
+      { sampleSize: 10 },
+    );
+    expect(
+      find(
+        r2.findings,
+        "VT_FIELD_MISSING",
+        (f) => f.field === "signature__v",
+      )[0].severity,
+    ).toBe("blocking");
+    expect(r2.blockedUnits).toEqual([{ objectKey: "call2", country: "US" }]);
+
+    // optional stays warning + drop
+    const optional = call2Mapping();
+    const r3 = await runPreflight(
+      inputFor(fixture({ call2Meta: meta }), [optional]),
+      { sampleSize: 10 },
+    );
+    expect(
+      find(
+        r3.findings,
+        "VT_FIELD_MISSING",
+        (f) => f.field === "signature__v",
+      )[0].severity,
+    ).toBe("warning");
+    expect(
+      r3.mappings.get("call2:US")!.fields.map((f) => f.target),
+    ).not.toContain("signature__v");
+
+    // attachment policy on a required row with allow_attachments = false → blocking
+    const meta4 = sampleCall2VaultMetadata();
+    meta4.fields = meta4.fields.filter((f) => f.name !== "signature__v");
+    meta4.allow_attachments = false;
+    const attachRequired = call2Mapping({
+      options: {
+        ...OBJECT_OPTION_DEFAULTS,
+        blobs: { signature: "attachment" },
+      },
+    });
+    attachRequired.fields.find((f) => f.target === "signature__v")!.required =
+      "Y";
+    const r4 = await runPreflight(
+      inputFor(fixture({ call2Meta: meta4 }), [attachRequired]),
+      { sampleSize: 10 },
+    );
+    expect(find(r4.findings, "VT_ATTACHMENTS_DISABLED")[0]).toMatchObject({
+      severity: "blocking",
+      field: "signature",
+    });
+  });
+
+  it("an optional [UNV] ref whose target is absent warns and is dropped; a verified one still blocks", async () => {
+    const unv = call2Mapping();
+    unv.fields.push(
+      F({
+        source: "Account_vod__c",
+        target: "guessed_account_ref__v",
+        transform: { kind: "ref", objectKey: "account" },
+        evidence: "UNV",
+        sourceType: "reference",
+      }),
+    );
+    const r = await runPreflight(inputFor(fixture(), [unv]), {
+      sampleSize: 0,
+    });
+    expect(
+      find(
+        r.findings,
+        "VT_FIELD_MISSING",
+        (f) => f.field === "guessed_account_ref__v",
+      )[0].severity,
+    ).toBe("warning");
+    expect(codes(r.findings, "blocking")).toEqual([]);
+    expect(
+      r.mappings.get("call2:US")!.fields.map((f) => f.target),
+    ).not.toContain("guessed_account_ref__v");
+
+    const obs = call2Mapping();
+    obs.fields.push(
+      F({
+        source: "Account_vod__c",
+        target: "verified_account_ref__v",
+        transform: { kind: "ref", objectKey: "account" },
+        evidence: "OBS",
+        sourceType: "reference",
+      }),
+    );
+    const r2 = await runPreflight(inputFor(fixture(), [obs]), {
+      sampleSize: 0,
+    });
+    expect(
+      find(
+        r2.findings,
+        "VT_FIELD_MISSING",
+        (f) => f.field === "verified_account_ref__v",
+      )[0].severity,
+    ).toBe("blocking");
+  });
+
+  it("columns include transform inputs, extraColumns and User_vod__c for the queue-owner fallback", async () => {
+    // User_vod__c is no longer a mapping row of its own
+    const m = call2Mapping({}, (f) => f.target !== "user__v");
+    m.options = {
+      ...m.options,
+      extraColumns: ["Detailed_Products_vod__c", "Nope__c"],
+    };
+    m.fields.push(
+      F({
+        source: "Id",
+        target: "composite_key__v",
+        transform: {
+          kind: "compositeExternalId",
+          template: "{a}__{u}__{d}",
+          parts: {
+            a: { ref: "account", source: "Account_vod__c" },
+            u: { user: "CreatedById" },
+            d: { field: "Signature_Date_vod__c" },
+          },
+        },
+      }),
+    );
+    const r = await runPreflight(inputFor(fixture(), [m]), { sampleSize: 0 });
+    const cols = r.resolvedTargets.get("call2")!.columns;
+    expect(cols).toEqual(
+      expect.arrayContaining([
+        "OwnerId",
+        "User_vod__c",
+        "Detailed_Products_vod__c",
+        "Signature_Date_vod__c",
+        "Account_vod__c",
+        "CreatedById",
+      ]),
+    );
+    expect(cols).not.toContain("Nope__c");
+    expect(
+      find(r.findings, "SF_FIELD_MISSING", (f) => f.field === "Nope__c")[0],
+    ).toMatchObject({ severity: "warning" });
+  });
+
+  it("VT_MIGRATION_PERMISSION warns while Record Migration is unverified (migrationMode on, no --probe-writes)", async () => {
+    const r = await runPreflight(inputFor(fixture(), [call2Mapping()]), {
+      sampleSize: 0,
+    });
+    expect(find(r.findings, "VT_MIGRATION_PERMISSION")[0]).toMatchObject({
+      severity: "warning",
+    });
+    expect(r.blocking).toBe(false);
+
+    const off = fixture({
+      configInput: {
+        target: {
+          vaultDns: VAULT_DNS,
+          auth: { kind: "password", username: "u", password: "p" },
+          migrationUserId: 12345,
+          migrationMode: false,
+        },
+      },
+    });
+    const r2 = await runPreflight(inputFor(off, [call2Mapping()]), {
+      sampleSize: 0,
+    });
+    expect(find(r2.findings, "VT_MIGRATION_PERMISSION")).toEqual([]);
+
+    const probed = fixture({
+      configInput: {
+        preflight: { probeWrites: true, probeObject: "migration_probe__c" },
+      },
+      vaultSetup: (v) => v.addObject(probeMeta()),
+    });
+    const r3 = await runPreflight(inputFor(probed, [call2Mapping()]), {
+      sampleSize: 0,
+    });
+    expect(find(r3.findings, "VT_MIGRATION_PERMISSION")).toEqual([]);
+  });
+
+  it("VT_MIGRATION_PERMISSION blocks when the permissions read-back denies create/edit on the probe object (§5.2)", async () => {
+    const fx = fixture({
+      configInput: { preflight: { probeObject: "migration_probe__c" } },
+      vaultSetup: (v) =>
+        v
+          .addObject(probeMeta())
+          .setObjectPermissions("migration_probe__c", { create: false }),
+    });
+    const r = await runPreflight(inputFor(fx, [call2Mapping()]), {
+      sampleSize: 0,
+    });
+    const f = find(r.findings, "VT_MIGRATION_PERMISSION");
+    expect(f.some((x) => x.severity === "blocking")).toBe(true);
+    expect(f.some((x) => x.severity === "warning")).toBe(false);
+    expect(r.blocking).toBe(true);
+    const call = fx.vault.calls.find((c) => c.method === "userPermissions");
+    expect(call?.args[1]).toBe("object.migration_probe__c.actions");
+
+    // granted → the read-back is silent; only the unverified Record Migration warning remains
+    const ok = fixture({
+      configInput: { preflight: { probeObject: "migration_probe__c" } },
+      vaultSetup: (v) => v.addObject(probeMeta()),
+    });
+    const r2 = await runPreflight(inputFor(ok, [call2Mapping()]), {
+      sampleSize: 0,
+    });
+    expect(
+      find(r2.findings, "VT_MIGRATION_PERMISSION").map((x) => x.severity),
+    ).toEqual(["warning"]);
+  });
+
+  it("VT_WRONG_VAULT comes from the auth layer's VAULT_DNS_MISMATCH and from target.vaultId", async () => {
+    const fx = fixture();
+    fx.vault.failNext = {
+      method: "authenticate",
+      error: new VaultApiError(
+        "VAULT_DNS_MISMATCH",
+        "no membership in acme-crm.veevavault.com",
+        "FAILURE",
+      ),
+      remaining: 1,
+    };
+    const r = await runPreflight(inputFor(fx, [call2Mapping()]), {
+      sampleSize: 0,
+    });
+    expect(find(r.findings, "VT_WRONG_VAULT")[0].severity).toBe("blocking");
+    expect(find(r.findings, "VT_AUTH_FAILED")).toEqual([]);
+    expect(r.blocking).toBe(true);
+
+    const fx2 = fixture({
+      configInput: {
+        target: {
+          vaultDns: VAULT_DNS,
+          auth: { kind: "password", username: "u", password: "p" },
+          migrationUserId: 12345,
+          vaultId: 424242,
+        },
+      },
+    });
+    const r2 = await runPreflight(inputFor(fx2, [call2Mapping()]), {
+      sampleSize: 0,
+    });
+    expect(find(r2.findings, "VT_WRONG_VAULT")[0].detail).toMatch(
+      /target.vaultId 424242/,
+    );
+
+    // same DNS in vaultIds[].url → no finding
+    const r3 = await runPreflight(inputFor(fixture(), [call2Mapping()]), {
+      sampleSize: 0,
+    });
+    expect(find(r3.findings, "VT_WRONG_VAULT")).toEqual([]);
+  });
+
+  it("probe results are cached per vault", async () => {
+    const CN_DNS = "cn.veevavault.com";
+    const fx = fixture({
+      configInput: {
+        preflight: { probeWrites: true, probeObject: "migration_probe__c" },
+        countries: { US: {}, CN: { target: { vaultDns: CN_DNS } } },
+      },
+      vaultSetup: (v) => v.addObject(probeMeta()),
+    });
+    const cn = new FakeVaultClient({ vaultDns: CN_DNS, vaultId: 2002 })
+      .addObject(sampleCall2VaultMetadata())
+      .addObject(probeMeta());
+    const vaults = new Map([
+      [VAULT_DNS, fx.vault],
+      [CN_DNS, cn],
+    ]);
+    const r = await runPreflight(
+      inputFor(fx, [call2Mapping(), call2Mapping({ country: "CN" })], {
+        vaults,
+      }),
+      { sampleSize: 0 },
+    );
+    const probeUpserts = (v: FakeVaultClient) =>
+      v.calls.filter(
+        (c) => c.method === "upsert" && c.args[0] === "migration_probe__c",
+      ).length;
+    expect(probeUpserts(fx.vault)).toBe(3);
+    expect(probeUpserts(cn)).toBe(3);
+    expect(await fx.store.probeResults.get("migrationMode")).toBeDefined();
+    expect(
+      await fx.store.probeResults.get(`migrationMode@${CN_DNS}`),
+    ).toBeDefined();
+    expect(
+      find(r.findings, "PROBE_RESULT").filter(
+        (f) => (f.detail as { cached?: boolean }).cached,
+      ),
+    ).toEqual([]);
+
+    // second run: both vaults hit their own cache
+    await runPreflight(
+      inputFor(fx, [call2Mapping(), call2Mapping({ country: "CN" })], {
+        vaults,
+        runId: "run-2",
+      }),
+      { sampleSize: 0 },
+    );
+    expect(probeUpserts(fx.vault)).toBe(3);
+    expect(probeUpserts(cn)).toBe(3);
+  });
+
+  it("VT_LENGTH without a sample: warning under truncation = fail, info otherwise", async () => {
+    const meta = sampleCall2VaultMetadata();
+    meta.fields.find((f) => f.name === "territory__v")!.max_length = 4;
+    const m = call2Mapping();
+    m.fields.find((f) => f.target === "territory__v")!.truncation = "fail";
+    const r = await runPreflight(inputFor(fixture({ call2Meta: meta }), [m]), {
+      sampleSize: 0,
+    });
+    expect(
+      find(r.findings, "VT_LENGTH", (f) => f.field === "territory__v")[0],
+    ).toMatchObject({ severity: "warning" });
+    expect(codes(r.findings, "blocking")).toEqual([]);
+
+    const r2 = await runPreflight(
+      inputFor(fixture({ call2Meta: meta }), [call2Mapping()]),
+      { sampleSize: 0 },
+    );
+    expect(
+      find(r2.findings, "VT_LENGTH", (f) => f.field === "territory__v")[0],
+    ).toMatchObject({ severity: "info" });
+  });
+
+  it("--allow-mdl repairs an existing non-unique legacy_crm_id__c with MODIFY Field", async () => {
+    const build = () =>
+      buildVaultMetadata(
+        "call2__v",
+        [
+          ...sampleCall2VaultMetadata().fields.filter(
+            (f) =>
+              !/^(id|name__v|status__v|created_|modified_|legacy_crm_id__v|object_type__v|state__v)/.test(
+                f.name,
+              ),
+          ),
+          {
+            name: "legacy_crm_id__c",
+            type: "String",
+            max_length: 18,
+            unique: false,
+          },
+        ],
+        {
+          legacyIdField: null,
+          objectTypes: ["call_report__v"],
+          lifecycles: ["call2_lifecycle__v"],
+        },
+      );
+    const m = call2Mapping({
+      options: {
+        ...OBJECT_OPTION_DEFAULTS,
+        externalIdOwnedBy: "integration",
+        blobs: {},
+      },
+    });
+    const r = await runPreflight(
+      inputFor(fixture({ call2Meta: build() }), [m]),
+      {
+        sampleSize: 0,
+      },
+    );
+    const b = find(r.findings, "VT_LEGACY_ID_FIELD_MISSING")[0];
+    expect(b.severity).toBe("blocking");
+    const mdl = (b.detail as { mdl: string }).mdl;
+    expect(mdl).toContain("MODIFY Field legacy_crm_id__c(unique(true))");
+    expect(mdl).not.toContain("ADD Field");
+
+    const fx2 = fixture({ call2Meta: build() });
+    const r2 = await runPreflight(
+      inputFor(fx2, [m], { flags: { allowMdl: true } }),
+      { sampleSize: 0 },
+    );
+    const exec = fx2.vault.calls.find((c) => c.method === "executeMdl");
+    expect(exec?.args[0]).toContain("MODIFY Field legacy_crm_id__c");
+    // the fake only applies ADD Field, so the field is still not unique after
+    // the MDL: the post-MDL check must verify the attributes, not existence
+    expect(find(r2.findings, "VT_LEGACY_ID_FIELD_MISSING")[0]).toMatchObject({
+      severity: "blocking",
+      detail: expect.stringMatching(/not a unique active String field/),
+    });
+    expect(r2.resolvedTargets.get("call2")!.legacyIdField).toBeUndefined();
+  });
+});

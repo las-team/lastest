@@ -302,7 +302,15 @@ describe("clm_presentation module", () => {
       disabledBy: "statusFromFlag",
       transform: { kind: "statusFromFlag" },
     });
-    expect(byTarget.get("external_id__v")).toBeDefined();
+    // Block S external_id__v replaced by the integration-ownership guard
+    expect(byTarget.get("external_id__v")).toMatchObject({
+      source: "External_ID_vod__c",
+      optionalSource: true,
+      transform: { kind: "custom", fnName: "externalIdIfMigrationOwned" },
+    });
+    expect(
+      clm_presentation.fields.filter((f) => f.target === "external_id__v"),
+    ).toHaveLength(1);
     expect(byTarget.get("ownerid__v")).toBeDefined();
   });
 
@@ -395,6 +403,17 @@ describe("clm_presentation module", () => {
       }),
     );
     expect(r.unresolvedRequiredFks).toEqual([]);
+  });
+
+  it("never overwrites the integration-owned external_id__v unless externalIdOwnedBy = migration", () => {
+    const owned = run(sampleRow({ External_ID_vod__c: "EXT-P-1" }));
+    expect(owned.mapping.options.externalIdOwnedBy).toBe("integration");
+    expect(owned.result.status).toBe("ok");
+    expect(owned.result.payload.external_id__v).toBeUndefined();
+    const migration = run(sampleRow({ External_ID_vod__c: "EXT-P-1" }), {
+      overrides: { externalIdOwnedBy: "migration" },
+    });
+    expect(migration.result.payload.external_id__v).toBe("EXT-P-1");
   });
 
   it("reports an unresolved required product as pending_fk", () => {

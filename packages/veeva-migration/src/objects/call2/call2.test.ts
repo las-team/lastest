@@ -347,9 +347,11 @@ describe("call2 module", () => {
       required: "Y",
       transform: { kind: "objectType", mapKey: "call2.objectType" },
     });
+    // `y?`, not `Y`: the [UNV] name must survive a describe miss as a
+    // warning (row dropped), never block the unit (CONTRACTS §0, §5.2)
     expect(byTarget.get("call2_status__v")).toMatchObject({
       source: "Status_vod__c",
-      required: "Y",
+      required: "y?",
       evidence: "UNV",
       transform: { kind: "picklist", mapKey: "call2.status" },
     });
@@ -768,6 +770,38 @@ describe("call2 module", () => {
     expect(unknownCreator.payload.created_by__v).toBe(1);
     expect(unknownCreator.diagnostics).toContainEqual(
       expect.objectContaining({ code: "AUDIT_USER_FALLBACK" }),
+    );
+  });
+
+  it("call2_status__v: the target metadata decides the requirement (y?)", () => {
+    // `state__v` is `Y` in the module; relax it so only the status row decides
+    const config = { call2: { required: { state__v: false } } };
+    const blank = parentCall({ Status_vod__c: null });
+    // no business status, field not required by the vault: loaded without it
+    const lax = run(blank, { config }).result;
+    expect(lax.failure).toBeUndefined();
+    expect(lax.status).toBe("ok");
+    expect(lax.payload.call2_status__v).toBeUndefined();
+    // the same row fails when the vault requires the field
+    const strict = run(blank, {
+      config,
+      metadata: metadata({
+        call2_status__v: {
+          name: "call2_status__v",
+          type: "Picklist",
+          picklist: "call2_status__v",
+          required: true,
+        },
+      }),
+    }).result;
+    expect(strict.status).toBe("failed");
+    expect(strict.failure).toMatchObject({
+      code: "REQUIRED_MISSING",
+      field: "call2_status__v",
+    });
+    // a known status is written as before
+    expect(run(parentCall()).result.payload.call2_status__v).toBe(
+      "submitted__v",
     );
   });
 

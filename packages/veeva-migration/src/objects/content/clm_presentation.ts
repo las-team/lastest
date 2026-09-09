@@ -4,7 +4,9 @@
  *
  * Same integration caveat as `key_message` (§6.3.14): PromoMats/MedComms
  * CLM sync owns presentations → `createPolicy: match-only` by default,
- * `external_id__v` integration-owned (§3.2 step 4).
+ * `external_id__v` integration-owned (§3.2 step 4) — written only with
+ * `objects.clm_presentation.externalIdOwnedBy = migration`
+ * (`CONTENT_EXTERNAL_ID_FIELD`, see `key_message`).
  *
  * Matching (§3.3): id map → `vexternal_id__v` / `vault_doc_id__v` /
  * `presentation_id__v` → legacy-id field.
@@ -24,8 +26,10 @@
  */
 import { defineObject } from "../types";
 import {
+  CONTENT_EXTERNAL_ID_FIELD,
   KEY_MESSAGE_STATUS_DEFAULTS,
   VAULT_IDENTITY_FIELDS,
+  externalIdIfMigrationOwned,
   outOfScopeRef,
 } from "./key_message";
 
@@ -92,6 +96,7 @@ export const clm_presentation = defineObject({
       notes: "EXTID unique; match key (§3.3)",
     },
     ...VAULT_IDENTITY_FIELDS,
+    CONTENT_EXTERNAL_ID_FIELD,
     {
       source: "Directory_vod__c",
       target: "directory__v",
@@ -263,7 +268,7 @@ export const clm_presentation = defineObject({
       notes: "last resort — the upsert idParam (§3.2)",
     },
   ],
-  custom: { outOfScopeRef },
+  custom: { outOfScopeRef, externalIdIfMigrationOwned },
   notes:
-    "As key_message: integration-owned → createPolicy match-only by default; deletePolicy inactivate → status__v = inactive__v + active__v = false; clm_presentation_status__v / status__v picked at preflight; survey__v out of v1 (counted).",
+    "As key_message: integration-owned → createPolicy match-only by default; external_id__v written only with externalIdOwnedBy = migration; deletePolicy inactivate → status__v = inactive__v + active__v = false; clm_presentation_status__v / status__v picked at preflight; survey__v out of v1 (counted).",
 });

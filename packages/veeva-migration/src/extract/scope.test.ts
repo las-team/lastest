@@ -111,6 +111,38 @@ describe("buildScopePredicate", () => {
     ).toBeUndefined();
   });
 
+  it("an unscoped object stays unscoped when the plan carries a country cutoff", () => {
+    // the engine passes the country's cutoff as ExtractPlan.cutoffDate for
+    // every unit; `historyMonths: null` (§7.2.1) must not be re-scoped by it
+    const b = buildScopePredicate(resolved(call2Scope, null), {
+      cutoffDate: "2024-09-09",
+    });
+    expect(b.predicate).toBeUndefined();
+    expect(b.cutoffDate).toBeUndefined();
+    expect(
+      effectiveCutoffDate(resolved(call2Scope, null), {
+        cutoffDate: "2024-09-09",
+      }),
+    ).toBeUndefined();
+    expect(
+      buildScopePredicate(
+        {
+          spec: {
+            kind: "via-parent",
+            parentKey: "call2",
+            parentField: "Call2_vod__r.Call_Date_vod__c",
+          },
+        },
+        { cutoffDate: "2024-09-09" },
+      ).predicate,
+    ).toBeUndefined();
+    // a scoped object still honours the plan override
+    expect(
+      buildScopePredicate(resolved(call2Scope), { cutoffDate: "2023-01-01" })
+        .cutoffDate,
+    ).toBe("2023-01-01");
+  });
+
   it("substitutes {cutoffDate}/{cutoffDateTime} tokens in the open term (sent_email)", () => {
     const b = buildScopePredicate(
       resolved({

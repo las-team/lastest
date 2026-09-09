@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { parseCountryOf } from "../country-of";
-import { buildMaterialisedMapping, sampleCall2Describe } from "../testkit";
+import {
+  buildDescribe,
+  buildMaterialisedMapping,
+  sampleCall2Describe,
+} from "../testkit";
 import { parseTransform } from "../transform/spec";
 import type { FieldMapping } from "../types";
 import { buildColumnList, mappingFkColumns, rowSources } from "./columns";
@@ -140,6 +144,34 @@ describe("buildColumnList", () => {
     expect(columns).toContain("Account_vod__c");
     // Status_vod__c is in the describe, so it stays even when preflight listed only Account
     expect(columns).toContain("Status_vod__c");
+  });
+
+  it("only Id is forced: IsDeleted / SystemModstamp follow the describe", () => {
+    const describe = buildDescribe(
+      "Territory2",
+      [{ name: "Name", type: "string" }],
+      { systemFields: false },
+    );
+    describe.fields.push({
+      ...describe.fields[0],
+      name: "SystemModstamp",
+      type: "datetime",
+    });
+    const m = buildMaterialisedMapping({
+      objectKey: "territory",
+      sourceObject: "Territory2",
+      targetObject: "territory__v",
+      countryOf: parseCountryOf("global"),
+      fields: [
+        row("Id", "legacy_crm_id__v", "legacyId", "K"),
+        row("Name", "name__v", "text", "Y"),
+      ],
+    });
+    const { columns } = buildColumnList(m, makeTarget("territory", describe));
+    expect(columns).toContain("Id");
+    expect(columns).toContain("SystemModstamp");
+    expect(columns).not.toContain("IsDeleted");
+    expect(columns).not.toContain("CreatedDate");
   });
 
   it("trusts every mapped column when no describe is available", () => {

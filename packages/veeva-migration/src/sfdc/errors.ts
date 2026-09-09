@@ -53,7 +53,11 @@ export const RETRYABLE_CODES: ReadonlySet<string> = new Set([
   "REQUEST_TIMEOUT",
 ]);
 
-/** Structural = mapping bug: fatal for the unit, never retried (§8.1). */
+/**
+ * Structural = mapping bug: fatal for the unit, never retried (§8.1).
+ * Bulk API 2.0 spells its codes without underscores (`INVALIDJOB`,
+ * `INVALIDJOBSTATE`, `INVALIDENTITY`, …) — both spellings are listed.
+ */
 export const STRUCTURAL_CODES: ReadonlySet<string> = new Set([
   "INVALID_FIELD",
   "MALFORMED_QUERY",
@@ -68,6 +72,13 @@ export const STRUCTURAL_CODES: ReadonlySet<string> = new Set([
   "INVALID_BATCH_SIZE",
   "INVALID_JOB",
   "INVALID_JOB_STATE",
+  // Bulk API 2.0 spellings (§2.1.5 job create / results / abort errors)
+  "INVALIDJOB",
+  "INVALIDJOBSTATE",
+  "INVALIDENTITY",
+  "INVALIDOPERATION",
+  "INVALIDVALUE",
+  "EXCEEDED_MAX_SIZE_REQUEST",
   "BULK_JOB_FAILED",
   "BULK_JOB_ABORTED",
   "INVALID_REPLICATION_DATE",
@@ -82,6 +93,8 @@ export const PERMISSION_CODES: ReadonlySet<string> = new Set([
   "API_DISABLED_FOR_ORG",
   "API_CURRENTLY_DISABLED",
   "FORBIDDEN",
+  // Bulk API 2.0 spelling: Bulk API not enabled for the org/user
+  "FEATURENOTENABLED",
 ]);
 
 /** Derive the §8.1 class from HTTP status + Salesforce errorCode. */
@@ -90,7 +103,13 @@ export function classifySfdcError(
   errorCode: string | undefined,
 ): SfdcErrorClass {
   const code = errorCode?.toUpperCase();
-  if (status === 401 || code === "INVALID_SESSION_ID") return "session";
+  // Bulk 2.0 spells it INVALIDSESSIONID
+  if (
+    status === 401 ||
+    code === "INVALID_SESSION_ID" ||
+    code === "INVALIDSESSIONID"
+  )
+    return "session";
   if (code && RETRYABLE_CODES.has(code)) return "retryable";
   if (status === 429) return "retryable";
   if (status !== undefined && status >= 500) return "retryable";

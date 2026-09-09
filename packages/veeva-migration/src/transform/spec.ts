@@ -43,6 +43,20 @@ function parseCondition(raw: string): FlagCondition {
   return { equals: parseScalar(v) };
 }
 
+/** `text(128)` / `number(2)` arguments must be non-negative integers — `text(abc)` would otherwise become `max: NaN` and empty every value. */
+function parseIntArg(
+  kind: string,
+  argName: string,
+  raw: string,
+  text: string,
+): number {
+  if (!/^\d+$/.test(raw))
+    throw new TransformSpecError(
+      `${kind}(${argName}) must be a non-negative integer in "${text}"`,
+    );
+  return Number(raw);
+}
+
 /** Parse the textual form. Throws `TransformSpecError`. */
 export function parseTransform(text: string): TransformSpec {
   const trimmed = text.trim();
@@ -56,7 +70,6 @@ export function parseTransform(text: string): TransformSpec {
   let spec: TransformSpec;
   switch (name) {
     case "copy":
-    case "longtext":
     case "richtext":
     case "bool":
     case "date":
@@ -71,13 +84,14 @@ export function parseTransform(text: string): TransformSpec {
       spec = { kind: name };
       break;
     case "text":
+    case "longtext":
       spec = args[0]
-        ? { kind: "text", max: Number(args[0]) }
-        : { kind: "text" };
+        ? { kind: name, max: parseIntArg(name, "max", args[0], text) }
+        : { kind: name };
       break;
     case "number":
       spec = args[0]
-        ? { kind: "number", scale: Number(args[0]) }
+        ? { kind: "number", scale: parseIntArg(name, "scale", args[0], text) }
         : { kind: "number" };
       break;
     case "picklist":

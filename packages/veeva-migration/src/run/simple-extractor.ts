@@ -111,7 +111,12 @@ export interface SimpleExtractorOptions {
   pageRows?: number;
   /** Mappings/targets of other objects, for parent country paths. */
   mappings?: Map<ObjectKey, MaterialisedMapping>;
+  /** End of the delete feed when the plan carries `deletedSince` but no window (full re-extract, §4.1 `SCOPE_CUTOFF_CHANGED`): the run's `wm_hi`. */
+  feedEnd?: () => string | undefined;
 }
+
+/** Selected when the describe has it (§2.2 step 2): merge losers carry the survivor (§3.4 a). */
+const MASTER_RECORD_COLUMN = "MasterRecordId";
 
 export class SimpleExtractor implements Extractor {
   private jobCounter = 0;
@@ -157,6 +162,11 @@ export class SimpleExtractor implements Extractor {
     const dir = this.extractDir(plan.runDir, unit);
     await fs.mkdir(dir, { recursive: true });
     const columns = columnsFor(target, mapping);
+    if (
+      !columns.includes(MASTER_RECORD_COLUMN) &&
+      target.describe?.fields.some((f) => f.name === MASTER_RECORD_COLUMN)
+    )
+      columns.push(MASTER_RECORD_COLUMN);
     const parentPaths: Record<string, string> = {};
     for (const s of mapping.countryOf)
       if (s.kind === "parent") {
@@ -233,12 +243,16 @@ export class SimpleExtractor implements Extractor {
         const deleted = row.IsDeleted === true || row.IsDeleted === "true";
         if (deleted) {
           manifest.extractedDeleted++;
+          const master = row[MASTER_RECORD_COLUMN];
           manifest.deletedIds.push({
             id: row.Id,
             deletedDate:
               typeof row.SystemModstamp === "string"
                 ? row.SystemModstamp
                 : (plan.window?.wmHi ?? new Date().toISOString()),
+            ...(typeof master === "string" && isSfdcId(master)
+              ? { masterRecordId: to18(master) }
+              : {}),
           });
           continue;
         }
@@ -260,12 +274,16 @@ export class SimpleExtractor implements Extractor {
         }
       }
     }
-    if (plan.deletedSince && target.replicateable && plan.window) {
+    // §4.3 step 1: the feed runs whenever a `deleted` watermark is in force — also on a
+    // full re-extract without a window (SCOPE_CUTOFF_CHANGED), else those deletes are lost
+    const feedEnd =
+      plan.window?.wmHi ?? this.opts.feedEnd?.() ?? new Date().toISOString();
+    if (plan.deletedSince && target.replicateable) {
       try {
         const feed = await this.deps.sfdc.getDeleted(
           mapping.sourceObject,
           plan.deletedSince,
-          plan.window.wmHi,
+          feedEnd,
         );
         for (const d of feed.deletedRecords)
           manifest.deletedIds.push({

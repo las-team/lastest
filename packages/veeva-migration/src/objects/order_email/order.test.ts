@@ -352,10 +352,14 @@ describe("order module", () => {
       kind: "ref",
       objectKey: "address",
     });
+    // §6.3.38 row 2 has no Vault target (`—`): the placeholder target is
+    // marked target-less with required '-' so preflight keeps the count row
     for (const r of ORDER_OUT_OF_SCOPE_REFS)
       expect(byTarget.get(r.target), r.target).toMatchObject({
         source: r.source,
         transform: { kind: "custom", fnName: "outOfScopeRef" },
+        required: "-",
+        optionalSource: true,
         evidence: "UNV",
       });
     expect(byTarget.get("order_date__v")).toMatchObject({

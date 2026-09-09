@@ -191,6 +191,13 @@ describe("em_catalog module", () => {
         expect(f.evidence, `${f.target} has an evidence tag`).toBeDefined();
   });
 
+  it("defaults externalIdOwnedBy to integration so external_id__v stays the match key (§3.2 step 4), overridable per object", () => {
+    expect(mappingFor().options.externalIdOwnedBy).toBe("integration");
+    expect(
+      mappingFor({ externalIdOwnedBy: "migration" }).options.externalIdOwnedBy,
+    ).toBe("migration");
+  });
+
   it("is full scope: no predicate after materialisation", () => {
     const m = mappingFor();
     expect(m.scope.spec).toEqual({ kind: "full" });

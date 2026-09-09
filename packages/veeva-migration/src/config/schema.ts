@@ -6,6 +6,7 @@
  * specific flags are open, listed ones are typed) and `picklists` (map keys).
  */
 import { z } from "zod";
+import { parseTransform } from "../transform/spec";
 import { OBJECT_KEYS } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -18,8 +19,12 @@ export const SourceAuthSchema = z.discriminatedUnion("kind", [
       kind: z.literal("jwt"),
       clientId: z.string().min(1),
       username: z.string().min(1),
-      /** `aud` claim: login/test/My Domain login URL (§2.1.1). */
-      aud: z.string().url().default("https://login.salesforce.com"),
+      /**
+       * `aud` claim: login/test/My Domain login URL (§2.1.1). Unset → the
+       * origin of `source.loginUrl` (derived in `sfdc/auth.ts`), so a
+       * sandbox never sends the production audience by accident.
+       */
+      aud: z.string().url().optional(),
       privateKeyPath: z.string().optional(),
       privateKey: z.string().optional(),
     })
@@ -134,7 +139,11 @@ export const RequirementSchema = z.union([
   z.boolean(),
 ]);
 
-/** Same shape as a mapping row (§7.2 field map). `transform` is textual (`parseTransform`). */
+/**
+ * Same shape as a mapping row (§7.2 field map). `transform` is textual and
+ * must parse (`parseTransform`) — a typo is `CONFIG_INVALID` (exit 5) at load
+ * time (`MAP_TRANSFORM_INVALID`), never a crash in `materialise`.
+ */
 export const FieldOverrideSchema = z
   .object({
     source: z.string(),
@@ -147,7 +156,18 @@ export const FieldOverrideSchema = z
     blobName: z.string().optional(),
     notes: z.string().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((v, ctx) => {
+    try {
+      parseTransform(v.transform);
+    } catch (e) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `MAP_TRANSFORM_INVALID: ${(e as Error).message}`,
+        path: ["transform"],
+      });
+    }
+  });
 
 export const FieldsOverrideSchema = z
   .object({
@@ -167,7 +187,15 @@ export const ObjectLoadSchema = z
     partitionBy: z
       .object({
         field: z.string().min(1),
-        order: z.tuple([z.literal("null"), z.literal("notNull")]).optional(),
+        /** `["null", notNull]` — the §7.3 excerpt's bare YAML `null` is accepted and normalised to the literal. */
+        order: z
+          .tuple([
+            z
+              .union([z.literal("null"), z.null()])
+              .transform(() => "null" as const),
+            z.literal("notNull"),
+          ])
+          .optional(),
       })
       .strict()
       .optional(),
@@ -393,6 +421,8 @@ export const DeltaSchema = z
 export const PerformanceSchema = z
   .object({
     sfdcBulkConcurrency: z.number().int().min(1).max(25).default(4),
+    /** Bulk 2.0 `maxRecords` per results page (§2.1.5; bounds memory per page). */
+    sfdcBulkMaxRecords: z.number().int().positive().default(100_000),
     sfdcRestConcurrency: z.number().int().min(1).default(2),
     vaultConcurrency: z.number().int().min(1).default(4),
     vaultBatch: z.number().int().min(1).max(500).default(500),
@@ -447,7 +477,17 @@ export const WaveSchema = z
   })
   .strict();
 
-export const MigrationConfigSchema = CountryLayerSchema.extend({
+export interface ConfigRefineOptions {
+  /**
+   * Region names that exist outside the file (the shipped `config/regions/*`
+   * overlays): a `countries.<ISO>.region` naming one of them passes the
+   * `CONFIG_REGION_UNKNOWN` check because the merge adds the region.
+   */
+  knownRegions?: readonly string[];
+}
+
+/** Unrefined shape (no cross-key checks) — use `MigrationConfigSchema` / `makeMigrationConfigSchema`. */
+export const MigrationConfigBaseSchema = CountryLayerSchema.extend({
   version: z.literal(1),
   source: SourceSchema,
   target: TargetSchema.extend({
@@ -475,50 +515,68 @@ export const MigrationConfigSchema = CountryLayerSchema.extend({
     .record(z.string().regex(/^[A-Z]{2}$/), CountryEntrySchema)
     .default({}),
   waves: z.array(WaveSchema).default([]),
-})
-  .strict()
-  .superRefine((cfg, ctx) => {
-    // §7.3: every wave country must have an overlay (or an explicit region line).
-    for (const wave of cfg.waves) {
-      for (const iso of wave.countries) {
-        if (!cfg.countries[iso]) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: `CONFIG_COUNTRY_NO_OVERLAY: wave "${wave.name}" lists ${iso} but countries.${iso} has no overlay`,
-            path: ["waves"],
-          });
-        }
-      }
-    }
-    for (const [iso, entry] of Object.entries(cfg.countries)) {
-      if (entry.region && !cfg.regions[entry.region]) {
+}).strict();
+
+function refineConfig(
+  cfg: z.infer<typeof MigrationConfigBaseSchema>,
+  ctx: z.RefinementCtx,
+  opts: ConfigRefineOptions,
+): void {
+  const knownRegions = new Set(opts.knownRegions ?? []);
+  // §7.3: every wave country must have an overlay (or an explicit region line).
+  for (const wave of cfg.waves) {
+    for (const iso of wave.countries) {
+      if (!cfg.countries[iso]) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `CONFIG_REGION_UNKNOWN: countries.${iso}.region "${entry.region}" is not defined in regions`,
-          path: ["countries", iso, "region"],
+          message: `CONFIG_COUNTRY_NO_OVERLAY: wave "${wave.name}" lists ${iso} but countries.${iso} has no overlay`,
+          path: ["waves"],
         });
       }
     }
-    const checkObjects = (
-      objects: Record<string, unknown> | undefined,
-      path: string[],
-    ) => {
-      for (const key of Object.keys(objects ?? {})) {
-        if (!(OBJECT_KEYS as readonly string[]).includes(key)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: `CONFIG_OBJECT_KEY_UNKNOWN: "${key}" is not an object key`,
-            path: [...path, "objects", key],
-          });
-        }
+  }
+  for (const [iso, entry] of Object.entries(cfg.countries)) {
+    if (
+      entry.region &&
+      !cfg.regions[entry.region] &&
+      !knownRegions.has(entry.region)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `CONFIG_REGION_UNKNOWN: countries.${iso}.region "${entry.region}" is not defined in regions`,
+        path: ["countries", iso, "region"],
+      });
+    }
+  }
+  const checkObjects = (
+    objects: Record<string, unknown> | undefined,
+    path: string[],
+  ) => {
+    for (const key of Object.keys(objects ?? {})) {
+      if (!(OBJECT_KEYS as readonly string[]).includes(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `CONFIG_OBJECT_KEY_UNKNOWN: "${key}" is not an object key`,
+          path: [...path, "objects", key],
+        });
       }
-    };
-    checkObjects(cfg.objects, []);
-    for (const [r, layer] of Object.entries(cfg.regions))
-      checkObjects(layer.objects, ["regions", r]);
-    for (const [c, layer] of Object.entries(cfg.countries))
-      checkObjects(layer.objects, ["countries", c]);
-  });
+    }
+  };
+  checkObjects(cfg.objects, []);
+  for (const [r, layer] of Object.entries(cfg.regions))
+    checkObjects(layer.objects, ["regions", r]);
+  for (const [c, layer] of Object.entries(cfg.countries))
+    checkObjects(layer.objects, ["countries", c]);
+}
+
+/** Full schema with the cross-key checks; `knownRegions` relaxes `CONFIG_REGION_UNKNOWN` for shipped regions. */
+export function makeMigrationConfigSchema(opts: ConfigRefineOptions = {}) {
+  return MigrationConfigBaseSchema.superRefine((cfg, ctx) =>
+    refineConfig(cfg, ctx, opts),
+  );
+}
+
+export const MigrationConfigSchema = makeMigrationConfigSchema();
 
 export type MigrationConfig = z.infer<typeof MigrationConfigSchema>;
 export type MigrationConfigInput = z.input<typeof MigrationConfigSchema>;

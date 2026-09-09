@@ -459,6 +459,26 @@ describe("StateStore contract", () => {
   });
 });
 
+describe("MemoryStateStore performance", () => {
+  it("id-map put/byVaultId stay linear on a large map", async () => {
+    const s = new MemoryStateStore("test.veevavault.com");
+    const N = 20_000;
+    const id = (i: number) => `001${String(i).padStart(12, "0")}`;
+    const rows: IdMapRow[] = [];
+    for (let i = 1; i <= N; i++) rows.push(idRow(id(i), { vaultId: `V${i}` }));
+    const t0 = performance.now();
+    await s.idMap.putMany(rows);
+    for (let i = 1; i <= N; i += 7)
+      expect((await s.idMap.byVaultId("account__v", `V${i}`))?.vaultId).toBe(
+        `V${i}`,
+      );
+    await expect(
+      s.idMap.put(idRow(id(N + 1), { vaultId: "V17" })),
+    ).rejects.toThrow(/id_map_vault_uidx/);
+    expect(performance.now() - t0).toBeLessThan(3000);
+  });
+});
+
 describe("MemoryStateStore helpers", () => {
   it("seedIdMap + idResolver", async () => {
     const s = new MemoryStateStore();

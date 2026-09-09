@@ -13,9 +13,12 @@ import { materialise, resolveCountry } from "../../config/resolve";
 import { parseConfig } from "../../config/schema";
 import { applyMapping } from "../../transform/apply";
 import { buildScopePredicate } from "../../extract/scope";
+import { buildColumnList } from "../../extract/columns";
+import { extraColumnsOf } from "../../preflight/source";
 import {
   SAMPLE_USER_ID,
   buildCountryContext,
+  buildDescribe,
   buildIdResolver,
   buildTransformContext,
   buildVaultMetadata,
@@ -333,19 +336,99 @@ describe("user_territory module", () => {
       overrides: { unmappedUserPolicy: "skipRow" },
     });
     expect(skipped.result.status).toBe("skipped");
-    expect(skipped.result.skipReason).toBe("UNMAPPED_USER_SKIP");
+    // skip reasons are canonicalised (`rule`); the code stays on the diagnostic
+    expect(skipped.result.skipReason).toBe("rule");
+    expect(skipped.result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        kind: "skipped",
+        code: "UNMAPPED_USER_SKIP",
+        fatal: true,
+      }),
+    );
   });
 
-  it("omits name__v with a diagnostic when a relationship column was not selected", () => {
-    const { result: r } = run(sampleRow({ "Territory2.Name": "" }));
-    expect(r.payload.name__v).toBeUndefined();
-    expect(r.diagnostics).toContainEqual(
+  it("fails the row (never silently drops the required name__v) when a relationship column is missing", () => {
+    const empty = run(sampleRow({ "Territory2.Name": "" }));
+    expect(empty.result.status).toBe("failed");
+    expect(empty.result.failure).toMatchObject({
+      code: "USER_TERRITORY_NAME_INCOMPLETE",
+      field: "name__v",
+    });
+    expect(empty.result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        kind: "required_missing",
+        code: "USER_TERRITORY_NAME_INCOMPLETE",
+        field: "name__v",
+        fatal: true,
+      }),
+    );
+    // column not selected at all → the detail points at extraColumns
+    const { "Territory2.Name": _dropped, ...withoutColumn } = sampleRow();
+    const absent = run(withoutColumn as SourceRow);
+    expect(absent.result.status).toBe("failed");
+    expect(absent.result.failure?.message).toContain("extraColumns");
+    // operator made name__v optional → loaded without it, non-fatal diagnostic
+    const optional = run(sampleRow({ "Territory2.Name": "" }), {
+      overrides: { required: { name__v: false } },
+    });
+    expect(optional.result.status).toBe("ok");
+    expect(optional.result.payload.name__v).toBeUndefined();
+    expect(optional.result.diagnostics).toContainEqual(
       expect.objectContaining({
         kind: "custom",
         code: "USER_TERRITORY_NAME_INCOMPLETE",
         field: "name__v",
       }),
     );
+  });
+
+  it("declares the territory Name relationship column so the column builder selects it", () => {
+    const config = makeConfig();
+    const mapping = materialise(
+      user_territory,
+      resolveCountry(config, "US"),
+      config,
+      { now: NOW },
+    );
+    expect(mapping.options.extraColumns).toEqual([
+      ...USER_TERRITORY_EXTRA_COLUMNS,
+    ]);
+    expect(extraColumnsOf(mapping)).toEqual([
+      "User.Username",
+      "Territory2.Name",
+    ]);
+    const describe = buildDescribe("UserTerritory2Association", [
+      {
+        name: "UserId",
+        type: "reference",
+        referenceTo: ["User"],
+        relationshipName: "User",
+      },
+      {
+        name: "Territory2Id",
+        type: "reference",
+        referenceTo: ["Territory2"],
+        relationshipName: "Territory2",
+      },
+      { name: "RoleInTerritory2", type: "picklist" },
+      { name: "IsActive", type: "boolean" },
+    ]);
+    const { columns } = buildColumnList(
+      mapping,
+      { describe, columns: [] },
+      { extra: extraColumnsOf(mapping) },
+    );
+    expect(columns).toContain("User.Username");
+    expect(columns).toContain("Territory2.Name");
+    // the row's own `source` alone would not bring the territory name along
+    const bare = buildColumnList(mapping, { describe, columns: [] });
+    expect(bare.columns).toContain("User.Username");
+    expect(bare.columns).not.toContain("Territory2.Name");
+    // legacy variant declares the legacy relationship column
+    expect(user_territoryLegacy.optionDefaults?.extraColumns).toEqual([
+      "User.Username",
+      "Territory.Name",
+    ]);
   });
 
   it("is unscoped (full): the scope builder yields no predicate", () => {
@@ -421,11 +504,31 @@ describe("user_territory custom transforms", () => {
       value: "abc:defg",
       diagnostic: { kind: "truncated", field: "name__v" },
     });
+    // optional target (`n` row, target not required): non-fatal
     expect(
       userTerritoryName(undefined, row({ "User.Username": "abc" }), ctx),
     ).toMatchObject({
       omit: true,
-      diagnostic: { code: "USER_TERRITORY_NAME_INCOMPLETE" },
+      diagnostic: { kind: "custom", code: "USER_TERRITORY_NAME_INCOMPLETE" },
+    });
+    // required target (`Y` row): fatal required_missing
+    const requiredCtx = buildTransformContext({
+      objectKey: "user_territory",
+      field: { target: "name__v", required: "Y" },
+    });
+    expect(
+      userTerritoryName(
+        undefined,
+        row({ "User.Username": "abc" }),
+        requiredCtx,
+      ),
+    ).toMatchObject({
+      omit: true,
+      diagnostic: {
+        kind: "required_missing",
+        code: "USER_TERRITORY_NAME_INCOMPLETE",
+        fatal: true,
+      },
     });
   });
 

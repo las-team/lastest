@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_SAMPLE_STRATEGY,
+  SAMPLE_TRANSACTION_ACCOUNT_OPTIONAL_CODE,
   SAMPLE_TRANSACTION_DISBURSEMENT_TYPE,
   SAMPLE_TRANSACTION_OBJECT_TYPES,
   SAMPLE_TRANSACTION_SIGNATURE_BLOB,
@@ -9,6 +11,7 @@ import {
   accountRef,
   isDisbursement,
   rollupSign,
+  sampleStrategyLoadFlags,
   sample_transaction,
   signedQuantity,
 } from "./sample_transaction";
@@ -369,10 +372,13 @@ describe("sample_transaction module", () => {
       evidence: "UNV",
       transform: { kind: "ref", objectKey: "sample_lot" },
     });
+    // "n (Y for disbursement)": declared Y so an unresolved reference is
+    // pending_fk (§3.5); the custom relaxes the empty case per type
     expect(byTarget.get("account__v")).toMatchObject({
       source: "Account_vod__c",
-      required: "n",
+      required: "Y",
       evidence: "UNV",
+      sourceType: "reference",
       transform: { kind: "custom", fnName: "accountRef" },
     });
     expect(byTarget.get("quantity__v")).toMatchObject({
@@ -647,11 +653,48 @@ describe("sample_transaction module", () => {
     expect(receipt.result.status).toBe("ok");
     expect(receipt.result.objectType).toBe("receipt__v");
     expect(receipt.result.payload.account__v).toBeUndefined();
-    // unresolved account on a disbursement: optional path (omitted, edge kept)
+    expect(receipt.result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        kind: "custom",
+        field: "account__v",
+        code: SAMPLE_TRANSACTION_ACCOUNT_OPTIONAL_CODE,
+      }),
+    );
+    expect(
+      receipt.result.diagnostics.find(
+        (d) => d.code === SAMPLE_TRANSACTION_ACCOUNT_OPTIONAL_CODE,
+      )?.fatal,
+    ).toBeFalsy();
+  });
+
+  it("routes an unresolved account on a disbursement to pending_fk (§3.5 required reference)", () => {
     const unresolved = run(sampleRow(), { knownAccount: false });
-    expect(unresolved.result.status).toBe("ok");
-    expect(unresolved.result.payload.account__v).toBeUndefined();
-    expect(unresolved.result.unresolvedOptionalFks).toContainEqual({
+    expect(unresolved.result.status).toBe("pending_fk");
+    expect(unresolved.result.unresolvedRequiredFks).toEqual([
+      { field: "account__v", objectKey: "account", sfdcId: IDS.account1 },
+    ]);
+    expect(unresolved.result.unresolvedOptionalFks).toEqual(
+      expect.not.arrayContaining([
+        expect.objectContaining({ field: "account__v" }),
+      ]),
+    );
+    // the deferred reference stays in the payload for the end-of-run retry
+    expect(unresolved.result.payload.account__v).toEqual({
+      $fk: { object: "account", sfdcId: IDS.account1 },
+    });
+    expect(unresolved.result.fkEdges).toContainEqual({
+      field: "account__v",
+      targetObjectKey: "account",
+      targetSfdcId: IDS.account1,
+    });
+    // an operator-side required override still wins (mapping.required)
+    const relaxed = run(sampleRow(), {
+      knownAccount: false,
+      config: { sample_transaction: { required: { account__v: false } } },
+    });
+    expect(relaxed.result.status).toBe("ok");
+    expect(relaxed.result.payload.account__v).toBeUndefined();
+    expect(relaxed.result.unresolvedOptionalFks).toContainEqual({
       field: "account__v",
       objectKey: "account",
       sfdcId: IDS.account1,
@@ -752,6 +795,48 @@ describe("sample_transaction module", () => {
     expect(triggers.mapping.load.noTriggers).toBe(false);
   });
 
+  describe("sampleStrategyLoadFlags (§6.3.35 Load column)", () => {
+    it("derives the NoTriggers header of both objects and the scope predicate from the strategy", () => {
+      expect(DEFAULT_SAMPLE_STRATEGY).toBe("noTriggersRecalc");
+      expect(sampleStrategyLoadFlags(undefined)).toEqual({
+        strategy: "noTriggersRecalc",
+        noTriggers: { sample_transaction: true, call2_sample: true },
+      });
+      expect(sampleStrategyLoadFlags("noTriggersVerify")).toEqual({
+        strategy: "noTriggersVerify",
+        noTriggers: { sample_transaction: true, call2_sample: true },
+      });
+      // transactions with triggers, call samples NoTriggers (no duplicate generation)
+      expect(sampleStrategyLoadFlags("triggersOnTransactions")).toEqual({
+        strategy: "triggersOnTransactions",
+        noTriggers: { sample_transaction: false, call2_sample: true },
+      });
+      // call samples regenerate disbursements; transactions restricted to other types
+      expect(sampleStrategyLoadFlags("triggersOnCallSamples")).toEqual({
+        strategy: "triggersOnCallSamples",
+        noTriggers: { sample_transaction: false, call2_sample: false },
+        scopePredicate: TRIGGERS_ON_CALL_SAMPLES_PREDICATE,
+      });
+      expect(TRIGGERS_ON_CALL_SAMPLES_PREDICATE).toBe(
+        `Type_vod__c != '${SAMPLE_TRANSACTION_DISBURSEMENT_TYPE}'`,
+      );
+    });
+
+    it("keeps the module default consistent with the default strategy", () => {
+      expect(sample_transaction.load.sampleStrategy).toBe(
+        DEFAULT_SAMPLE_STRATEGY,
+      );
+      expect(sample_transaction.load.noTriggers).toBe(
+        sampleStrategyLoadFlags(DEFAULT_SAMPLE_STRATEGY).noTriggers
+          .sample_transaction,
+      );
+      // an overlay naming a triggers strategy must be applied with the helper
+      // at materialise time: the materialised header alone does not follow it
+      const flags = sampleStrategyLoadFlags("triggersOnTransactions");
+      expect(flags.noTriggers.sample_transaction).toBe(false);
+    });
+  });
+
   describe("helpers", () => {
     it("isDisbursement prefers the record type, falls back to Type_vod__c", () => {
       expect(
@@ -799,6 +884,8 @@ describe("sample_transaction module", () => {
       expect(accountRef(IDS.account1, sampleRow(), ctx)).toEqual({
         value: { $fk: { object: "account", sfdcId: IDS.account1 } },
       });
+      // empty on a non-disbursement: omitted with a non-fatal custom
+      // diagnostic (what keeps applyMapping from failing the required row)
       expect(
         accountRef(
           "",
@@ -810,6 +897,12 @@ describe("sample_transaction module", () => {
         ),
       ).toEqual({
         omit: true,
+        diagnostic: {
+          kind: "custom",
+          field: "account__v",
+          code: SAMPLE_TRANSACTION_ACCOUNT_OPTIONAL_CODE,
+          detail: "account__v is optional on non-disbursement transactions",
+        },
       });
       expect(accountRef(undefined, sampleRow(), ctx)).toMatchObject({
         omit: true,

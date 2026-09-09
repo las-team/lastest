@@ -99,7 +99,194 @@ describe("password auth (§2.5.1)", () => {
   });
 });
 
+describe("auth flow never re-enters itself (§2.5.1 / §8.1: re-auth once, else fatal)", () => {
+  it("accessToken: an invalid token fails users/me with INVALID_SESSION_ID after exactly one call (no hang)", async () => {
+    const t = makeTestClient(
+      [
+        {
+          method: "GET",
+          path: `${API}/objects/users/me`,
+          body: failureBody("INVALID_SESSION_ID", "expired token"),
+          persist: true,
+        },
+      ],
+      { auth: { kind: "accessToken", token: "EXPIRED" }, vaultId: 1001 },
+    );
+    await expect(t.client.authenticate()).rejects.toMatchObject({
+      type: "INVALID_SESSION_ID",
+    });
+    expect(t.fetch.calls).toHaveLength(1);
+    expect(t.client.session).toBeUndefined();
+    expect(t.client.auth.user).toBeUndefined();
+  });
+
+  it("password: users/me rejecting the fresh session fails auth after one auth attempt (no replay, no hang)", async () => {
+    const t = makeTestClient([
+      { method: "POST", path: `${API}/auth`, body: authBody(), persist: true },
+      {
+        method: "GET",
+        path: `${API}/objects/users/me`,
+        body: failureBody("INVALID_SESSION_ID"),
+        persist: true,
+      },
+    ]);
+    await expect(t.client.authenticate()).rejects.toMatchObject({
+      type: "INVALID_SESSION_ID",
+    });
+    expect(
+      t.fetch.calls.filter((c) => c.pathname.endsWith("/auth")),
+    ).toHaveLength(1);
+    expect(t.fetch.calls).toHaveLength(2);
+    expect(t.client.session).toBeUndefined();
+  });
+
+  it("a re-entrant reauthenticate() from inside the auth flow throws instead of awaiting itself", async () => {
+    const t = makeTestClient([
+      { method: "POST", path: `${API}/auth`, body: authBody(), persist: true },
+    ]);
+    let inner: Promise<unknown> | undefined;
+    t.fetch.add({
+      method: "GET",
+      path: `${API}/objects/users/me`,
+      persist: true,
+      handler: () => {
+        inner = t.client.auth.reauthenticate();
+        inner.catch(() => undefined);
+        return { body: meBody() };
+      },
+    });
+    await expect(t.client.authenticate()).resolves.toMatchObject({
+      sessionId: "SESSION-1",
+    });
+    await expect(inner).rejects.toMatchObject({
+      type: "INVALID_SESSION_ID",
+      errorClass: "fatal",
+    });
+    expect(
+      t.fetch.calls.filter((c) => c.pathname.endsWith("/auth")),
+    ).toHaveLength(1);
+  });
+});
+
+describe("session is committed only after users/me validates it", () => {
+  it("a non-session users/me failure leaves no cached session; the next authenticate() re-runs the full flow", async () => {
+    const t = makeTestClient([
+      { method: "POST", path: `${API}/auth`, body: authBody(), persist: true },
+      {
+        method: "GET",
+        path: `${API}/objects/users/me`,
+        body: failureBody("INSUFFICIENT_ACCESS"),
+      },
+      { method: "GET", path: `${API}/objects/users/me`, body: meBody() },
+    ]);
+    await expect(t.client.authenticate()).rejects.toMatchObject({
+      type: "INSUFFICIENT_ACCESS",
+    });
+    expect(t.client.session).toBeUndefined();
+    expect(t.client.auth.user).toBeUndefined();
+    const s = await t.client.authenticate();
+    expect(s.sessionId).toBe("SESSION-1");
+    expect(t.client.auth.user?.id).toBe(12345);
+    expect(
+      t.fetch.calls.filter((c) => c.pathname.endsWith("/auth")),
+    ).toHaveLength(2);
+  });
+
+  it("a failed version probe after the fallback auth does not pre-commit the session", async () => {
+    const t = makeTestClient([
+      {
+        method: "POST",
+        path: `${API}/auth`,
+        body: failureBody("MALFORMED_URL", "Invalid API version"),
+      },
+      { method: "POST", path: "/api/v26.1/auth", body: authBody() },
+      { method: "GET", path: "/api", body: failureBody("INSUFFICIENT_ACCESS") },
+      {
+        method: "GET",
+        path: "/api/v26.1/objects/users/me",
+        body: failureBody("INACTIVE_USER"),
+      },
+    ]);
+    await expect(t.client.authenticate()).rejects.toMatchObject({
+      type: "INACTIVE_USER",
+    });
+    expect(t.client.session).toBeUndefined();
+    // GET /api and users/me carried the not-yet-committed session explicitly
+    expect(
+      t.fetch.calls
+        .filter((c) => c.pathname === "/api" || c.pathname.endsWith("/me"))
+        .every((c) => c.headers.authorization === "SESSION-1"),
+    ).toBe(true);
+  });
+});
+
 describe("auth burst guard (20/min)", () => {
+  it("retries a retryable auth failure inside the guard, waiting a full window on API_LIMIT_EXCEEDED", async () => {
+    const t = makeTestClient([
+      {
+        method: "POST",
+        path: `${API}/auth`,
+        body: failureBody("API_LIMIT_EXCEEDED", "auth burst"),
+      },
+      {
+        method: "POST",
+        path: `${API}/auth`,
+        body: failureBody("API_LIMIT_EXCEEDED", "auth burst"),
+      },
+      ...authRoutes(),
+    ]);
+    await expect(t.client.authenticate()).resolves.toMatchObject({
+      sessionId: "SESSION-1",
+    });
+    expect(
+      t.fetch.calls.filter((c) => c.pathname.endsWith("/auth")),
+    ).toHaveLength(3);
+    // the two waits are full guard windows, not jitter
+    expect(t.sleeps).toEqual([60_000, 60_000]);
+  });
+
+  it("records every retry attempt in the guard, so retries cannot exceed the limit", async () => {
+    const t = makeTestClient(
+      [
+        { method: "POST", path: `${API}/auth`, status: 503, body: "" },
+        { method: "POST", path: `${API}/auth`, status: 503, body: "" },
+        ...authRoutes(),
+      ],
+      { authRateLimit: { max: 2, windowMs: 60_000 } },
+    );
+    await expect(t.client.authenticate()).resolves.toMatchObject({
+      sessionId: "SESSION-1",
+    });
+    expect(
+      t.fetch.calls.filter((c) => c.pathname.endsWith("/auth")),
+    ).toHaveLength(3);
+    // jitter 1 s, jitter 2 s, then the guard holds the third attempt until the
+    // first one (t0) leaves the 60 s window: 60 000 − 3 000 + 1
+    expect(t.sleeps).toEqual([1000, 2000, 57_001]);
+  });
+
+  it("backs off with jitter on other retryable auth errors and gives up after maxAttempts", async () => {
+    const t = makeTestClient(
+      [
+        {
+          method: "POST",
+          path: `${API}/auth`,
+          status: 503,
+          body: "",
+          persist: true,
+        },
+      ],
+      { retry: { maxAttempts: 3 } },
+    );
+    await expect(t.client.authenticate()).rejects.toMatchObject({
+      type: "SERVICE_UNAVAILABLE",
+      errorClass: "retryable",
+    });
+    expect(t.fetch.calls).toHaveLength(3);
+    expect(t.sleeps).toEqual([1000, 2000]);
+    expect(t.client.auth.authCallsInWindow).toBe(3);
+  });
+
   it("waits for the window instead of exceeding the limit", async () => {
     const t = makeTestClient(authRoutes(), {
       authRateLimit: { max: 3, windowMs: 60_000 },

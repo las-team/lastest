@@ -14,13 +14,18 @@
  * auto-disables it with `warning SF_OBJECT_MISSING`.
  *
  * Scope (§6.2): "via parent `Event_vod__r.Start_Time_vod__c` ∨
- * `Payment_Date_vod__c`". `ScopeSpec` cannot express a parent date *and* an
- * own secondary date in one `via-parent` rule, so the header is `dated` with
- * two predicates: the parent's start time through the relationship path and
- * the secondary date (`payment_date__v`, "secondary scope date"). Rendered
- * SOQL (`extract/scope.ts`):
- * `Event_vod__r.Start_Time_vod__c >= {cutoff}T00:00:00Z OR Payment_Date_vod__c >= {cutoff}`.
- * `expense_line` mirrors both terms through `Expense_Header_vod__r.` so a
+ * `Payment_Date_vod__c`". A `via-parent` rule carries a single `parentField`
+ * and cannot add an own secondary date, so the header is `dated` with two
+ * predicates — the parent's start time through the relationship path and
+ * the secondary date (`payment_date__v`, "secondary scope date") — plus the
+ * parent event's open-item term as `openPredicate` (§1.1 #4: an EM event
+ * with an end time in the future or a status ∉ closed/cancelled is always in
+ * scope, and so is its ToV evidence; the extractor gives `em_attendee` /
+ * `em_event_speaker` the same term automatically through `via-parent`, here
+ * it is spelled through `Event_vod__r.` by hand — `EXPENSE_HEADER_OPEN_PREDICATE`).
+ * Rendered SOQL (`extract/scope.ts`):
+ * `(Event_vod__r.Start_Time_vod__c >= {cutoff}T00:00:00Z OR Payment_Date_vod__c >= {cutoff}) OR ((Event_vod__r.End_Time_vod__c >= {cutoff}T00:00:00Z) OR (Event_vod__r.Status_vod__c NOT IN (…closed…)))`.
+ * `expense_line` mirrors every term through `Expense_Header_vod__r.` so a
  * line is in scope exactly when its header is.
  *
  * Load: `noTriggers = true` — Vault EM expense triggers roll amounts into
@@ -41,6 +46,7 @@
 import { isContactId, isSfdcId, to18 } from "../../transform/ids";
 import { applyTransform } from "../../transform/registry";
 import type { CustomTransformFn, TransformSpec } from "../../types";
+import { EM_EVENT_CLOSED_STATUSES } from "../em_event/em_event";
 import { defineObject } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -55,6 +61,24 @@ export function isEmpty(v: unknown): boolean {
 export const EXPENSE_HEADER_PAYEE_MAP_KEY = "expense_header.payee";
 /** Picklist map key of the business status crosswalk (§6.0.2 status-field rule). */
 export const EXPENSE_HEADER_STATUS_MAP_KEY = "expense_header.status";
+
+/**
+ * The EM event open-item term (§1.1 #4, same shape as
+ * `em_event.EM_EVENT_OPEN_PREDICATE`: end time not before the cutoff ∨ status
+ * ∉ `EM_EVENT_CLOSED_STATUSES`) seen through a relationship `prefix`
+ * (`Event_vod__r.` from a header, `Expense_Header_vod__r.Event_vod__r.` from a
+ * line). The prefix is written into the field paths directly: the
+ * `{cutoffDateTime}` token must reach `renderOpenPredicate` untouched, which
+ * `prefixPredicateFields` over the unrendered text would not guarantee.
+ */
+export function emEventOpenTerm(prefix: string): string {
+  const p = prefix.endsWith(".") ? prefix : `${prefix}.`;
+  const closed = EM_EVENT_CLOSED_STATUSES.map((s) => `'${s}'`).join(", ");
+  return `(${p}End_Time_vod__c >= {cutoffDateTime}) OR (${p}Status_vod__c NOT IN (${closed}))`;
+}
+
+/** Open-item term of the header's parent event through `Event_vod__r.` (§1.1 #4, §6.2). */
+export const EXPENSE_HEADER_OPEN_PREDICATE = emEventOpenTerm("Event_vod__r.");
 
 /**
  * `payee__v` `[UNV type]`: picklist crosswalk when the target is a Picklist,
@@ -98,13 +122,15 @@ export const expense_header = defineObject({
   source: "Expense_Header_vod__c",
   target: "expense_header__v",
   targetEvidence: "OBS",
-  // §6.2: via parent Event_vod__r.Start_Time_vod__c ∨ Payment_Date_vod__c (see header comment)
+  // §6.2: via parent Event_vod__r.Start_Time_vod__c ∨ Payment_Date_vod__c,
+  // ∨ the parent event's open-item term (§1.1 #4) — see header comment.
   scope: {
     kind: "dated",
     predicates: [
       { field: "Event_vod__r.Start_Time_vod__c", type: "datetime" },
       { field: "Payment_Date_vod__c", type: "date" },
     ],
+    openPredicate: EXPENSE_HEADER_OPEN_PREDICATE,
     retentionFamily: "tov",
   },
   countryOf: "parent:em_event:Event_vod__c",
@@ -213,10 +239,13 @@ export const expense_header = defineObject({
       required: "y?",
       evidence: "OBS",
       unverifiedSource: true,
-      sourceType: "picklist",
+      // No `sourceType`: the name is guessed (§9.3 item 32b), and a declared
+      // `picklist` on a String-typed field would raise a blocking
+      // SF_FIELD_TYPE_MISMATCH (no auto-switch) instead of degrading — the
+      // picklist transform reads a string source just as well.
       countryConfigurable: true,
       notes:
-        "[UNVERIFIED-SOURCE]; business status per the §6.0.2 status-field rule ({object}_status__v [OBS]); crosswalk per country",
+        "[UNVERIFIED-SOURCE]; business status per the §6.0.2 status-field rule ({object}_status__v [OBS]); crosswalk per country; source type undeclared until preflight confirms the field",
     },
     {
       source: "Payment_Date_vod__c",
@@ -301,5 +330,5 @@ export const expense_header = defineObject({
   custom: { payeeAuto },
   optionDefaults: { optional: true },
   notes:
-    "Transfer-of-value evidence (§6.3.25a): optional module (auto-disabled with SF_OBJECT_MISSING when the org has no EM expenses); scoped on the parent event start time OR payment date, widened by scope.tovRetentionMonths; noTriggers = true so Vault does not re-roll em_event__v.actual_cost__v; deletes ignored (§4.4).",
+    "Transfer-of-value evidence (§6.3.25a): optional module (auto-disabled with SF_OBJECT_MISSING when the org has no EM expenses); scoped on the parent event start time OR payment date OR the parent event still open (§1.1 #4), widened by scope.tovRetentionMonths; noTriggers = true so Vault does not re-roll em_event__v.actual_cost__v; deletes ignored (§4.4).",
 });

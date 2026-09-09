@@ -11,11 +11,17 @@
  * Address line 1 lives in `Name` (255 in SFDC, 128 in Vault): the overflow
  * policy `objects.address.line1Overflow` (`truncate` | `spillToLine2` |
  * `fail`) is implemented by the paired `addressLine1` / `addressLine2`
- * custom transforms, which split at the same word boundary.
+ * custom transforms, which split at the same word boundary. `spillToLine2`
+ * needs a line-2 target on the vault (`LINE2_TARGETS`): when neither
+ * spelling exists the overflow cannot travel anywhere, so line 1 is truncated
+ * with `LINE1_SPILL_TARGET_MISSING` (never silently shortened).
  *
  * Fallback target spellings ("whichever exists") are separate rows with the
  * same source; preflight keeps the one the vault has (`VT_FIELD_MISSING`
- * drops the other).
+ * drops the other). The §3.3 natural-key match rule is declared once per
+ * city/postal-code spelling pair (`naturalKeyRules`) because the matcher
+ * skips a rule whose key target is missing and preflight does not rewrite
+ * match keys — one of the variants always survives.
  *
  * Custom transforms (pure, unit-tested in `address.test.ts`):
  *  - `addressLine1`  Name → `name__v` with the line-1 overflow policy
@@ -26,6 +32,7 @@
 import { applyTransform } from "../../transform/registry";
 import type {
   CustomTransformFn,
+  MatchRule,
   SourceRow,
   TransformContext,
   TransformResult,
@@ -76,6 +83,23 @@ function line1Max(ctx: TransformContext): number {
   return ctx.targetField?.maxLength ?? DEFAULT_LINE1_MAX;
 }
 
+/** Line-2 target spellings, in row order ("whichever exists"). */
+export const LINE2_TARGETS = [
+  "street_address_2_cda__v",
+  "address_line_2__v",
+] as const;
+
+/**
+ * Whether the vault can receive the spilled remainder: true when a line-2
+ * target is in the resolved metadata, or when the metadata carries no field
+ * list at all (unit tests / metadata unavailable — trust the policy).
+ */
+export function hasLine2Target(ctx: TransformContext): boolean {
+  const fields = ctx.metadata.fields;
+  if (!Object.keys(fields).length) return true;
+  return LINE2_TARGETS.some((t) => Boolean(fields[t]));
+}
+
 /** `Name` (= street line 1) → `name__v` (128) under the line-1 overflow policy. */
 export const addressLine1: CustomTransformFn = (value, _row, ctx) => {
   if (isEmpty(value)) return undefined;
@@ -97,14 +121,27 @@ export const addressLine1: CustomTransformFn = (value, _row, ctx) => {
       },
     } satisfies TransformResult;
   if (policy === "spillToLine2") {
-    const { line1 } = splitLine1(text, max);
+    if (hasLine2Target(ctx)) {
+      const { line1 } = splitLine1(text, max);
+      return {
+        value: line1,
+        diagnostic: {
+          kind: "truncated",
+          field: ctx.field.target,
+          code: "LINE1_SPILLED",
+          detail,
+        },
+      } satisfies TransformResult;
+    }
+    // nowhere to spill to (both line-2 spellings pruned by preflight):
+    // truncate like the default policy but say why, so the loss is visible
     return {
-      value: line1,
+      value: text.slice(0, max),
       diagnostic: {
         kind: "truncated",
         field: ctx.field.target,
-        code: "LINE1_SPILLED",
-        detail,
+        code: "LINE1_SPILL_TARGET_MISSING",
+        detail: `${detail}; spillToLine2 needs ${LINE2_TARGETS.join(" or ")} on the target`,
       },
     } satisfies TransformResult;
   }
@@ -169,6 +206,53 @@ export const postalCode: CustomTransformFn = (value, row, ctx) => {
     ? ({ omit: true, diagnostic } satisfies TransformResult)
     : ({ value: result.value, diagnostic } satisfies TransformResult);
 };
+
+// ---------------------------------------------------------------------------
+// §3.3 natural key — one rule per city / postal-code spelling pair
+// ---------------------------------------------------------------------------
+
+/** City target spellings (OBS first). */
+export const CITY_TARGETS = ["city_cda__v", "city__v"] as const;
+/** Postal-code target spellings (OBS first). */
+export const POSTAL_CODE_TARGETS = [
+  "postal_code_cda__v",
+  "postal_code__v",
+  "zip__v",
+] as const;
+
+/**
+ * `(account__v, upper(name__v), upper(city), postal_code, country)` for every
+ * spelling combination, OBS pair first. The matcher skips a rule whose key
+ * target the vault lacks (`load/matcher.ts`), so exactly the variant(s) the
+ * vault has run; all sit in the same §3.3 precedence slot.
+ */
+export function naturalKeyRules(): MatchRule[] {
+  const rules: MatchRule[] = [];
+  for (const city of CITY_TARGETS)
+    for (const postal of POSTAL_CODE_TARGETS) {
+      const obs = city === CITY_TARGETS[0] && postal === POSTAL_CODE_TARGETS[0];
+      rules.push({
+        method: "natural_key",
+        keys: [
+          {
+            target: "account__v",
+            source: "Account_vod__c",
+            transform: { kind: "ref", objectKey: "account" },
+          },
+          { target: "name__v", source: "Name", caseInsensitive: true },
+          { target: city, source: "City_vod__c", caseInsensitive: true },
+          { target: postal, source: "Zip_vod__c" },
+          { target: "country__v", source: "Country_vod__c" },
+        ],
+        sameCountry: true,
+        evidence: obs ? "OBS" : "UNV",
+        notes: obs
+          ? "(account__v, upper(name__v), upper(city), postal_code, country) — reported as a warning with counts for review (§3.3)"
+          : `fallback spelling pair ${city} / ${postal} — the matcher runs whichever the vault has`,
+      });
+    }
+  return rules;
+}
 
 // ---------------------------------------------------------------------------
 // module
@@ -803,24 +887,7 @@ export const address = defineObject({
       keys: [{ target: "mobile_id__v", source: "Mobile_ID_vod__c" }],
       evidence: "UNV",
     },
-    {
-      method: "natural_key",
-      keys: [
-        {
-          target: "account__v",
-          source: "Account_vod__c",
-          transform: { kind: "ref", objectKey: "account" },
-        },
-        { target: "name__v", source: "Name", caseInsensitive: true },
-        { target: "city_cda__v", source: "City_vod__c", caseInsensitive: true },
-        { target: "postal_code_cda__v", source: "Zip_vod__c" },
-        { target: "country__v", source: "Country_vod__c" },
-      ],
-      sameCountry: true,
-      evidence: "OBS",
-      notes:
-        "(account__v, upper(name__v), upper(city), postal_code, country) — reported as a warning with counts for review (§3.3)",
-    },
+    ...naturalKeyRules(),
   ],
   custom: { addressLine1, addressLine2, postalCode, countryAuto, phoneText },
   optionDefaults: { line1Overflow: "truncate" },

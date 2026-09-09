@@ -199,6 +199,8 @@ export class FakeVaultClient implements VaultClient {
   private objectTypeConfigs = new Map<string, VaultObjectTypeConfig[]>();
   private lifecycles = new Map<string, VaultLifecycle>();
   private userList: VaultUser[] = [];
+  /** `object.<name>.actions` → permission flags returned by `userPermissions` (default: everything granted). */
+  private permissionsByObject = new Map<string, Record<string, boolean>>();
   private idCounter = 1000;
   private authCount = 0;
   private opts: Required<FakeVaultOptions>;
@@ -397,6 +399,36 @@ export class FakeVaultClient implements VaultClient {
       user_name__v: "migration@acme.com",
       active__v: true,
     };
+  }
+  /** Override the object permissions reported by `userPermissions` (unset objects grant everything). */
+  setObjectPermissions(
+    objectName: string,
+    perms: Partial<Record<"read" | "create" | "edit" | "delete", boolean>>,
+  ): this {
+    this.permissionsByObject.set(objectName, {
+      read: true,
+      create: true,
+      edit: true,
+      delete: true,
+      ...perms,
+    });
+    return this;
+  }
+  async userPermissions(
+    userId: number | string,
+    filter?: string,
+  ): Promise<Array<Record<string, unknown>>> {
+    this.log("userPermissions", [userId, filter]);
+    this.requireSession();
+    const all = { read: true, create: true, edit: true, delete: true };
+    const entry = (name: string): Record<string, unknown> => ({
+      name: `object.${name}.actions`,
+      permissions: this.permissionsByObject.get(name) ?? all,
+    });
+    const m = filter ? /^object\.([^.]+)\./.exec(filter) : null;
+    if (m) return [entry(m[1])];
+    const names = new Set([...this.objects.keys(), ...this.metadata.keys()]);
+    return [...names].map(entry);
   }
 
   // --- VQL (§2.5.5) -----------------------------------------------------
@@ -793,6 +825,12 @@ export class FakeVaultClient implements VaultClient {
   ): Promise<VaultBulkResponse> {
     this.log("deleteRecords", [objectName, ids], opts);
     this.requireSession();
+    if (ids.length > 500)
+      throw new VaultApiError(
+        "INVALID_DATA",
+        "Maximum 500 records per request",
+        "FAILURE",
+      );
     if (objectName === "user__sys")
       throw new VaultApiError(
         "OPERATION_NOT_ALLOWED",

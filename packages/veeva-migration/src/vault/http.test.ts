@@ -148,6 +148,49 @@ describe("responseStatus branching (HTTP 200 with FAILURE)", () => {
     await expect(t.client.limits!()).resolves.toEqual({ a: 1 });
   });
 
+  it("allowFailure still re-authenticates on INVALID_SESSION_ID and retries API_LIMIT_EXCEEDED / EXCEPTION", async () => {
+    const t = makeTestClient([
+      ...authRoutes(),
+      {
+        method: "GET",
+        path: `${API}/x`,
+        body: failureBody("INVALID_SESSION_ID"),
+      },
+      {
+        method: "GET",
+        path: `${API}/x`,
+        body: failureBody("API_LIMIT_EXCEEDED"),
+      },
+      {
+        method: "GET",
+        path: `${API}/x`,
+        body: { responseStatus: "EXCEPTION", errors: [] },
+      },
+      {
+        method: "GET",
+        path: `${API}/x`,
+        body: failureBody("INSUFFICIENT_ACCESS"),
+      },
+    ]);
+    await t.client.authenticate();
+    const authsBefore = t.fetch.calls.filter((c) =>
+      c.pathname.endsWith("/auth"),
+    ).length;
+    const res = await t.client.http.request({
+      method: "GET",
+      path: "/x",
+      allowFailure: true,
+    });
+    expect(res.responseStatus).toBe("FAILURE");
+    expect(
+      t.fetch.calls.filter((c) => c.pathname.endsWith("/auth")),
+    ).toHaveLength(authsBefore + 1);
+    expect(t.fetch.calls.filter((c) => c.pathname.endsWith("/x"))).toHaveLength(
+      4,
+    );
+    expect(t.sleeps).toEqual([1000, 2000]);
+  });
+
   it("allowFailure returns the envelope instead of throwing", async () => {
     const t = makeTestClient([
       ...authRoutes(),
@@ -210,6 +253,46 @@ describe("session replay", () => {
     expect(
       t.fetch.calls.filter((c) => c.pathname.endsWith("/limits")),
     ).toHaveLength(2);
+  });
+
+  it("re-authenticates through a downtime announced together with INVALID_SESSION_ID (no deadlock)", async () => {
+    const t = makeTestClient([
+      ...authRoutes(),
+      {
+        method: "GET",
+        path: `${API}/limits`,
+        headers: vaultHeaders({
+          "X-VaultAPI-DowntimeExpectedDurationMinutes": "3",
+        }),
+        body: failureBody("INVALID_SESSION_ID"),
+      },
+      {
+        method: "GET",
+        path: `${API}/limits`,
+        body: { responseStatus: "SUCCESS", ok: true },
+      },
+      {
+        method: "GET",
+        path: `${API}/limits`,
+        body: { responseStatus: "SUCCESS", again: true },
+      },
+    ]);
+    await t.client.authenticate();
+    const authsBefore = t.fetch.calls.filter((c) =>
+      c.pathname.endsWith("/auth"),
+    ).length;
+    await expect(t.client.limits!()).resolves.toEqual({ ok: true });
+    // the re-auth's POST /auth waited out the pause; users/me right after it did not re-enter
+    expect(t.sleeps).toEqual([240_000]);
+    expect(
+      t.fetch.calls.filter((c) => c.pathname.endsWith("/auth")),
+    ).toHaveLength(authsBefore + 1);
+    // the fresh session satisfied the post-downtime re-auth: no second auth
+    await expect(t.client.limits!()).resolves.toEqual({ again: true });
+    expect(
+      t.fetch.calls.filter((c) => c.pathname.endsWith("/auth")),
+    ).toHaveLength(authsBefore + 1);
+    expect(t.sleeps).toEqual([240_000]);
   });
 
   it("maps HTTP 401 without an envelope to a session error", async () => {
@@ -442,6 +525,36 @@ describe("burst headers (§2.5.2, §8.3)", () => {
       .map((l) => JSON.parse(l))
       .find((r) => r.code === "VT_RESPONSE_DELAY");
     expect(warn).toMatchObject({ level: 40, response_delay_ms: 500 });
+  });
+
+  it("runs the post-downtime re-auth even when the pause elapsed with no request in flight", async () => {
+    const t = makeTestClient([
+      ...authRoutes(),
+      {
+        method: "GET",
+        path: `${API}/limits`,
+        headers: vaultHeaders({
+          "X-VaultAPI-DowntimeExpectedDurationMinutes": "3",
+        }),
+        body: { responseStatus: "SUCCESS" },
+      },
+      {
+        method: "GET",
+        path: `${API}/limits`,
+        body: { responseStatus: "SUCCESS" },
+      },
+    ]);
+    await t.client.authenticate();
+    const authsBefore = t.fetch.calls.filter((c) =>
+      c.pathname.endsWith("/auth"),
+    ).length;
+    await t.client.limits!();
+    t.clock.advance(10 * 60_000); // idle through the whole downtime
+    await t.client.limits!();
+    expect(t.sleeps).toEqual([]);
+    expect(
+      t.fetch.calls.filter((c) => c.pathname.endsWith("/auth")),
+    ).toHaveLength(authsBefore + 1);
   });
 
   it("pauses for the announced downtime + 1 min, then re-authenticates before the next call", async () => {

@@ -561,7 +561,8 @@ export function buildMaterialisedMapping(
 
 export const SAMPLE_USER_ID = "005000000000001AAA";
 export const SAMPLE_USER_ID_2 = "005000000000002AAA";
-export const SAMPLE_QUEUE_ID = "00G000000000001AAA";
+// the `G` in block 0 makes the checksum suffix `EAA`, so never hand-write it
+export const SAMPLE_QUEUE_ID = to18("00G000000000001");
 
 /** Three accounts (US person, US business, DE person) + one soft-deleted row. */
 export function sampleAccountRows(): SourceRow[] {

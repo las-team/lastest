@@ -2,9 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   EMAIL_ACTIVITY_EVENT_TYPE,
   EMAIL_ACTIVITY_IP_FIELD,
+  EMAIL_ACTIVITY_IP_REGION_DEFAULTS,
   EMAIL_ACTIVITY_LOAD_IP_FLAG,
   EMAIL_ACTIVITY_PARENT_FIELD,
+  PII_IP_ADDRESS_OMITTED_CODE,
   email_activity,
+  ipAddress,
+  loadIpAddressEffective,
 } from "./email_activity";
 import { SENT_EMAIL_OPEN_PREDICATE, sent_email } from "./sent_email";
 import { validateObjectModule } from "../types";
@@ -17,6 +21,7 @@ import {
   SAMPLE_USER_ID,
   buildCountryContext,
   buildIdResolver,
+  buildTransformContext,
   buildVaultMetadata,
   resolveMetadata,
 } from "../../testkit";
@@ -112,12 +117,8 @@ function run(
 ) {
   const config = makeConfig(opts.overrides, opts.configExtra);
   const iso2 = opts.iso2 ?? "US";
-  const mapping = materialise(
-    email_activity,
-    resolveCountry(config, iso2),
-    config,
-    { now: NOW },
-  );
+  const cc = resolveCountry(config, iso2);
+  const mapping = materialise(email_activity, cc, config, { now: NOW });
   const ids = buildIdResolver(
     { sent_email: opts.emails ?? { [EMAIL_ID]: "V0S1" } },
     { [SAMPLE_USER_ID]: 101 },
@@ -125,7 +126,11 @@ function run(
   return {
     mapping,
     result: applyMapping(row, mapping, {
-      country: buildCountryContext({ iso2, erased: opts.erased }),
+      country: buildCountryContext({
+        iso2,
+        region: cc.region,
+        erased: opts.erased,
+      }),
       metadata: metadata(),
       ids,
       migrationUserId: 1,
@@ -176,9 +181,10 @@ describe("email_activity module", () => {
       name: "autoNumber",
       ownerId: false,
     });
-    expect(email_activity.optionDefaults).toEqual({
-      [EMAIL_ACTIVITY_LOAD_IP_FLAG]: true,
-    });
+    // no static loadIpAddress default: unset → region default (EU false, else true)
+    expect(email_activity.optionDefaults).toBeUndefined();
+    expect(Object.keys(email_activity.custom ?? {})).toEqual(["ipAddress"]);
+    expect(EMAIL_ACTIVITY_IP_REGION_DEFAULTS).toEqual({ EU: false });
     expect(email_activity.notes).not.toContain("STUB");
     // loads after sent_email (§6.1 step 20)
     const steps = loadOrder([
@@ -227,14 +233,16 @@ describe("email_activity module", () => {
     });
     for (const target of ["url__v", "user_agent__v", "ip_address__v"])
       expect(byTarget.get(target), target).toMatchObject({
-        transform: { kind: "text" },
         required: "n",
         evidence: "UNV",
         unverifiedSource: true,
         optionalSource: true,
       });
+    for (const target of ["url__v", "user_agent__v"])
+      expect(byTarget.get(target)?.transform, target).toEqual({ kind: "text" });
     expect(byTarget.get("ip_address__v")).toMatchObject({
       source: EMAIL_ACTIVITY_IP_FIELD,
+      transform: { kind: "custom", fnName: "ipAddress" },
       disabledBy: EMAIL_ACTIVITY_LOAD_IP_FLAG,
     });
     expect(email_activity.picklists["email_activity.eventType"]).toMatchObject({
@@ -284,8 +292,12 @@ describe("email_activity module", () => {
   it("drops ip_address__v when loadIpAddress is false — explicitly or through the regions.EU overlay", () => {
     const { mapping: us, result: usResult } = run(sampleRow());
     expect(us.fields.some((f) => f.target === "ip_address__v")).toBe(true);
-    expect(us.options[EMAIL_ACTIVITY_LOAD_IP_FLAG]).toBe(true);
+    // unset flag: the region default applies (US has no region → loaded)
+    expect(us.options[EMAIL_ACTIVITY_LOAD_IP_FLAG]).toBeUndefined();
     expect(usResult.payload.ip_address__v).toBe("203.0.113.7");
+    expect(usResult.diagnostics).not.toContainEqual(
+      expect.objectContaining({ code: PII_IP_ADDRESS_OMITTED_CODE }),
+    );
 
     const { mapping: off, result: offResult } = run(sampleRow(), {
       overrides: { [EMAIL_ACTIVITY_LOAD_IP_FLAG]: false },
@@ -316,6 +328,55 @@ describe("email_activity module", () => {
     expect(de.fields.some((f) => f.target === "ip_address__v")).toBe(false);
     expect(deResult.payload.ip_address__v).toBeUndefined();
     expect(de.mappingHash).not.toBe(us.mappingHash);
+  });
+
+  it("never loads ip_address__v for an EU-region unit whose config carries no loadIpAddress at all (§6.3.41 default false in regions.EU)", () => {
+    // regions.EU declared but WITHOUT the §7.3 `objects.email_activity.loadIpAddress: false` block
+    const configExtra = {
+      regions: { EU: {} },
+      countries: { US: {}, DE: { region: "EU" } },
+    };
+    const { mapping, result } = run(sampleRow(), { iso2: "DE", configExtra });
+    expect(mapping.country).toBe("DE");
+    expect(mapping.options[EMAIL_ACTIVITY_LOAD_IP_FLAG]).toBeUndefined();
+    // the row survives materialise (no explicit false) — the transform applies the region default
+    expect(mapping.fields.some((f) => f.target === "ip_address__v")).toBe(true);
+    expect(result.status).toBe("ok");
+    expect(result.payload.ip_address__v).toBeUndefined();
+    expect(result.payload.url__v).toBe("https://example.com/cholecap?utm=mail");
+    const omitted = result.diagnostics.find(
+      (d) => d.code === PII_IP_ADDRESS_OMITTED_CODE,
+    );
+    expect(omitted).toMatchObject({ kind: "custom", field: "ip_address__v" });
+    expect(omitted?.fatal).toBeUndefined();
+    // PII never echoed
+    expect(JSON.stringify(omitted)).not.toContain("203.0.113.7");
+    // an explicit opt-in on the country wins over the region default
+    const { result: optIn } = run(sampleRow(), {
+      iso2: "DE",
+      configExtra: {
+        regions: { EU: {} },
+        countries: {
+          US: {},
+          DE: {
+            region: "EU",
+            objects: {
+              email_activity: { [EMAIL_ACTIVITY_LOAD_IP_FLAG]: true },
+            },
+          },
+        },
+      },
+    });
+    expect(optIn.payload.ip_address__v).toBe("203.0.113.7");
+    // a non-EU region keeps the §7.2.1 default (true)
+    const { result: ca } = run(sampleRow(), {
+      iso2: "CA",
+      configExtra: {
+        regions: { NA: {} },
+        countries: { US: {}, CA: { region: "NA" } },
+      },
+    });
+    expect(ca.payload.ip_address__v).toBe("203.0.113.7");
   });
 
   it("skips erased rows and reports an unresolved parent email as pending_fk", () => {
@@ -359,5 +420,61 @@ describe("email_activity module", () => {
       { kind: "parent", key: "sent_email", field: "Sent_Email_vod__c" },
     ]);
     expect(mapping.options.deletePolicy).toBe("delete");
+  });
+});
+
+describe("email_activity custom transforms", () => {
+  it("loadIpAddressEffective: explicit boolean wins, else EU → false, else true", () => {
+    expect(loadIpAddressEffective(undefined, undefined)).toBe(true);
+    expect(loadIpAddressEffective(undefined, "NA")).toBe(true);
+    expect(loadIpAddressEffective(undefined, "EU")).toBe(false);
+    expect(loadIpAddressEffective(true, "EU")).toBe(true);
+    expect(loadIpAddressEffective(false, "NA")).toBe(false);
+    expect(loadIpAddressEffective("yes", "EU")).toBe(false);
+  });
+
+  it("ipAddress carries the value as text outside the EU and omits + counts it under the EU default", () => {
+    const ctxFor = (region: string | undefined, option?: boolean) =>
+      buildTransformContext({
+        objectKey: "email_activity",
+        field: { source: EMAIL_ACTIVITY_IP_FIELD, target: "ip_address__v" },
+        country: buildCountryContext({ iso2: region ? "DE" : "US", region }),
+        mapping:
+          option === undefined
+            ? undefined
+            : {
+                options: {
+                  ...buildTransformContext().mapping.options,
+                  [EMAIL_ACTIVITY_LOAD_IP_FLAG]: option,
+                },
+              },
+      });
+    const row = { Id: ACTIVITY_ID };
+    expect(ipAddress(" 203.0.113.7 ", row, ctxFor(undefined))).toEqual({
+      value: "203.0.113.7",
+    });
+    expect(ipAddress("203.0.113.7", row, ctxFor("NA"))).toEqual({
+      value: "203.0.113.7",
+    });
+    const eu = ipAddress("203.0.113.7", row, ctxFor("EU"));
+    expect(eu).toEqual({
+      omit: true,
+      diagnostic: {
+        kind: "custom",
+        field: "ip_address__v",
+        code: PII_IP_ADDRESS_OMITTED_CODE,
+        detail: expect.stringContaining("region EU"),
+      },
+    });
+    expect(JSON.stringify(eu)).not.toContain("203.0.113.7");
+    expect(ipAddress("203.0.113.7", row, ctxFor("EU", true))).toEqual({
+      value: "203.0.113.7",
+    });
+    expect(ipAddress("203.0.113.7", row, ctxFor("NA", false))).toMatchObject({
+      omit: true,
+      diagnostic: { code: PII_IP_ADDRESS_OMITTED_CODE },
+    });
+    expect(ipAddress("", row, ctxFor("EU"))).toBeUndefined();
+    expect(ipAddress(null, row, ctxFor(undefined))).toBeUndefined();
   });
 });

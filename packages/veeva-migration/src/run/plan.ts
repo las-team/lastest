@@ -11,7 +11,7 @@ import {
   resolveCountry,
   type ResolvedCountryConfig,
 } from "../config/resolve";
-import { isGlobalCountryOf } from "../country-of";
+import { isGlobalCountryOf, isTerritoryCountryRule } from "../country-of";
 import { hashObject } from "../hash";
 import { OBJECT_MODULES, loadOrder } from "../objects/registry";
 import type { ObjectModule } from "../objects/types";
@@ -98,7 +98,12 @@ export function isGlobalModule(
   cc: ResolvedCountryConfig,
 ): boolean {
   const ov = cc.objects[module.key]?.countryOf;
-  if (ov !== undefined) {
+  // the territory country rule (`fromUsers` | `field:` | …) is a per-row
+  // derivation, not a unit rule — the unit stays global (see config/resolve)
+  if (
+    ov !== undefined &&
+    !(module.key === "territory" && isTerritoryCountryRule(ov))
+  ) {
     const list = Array.isArray(ov) ? ov : [ov];
     return list.length === 1 && list[0].trim() === "global";
   }

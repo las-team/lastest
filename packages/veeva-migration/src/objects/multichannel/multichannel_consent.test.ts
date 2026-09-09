@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CONSENT_CONFIG_MAP_INVALID_CODE,
   CONSENT_OPTOUT_EVENT_TYPE_MISSING_CODE,
   CONSENT_TYPE_CONFIG,
   MULTICHANNEL_CONSENT_CONFIG_MAP_NAMES,
@@ -13,6 +14,7 @@ import {
   configNamePath,
   consentConfigRef,
   consentType,
+  isVaultRecordId,
   multichannel_consent,
   optoutEventType,
 } from "./multichannel_consent";
@@ -42,6 +44,11 @@ const TEMPLATE_ID = to18("a0W000000000001");
 const PRODUCT_ID = to18("a0P000000000001");
 const DETAIL_GROUP_ID = to18("a0P000000000002");
 const SENT_EMAIL_ID = to18("a0S000000000001");
+/** Vault record ids (15 alphanumerics, `V4V000000001002`-shaped). */
+const VAULT_CONTENT_TYPE = "V0CT00000000001";
+const VAULT_CONSENT_LINE = "V0Y000000000001";
+const VAULT_TEMPLATE = "V0W000000000001";
+const VAULT_CONSENT_TYPE = "V0X000000000001";
 
 function config(overrides: Record<string, unknown> = {}) {
   return parseConfig({
@@ -60,8 +67,12 @@ function config(overrides: Record<string, unknown> = {}) {
         configMaps: {
           consentType: { [CONSENT_TYPE_ID]: "external_id:AE_US" },
           consentLine: { [CONSENT_LINE_ID]: "name:Marketing Email" },
-          contentType: { [CONTENT_TYPE_ID]: "V0CT00000000001" },
+          contentType: { [CONTENT_TYPE_ID]: VAULT_CONTENT_TYPE },
           consentTemplate: {},
+        },
+        // what preflight writes back after resolving name:<v> by VQL (country + object type scoped)
+        configMapsResolved: {
+          consentLine: { [CONSENT_LINE_ID]: VAULT_CONSENT_LINE },
         },
         ...overrides,
       },
@@ -454,12 +465,12 @@ describe("multichannel_consent module", () => {
       name__v: "MC-000001",
       "object_type__v.api_name__v": "approved_email__v",
       account__v: { $fk: { object: "account", sfdcId: IDS.account1 } },
-      // (1) explicit map: external_id:<v> → lookup form
+      // (1) explicit map: external_id:<v> → lookup form (refLookup)
       "consent_type__v.external_id__v": "AE_US",
-      // (1) explicit map: name:<v> → lookup form
-      "consent_line__v.name__v": "Marketing Email",
+      // (1) explicit map: name:<v> → the preflight-resolved Vault id, never a name__v lookup
+      consent_line__v: VAULT_CONSENT_LINE,
       // (1) explicit map: Vault record id (config crosswalk exception)
-      content_type__v: "V0CT00000000001",
+      content_type__v: VAULT_CONTENT_TYPE,
       // (2) automatic: relationship External_ID_vod__c
       "sample_consent_template__v.external_id__v": "TPL-US-1",
       opt_type__v: "opt_in__v",
@@ -486,10 +497,12 @@ describe("multichannel_consent module", () => {
       created_date__v: "2025-03-04T10:31:00.000Z",
       last_device__v: "data_load__v",
     });
-    // never a Vault id for a mapped object, never a raw SFDC id in a reference
+    // never a raw SFDC id in a reference, never a load-time name__v lookup
     expect(result.payload.consent_type__v).toBeUndefined();
-    expect(result.payload.consent_line__v).toBeUndefined();
     expect(result.payload.sample_consent_template__v).toBeUndefined();
+    expect(
+      Object.keys(result.payload).filter((k) => k.endsWith(".name__v")),
+    ).toEqual([]);
     // opt-in: no opt-out event type
     expect(result.payload.optout_event_type__v).toBeUndefined();
     // signature deferred to the blob pass
@@ -537,7 +550,10 @@ describe("multichannel_consent module", () => {
     expect(pending.result.payload.optout_event_type__v).toBeUndefined();
   });
 
-  it("falls back to the config row Name and reports unmatched config rows", () => {
+  it("Name-only config rows come from the preflight cache, never from a load-time name__v lookup", () => {
+    // Name alone (no map entry, no External_ID_vod__c): name__v is not
+    // country-scoped, so the transform reports the row for preflight instead
+    // of emitting a lookup that could bind another country's template
     const byName = run(
       consentRow({
         "Sample_Consent_Template_vod__r.External_ID_vod__c": "",
@@ -545,11 +561,62 @@ describe("multichannel_consent module", () => {
     );
     expect(byName.result.status).toBe("ok");
     expect(byName.result.payload["sample_consent_template__v.name__v"]).toBe(
-      "US sample template",
+      undefined,
+    );
+    expect(byName.result.payload.sample_consent_template__v).toBeUndefined();
+    expect(byName.result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        kind: "unresolved_fk",
+        field: "sample_consent_template__v",
+        code: VT_CONSENT_CONFIG_UNMATCHED_CODE,
+        value: TEMPLATE_ID,
+        fatal: false,
+        detail: expect.stringContaining('"US sample template"'),
+      }),
+    );
+
+    // the same row once preflight has resolved the Name by VQL
+    const resolved = run(
+      consentRow({
+        "Sample_Consent_Template_vod__r.External_ID_vod__c": "",
+      }),
+      {
+        overrides: {
+          configMapsResolved: {
+            consentLine: { [CONSENT_LINE_ID]: VAULT_CONSENT_LINE },
+            consentTemplate: { [TEMPLATE_ID]: VAULT_TEMPLATE },
+          },
+        },
+      },
+    );
+    expect(resolved.result.status).toBe("ok");
+    expect(resolved.result.payload.sample_consent_template__v).toBe(
+      VAULT_TEMPLATE,
     );
     expect(
-      byName.result.payload["sample_consent_template__v.external_id__v"],
-    ).toBeUndefined();
+      resolved.result.diagnostics.some(
+        (d) => d.field === "sample_consent_template__v",
+      ),
+    ).toBe(false);
+
+    // an explicit name:<v> entry preflight did not resolve is reported the same way
+    const unresolvedName = run(consentRow(), {
+      overrides: { configMapsResolved: {} },
+    });
+    expect(unresolvedName.result.status).toBe("ok");
+    expect(unresolvedName.result.payload.consent_line__v).toBeUndefined();
+    expect(unresolvedName.result.payload["consent_line__v.name__v"]).toBe(
+      undefined,
+    );
+    expect(unresolvedName.result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: VT_CONSENT_CONFIG_UNMATCHED_CODE,
+        field: "consent_line__v",
+        value: CONSENT_LINE_ID,
+        fatal: false,
+        detail: expect.stringContaining("name:Marketing Email"),
+      }),
+    );
 
     // optional config reference without any hit: omitted + counted, row still ok
     const unmatched = run(
@@ -580,6 +647,24 @@ describe("multichannel_consent module", () => {
         code: VT_CONSENT_CONFIG_UNMATCHED_CODE,
         field: "consent_type__v",
         fatal: true,
+      }),
+    );
+
+    // a forgotten prefix is a broken overlay: fatal even on an optional reference
+    const badValue = run(consentRow(), {
+      overrides: {
+        configMaps: { contentType: { [CONTENT_TYPE_ID]: "AE_US" } },
+      },
+    });
+    expect(badValue.result.status).toBe("failed");
+    expect(badValue.result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        kind: "invalid_value",
+        code: CONSENT_CONFIG_MAP_INVALID_CODE,
+        field: "content_type__v",
+        value: CONTENT_TYPE_ID,
+        fatal: true,
+        detail: expect.stringContaining('"AE_US"'),
       }),
     );
   });
@@ -627,8 +712,12 @@ describe("multichannel_consent module", () => {
       });
     const row: SourceRow = { Id: CONSENT_ID };
     expect(
-      consentType(CONSENT_TYPE_ID, row, ctx({ [CONSENT_TYPE_ID]: "V0X1" })),
-    ).toEqual({ value: "V0X1" });
+      consentType(
+        CONSENT_TYPE_ID,
+        row,
+        ctx({ [CONSENT_TYPE_ID]: VAULT_CONSENT_TYPE }),
+      ),
+    ).toEqual({ value: VAULT_CONSENT_TYPE });
     // 15-char key in the overlay still matches an 18-char source id
     expect(
       consentType(
@@ -640,15 +729,44 @@ describe("multichannel_consent module", () => {
       value: "AE_DE",
       targetField: "consent_type__v.external_id__v",
     });
+    // name:<v> without the preflight cache: never a name__v lookup
     expect(
       consentType(CONSENT_TYPE_ID, row, ctx({ [CONSENT_TYPE_ID]: "name:AE" })),
-    ).toEqual({ value: "AE", targetField: "consent_type__v.name__v" });
+    ).toMatchObject({
+      omit: true,
+      diagnostic: {
+        kind: "unresolved_fk",
+        code: VT_CONSENT_CONFIG_UNMATCHED_CODE,
+        value: CONSENT_TYPE_ID,
+        fatal: false,
+        detail: expect.stringContaining("name:AE"),
+      },
+    });
+    // un-prefixed value that cannot be a Vault record id (forgotten prefix / label)
+    for (const bad of ["AE_DE", "Marketing Email", "V0X1", " V0X000000000001"])
+      expect(
+        consentType(CONSENT_TYPE_ID, row, ctx({ [CONSENT_TYPE_ID]: bad })),
+      ).toMatchObject({
+        omit: true,
+        diagnostic: {
+          kind: "invalid_value",
+          code: CONSENT_CONFIG_MAP_INVALID_CODE,
+          value: CONSENT_TYPE_ID,
+          fatal: true,
+        },
+      });
+    expect(isVaultRecordId("V4V000000001002")).toBe(true);
+    expect(isVaultRecordId("AE_DE")).toBe(false);
+    expect(isVaultRecordId(15)).toBe(false);
     // selector rows emit nothing
     expect(
       consentType(
         "X",
         row,
-        ctx({ [CONSENT_TYPE_ID]: "V0X1" }, "consent_type__v.external_id"),
+        ctx(
+          { [CONSENT_TYPE_ID]: VAULT_CONSENT_TYPE },
+          "consent_type__v.external_id",
+        ),
       ),
     ).toBeUndefined();
     expect(consentType("", row, ctx())).toBeUndefined();
@@ -664,19 +782,52 @@ describe("multichannel_consent module", () => {
         ctx(),
       ),
     ).toEqual({ value: "AE_X", targetField: "consent_type__v.external_id__v" });
+    // automatic Name match: resolvable only at preflight (country + object type) → reported, not looked up
     expect(
       consentType(
         CONSENT_TYPE_ID,
         { Id: CONSENT_ID, "Consent_Type_vod__r.Name": "Approved Email" },
         ctx(),
       ),
-    ).toEqual({
-      value: "Approved Email",
-      targetField: "consent_type__v.name__v",
+    ).toMatchObject({
+      omit: true,
+      diagnostic: {
+        code: VT_CONSENT_CONFIG_UNMATCHED_CODE,
+        value: CONSENT_TYPE_ID,
+        fatal: false,
+        detail: expect.stringContaining('"Approved Email"'),
+      },
     });
     expect(consentType(CONSENT_TYPE_ID, row, ctx({}))).toMatchObject({
       omit: true,
       diagnostic: { code: VT_CONSENT_CONFIG_UNMATCHED_CODE, fatal: false },
+    });
+    // the preflight cache wins over every other form, and is validated too
+    const resolvedCtx = (resolved: string) =>
+      buildTransformContext({
+        objectKey: "multichannel_consent",
+        field: { source: "Consent_Type_vod__c", target: "consent_type__v" },
+        mapping: {
+          options: {
+            configMaps: { consentType: { [CONSENT_TYPE_ID]: "name:AE" } },
+            configMapsResolved: {
+              consentType: { [to15(CONSENT_TYPE_ID)]: resolved },
+            },
+          },
+        } as never,
+      });
+    expect(
+      consentType(
+        CONSENT_TYPE_ID,
+        { Id: CONSENT_ID, "Consent_Type_vod__r.External_ID_vod__c": "AE_X" },
+        resolvedCtx(VAULT_CONSENT_TYPE),
+      ),
+    ).toEqual({ value: VAULT_CONSENT_TYPE });
+    expect(
+      consentType(CONSENT_TYPE_ID, row, resolvedCtx("not an id")),
+    ).toMatchObject({
+      omit: true,
+      diagnostic: { code: CONSENT_CONFIG_MAP_INVALID_CODE, fatal: true },
     });
     // factory + helpers
     expect(configExternalIdPath(CONSENT_TYPE_CONFIG.source)).toBe(
@@ -697,6 +848,25 @@ describe("multichannel_consent module", () => {
     ).toEqual({ [CONSENT_LINE_ID]: "V0Y1" });
     expect(configMapOf({ configMaps: false }, "consentLine")).toBeUndefined();
     expect(configMapOf({}, "consentType")).toBeUndefined();
+    // normalised once per raw map object (row × field hot path), by options key
+    const options = {
+      configMaps: { consentType: { [to15(CONSENT_TYPE_ID)]: "name:AE" } },
+      configMapsResolved: {
+        consentType: { [CONSENT_TYPE_ID]: VAULT_CONSENT_TYPE },
+      },
+    };
+    const first = configMapOf(options, "consentType");
+    expect(first).toBe(configMapOf(options, "consentType"));
+    expect(first).toEqual({ [CONSENT_TYPE_ID]: "name:AE" });
+    expect(configMapOf(options, "consentType", "configMapsResolved")).toEqual({
+      [CONSENT_TYPE_ID]: VAULT_CONSENT_TYPE,
+    });
+    expect(
+      configMapOf(
+        { configMaps: { consentType: { ...options.configMaps.consentType } } },
+        "consentType",
+      ),
+    ).not.toBe(first);
     expect(typeof consentConfigRef(CONSENT_TYPE_CONFIG)).toBe("function");
   });
 
@@ -744,5 +914,45 @@ describe("multichannel_consent module", () => {
       omit: true,
       diagnostic: { code: CONSENT_OPTOUT_EVENT_TYPE_MISSING_CODE, fatal: true },
     });
+    // a crosswalk entry mapped to null skips the value without a diagnostic —
+    // under an opt-out that is still a missing required value, never a silent omit
+    const nullMapped = buildTransformContext({
+      objectKey: "multichannel_consent",
+      field: {
+        source: "Optout_Event_Type_vod__c",
+        target: "optout_event_type__v",
+      },
+      mapping: {
+        picklists: {
+          "multichannel_consent.optoutEventType": {
+            ...MULTICHANNEL_CONSENT_OPTOUT_EVENT_TYPE,
+            Bounced_vod: null,
+          },
+        },
+      },
+    });
+    expect(
+      optoutEventType(
+        "Bounced_vod",
+        { Id: CONSENT_ID, Opt_Type_vod__c: "Opt_Out_vod" },
+        nullMapped,
+      ),
+    ).toMatchObject({
+      omit: true,
+      diagnostic: {
+        kind: "required_missing",
+        field: "optout_event_type__v",
+        code: CONSENT_OPTOUT_EVENT_TYPE_MISSING_CODE,
+        value: "Bounced_vod",
+        fatal: true,
+      },
+    });
+    expect(
+      optoutEventType(
+        "Bounced_vod",
+        { Id: CONSENT_ID, Opt_Type_vod__c: "Opt_In_vod" },
+        nullMapped,
+      ),
+    ).toEqual({ omit: true, diagnostic: undefined });
   });
 });

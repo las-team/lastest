@@ -16,6 +16,7 @@
 import { hashObject } from "../hash";
 import { isSfdcId, to18 } from "./ids";
 import { applyTransform } from "./registry";
+import { readSource } from "./source";
 import {
   isDeferredComposite,
   isDeferredFk,
@@ -31,9 +32,12 @@ import {
   type ResolvedMetadata,
   type RowDiagnostic,
   type RunMode,
+  type SkipReason,
   type SourceRow,
   type TransformContext,
 } from "../types";
+
+export { readSource } from "./source";
 
 export interface ApplyContext {
   country: CountryContext;
@@ -80,28 +84,39 @@ export interface ApplyResult {
   skipReason?: string;
 }
 
-/** Read a source column, accepting flattened dotted keys or nested objects. */
-export function readSource(row: SourceRow, path: string): unknown {
-  if (!path) return undefined;
-  if (path in row) return row[path];
-  if (!path.includes(".")) return undefined;
-  let cur: unknown = row;
-  for (const part of path.split(".")) {
-    if (cur === null || typeof cur !== "object") return undefined;
-    cur = (cur as Record<string, unknown>)[part];
-  }
-  return cur;
-}
-
 function isEmpty(v: unknown): boolean {
   return v === null || v === undefined || v === "";
 }
 
+/**
+ * §8.8 gate vocabulary for `skipped` rows: `erased`, `rule`, `contact_ref`,
+ * `country_unresolved`, `out_of_scope_ref`. Configured skips (a `null`
+ * object type, `unmappedUserPolicy: skipRow`, …) are `rule`; the diagnostic
+ * keeps the precise code.
+ */
+export function canonicalSkipReason(code: string | undefined): SkipReason {
+  if (!code) return "rule";
+  if (code === "ERASED_SKIPPED") return "erased";
+  if (code.startsWith("CONTACT_REF")) return "contact_ref";
+  if (code.startsWith("COUNTRY_UNRESOLVED")) return "country_unresolved";
+  if (code.startsWith("OUT_OF_SCOPE_REF")) return "out_of_scope_ref";
+  return "rule";
+}
+
+/**
+ * `required = mapping.required[target] ?? (K|Y) ?? metadata.required`
+ * (CONTRACTS §4), with one deliberate refinement: an `n` row with an empty
+ * source defers to Vault's own default (`status__v` → `active__v`, §6.0.4)
+ * instead of failing locally, whereas an unresolved reference on a
+ * target-required field can never be defaulted — §3.5 routes it to
+ * `pending_fk` (`forReference`).
+ */
 function isRequired(
   field: FieldMapping,
   mapping: MaterialisedMapping,
   metadata: ResolvedMetadata,
   outputField: string,
+  forReference = false,
 ): boolean {
   const override =
     mapping.required[outputField] ?? mapping.required[field.target];
@@ -109,7 +124,8 @@ function isRequired(
   if (field.required === "K" || field.required === "Y") return true;
   if (field.required === "-") return false;
   const meta = metadata.fields[outputField] ?? metadata.fields[field.target];
-  return meta?.required === true && field.required !== "n" ? true : false;
+  if (meta?.required !== true) return false;
+  return forReference || field.required !== "n";
 }
 
 function collectEdges(
@@ -191,7 +207,7 @@ export function applyMapping(
 
     if (result.diagnostic?.fatal) {
       if (result.diagnostic.kind === "skipped") {
-        skipReason ??= result.diagnostic.code ?? "rule";
+        skipReason ??= canonicalSkipReason(result.diagnostic.code);
       } else {
         failure ??= {
           code: result.diagnostic.code ?? result.diagnostic.kind.toUpperCase(),
@@ -224,13 +240,16 @@ export function applyMapping(
         payload[outField] = null;
         continue;
       }
+      if (result.unresolved) {
+        if (isRequired(field, mapping, ctx.metadata, outField, true))
+          unresolvedRequiredFks.push({ field: outField, ...result.unresolved });
+        continue;
+      }
       if (
         isRequired(field, mapping, ctx.metadata, outField) &&
         field.transform.kind !== "skip"
       ) {
-        if (result.unresolved) {
-          unresolvedRequiredFks.push({ field: outField, ...result.unresolved });
-        } else if (
+        if (
           !result.diagnostic ||
           result.diagnostic.kind === "unresolved_fk" ||
           result.diagnostic.kind === "unmapped_picklist" ||
@@ -256,7 +275,7 @@ export function applyMapping(
 
     // value branch
     if (result.unresolved) {
-      const required = isRequired(field, mapping, ctx.metadata, outField);
+      const required = isRequired(field, mapping, ctx.metadata, outField, true);
       if (required) {
         unresolvedRequiredFks.push({ field: outField, ...result.unresolved });
         payload[outField] = result.value;

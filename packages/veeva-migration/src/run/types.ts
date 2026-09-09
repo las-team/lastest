@@ -63,6 +63,8 @@ export interface RunOptions {
   allowPicklistCreate?: boolean;
   allowPicklistReactivate?: boolean;
   probeWrites?: boolean;
+  /** `preflight --reprobe`: ignore cached `probe_results` (§5.3). */
+  reprobe?: boolean;
   /** `final-delta --freeze-at`. */
   freezeAt?: string;
   acceptGateExceptions?: string;

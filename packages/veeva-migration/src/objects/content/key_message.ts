@@ -29,6 +29,16 @@
  * `Product_Strategy_vod__c` references an object out of v1 (§6.2.1): the
  * value is dropped and counted (`OUT_OF_SCOPE_REF_DROPPED`) by
  * `custom(outOfScopeRef)`, which the other content modules reuse.
+ *
+ * **`external_id__v` on integration-owned content.** The Block S copy row
+ * (§6.0.4) is replaced by `CONTENT_EXTERNAL_ID_FIELD`
+ * (`custom(externalIdIfMigrationOwned)`): under the default
+ * `externalIdOwnedBy: integration` the value is omitted, so a matched
+ * update can never overwrite the PromoMats/MedComms key (§3.2 step 4 —
+ * `UnchangedFieldBehavior: AlwaysIgnore` only skips *identical* values);
+ * with `objects.<key>.externalIdOwnedBy = migration` it is copied. The
+ * match rules read the source column, so matching is unaffected.
+ * `clm_presentation` and `approved_document` reuse the row.
  */
 import { isSfdcId, to18 } from "../../transform/ids";
 import type { CustomTransformFn } from "../../types";
@@ -58,6 +68,41 @@ export const outOfScopeRef: CustomTransformFn = (value, _row, ctx) => {
     },
   };
 };
+
+/**
+ * `External_ID_vod__c → external_id__v` only when the migration owns the
+ * field (`objects.<key>.externalIdOwnedBy = 'migration'`); omitted under the
+ * default `integration` so a matched update never overwrites the
+ * PromoMats/MedComms/Align key (§3.2 step 4, §6.0.4).
+ */
+export const externalIdIfMigrationOwned: CustomTransformFn = (
+  value,
+  _row,
+  ctx,
+) => {
+  if (ctx.mapping.options.externalIdOwnedBy === "integration") return undefined;
+  if (isEmpty(value)) return undefined;
+  const text = String(value).trim();
+  return text === "" ? undefined : text;
+};
+
+/**
+ * Guarded replacement of the Block S `external_id__v` row for the
+ * integration-owned content objects (`key_message`, `clm_presentation`,
+ * `approved_document`). Same target as the Block S row → replaces it
+ * (`defineObject`).
+ */
+export const CONTENT_EXTERNAL_ID_FIELD = {
+  source: "External_ID_vod__c",
+  target: "external_id__v",
+  transform: "custom(externalIdIfMigrationOwned)",
+  required: "n",
+  evidence: "OBS",
+  sourceType: "string",
+  optionalSource: true,
+  notes:
+    "written only with objects.<key>.externalIdOwnedBy = migration; PromoMats/MedComms owns external_id__v by default (integration) and is never overwritten (§3.2 step 4, §6.0.4); skipped when chosen as legacy-id field (§3.2)",
+} as const;
 
 /** `Status_vod__c` → `key_message_status__v` defaults (§6.3.14). */
 export const KEY_MESSAGE_STATUS_DEFAULTS: Record<string, string> = {
@@ -198,6 +243,7 @@ export const key_message = defineObject({
       notes: "EXTID unique 255; match key (§3.3)",
     },
     ...VAULT_IDENTITY_FIELDS,
+    CONTENT_EXTERNAL_ID_FIELD,
     {
       source: "CLM_ID_vod__c",
       target: "clm_id__v",
@@ -374,7 +420,7 @@ export const key_message = defineObject({
       notes: "last resort — the upsert idParam (§3.2)",
     },
   ],
-  custom: { outOfScopeRef },
+  custom: { outOfScopeRef, externalIdIfMigrationOwned },
   notes:
-    "Integration-owned when PromoMats/MedComms syncs CLM content → createPolicy match-only by default (objects.key_message.createPolicy = create for non-Vault-managed content); shared_resource__v patched in pass 2; deletePolicy inactivate → status__v = inactive__v + active__v = false; key_message_status__v / status__v picked at preflight.",
+    "Integration-owned when PromoMats/MedComms syncs CLM content → createPolicy match-only by default (objects.key_message.createPolicy = create for non-Vault-managed content); external_id__v written only with externalIdOwnedBy = migration; shared_resource__v patched in pass 2; deletePolicy inactivate → status__v = inactive__v + active__v = false; key_message_status__v / status__v picked at preflight.",
 });

@@ -16,6 +16,7 @@
  */
 import { getLogger, type Logger } from "../logger";
 import {
+  classifyVaultError,
   isKnownVaultErrorType,
   parseVaultErrors,
   toVaultError,
@@ -99,7 +100,12 @@ export interface VaultRequest {
   accept?: string;
   /** `X-VaultAPI-ReferenceId: {run_id}:{object}:{batch}`. */
   referenceId?: string;
-  /** Skip `Authorization` (auth endpoint). */
+  /**
+   * Skip the session `Authorization` header (auth endpoint, or a request
+   * issued by the auth flow itself carrying an explicit `headers.Authorization`).
+   * The transport never re-authenticates for such a request — no session
+   * replay and no post-downtime re-auth — so the auth flow cannot re-enter itself.
+   */
   noAuth?: boolean;
   /** Retry retryable classes (default true). */
   retry?: boolean;
@@ -107,7 +113,12 @@ export interface VaultRequest {
   replayOnSessionError?: boolean;
   /** Return the raw text body instead of parsed JSON. */
   raw?: boolean;
-  /** Also return (instead of throwing) when the envelope is FAILURE/EXCEPTION. Used by probes. */
+  /**
+   * Return (instead of throwing) a FAILURE envelope of the `structural`,
+   * `permission` or `fatal` class. Used by probes. Session and retryable
+   * classes (INVALID_SESSION_ID, API_LIMIT_EXCEEDED, EXCEPTION …) are still
+   * thrown so re-auth + replay and the retry loop apply (§2.5.2).
+   */
   allowFailure?: boolean;
   timeoutMs?: number;
 }
@@ -202,6 +213,11 @@ export class VaultHttp {
   private readonly hooks: VaultHttpHooks;
   private readonly retryPolicy: Partial<VaultRetryPolicy>;
 
+  /** The transport's logger (injected or `getLogger("Vault")`) for the endpoint modules. */
+  get logger(): Logger {
+    return this.log;
+  }
+
   /** Counters from the most recent response (§2.5.2). */
   burst: VaultBurstInfo = {};
   /** Effective API version (may change through the §2.5.1 fallback). */
@@ -271,7 +287,7 @@ export class VaultHttp {
         },
       );
     const send = async () => {
-      await this.beforeSend();
+      await this.beforeSend(req);
       return this.sendWithSessionReplay<T>(req);
     };
     if (req.retry === false) return send();
@@ -302,15 +318,22 @@ export class VaultHttp {
 
   // -- pauses ---------------------------------------------------------------
 
-  private async beforeSend(): Promise<void> {
+  private async beforeSend(req: Pick<VaultRequest, "noAuth">): Promise<void> {
     const now = this.now();
     if (this.pauseUntil > now) {
       await this.sleep(this.pauseUntil - now);
       this.pauseUntil = 0;
-      if (this.reauthAfterPause) {
-        this.reauthAfterPause = false;
-        await this.opts.reauthenticate?.();
-      }
+    }
+    // Post-downtime re-auth (§2.5.1). Runs once the pause is over — even when
+    // it elapsed with no request in flight — and never for a `noAuth` request:
+    // those are the auth flow itself (the auth POST, users/me right after it),
+    // and re-entering `reauthenticate()` from inside it would deadlock on the
+    // in-flight auth promise. The flag stays pending for the next
+    // authenticated request unless the re-auth completes (see
+    // `sendWithSessionReplay`, which also clears it after a replay re-auth).
+    if (this.reauthAfterPause && !req.noAuth && this.opts.reauthenticate) {
+      this.reauthAfterPause = false;
+      await this.opts.reauthenticate();
     }
     const remaining = this.burst.burstLimitRemaining;
     if (remaining !== undefined && remaining < this.burstFloor) {
@@ -394,6 +417,8 @@ export class VaultHttp {
           "session invalid — re-authenticating and replaying once",
         );
         await this.opts.reauthenticate();
+        // A fresh session satisfies a pending post-downtime re-auth too.
+        this.reauthAfterPause = false;
         return this.sendOnce<T>(req);
       }
       throw err;
@@ -506,23 +531,32 @@ export class VaultHttp {
 
     const failed =
       responseStatus === "FAILURE" || responseStatus === "EXCEPTION";
-    if (failed && !req.allowFailure) {
+    if (failed) {
       const type =
         primary?.type ??
         (responseStatus === "EXCEPTION" ? "EXCEPTION" : "FAILURE");
-      const message =
-        primary?.message ??
-        envelope?.responseMessage ??
-        `Vault returned ${responseStatus}`;
-      if (!isKnownVaultErrorType(type))
-        this.log.warn(
-          { error_type: type, http_status: httpStatus },
-          "unknown Vault error type",
-        );
-      throw new VaultRequestError(type, message, {
-        status: responseStatus,
-        ...ctx,
-      });
+      // `allowFailure` only hands back envelopes the caller can interpret
+      // (structural / permission / fatal); a session or retryable failure is
+      // never the probe's answer and must go through re-auth / backoff.
+      const cls = classifyVaultError(type, httpStatus, responseStatus);
+      const tolerated =
+        req.allowFailure === true && cls !== "session" && cls !== "retryable";
+      if (!tolerated) {
+        const message =
+          primary?.message ??
+          envelope?.responseMessage ??
+          `Vault returned ${responseStatus}`;
+        if (!isKnownVaultErrorType(type))
+          this.log.warn(
+            { error_type: type, http_status: httpStatus },
+            "unknown Vault error type",
+          );
+        throw new VaultRequestError(type, message, {
+          status: responseStatus,
+          errorClass: cls,
+          ...ctx,
+        });
+      }
     }
     if (httpStatus >= 400 && !(failed && req.allowFailure)) {
       const type =

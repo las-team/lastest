@@ -18,7 +18,10 @@
  * `Contract_vod__c`, `Assortment_vod__c`, `Order_Campaign_vod__c`) are kept
  * as rows so nothing is silently dropped: `custom(outOfScopeRef)` omits the
  * field and counts it (`OUT_OF_SCOPE_REF_DROPPED`, `CONTRACT_REF_DROPPED` for
- * the contract, §6.2.1).
+ * the contract, §6.2.1). Their §6.3.38 target is `—`: the `target` on the
+ * row is a placeholder name and `required = '-'` marks the row as
+ * target-less (same convention as `sent_email`/`call2`), so preflight must
+ * not drop it when the placeholder is absent from Vault metadata.
  *
  * Amount fields are currency fields → Block S `CurrencyIsoCode →
  * local_currency__sys` is enabled; the signature image goes through the blob
@@ -158,7 +161,7 @@ export const ORDER_ADDRESS_SNAPSHOT_FIELDS: ReadonlyArray<{
   { source: "Billing_Country_vod__c", target: "billing_country__v" },
 ];
 
-/** Lookups into objects outside v1 (§6.3.38 row 2, §6.2.1): omitted and counted. */
+/** Lookups into objects outside v1 (§6.3.38 row 2, §6.2.1): omitted and counted. `target` is a placeholder (§6.3.38 lists `—`); the rows carry `required: '-'`. */
 export const ORDER_OUT_OF_SCOPE_REFS: ReadonlyArray<{
   source: string;
   target: string;
@@ -250,12 +253,14 @@ export const order = defineObject({
     unv("Billing_Address_vod__c", "billing_address__v", "ref(address)", {
       sourceType: "reference",
     }),
-    // --- lookups into objects outside v1 (row 2): omitted + counted
+    // --- lookups into objects outside v1 (row 2): omitted + counted; no Vault
+    // target (§6.3.38 `—`) → required '-' so the placeholder name never gates the count
     ...ORDER_OUT_OF_SCOPE_REFS.map((r) =>
       unv(r.source, r.target, "custom(outOfScopeRef)", {
+        required: "-",
         sourceType: "reference",
         optionalSource: true,
-        notes: `${r.notes} — omitted in v1, counted (§6.2.1)`,
+        notes: `${r.notes} — omitted in v1, counted (§6.2.1); target is a placeholder, the row is target-less`,
       }),
     ),
     // --- dates (row 3)

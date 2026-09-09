@@ -26,6 +26,7 @@ import {
   type TransformSpec,
   type Unit,
 } from "../types";
+import { NAME_TEMPLATE_COLUMNS, rowSources } from "../extract/columns";
 import { FindingCollector } from "./findings";
 import { isSkipRow } from "./lints";
 import { autoSwitchTransform, sfdcTypeGroup } from "./matrix";
@@ -573,6 +574,27 @@ export async function checkSourceUnit(
     columns.add(f.source);
   }
 
+  // --- transform-declared inputs beyond `source` (§2.2 step 2): the
+  // `statusFromFlag` flag, `compositeExternalId` parts and the name-template
+  // components. Under the default extractor `columns` *is* the SELECT list,
+  // so anything not listed here is invisible to the transform.
+  for (const f of mapping.fields) {
+    if (isSkipRow(f) || result.drops.has(f.target)) continue;
+    for (const path of rowSources(f)) {
+      if (!path || path === f.source || columns.has(path)) continue;
+      const res = await resolveSourcePath(ctx, describe, path);
+      if (res.status === "missing") {
+        // person-name parts are org dependent (MiddleName/Suffix) — silent
+        if (NAME_TEMPLATE_COLUMNS.includes(path)) continue;
+        findings.warning(
+          "SF_FIELD_MISSING",
+          `${innerTransform(f.transform).kind} input ${path} of ${f.target}: ${res.reason}`,
+          { ...uctx, field: f.target },
+        );
+      } else columns.add(path);
+    }
+  }
+
   // --- scope date fields
   for (const path of scopeDateFields(mapping)) {
     const res = await resolveSourcePath(ctx, describe, path);
@@ -634,6 +656,10 @@ export async function checkSourceUnit(
   for (const rule of mapping.match)
     for (const k of rule.keys ?? [])
       extra.push([k.source, `match ${rule.method}`]);
+  // module/config-declared relationship columns read by `custom(...)` rows
+  // (`objects.<key>.extraColumns`, e.g. `Territory2.Name` for user_territory)
+  for (const path of extraColumnsOf(mapping))
+    extra.push([path, "extraColumns"]);
   for (const [path, use] of extra) {
     if (!path || columns.has(path)) continue;
     const res = await resolveSourcePath(ctx, describe, path);
@@ -648,6 +674,15 @@ export async function checkSourceUnit(
       );
     else columns.add(path);
   }
+
+  // --- §3.4 queue owners: `ownerid__v` falls back to the rep in `User_vod__c`
+  // when `OwnerId` is a `00G` queue, so the column must travel with OwnerId
+  if (
+    columns.has("OwnerId") &&
+    !columns.has("User_vod__c") &&
+    sysNames.has("User_vod__c")
+  )
+    columns.add("User_vod__c");
 
   // --- record types referenced by the crosswalk
   const rtNames = new Set(describe.recordTypeInfos.map((r) => r.developerName));
@@ -746,6 +781,17 @@ export async function checkSourceUnit(
   }
 
   return result;
+}
+
+/**
+ * `objects.<key>.extraColumns`: source columns/paths a module's `custom(...)`
+ * rows read beyond their `source` (declared via `optionDefaults` or the
+ * config overlay). Non-string entries are ignored.
+ */
+export function extraColumnsOf(mapping: MaterialisedMapping): string[] {
+  const raw = mapping.options.extraColumns;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((c): c is string => typeof c === "string" && c !== "");
 }
 
 /** Referenced object keys of a mapping (for parent target resolution). */

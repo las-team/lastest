@@ -30,7 +30,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { getLogger } from "../logger";
-import { ConfigError, formatZodError } from "./load";
+import { ConfigError, formatZodError } from "./errors";
 import {
   CountryEntrySchema,
   CountryLayerSchema,

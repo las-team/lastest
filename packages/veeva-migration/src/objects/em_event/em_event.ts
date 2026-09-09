@@ -23,11 +23,16 @@
  *    `objects.em_event.configurationMap` (SFDC id → Vault id or
  *    `external_id:<value>`), else automatic match by the configuration's
  *    `External_ID_vod__c` (`external_id__v` lookup) then `Name`
- *    (`name__v` lookup); unmatched → `VT_EM_CONFIG_UNMATCHED`.
+ *    (`name__v` lookup); unmatched → fatal `VT_EM_CONFIG_UNMATCHED` (the
+ *    spec's blocking finding — an explicit
+ *    `objects.em_event.required.event_configuration__v: false` downgrades
+ *    it to a counted omission).
  *  - `vendorRefDropped` — `vendor__v` omitted and counted
  *    (`EM_VENDOR_REF_DROPPED`, `EM_Vendor_vod__c` is out of v1, §6.2.1).
- *  - `eventCountryFallback` — `Event_Country_vod__c` feeds `country__v`
- *    only when `Country_vod__c` is empty.
+ *  - `eventCountry` — `country__v` as `country(ref)` from `Country_vod__c`,
+ *    else from the selected `Event_Country_vod__c` column. The fallback lives
+ *    in the primary row (not a second row) so that a required `country__v`
+ *    is satisfied before `applyMapping` evaluates `REQUIRED_MISSING`.
  *  - `eventStage` — `stage__v` from `objects.em_event.stageMap` only (the
  *    stage is otherwise set by Vault from `state__v`).
  *
@@ -340,7 +345,11 @@ export function configurationMapOf(
  * configured map (Vault id or `external_id:<value>` → `external_id__v`
  * lookup), else `External_ID_vod__c` of the configuration, else its `Name`
  * (`name__v` lookup, matched per country by the loader). Unmatched →
- * `VT_EM_CONFIG_UNMATCHED` (fatal when the field is required).
+ * `VT_EM_CONFIG_UNMATCHED`, fatal for the row (§6.1/§6.3.22 make it a
+ * blocking finding: the event names a configuration that cannot be
+ * resolved, and loading it unconfigured is worse than holding it for
+ * review). An explicit `required: { event_configuration__v: false }`
+ * override downgrades it to a counted omission.
  */
 export const eventConfiguration: CustomTransformFn = (
   value,
@@ -371,8 +380,6 @@ export const eventConfiguration: CustomTransformFn = (
   const name = row[EM_EVENT_CONFIG_NAME_SOURCE];
   if (!isEmpty(name))
     return { value: String(name).trim(), targetField: `${target}.name__v` };
-  const required =
-    ctx.mapping.required[target] ?? ctx.targetField?.required ?? false;
   return {
     omit: true,
     diagnostic: {
@@ -380,7 +387,7 @@ export const eventConfiguration: CustomTransformFn = (
       field: target,
       code: VT_EM_CONFIG_UNMATCHED_CODE,
       value: id,
-      fatal: required,
+      fatal: ctx.mapping.required[target] !== false,
       detail:
         "EM_Event_Configuration_vod__c row has no Vault match (configurationMap / External_ID_vod__c / Name)",
     },
@@ -408,20 +415,25 @@ export const vendorRefDropped: CustomTransformFn = (
   };
 };
 
-/** `custom(eventCountryFallback)`: `Event_Country_vod__c` → `country__v` only when `Country_vod__c` is empty. */
-export const eventCountryFallback: CustomTransformFn = (
+/** `[DOC sfdc-extract.md §7.16]` fallback source for `country__v` (selector row `country__v.event_country`). */
+export const EVENT_COUNTRY_FALLBACK_SOURCE = "Event_Country_vod__c";
+
+/**
+ * `custom(eventCountry)`: `country__v` = `country(ref)` of `Country_vod__c`,
+ * else of the selected `Event_Country_vod__c` column (ref → `Country_vod__c`
+ * or ISO text). Lives in the primary row so a required `country__v` is
+ * satisfied by the fallback before `REQUIRED_MISSING` is evaluated. The
+ * selector row emits nothing.
+ */
+export const eventCountry: CustomTransformFn = (
   value,
   row,
   ctx,
 ): TransformResult | undefined => {
-  if (isEmpty(value)) return undefined;
-  if (!isEmpty(row.Country_vod__c)) return undefined;
-  const r = applyTransform({ kind: "country", mode: "ref" }, value, row, {
-    ...ctx,
-    targetField: ctx.metadata.fields.country__v ?? ctx.targetField,
-  });
-  if ("omit" in r) return r;
-  return { ...r, targetField: "country__v" };
+  if (ctx.field.target !== "country__v") return undefined;
+  const raw = isEmpty(value) ? row[EVENT_COUNTRY_FALLBACK_SOURCE] : value;
+  if (isEmpty(raw)) return undefined;
+  return applyTransform({ kind: "country", mode: "ref" }, raw, row, ctx);
 };
 
 /** `custom(eventStage)`: `stage__v` from `objects.em_event.stageMap[status]`; nothing without a map entry. */
@@ -604,7 +616,7 @@ export const em_event = defineObject({
       evidence: "OBS",
       unverifiedSource: true,
       notes:
-        "[UNVERIFIED-SOURCE — exact API name resolved by describe prefix match Event_Time_Zone*]; selector row: column read by the time_zone__v row",
+        "[UNVERIFIED-SOURCE — exact API name resolved by describe prefix match Event_Time_Zone*]; selector row: column read by the time_zone__v row (any selected Event_Time_Zone* key is honoured). An org that names the field differently points at it with objects.em_event.fields.override [{ target: time_zone__v.event, source: <API name> }]; without it the row is dropped at preflight (SF_FIELD_MISSING) and every event falls back to the owner / country zone (EM_EVENT_TIMEZONE_FROM_OWNER / _DEFAULTED counts)",
     },
     {
       source: OWNER_TIME_ZONE_SOURCE,
@@ -621,21 +633,23 @@ export const em_event = defineObject({
     {
       source: "Country_vod__c",
       target: "country__v",
-      transform: "country(ref)",
+      transform: "custom(eventCountry)",
       required: "y?",
       evidence: "OBS",
       sourceType: "reference",
+      notes:
+        "country(ref) of Country_vod__c, else of Event_Country_vod__c (selector row country__v.event_country) — the fallback sits in this row so a required country__v is satisfied before REQUIRED_MISSING",
     },
     {
-      source: "Event_Country_vod__c",
+      source: EVENT_COUNTRY_FALLBACK_SOURCE,
       target: "country__v.event_country",
-      transform: "custom(eventCountryFallback)",
+      transform: "custom(eventCountry)",
       required: "n",
       evidence: "UNV",
       unverifiedSource: true,
       countryConfigurable: true,
       notes:
-        "[DOC sfdc-extract.md §7.16 — confirm in describe] ref→Country_vod__c or ISO text; feeds country__v only when Country_vod__c is null",
+        "[DOC sfdc-extract.md §7.16 — confirm in describe] ref→Country_vod__c or ISO text; selector row read by the country__v row when Country_vod__c is null",
     },
     // --- location
     text("Location_vod__c", "location__v", {
@@ -694,7 +708,7 @@ export const em_event = defineObject({
       sourceType: "reference",
       countryConfigurable: true,
       notes:
-        "em_event_configuration__v must pre-exist (§6.1); objects.em_event.configurationMap (SFDC Id → Vault id | external_id:<value>), else External_ID_vod__c = external_id__v, then Name = name__v per country; unmatched → blocking VT_EM_CONFIG_UNMATCHED",
+        "em_event_configuration__v must pre-exist (§6.1); objects.em_event.configurationMap (SFDC Id → Vault id | external_id:<value>), else External_ID_vod__c = external_id__v, then Name = name__v per country; unmatched → VT_EM_CONFIG_UNMATCHED, fatal for the row (objects.em_event.required.event_configuration__v: false downgrades it to a counted omission)",
     },
     {
       source: EM_EVENT_CONFIG_EXTERNAL_ID_SOURCE,
@@ -1075,7 +1089,7 @@ export const em_event = defineObject({
     emEventLocalTimes,
     eventConfiguration,
     vendorRefDropped,
-    eventCountryFallback,
+    eventCountry,
     eventStage,
   },
   optionDefaults: {

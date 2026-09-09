@@ -159,16 +159,13 @@ export function buildColumnList(
   };
 
   const wanted: string[] = [];
-  // 1. system columns
+  // 1. system columns — only `Id` is forced; the others are intersected
+  // with the describe like every mapped column (§2.2 step 2). Objects
+  // described without `IsDeleted` (some setup/association objects) would
+  // otherwise fail every query with INVALID_FIELD; the row router treats a
+  // missing `IsDeleted` column as live.
   for (const c of SYSTEM_COLUMNS)
-    if (
-      !hasDescribe ||
-      has(c) ||
-      c === "Id" ||
-      c === "IsDeleted" ||
-      c === "SystemModstamp"
-    )
-      wanted.push(c);
+    if (!hasDescribe || has(c) || c === "Id") wanted.push(c);
   for (const c of OPTIONAL_SYSTEM_COLUMNS)
     if (hasDescribe && has(c)) wanted.push(c);
   if (hasDescribe && has("RecordTypeId"))

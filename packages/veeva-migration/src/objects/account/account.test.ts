@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ACCOUNT_EXTRA_COLUMNS,
   ACCOUNT_OBJECT_TYPES,
   ACCOUNT_TYPE_DEFAULTS,
   account,
@@ -21,8 +22,11 @@ import { materialise, resolveCountry } from "../../config/resolve";
 import { parseConfig } from "../../config/schema";
 import { applyMapping } from "../../transform/apply";
 import { buildScopePredicate } from "../../extract/scope";
+import { buildColumnList } from "../../extract/columns";
 import {
   IDS,
+  buildDescribe,
+  sampleAccountDescribe,
   SAMPLE_QUEUE_ID,
   SAMPLE_USER_ID,
   SAMPLE_USER_ID_2,
@@ -220,7 +224,68 @@ describe("account module", () => {
       useParentIdFallback: false,
       loadFormattedName: false,
       contactToPersonAccount: false,
+      depthOrder: false,
+      extraColumns: ["IsPersonAccount", "PersonContactId"],
     });
+    // §2.2 step 9: the depth pass has a field to key on once depthOrder = true
+    expect(account.load.depthOrderBy).toBe("Primary_Parent_vod__c");
+    expect(account.depthOrderBy).toBe("Primary_Parent_vod__c");
+  });
+
+  it("selects IsPersonAccount / PersonContactId through extraColumns when the describe has them", () => {
+    const mapping = mappingFor("US");
+    const extra = mapping.options.extraColumns as string[];
+    expect(extra).toEqual([...ACCOUNT_EXTRA_COLUMNS]);
+    const withBridge = buildDescribe(
+      "Account",
+      [
+        ...sampleAccountDescribe()
+          .fields.filter(
+            (f) =>
+              !/^(Id|IsDeleted|SystemModstamp|Created|LastModified|OwnerId|RecordTypeId|CurrencyIsoCode)/.test(
+                f.name,
+              ),
+          )
+          .map((f) => ({ ...f })),
+        {
+          name: "PersonContactId",
+          type: "reference" as const,
+          referenceTo: ["Contact"],
+        },
+      ],
+      { keyPrefix: "001", systemFields: { recordType: true } },
+    );
+    const { columns } = buildColumnList(
+      mapping,
+      { describe: withBridge, columns: [] },
+      { extra },
+    );
+    expect(columns).toContain("IsPersonAccount");
+    expect(columns).toContain("PersonContactId");
+    expect(columns).toContain("LastName");
+    expect(columns).toContain("Primary_Parent_vod__c");
+    // a skip row on its own selects nothing — the extra list is what carries the flag
+    const bare = buildColumnList(
+      mapping,
+      { describe: withBridge, columns: [] },
+      {},
+    ).columns;
+    expect(bare).not.toContain("IsPersonAccount");
+    expect(bare).not.toContain("PersonContactId");
+    // absent from the describe (no person accounts) → simply not selected
+    const business = buildDescribe(
+      "Account",
+      [{ name: "Name", type: "string" }],
+      {
+        keyPrefix: "001",
+      },
+    );
+    const without = buildColumnList(
+      mapping,
+      { describe: business, columns: [] },
+      { extra },
+    ).columns;
+    expect(without).not.toContain("IsPersonAccount");
   });
 
   it("carries every §6.3.7 row (including skips, fallbacks and UNV targets) with evidence tags", () => {
@@ -374,6 +439,12 @@ describe("account module", () => {
     expect(mapping.options.externalIdOwnedBy).toBe("integration");
     expect(mapping.options.vidField).toBe("VeevaID_vod__c");
     expect(mapping.load.noTriggers).toBe(false);
+    // objects.account.depthOrder switches the declared depth field on
+    expect(mapping.options.depthOrder).toBe(false);
+    expect(mapping.load.depthOrderBy).toBe("Primary_Parent_vod__c");
+    const depth = mappingFor("US", { depthOrder: true });
+    expect(depth.options.depthOrder).toBe(true);
+    expect(depth.load.depthOrderBy).toBe("Primary_Parent_vod__c");
     // ParentId fallback row is dropped unless the flag is on
     expect(
       mapping.fields.some(
@@ -596,11 +667,12 @@ describe("account module", () => {
 describe("account custom transforms", () => {
   const base = (): SourceRow => ({ Id: IDS.account1 });
 
-  it("readFlag / isPersonAccount fall back from IsPersonAccount to the record type to LastName", () => {
+  it("readFlag / isPersonAccount fall back from IsPersonAccount to LastName presence to the record type", () => {
     expect(readFlag("true")).toBe(true);
     expect(readFlag(0)).toBe(false);
     expect(readFlag("maybe")).toBeUndefined();
     const ctx = buildTransformContext();
+    // 1. the flag wins over everything
     expect(
       isPersonAccount(
         { ...base(), IsPersonAccount: false, LastName: "X" },
@@ -609,7 +681,23 @@ describe("account custom transforms", () => {
     ).toBe(false);
     expect(
       isPersonAccount(
-        { ...base(), "RecordType.DeveloperName": "Business_Professional_vod" },
+        {
+          ...base(),
+          IsPersonAccount: "true",
+          "RecordType.DeveloperName": "Hospital_vod",
+        },
+        ctx,
+      ),
+    ).toBe(true);
+    // 2. LastName selected (key present): non-null ⇒ person, null ⇒ business,
+    //    regardless of the record type list
+    expect(
+      isPersonAccount(
+        {
+          ...base(),
+          "RecordType.DeveloperName": "HCP_Custom__c",
+          LastName: "X",
+        },
         ctx,
       ),
     ).toBe(true);
@@ -617,13 +705,27 @@ describe("account custom transforms", () => {
       isPersonAccount(
         {
           ...base(),
-          "RecordType.DeveloperName": "Hospital_vod",
-          LastName: "X",
+          "RecordType.DeveloperName": "Professional_vod",
+          LastName: null,
         },
         ctx,
       ),
     ).toBe(false);
     expect(isPersonAccount({ ...base(), LastName: "Doe" }, ctx)).toBe(true);
+    // 3. record type only when neither column was selected
+    expect(
+      isPersonAccount(
+        { ...base(), "RecordType.DeveloperName": "Business_Professional_vod" },
+        ctx,
+      ),
+    ).toBe(true);
+    expect(
+      isPersonAccount(
+        { ...base(), "RecordType.DeveloperName": "Hospital_vod" },
+        ctx,
+      ),
+    ).toBe(false);
+    expect(isPersonAccount(base(), ctx)).toBe(false);
     const configured = buildTransformContext({
       mapping: {
         options: { ...ctx.mapping.options, personRecordTypes: ["HCP__c"] },
@@ -822,6 +924,19 @@ describe("account custom transforms", () => {
       "415-555-0100 ext 12",
     );
     expect(normalisePhone("1-800-FLOWERS", "US")).toBe("1-800-FLOWERS");
+    // NANP: a leading country code without '+' is unambiguous (area codes never start with 0/1)
+    expect(normalisePhone("1-415-555-0100", "US")).toBe("+14155550100");
+    expect(normalisePhone("1 (415) 555-0100", "CA")).toBe("+14155550100");
+    expect(normalisePhone("+1 (415) 555-0100", "US")).toBe("+14155550100");
+    expect(normalisePhone("555-0100", "US")).toBe("555-0100"); // 7 digits: no area code → as typed
+    expect(normalisePhone("0415 555 0100", "US")).toBe("0415 555 0100");
+    // other regions: a number already starting with the calling code but no '+'/'00' is ambiguous
+    expect(normalisePhone("49 30 1234567", "DE")).toBe("49 30 1234567");
+    expect(normalisePhone("30 1234567", "DE")).toBe("+49301234567");
+    expect(normalisePhone("020 7946 0000", "GB")).toBe("+442079460000");
+    expect(normalisePhone("06 1234 5678", "IT")).toBe("+390612345678"); // IT keeps the trunk 0
+    expect(normalisePhone("912 345 678", "ES")).toBe("+34912345678");
+    expect(normalisePhone("1234", "DE")).toBe("1234"); // outside the E.164 envelope
     const off = buildTransformContext({
       targetField: { name: "phone__v", maxLength: 40 },
     });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  FK_TARGET_MISMATCH_CODE,
   FK_TARGET_SWITCHED_CODE,
   ORDER_LINE_ORDER_FIELD,
   ORDER_LINE_PRODUCT_FIELD,
@@ -7,8 +8,12 @@ import {
   ORDER_LINE_PRODUCT_GROUP_TARGET,
   ORDER_LINE_UM,
   ORDER_LINE_WILDCARD_FIELDS,
+  PRODUCT_GROUP_PAIR_UNRESOLVED_CODE,
+  PRODUCT_GROUP_REF_TARGETS,
   order_line,
+  productGroupPairResolver,
   productGroupRef,
+  type ProductGroupPairResolver,
 } from "./order_line";
 import { ORDER_OPEN_PREDICATE, order } from "./order";
 import { validateObjectModule } from "../types";
@@ -26,13 +31,29 @@ import {
   resolveMetadata,
 } from "../../testkit";
 import { to18 } from "../../transform/ids";
-import type { SourceRow } from "../../types";
+import type { IdResolver, SourceRow } from "../../types";
 
 const NOW = new Date("2026-09-07T00:00:00Z");
 const LINE_ID = to18("a0L000000000001");
 const ORDER_ID = to18("a0O000000000001");
 const PRODUCT_ID = to18("a0P000000000001");
+/** The detail-group *product* row `Product_Group_vod__c` points at. */
 const GROUP_PRODUCT_ID = to18("a0P000000000002");
+/** The `Product_Group_vod__c` association row of (PRODUCT_ID, GROUP_PRODUCT_ID) — what the product_group id map is keyed by. */
+const GROUP_ID = to18("a0G000000000001");
+
+/** Pair index `(product, detail group) → Product_Group_vod__c.Id` as the integrator's resolver hook would expose it. */
+function withPairs(
+  ids: IdResolver,
+  pairs: Record<string, string>,
+): IdResolver & ProductGroupPairResolver {
+  return {
+    ...ids,
+    resolveProductGroupPair: (product, detailGroup) =>
+      pairs[`${product}|${detailGroup}`],
+  };
+}
+const PAIRS = { [`${PRODUCT_ID}|${GROUP_PRODUCT_ID}`]: GROUP_ID };
 
 function makeConfig(overrides: Record<string, unknown> = {}) {
   return parseConfig({
@@ -52,7 +73,7 @@ function makeConfig(overrides: Record<string, unknown> = {}) {
 }
 
 function metadata(
-  groupTarget: "product__v" | "product_group__v" = "product__v",
+  groupTarget: "product__v" | "product_group__v" | "account__v" = "product__v",
 ) {
   return resolveMetadata(
     buildVaultMetadata("order_line__v", [
@@ -130,8 +151,10 @@ function run(
   row: SourceRow,
   opts: {
     overrides?: Record<string, unknown>;
-    groupTarget?: "product__v" | "product_group__v";
+    groupTarget?: "product__v" | "product_group__v" | "account__v";
     orders?: Record<string, string>;
+    /** `(product|detailGroup) → Product_Group_vod__c.Id` pair index; absent = resolver without the hook. */
+    pairs?: Record<string, string>;
   } = {},
 ) {
   const config = makeConfig(opts.overrides);
@@ -141,14 +164,16 @@ function run(
     config,
     { now: NOW },
   );
-  const ids = buildIdResolver(
+  const base = buildIdResolver(
     {
       order: opts.orders ?? { [ORDER_ID]: "V0O1" },
       product: { [PRODUCT_ID]: "V0P1", [GROUP_PRODUCT_ID]: "V0P2" },
-      product_group: { [GROUP_PRODUCT_ID]: "V0G2" },
+      // keyed by Product_Group_vod__c.Id (legacy_id match), never by a Product id
+      product_group: { [GROUP_ID]: "V0G1" },
     },
     { [SAMPLE_USER_ID]: 101 },
   );
+  const ids = opts.pairs ? withPairs(base, opts.pairs) : base;
   return {
     mapping,
     result: applyMapping(row, mapping, {
@@ -325,11 +350,15 @@ describe("order_line module", () => {
     expect(named.payload.name__v).toBe("OL-000007");
   });
 
-  it("switches product_group__v to ref(product_group) when the target references product_group__v", () => {
-    const { result } = run(sampleRow(), { groupTarget: "product_group__v" });
+  it("switches product_group__v to ref(product_group) resolved through the (product, detail group) pair when the target references product_group__v", () => {
+    const { result } = run(sampleRow(), {
+      groupTarget: "product_group__v",
+      pairs: PAIRS,
+    });
     expect(result.status).toBe("ok");
+    // the deferred ref carries the Product_Group_vod__c id, never the Product id
     expect(result.payload[ORDER_LINE_PRODUCT_GROUP_TARGET]).toEqual({
-      $fk: { object: "product_group", sfdcId: GROUP_PRODUCT_ID },
+      $fk: { object: "product_group", sfdcId: GROUP_ID },
     });
     expect(result.diagnostics).toContainEqual(
       expect.objectContaining({
@@ -341,8 +370,69 @@ describe("order_line module", () => {
     expect(result.fkEdges).toContainEqual({
       field: ORDER_LINE_PRODUCT_GROUP_TARGET,
       targetObjectKey: "product_group",
-      targetSfdcId: GROUP_PRODUCT_ID,
+      targetSfdcId: GROUP_ID,
     });
+    expect(result.unresolvedRequiredFks).toEqual([]);
+  });
+
+  it("omits and counts product_group__v (never a dead Product-id lookup) when the switched target cannot be resolved through the pair", () => {
+    // resolver without the pair hook: the id map alone cannot answer
+    const { result } = run(sampleRow(), { groupTarget: "product_group__v" });
+    expect(result.status).toBe("ok");
+    expect(result.payload[ORDER_LINE_PRODUCT_GROUP_TARGET]).toBeUndefined();
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        kind: "unresolved_fk",
+        field: ORDER_LINE_PRODUCT_GROUP_TARGET,
+        objectKey: "product_group",
+        code: PRODUCT_GROUP_PAIR_UNRESOLVED_CODE,
+        value: GROUP_PRODUCT_ID,
+        detail: expect.stringContaining("resolveProductGroupPair"),
+      }),
+    );
+    expect(result.diagnostics).not.toContainEqual(
+      expect.objectContaining({ code: "UNRESOLVED_FK" }),
+    );
+    expect(result.fkEdges).not.toContainEqual(
+      expect.objectContaining({ targetObjectKey: "product_group" }),
+    );
+    expect(result.unresolvedRequiredFks).toEqual([]);
+    // hook present but no association row for this pair
+    const { result: noRow } = run(sampleRow(), {
+      groupTarget: "product_group__v",
+      pairs: {},
+    });
+    expect(noRow.status).toBe("ok");
+    expect(noRow.payload[ORDER_LINE_PRODUCT_GROUP_TARGET]).toBeUndefined();
+    expect(noRow.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: PRODUCT_GROUP_PAIR_UNRESOLVED_CODE,
+        detail: expect.stringContaining(GROUP_PRODUCT_ID),
+      }),
+    );
+  });
+
+  it("fails the row with FK_TARGET_MISMATCH when product_group__v references neither product__v nor product_group__v", () => {
+    const { result } = run(sampleRow(), { groupTarget: "account__v" });
+    expect(result.status).toBe("failed");
+    expect(result.failure).toMatchObject({
+      code: FK_TARGET_MISMATCH_CODE,
+      field: ORDER_LINE_PRODUCT_GROUP_TARGET,
+    });
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        kind: "invalid_value",
+        code: FK_TARGET_MISMATCH_CODE,
+        fatal: true,
+      }),
+    );
+    // an empty source never trips the guard
+    const { result: blank } = run(
+      sampleRow({ [ORDER_LINE_PRODUCT_GROUP_FIELD]: "" }),
+      { groupTarget: "account__v" },
+    );
+    expect(blank.status).toBe("ok");
+    expect(blank.payload[ORDER_LINE_PRODUCT_GROUP_TARGET]).toBeUndefined();
   });
 
   it("reports an unresolved parent order as pending_fk", () => {
@@ -383,72 +473,186 @@ describe("order_line module", () => {
 describe("order_line custom transforms", () => {
   const row = {
     Id: LINE_ID,
+    [ORDER_LINE_PRODUCT_FIELD]: PRODUCT_ID,
     [ORDER_LINE_PRODUCT_GROUP_FIELD]: GROUP_PRODUCT_ID,
   };
   const ids = buildIdResolver({
-    product: { [GROUP_PRODUCT_ID]: "V0P2" },
-    product_group: { [GROUP_PRODUCT_ID]: "V0G2" },
+    product: { [PRODUCT_ID]: "V0P1", [GROUP_PRODUCT_ID]: "V0P2" },
+    product_group: { [GROUP_ID]: "V0G1" },
   });
-
-  it("productGroupRef resolves through product by default", () => {
-    const ctx = buildTransformContext({
+  const ctxFor = (
+    resolver: IdResolver,
+    targetField?: { type?: "object" | "string"; referenceObject?: string },
+  ) =>
+    buildTransformContext({
       objectKey: "order_line",
       field: {
         source: ORDER_LINE_PRODUCT_GROUP_FIELD,
         target: ORDER_LINE_PRODUCT_GROUP_TARGET,
       },
-      targetField: {
-        type: "object",
-        rawType: "Object",
-        referenceObject: "product__v",
-      },
-      ids,
+      targetField: targetField
+        ? {
+            type: targetField.type ?? "object",
+            rawType: targetField.type === "string" ? "String" : "Object",
+            referenceObject: targetField.referenceObject,
+          }
+        : undefined,
+      ids: resolver,
     });
+
+  it("exposes the accepted targets and detects the pair hook by duck typing", () => {
+    expect(PRODUCT_GROUP_REF_TARGETS).toEqual([
+      "product__v",
+      "product_group__v",
+    ]);
+    expect(productGroupPairResolver(ids)).toBeUndefined();
+    const hooked = withPairs(ids, PAIRS);
+    expect(
+      productGroupPairResolver(hooked)?.(PRODUCT_ID, GROUP_PRODUCT_ID),
+    ).toBe(GROUP_ID);
+  });
+
+  it("productGroupRef resolves through product by default", () => {
+    const ctx = ctxFor(ids, { referenceObject: "product__v" });
     expect(productGroupRef(GROUP_PRODUCT_ID, row, ctx)).toEqual({
       value: { $fk: { object: "product", sfdcId: GROUP_PRODUCT_ID } },
     });
     expect(productGroupRef("", row, ctx)).toBeUndefined();
     // unknown target metadata (preflight not run) keeps the spec default
-    const bare = buildTransformContext({
-      objectKey: "order_line",
-      field: {
-        source: ORDER_LINE_PRODUCT_GROUP_FIELD,
-        target: ORDER_LINE_PRODUCT_GROUP_TARGET,
-      },
-      ids,
+    expect(productGroupRef(GROUP_PRODUCT_ID, row, ctxFor(ids))).toEqual({
+      value: { $fk: { object: "product", sfdcId: GROUP_PRODUCT_ID } },
     });
-    expect(productGroupRef(GROUP_PRODUCT_ID, row, bare)).toEqual({
+    // an Object field whose referenced object is unknown keeps the default too
+    expect(
+      productGroupRef(GROUP_PRODUCT_ID, row, ctxFor(ids, { type: "object" })),
+    ).toEqual({
       value: { $fk: { object: "product", sfdcId: GROUP_PRODUCT_ID } },
     });
   });
 
-  it("productGroupRef switches to product_group when the target says so, keeping unresolved diagnostics", () => {
-    const ctx = buildTransformContext({
-      objectKey: "order_line",
-      field: {
-        source: ORDER_LINE_PRODUCT_GROUP_FIELD,
-        target: ORDER_LINE_PRODUCT_GROUP_TARGET,
-      },
-      targetField: {
-        type: "object",
-        rawType: "Object",
-        referenceObject: "product_group__v",
-      },
-      ids,
+  it("productGroupRef switches to product_group through the pair hook, keeping unresolved diagnostics", () => {
+    const ctx = ctxFor(withPairs(ids, PAIRS), {
+      referenceObject: "product_group__v",
     });
     expect(productGroupRef(GROUP_PRODUCT_ID, row, ctx)).toMatchObject({
-      value: { $fk: { object: "product_group", sfdcId: GROUP_PRODUCT_ID } },
-      diagnostic: { kind: "custom", code: FK_TARGET_SWITCHED_CODE },
-    });
-    const unresolved = productGroupRef(to18("a0P000000000009"), row, ctx);
-    expect(unresolved).toMatchObject({
-      value: {
-        $fk: { object: "product_group", sfdcId: to18("a0P000000000009") },
-      },
-      unresolved: {
-        objectKey: "product_group",
-        sfdcId: to18("a0P000000000009"),
+      value: { $fk: { object: "product_group", sfdcId: GROUP_ID } },
+      diagnostic: {
+        kind: "custom",
+        field: ORDER_LINE_PRODUCT_GROUP_TARGET,
+        code: FK_TARGET_SWITCHED_CODE,
       },
     });
+    // 15-char inputs are normalised before the pair lookup
+    expect(
+      productGroupRef(
+        GROUP_PRODUCT_ID.slice(0, 15),
+        { ...row, [ORDER_LINE_PRODUCT_FIELD]: PRODUCT_ID.slice(0, 15) },
+        ctx,
+      ),
+    ).toMatchObject({
+      value: { $fk: { object: "product_group", sfdcId: GROUP_ID } },
+    });
+    // pair known, association row not (yet) in the id map → ordinary ref semantics (pending_fk material)
+    const otherGroup = to18("a0G000000000009");
+    const otherDetail = to18("a0P000000000009");
+    const late = ctxFor(
+      withPairs(ids, { [`${PRODUCT_ID}|${otherDetail}`]: otherGroup }),
+      { referenceObject: "product_group__v" },
+    );
+    expect(productGroupRef(otherDetail, row, late)).toMatchObject({
+      value: { $fk: { object: "product_group", sfdcId: otherGroup } },
+      unresolved: { objectKey: "product_group", sfdcId: otherGroup },
+      diagnostic: { kind: "unresolved_fk", code: "UNRESOLVED_FK" },
+    });
+  });
+
+  it("productGroupRef omits and counts the switched field when the pair cannot be resolved", () => {
+    const unresolved = (r: unknown) =>
+      expect(r).toEqual({
+        omit: true,
+        diagnostic: expect.objectContaining({
+          kind: "unresolved_fk",
+          field: ORDER_LINE_PRODUCT_GROUP_TARGET,
+          objectKey: "product_group",
+          code: PRODUCT_GROUP_PAIR_UNRESOLVED_CODE,
+          value: GROUP_PRODUCT_ID,
+        }),
+      });
+    // no hook on the resolver — never falls back to ids.resolve('product_group', <Product id>)
+    const noHook = productGroupRef(
+      GROUP_PRODUCT_ID,
+      row,
+      ctxFor(ids, { referenceObject: "product_group__v" }),
+    );
+    unresolved(noHook);
+    expect(
+      (noHook as { diagnostic: { detail: string } }).diagnostic.detail,
+    ).toContain("resolveProductGroupPair");
+    // hook present, no association row for the pair
+    unresolved(
+      productGroupRef(
+        GROUP_PRODUCT_ID,
+        row,
+        ctxFor(withPairs(ids, {}), { referenceObject: "product_group__v" }),
+      ),
+    );
+    // the pair needs Product_vod__c
+    unresolved(
+      productGroupRef(
+        GROUP_PRODUCT_ID,
+        { Id: LINE_ID, [ORDER_LINE_PRODUCT_GROUP_FIELD]: GROUP_PRODUCT_ID },
+        ctxFor(withPairs(ids, PAIRS), { referenceObject: "product_group__v" }),
+      ),
+    );
+    // a malformed detail-group id is an INVALID_ID, as for any ref
+    expect(
+      productGroupRef(
+        "not-an-id",
+        row,
+        ctxFor(withPairs(ids, PAIRS), { referenceObject: "product_group__v" }),
+      ),
+    ).toEqual({
+      omit: true,
+      diagnostic: {
+        kind: "invalid_value",
+        field: ORDER_LINE_PRODUCT_GROUP_TARGET,
+        code: "INVALID_ID",
+        value: "not-an-id",
+      },
+    });
+  });
+
+  it("productGroupRef fails the row when the target is not a reference to product__v / product_group__v", () => {
+    const wrongObject = productGroupRef(
+      GROUP_PRODUCT_ID,
+      row,
+      ctxFor(ids, { referenceObject: "account__v" }),
+    );
+    expect(wrongObject).toEqual({
+      omit: true,
+      diagnostic: expect.objectContaining({
+        kind: "invalid_value",
+        field: ORDER_LINE_PRODUCT_GROUP_TARGET,
+        code: FK_TARGET_MISMATCH_CODE,
+        fatal: true,
+        detail: expect.stringContaining("account__v"),
+      }),
+    });
+    const notAReference = productGroupRef(
+      GROUP_PRODUCT_ID,
+      row,
+      ctxFor(ids, { type: "string" }),
+    );
+    expect(notAReference).toMatchObject({
+      omit: true,
+      diagnostic: {
+        code: FK_TARGET_MISMATCH_CODE,
+        fatal: true,
+        detail: expect.stringContaining("String"),
+      },
+    });
+    expect(
+      productGroupRef("", row, ctxFor(ids, { referenceObject: "account__v" })),
+    ).toBeUndefined();
   });
 });

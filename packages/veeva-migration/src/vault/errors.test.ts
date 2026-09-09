@@ -71,6 +71,22 @@ describe("toVaultError / VaultRequestError", () => {
       message: "INVALID_DATA: bad",
     });
     expect(toVaultError(new Error("x")).errorClass).toBe("fatal");
+    // a bare TypeError is a programming error, not a transport failure
+    const bug = toVaultError(
+      new TypeError("Cannot read properties of undefined (reading 'x')"),
+    );
+    expect(bug).toMatchObject({
+      type: "UNEXPECTED_ERROR",
+      errorClass: "fatal",
+      retryable: false,
+    });
+    expect(
+      toVaultError(
+        Object.assign(new TypeError("fetch failed"), {
+          cause: { code: "ECONNRESET" },
+        }),
+      ),
+    ).toMatchObject({ type: "NETWORK_ERROR", errorClass: "retryable" });
     expect(vaultErrorClass(new VaultApiError("INVALID_SESSION_ID", "x"))).toBe(
       "session",
     );

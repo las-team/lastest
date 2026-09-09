@@ -108,6 +108,19 @@ export function stateStoreContract(
         expect((await s.runs.get("r1"))?.status).toBe("succeeded");
         expect(await s.runs.get("nope")).toBeUndefined();
       });
+      it("update ignores undefined patch values; explicit null clears", async () => {
+        const s = await store();
+        await s.runs.create(run("r1", { mappingHash: "mh" }));
+        await s.runs.update("r1", { mappingHash: undefined, status: "failed" });
+        expect(await s.runs.get("r1")).toMatchObject({
+          mappingHash: "mh",
+          status: "failed",
+        });
+        await s.runs.update("r1", { mappingHash: undefined });
+        expect((await s.runs.get("r1"))?.mappingHash).toBe("mh");
+        await s.runs.update("r1", { mappingHash: null });
+        expect((await s.runs.get("r1"))?.mappingHash ?? null).toBeNull();
+      });
       it("update of an unknown run throws", async () => {
         const s = await store();
         await expect(s.runs.update("zz", { status: "failed" })).rejects.toThrow(
@@ -283,6 +296,62 @@ export function stateStoreContract(
         await s.idMap.markDeleted("account", ids.a1, "2026-01-01T00:00:00Z");
         await s.idMap.put(idRow(ids.a5, { vaultId: "VX" }));
         expect((await s.idMap.byVaultId("account__v", "VX"))?.sfdcId).toBe(
+          ids.a5,
+        );
+      });
+      it("the live (vaultObject, vaultId) slot follows every mutation", async () => {
+        const s = await store();
+        // re-put with a new vault id frees the old slot
+        await s.idMap.put(idRow(ids.a1, { vaultId: "V1" }));
+        await s.idMap.put(idRow(ids.a1, { vaultId: "V2" }));
+        await s.idMap.put(idRow(ids.a2, { vaultId: "V1" }));
+        expect((await s.idMap.byVaultId("account__v", "V1"))?.sfdcId).toBe(
+          ids.a2,
+        );
+        expect((await s.idMap.byVaultId("account__v", "V2"))?.sfdcId).toBe(
+          ids.a1,
+        );
+        await expect(
+          s.idMap.put(idRow(ids.a3, { vaultId: "V2" })),
+        ).rejects.toThrow(/id_map_vault_uidx/);
+        // one batch may move a row and reuse its old slot; the last state counts
+        await s.idMap.putMany([
+          idRow(ids.a1, { vaultId: "V3" }),
+          idRow(ids.a3, { vaultId: "V2" }),
+          idRow(ids.a3, { vaultId: "V4" }),
+          idRow(ids.a4, { vaultId: "V2" }),
+        ]);
+        expect((await s.idMap.byVaultId("account__v", "V2"))?.sfdcId).toBe(
+          ids.a4,
+        );
+        expect((await s.idMap.byVaultId("account__v", "V3"))?.sfdcId).toBe(
+          ids.a1,
+        );
+        expect((await s.idMap.byVaultId("account__v", "V4"))?.sfdcId).toBe(
+          ids.a3,
+        );
+        // undelete re-occupies the slot; purgeDryRun releases it
+        await s.idMap.markDeleted("account", ids.a4, "t");
+        expect(await s.idMap.byVaultId("account__v", "V2")).toBeUndefined();
+        await s.idMap.markDeleted("account", ids.a4, null);
+        expect((await s.idMap.byVaultId("account__v", "V2"))?.sfdcId).toBe(
+          ids.a4,
+        );
+        await s.idMap.put(idRow(ids.a5, { vaultId: "V5", dryRun: true }));
+        expect(await s.idMap.purgeDryRun()).toBe(1);
+        expect(await s.idMap.byVaultId("account__v", "V5")).toBeUndefined();
+        await s.idMap.put(idRow(ids.a9, { vaultId: "V5" }));
+        expect((await s.idMap.byVaultId("account__v", "V5"))?.sfdcId).toBe(
+          ids.a9,
+        );
+        // a merged loser no longer holds V3 (its vault id becomes the survivor's)
+        await s.idMap.merge("account", ids.a1, ids.a2, "r2");
+        expect(await s.idMap.byVaultId("account__v", "V3")).toBeUndefined();
+        expect((await s.idMap.byVaultId("account__v", "V1"))?.sfdcId).toBe(
+          ids.a2,
+        );
+        await s.idMap.put(idRow(ids.a5, { vaultId: "V3" }));
+        expect((await s.idMap.byVaultId("account__v", "V3"))?.sfdcId).toBe(
           ids.a5,
         );
       });

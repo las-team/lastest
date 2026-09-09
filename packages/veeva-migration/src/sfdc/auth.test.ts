@@ -168,6 +168,48 @@ describe("createSfdcAuthenticator", () => {
     expect(auth.exchanges).toBe(1);
   });
 
+  it("defaults the JWT aud to the loginUrl origin (sandbox / My Domain) when none is configured", async () => {
+    const sandbox = "https://test.salesforce.com";
+    const fm = mockFetch([tokenRoute()]);
+    vi.stubGlobal("fetch", fm.fetch);
+    const auth = createSfdcAuthenticator({
+      loginUrl: `${sandbox}/`,
+      auth: {
+        kind: "jwt",
+        clientId: "ck",
+        username: "mig@acme.com",
+        privateKey,
+      },
+      now: () => NOW,
+    });
+    await auth.getSession();
+    expect(fm.calls[0].url).toBe(`${sandbox}/services/oauth2/token`);
+    const form = new URLSearchParams(fm.calls[0].body ?? "");
+    expect(decodeJwtClaims(form.get("assertion") ?? "")).toMatchObject({
+      aud: sandbox,
+    });
+
+    // an explicit aud still wins (e.g. My Domain login URL on a login.salesforce.com exchange)
+    const fm2 = mockFetch([tokenRoute()]);
+    vi.stubGlobal("fetch", fm2.fetch);
+    const explicit = createSfdcAuthenticator({
+      loginUrl: sandbox,
+      auth: {
+        kind: "jwt",
+        clientId: "ck",
+        username: "mig@acme.com",
+        aud: "https://acme--uat.sandbox.my.salesforce.com",
+        privateKey,
+      },
+      now: () => NOW,
+    });
+    await explicit.getSession();
+    const form2 = new URLSearchParams(fm2.calls[0].body ?? "");
+    expect(decodeJwtClaims(form2.get("assertion") ?? "")).toMatchObject({
+      aud: "https://acme--uat.sandbox.my.salesforce.com",
+    });
+  });
+
   it("uses client_credentials form fields on a My Domain URL", async () => {
     const fm = mockFetch([tokenRoute()]);
     const auth = createSfdcAuthenticator({

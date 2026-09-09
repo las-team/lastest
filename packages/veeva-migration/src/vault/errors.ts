@@ -177,6 +177,9 @@ const NETWORK_CODES = new Set([
   "ABORT_ERR",
 ]);
 
+/** `TypeError` messages that mean a transport failure (no `code` attached). */
+const NETWORK_MESSAGE = /fetch failed|network error|socket hang up|ECONN/i;
+
 function errorCodeOf(e: unknown): string | undefined {
   if (!e || typeof e !== "object") return undefined;
   const o = e as { code?: unknown; cause?: unknown; name?: unknown };
@@ -209,10 +212,13 @@ export function toVaultError(
     });
   const code = errorCodeOf(e);
   const msg = e instanceof Error ? e.message : String(e);
+  // Undici signals transport failures as `TypeError('fetch failed')` with a
+  // `cause.code`; a bare `TypeError` is a programming error, not a network
+  // one, and must surface as fatal instead of being retried for minutes.
   const isNetwork =
     (code !== undefined && NETWORK_CODES.has(code)) ||
-    (e instanceof TypeError && /fetch failed/i.test(msg));
-  if (isNetwork || e instanceof TypeError) {
+    (e instanceof TypeError && NETWORK_MESSAGE.test(msg));
+  if (isNetwork) {
     return new VaultRequestError(
       code === "ABORT_ERR" ? "REQUEST_TIMEOUT" : "NETWORK_ERROR",
       `Network error${code ? ` (${code})` : ""}: ${msg}`,

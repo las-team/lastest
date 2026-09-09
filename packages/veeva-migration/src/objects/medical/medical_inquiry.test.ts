@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   COUNTRY_ALIASES,
   COUNTRY_SOURCE,
+  GROUP_IDENTIFIER_SOURCE,
+  GROUP_IDENTIFIER_TARGET,
   INQUIRY_TEXT_SOURCE,
   INQUIRY_TEXT_TARGET,
   MEDICAL_INQUIRY_ACCOUNT_FIELD,
   MEDICAL_INQUIRY_CALL_FIELD,
   MEDICAL_INQUIRY_DELIVERY_METHOD,
   MEDICAL_INQUIRY_FULFILLMENT_STATUS,
+  MEDICAL_INQUIRY_GROUP_IDENTIFIER_MATCH,
   MEDICAL_INQUIRY_OPEN_PREDICATE,
   MEDICAL_INQUIRY_STATES,
   MEDICAL_INQUIRY_STATUS,
@@ -19,6 +22,7 @@ import {
   medical_inquiry,
   normaliseCountry,
   normaliseCountryValue,
+  richInquiryText,
 } from "./medical_inquiry";
 import { validateObjectModule } from "../types";
 import { loadOrder } from "../registry";
@@ -26,12 +30,19 @@ import { materialise, resolveCountry } from "../../config/resolve";
 import { parseConfig } from "../../config/schema";
 import { applyMapping } from "../../transform/apply";
 import { buildScopePredicate } from "../../extract/scope";
+import { matchRows } from "../../load/matcher";
+import type { LoadPlan } from "../../load/types";
+import type { ResolvedTarget } from "../../preflight/types";
+import { hashObject } from "../../hash";
 import {
+  FakeVaultClient,
   IDS,
+  MemoryStateStore,
   SAMPLE_USER_ID,
   SAMPLE_USER_ID_2,
   buildCountryContext,
   buildIdResolver,
+  buildMaterialisedMapping,
   buildTransformContext,
   buildVaultMetadata,
   resolveMetadata,
@@ -67,7 +78,11 @@ function makeConfig(overrides: Record<string, unknown> = {}) {
 type CountryTargetType = "Object" | "Picklist" | "String";
 
 function metadata(
-  opts: { lifecycled?: boolean; countryType?: CountryTargetType } = {},
+  opts: {
+    lifecycled?: boolean;
+    countryType?: CountryTargetType;
+    inquiryTextRequired?: boolean;
+  } = {},
 ) {
   const lifecycled = opts.lifecycled ?? true;
   const countryType = opts.countryType ?? "Object";
@@ -97,7 +112,11 @@ function metadata(
           type: "Object",
           object: { name: "user__sys" },
         },
-        { name: INQUIRY_TEXT_TARGET, type: "LongText" },
+        {
+          name: INQUIRY_TEXT_TARGET,
+          type: "LongText",
+          ...(opts.inquiryTextRequired ? { required: true } : {}),
+        },
         { name: "product__v", type: "Object", object: { name: "product__v" } },
         {
           name: "medical_inquiry_status__v",
@@ -216,6 +235,7 @@ function run(
     countryType?: CountryTargetType;
     calls?: Record<string, string>;
     accounts?: Record<string, string>;
+    inquiryTextRequired?: boolean;
   } = {},
 ) {
   const config = makeConfig(opts.overrides);
@@ -240,6 +260,7 @@ function run(
       metadata: metadata({
         lifecycled: opts.lifecycled,
         countryType: opts.countryType,
+        inquiryTextRequired: opts.inquiryTextRequired,
       }),
       ids,
       migrationUserId: 1,
@@ -290,11 +311,15 @@ describe("medical_inquiry module", () => {
     expect(medical_inquiry.match.map((m) => m.method)).toEqual([
       "legacy_id",
       "mobile_id",
-      "natural_key",
     ]);
-    expect(medical_inquiry.match[2]).toMatchObject({
+    // group_identifier__v is shared by grouped inquiries: never a default key
+    expect(
+      medical_inquiry.match.flatMap((m) => m.keys ?? []).map((k) => k.target),
+    ).not.toContain(GROUP_IDENTIFIER_TARGET);
+    expect(MEDICAL_INQUIRY_GROUP_IDENTIFIER_MATCH).toMatchObject({
+      method: "natural_key",
       keys: [
-        { target: "group_identifier__v", source: "Group_Identifier_vod__c" },
+        { target: GROUP_IDENTIFIER_TARGET, source: GROUP_IDENTIFIER_SOURCE },
       ],
       requireUnique: true,
     });
@@ -383,16 +408,17 @@ describe("medical_inquiry module", () => {
     expect(byTarget.get("assign_to_user__v")?.transform).toEqual({
       kind: "refUser",
     });
+    // the fallback lives in the documented row (a required target is satisfied before REQUIRED_MISSING)
     expect(byTarget.get(INQUIRY_TEXT_TARGET)).toMatchObject({
       source: INQUIRY_TEXT_SOURCE,
-      transform: { kind: "longtext" },
+      transform: { kind: "custom", fnName: "inquiryText" },
       required: "y?",
       evidence: "UNV",
       unverifiedSource: true,
     });
     expect(byTarget.get(`${INQUIRY_TEXT_TARGET}.rich`)).toMatchObject({
       source: RICH_INQUIRY_TEXT_SOURCE,
-      transform: { kind: "custom", fnName: "inquiryText" },
+      transform: { kind: "custom", fnName: "richInquiryText" },
       unverifiedSource: true,
       optionalSource: true,
     });
@@ -578,6 +604,151 @@ describe("medical_inquiry module", () => {
     );
     expect(none.status).toBe("ok");
     expect(none.payload[INQUIRY_TEXT_TARGET]).toBeUndefined();
+    // the documented text wins and is not counted as taken from the rich column
+    const { result: documented } = run(sampleRow());
+    expect(documented.payload[INQUIRY_TEXT_TARGET]).toBe(
+      "Is Cholecap safe with grapefruit?\nPatient asks.",
+    );
+    expect(documented.diagnostics).not.toContainEqual(
+      expect.objectContaining({ code: MI_INQUIRY_TEXT_FROM_RICH_CODE }),
+    );
+    // whitespace-only documented text counts as missing
+    const { result: blank } = run(sampleRow({ [INQUIRY_TEXT_SOURCE]: "   " }));
+    expect(blank.payload[INQUIRY_TEXT_TARGET]).toBe(
+      "Is Cholecap safe with grapefruit?",
+    );
+  });
+
+  it("satisfies a vault-required inquiry_text__v from the rich column instead of failing REQUIRED_MISSING", () => {
+    const { result } = run(sampleRow({ [INQUIRY_TEXT_SOURCE]: "" }), {
+      inquiryTextRequired: true,
+    });
+    expect(result.status).toBe("ok");
+    expect(result.failure).toBeUndefined();
+    expect(result.payload[INQUIRY_TEXT_TARGET]).toBe(
+      "Is Cholecap safe with grapefruit?",
+    );
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ code: MI_INQUIRY_TEXT_FROM_RICH_CODE }),
+    );
+    // both columns empty on a required target still fails (nothing to send)
+    const { result: none } = run(
+      sampleRow({ [INQUIRY_TEXT_SOURCE]: "", [RICH_INQUIRY_TEXT_SOURCE]: "" }),
+      { inquiryTextRequired: true },
+    );
+    expect(none.status).toBe("failed");
+    expect(none.failure).toMatchObject({
+      code: "REQUIRED_MISSING",
+      field: INQUIRY_TEXT_TARGET,
+    });
+  });
+
+  it("keeps the MI_INQUIRY_TEXT_FROM_RICH count when the rich text truncates", () => {
+    const long = `<p>${"x".repeat(40000)}</p>`;
+    const { result } = run(
+      sampleRow({
+        [INQUIRY_TEXT_SOURCE]: "",
+        [RICH_INQUIRY_TEXT_SOURCE]: long,
+      }),
+    );
+    expect(result.status).toBe("ok");
+    expect(result.payload[INQUIRY_TEXT_TARGET]).toBe("x".repeat(32000));
+    const fromRich = result.diagnostics.filter(
+      (d) => d.code === MI_INQUIRY_TEXT_FROM_RICH_CODE,
+    );
+    expect(fromRich).toHaveLength(1);
+    expect(fromRich[0]).toMatchObject({
+      kind: "truncated",
+      field: INQUIRY_TEXT_TARGET,
+    });
+    expect(fromRich[0].detail).toContain("40000 > 32000");
+    expect(fromRich[0].fatal).toBeUndefined();
+  });
+
+  it("never matches two inquiries of the same group to each other's Vault record", async () => {
+    const A = to18("a0Q000000000011");
+    const B = to18("a0Q000000000012");
+    const meta = buildVaultMetadata("medical_inquiry__v", [
+      { name: "legacy_crm_id__v", type: "String" },
+      { name: "mobile_id__v", type: "String" },
+      { name: GROUP_IDENTIFIER_TARGET, type: "String", max_length: 100 },
+    ]);
+    const vault = new FakeVaultClient();
+    vault.addObject(meta, [
+      {
+        id: "V0MI1",
+        legacy_crm_id__v: A,
+        mobile_id__v: "mob-A",
+        [GROUP_IDENTIFIER_TARGET]: "GRP-0001",
+      },
+    ]);
+    await vault.authenticate();
+    const store = new MemoryStateStore(vault.vaultDns);
+    // member A was loaded by an earlier run; B is a new member of the same group
+    await store.seedIdMap("medical_inquiry", meta.name, { [A]: "V0MI1" });
+    const target: ResolvedTarget = {
+      objectKey: "medical_inquiry",
+      targetObject: meta.name,
+      legacyIdField: "legacy_crm_id__v",
+      metadata: resolveMetadata(meta),
+      rawMetadata: meta,
+      objectTypes: [],
+      picklists: {},
+      replicateable: true,
+      columns: [],
+    };
+    const planFor = (match: LoadPlan["mapping"]["match"]): LoadPlan => ({
+      runId: "run-2",
+      unit: { objectKey: "medical_inquiry", country: "US" },
+      mapping: buildMaterialisedMapping({
+        objectKey: "medical_inquiry",
+        sourceObject: medical_inquiry.source,
+        targetObject: meta.name,
+        fields: [],
+        match,
+      }),
+      target,
+      runDir: "/nonexistent",
+      dryRun: true,
+      migrationMode: true,
+      unchangedFieldBehavior: "AlwaysIgnore",
+      batchSize: 500,
+      batchWallTimeMs: 60000,
+    });
+    const payload = {
+      legacy_crm_id__v: B,
+      mobile_id__v: "mob-B",
+      [GROUP_IDENTIFIER_TARGET]: "GRP-0001",
+    };
+    const rows = [
+      {
+        sfdcId: B,
+        systemModstamp: "2026-01-01T00:00:00.000Z",
+        payload,
+        sourceHash: hashObject(payload),
+        diagnostics: [],
+        source: { Id: B, [GROUP_IDENTIFIER_SOURCE]: "GRP-0001" },
+      },
+    ];
+    const deps = { vault, store };
+    const outcome = await matchRows(rows, planFor(medical_inquiry.match), deps);
+    expect(outcome.hits.size).toBe(0);
+    expect(outcome.findings).toEqual([]);
+    expect(await store.idMap.get("medical_inquiry", B)).toBeUndefined();
+    // the opt-in rule is exactly what would have merged B into A
+    const optIn = await matchRows(
+      rows,
+      planFor([
+        ...medical_inquiry.match,
+        MEDICAL_INQUIRY_GROUP_IDENTIFIER_MATCH,
+      ]),
+      deps,
+    );
+    expect(optIn.hits.get(B)).toMatchObject({
+      vaultId: "V0MI1",
+      method: "natural_key",
+      mergedInto: A,
+    });
   });
 
   it("normalises Country_vod__c to ISO-2 first and renders it per target type", () => {
@@ -730,44 +901,54 @@ describe("medical_inquiry custom transforms", () => {
 
     const textCtx = buildTransformContext({
       objectKey: "medical_inquiry",
-      field: {
-        source: RICH_INQUIRY_TEXT_SOURCE,
-        target: `${INQUIRY_TEXT_TARGET}.rich`,
-      },
-      metadata: {
-        fields: {
-          [INQUIRY_TEXT_TARGET]: {
-            name: INQUIRY_TEXT_TARGET,
-            type: "longtext",
-            rawType: "LongText",
-            maxLength: 32000,
-            multiValue: false,
-            required: false,
-            unique: false,
-            editable: true,
-            active: true,
-          },
-        },
+      field: { source: INQUIRY_TEXT_SOURCE, target: INQUIRY_TEXT_TARGET },
+      targetField: {
+        name: INQUIRY_TEXT_TARGET,
+        type: "longtext",
+        rawType: "LongText",
+        maxLength: 32000,
       },
     });
     expect(
       inquiryText(
-        "<p>Hello <b>world</b></p>",
-        { Id: INQUIRY_ID, [INQUIRY_TEXT_SOURCE]: "" },
+        "",
+        {
+          Id: INQUIRY_ID,
+          [RICH_INQUIRY_TEXT_SOURCE]: "<p>Hello <b>world</b></p>",
+        },
         textCtx,
       ),
     ).toMatchObject({
       value: "Hello world",
-      targetField: INQUIRY_TEXT_TARGET,
-      diagnostic: { code: MI_INQUIRY_TEXT_FROM_RICH_CODE },
+      diagnostic: { kind: "custom", code: MI_INQUIRY_TEXT_FROM_RICH_CODE },
     });
     expect(
       inquiryText(
-        "<p>Hello</p>",
-        { Id: INQUIRY_ID, [INQUIRY_TEXT_SOURCE]: "Documented" },
+        "Documented\r\ntext",
+        { Id: INQUIRY_ID, [RICH_INQUIRY_TEXT_SOURCE]: "<p>Hello</p>" },
         textCtx,
       ),
-    ).toBeUndefined();
+    ).toEqual({ value: "Documented\ntext" });
     expect(inquiryText("", { Id: INQUIRY_ID }, textCtx)).toBeUndefined();
+    expect(inquiryText(undefined, { Id: INQUIRY_ID }, textCtx)).toBeUndefined();
+    // truncated rich text keeps the FROM_RICH code with the truncation detail
+    expect(
+      inquiryText(
+        "",
+        { Id: INQUIRY_ID, [RICH_INQUIRY_TEXT_SOURCE]: "y".repeat(32001) },
+        textCtx,
+      ),
+    ).toMatchObject({
+      value: "y".repeat(32000),
+      diagnostic: {
+        kind: "truncated",
+        code: MI_INQUIRY_TEXT_FROM_RICH_CODE,
+        detail: expect.stringContaining("32001 > 32000"),
+      },
+    });
+    // the selector row never emits
+    expect(
+      richInquiryText("<p>Hello</p>", { Id: INQUIRY_ID }, textCtx),
+    ).toBeUndefined();
   });
 });

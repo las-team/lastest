@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ACCOUNT_IS_PERSON_SOURCE,
+  ATTENDEE_TYPE_FORMULA_SOURCE,
   ATTENDEE_TYPE_MAP_KEY,
   CONTACT_MAPPED_TO_PERSON_ACCOUNT_CODE,
   CONTACT_REF_DROPPED_CODE,
@@ -11,6 +12,7 @@ import {
   EM_ATTENDEE_WALK_IN_STATUS,
   attendeeType,
   contactAttendee,
+  contactRepointedToPersonAccount,
   deriveAttendeeSourceType,
   em_attendee,
 } from "./em_attendee";
@@ -225,11 +227,17 @@ describe("em_attendee module", () => {
       "external_id",
       "mobile_id",
       "natural_key",
+      "natural_key",
     ]);
-    expect(em_attendee.match[3].keys?.map((k) => k.target)).toEqual([
-      "event__v",
-      "account__v",
-      "user__v",
+    // §3.3 `(event__v, account__v | user__v)` — two pairs, since exactly one
+    // of account/user is ever set and a rule needs every key populated
+    expect(em_attendee.match[3].keys).toEqual([
+      { target: "event__v", source: "Event_vod__c" },
+      { target: "account__v", source: "Account_vod__c" },
+    ]);
+    expect(em_attendee.match[4].keys).toEqual([
+      { target: "event__v", source: "Event_vod__c" },
+      { target: "user__v", source: "User_vod__c" },
     ]);
     expect(em_attendee.optionDefaults).toEqual({
       personAccountTypeLookup: false,
@@ -248,6 +256,7 @@ describe("em_attendee module", () => {
       "user__v",
       "account__v.contact",
       "attendee_type__v",
+      "attendee_type__v.formula",
       "attendee_type__v.account",
       "attendee_name__v",
       "first_name__v",
@@ -316,8 +325,16 @@ describe("em_attendee module", () => {
       source: "Contact_vod__c",
       transform: { kind: "custom", fnName: "contactAttendee" },
     });
+    // primary row keyed on Id (never calculated, never dropped by preflight);
+    // the formula is a selector row that preflight may drop
     expect(byTarget.get("attendee_type__v")).toMatchObject({
+      source: "Id",
       required: "y?",
+      transform: { kind: "custom", fnName: "attendeeType" },
+    });
+    expect(byTarget.get("attendee_type__v.formula")).toMatchObject({
+      source: ATTENDEE_TYPE_FORMULA_SOURCE,
+      optionalSource: true,
       transform: { kind: "custom", fnName: "attendeeType" },
     });
     expect(byTarget.get("attendee_type__v.account")).toMatchObject({
@@ -534,6 +551,26 @@ describe("em_attendee module", () => {
     expect(mapped.diagnostics).toContainEqual(
       expect.objectContaining({ code: CONTACT_MAPPED_TO_PERSON_ACCOUNT_CODE }),
     );
+    // re-pointed to a person account → typed as one, even against the formula
+    expect(mapped.payload.attendee_type__v).toBe("person_account__v");
+    const mappedFormula = applyMapping(
+      row({
+        Account_vod__c: "",
+        Contact_vod__c: CONTACT_1,
+        Attendee_Type_vod__c: "Contact_vod",
+      }),
+      mapping(),
+      applyCtx({
+        ids: buildIdResolver(
+          {
+            em_event: { [EVENT_1]: "V0E000000000001" },
+            account: { [CONTACT_1]: "V0A000000000077" },
+          },
+          { [SAMPLE_USER_ID]: 11 },
+        ),
+      }),
+    );
+    expect(mappedFormula.payload.attendee_type__v).toBe("person_account__v");
     // account set → the contact column is ignored, no drop counted
     const both = applyMapping(
       row({ Contact_vod__c: CONTACT_1 }),
@@ -557,6 +594,66 @@ describe("em_attendee module", () => {
     );
     expect(person.payload.attendee_type__v).toBe("person_account__v");
     expect(person.payload["attendee_type__v.account"]).toBeUndefined();
+    expect(person.payload["attendee_type__v.formula"]).toBeUndefined();
+  });
+
+  it("still sets attendee_type__v when preflight dropped the calculated formula row", () => {
+    // preflight drops any row whose source is calculated (SF_FIELD_CALCULATED)
+    // and the column is then never selected — the primary row must not
+    // depend on it
+    const m = mapping();
+    const dropped = {
+      ...m,
+      fields: m.fields.filter((f) => f.target !== "attendee_type__v.formula"),
+    };
+    expect(dropped.fields.some((f) => f.target === "attendee_type__v")).toBe(
+      true,
+    );
+    const base = row();
+    delete base[ATTENDEE_TYPE_FORMULA_SOURCE];
+    const account = applyMapping(base, dropped, applyCtx());
+    expect(account.status).toBe("ok");
+    expect(account.payload.attendee_type__v).toBe("business_account__v");
+    const user = applyMapping(
+      { ...base, Account_vod__c: "", User_vod__c: SAMPLE_USER_ID },
+      dropped,
+      applyCtx(),
+    );
+    expect(user.payload.attendee_type__v).toBe("user__v");
+    const contact = applyMapping(
+      { ...base, Account_vod__c: "", Contact_vod__c: CONTACT_1 },
+      dropped,
+      applyCtx(),
+    );
+    expect(contact.payload.attendee_type__v).toBe("contact__v");
+    // the formula wins when its column was selected
+    const withFormula = applyMapping(
+      { ...base, Attendee_Type_vod__c: "Group_Account_vod" },
+      mapping(),
+      applyCtx(),
+    );
+    expect(withFormula.payload.attendee_type__v).toBe("business_account__v");
+    expect(withFormula.payload["attendee_type__v.formula"]).toBeUndefined();
+    // required on the target → still satisfied without the formula column
+    const meta = metadata();
+    const required = applyMapping(
+      base,
+      dropped,
+      applyCtx({
+        metadata: {
+          ...meta,
+          fields: {
+            ...meta.fields,
+            attendee_type__v: {
+              ...meta.fields.attendee_type__v,
+              required: true,
+            },
+          },
+        },
+      }),
+    );
+    expect(required.status).toBe("ok");
+    expect(required.payload.attendee_type__v).toBe("business_account__v");
   });
 
   it("reports an unresolved required parent as pending_fk and applies status crosswalks / policies", () => {
@@ -649,7 +746,7 @@ describe("em_attendee custom transforms", () => {
   it("attendeeType crosswalks the formula value and is silent on selector rows", () => {
     const ctx = buildTransformContext({
       objectKey: "em_attendee",
-      field: { source: "Attendee_Type_vod__c", target: "attendee_type__v" },
+      field: { source: "Id", target: "attendee_type__v" },
       targetField: {
         type: "picklist",
         picklistValues: [
@@ -663,19 +760,65 @@ describe("em_attendee custom transforms", () => {
         picklists: { [ATTENDEE_TYPE_MAP_KEY]: { ...EM_ATTENDEE_TYPE } },
       },
     });
-    expect(attendeeType("Group_Account_vod", base(), ctx)).toEqual({
+    const formula = (v: string, extra: Record<string, unknown> = {}) => ({
+      ...base(),
+      [ATTENDEE_TYPE_FORMULA_SOURCE]: v,
+      ...extra,
+    });
+    expect(attendeeType(ATT_1, formula("Group_Account_vod"), ctx)).toEqual({
       value: "business_account__v",
     });
     expect(
-      attendeeType("", { ...base(), User_vod__c: SAMPLE_USER_ID }, ctx),
+      attendeeType(ATT_1, { ...base(), User_vod__c: SAMPLE_USER_ID }, ctx),
     ).toEqual({
       value: "user__v",
     });
-    expect(attendeeType("", base(), ctx)).toBeUndefined();
-    expect(attendeeType("Robot_vod", base(), ctx)).toMatchObject({
+    expect(attendeeType(ATT_1, base(), ctx)).toBeUndefined();
+    expect(attendeeType(ATT_1, formula("Robot_vod"), ctx)).toMatchObject({
       omit: true,
       diagnostic: { kind: "unmapped_picklist", fatal: true },
     });
+    // an overlay that keeps the formula as the row source still works
+    const legacyLayout = {
+      ...ctx,
+      field: { ...ctx.field, source: ATTENDEE_TYPE_FORMULA_SOURCE },
+    };
+    expect(attendeeType("User_vod", base(), legacyLayout)).toEqual({
+      value: "user__v",
+    });
+    // contact re-pointed to a person account → person_account__v
+    const repointed = buildTransformContext({
+      objectKey: "em_attendee",
+      field: { source: "Id", target: "attendee_type__v" },
+      targetField: ctx.targetField,
+      mapping: ctx.mapping,
+      ids: buildIdResolver({ account: { [CONTACT_1]: "V0A000000000077" } }),
+    });
+    expect(
+      attendeeType(
+        ATT_1,
+        formula("Contact_vod", { Contact_vod__c: CONTACT_1 }),
+        repointed,
+      ),
+    ).toEqual({ value: "person_account__v" });
+    expect(
+      contactRepointedToPersonAccount(
+        { ...base(), Contact_vod__c: CONTACT_1 },
+        repointed,
+      ),
+    ).toBe(true);
+    expect(
+      contactRepointedToPersonAccount(
+        { ...base(), Contact_vod__c: CONTACT_1 },
+        ctx,
+      ),
+    ).toBe(false);
+    expect(
+      contactRepointedToPersonAccount(
+        { ...base(), Contact_vod__c: CONTACT_1, Account_vod__c: IDS.account1 },
+        repointed,
+      ),
+    ).toBe(false);
     const selector = buildTransformContext({
       objectKey: "em_attendee",
       field: {

@@ -226,4 +226,14 @@ export interface VaultClient {
   ): Promise<{ ok: boolean; jobId?: string; message?: string }>;
   /** §2.5.6 `GET /limits`. */
   limits?(): Promise<Record<string, unknown>>;
+  /**
+   * §2.5.6 / §5.2 `GET /objects/users/{id}/permissions?filter=…` — permission
+   * probe (`filter` e.g. `object.account__v.actions`). Entries are returned
+   * as-is (`{ name, permissions{read,create,edit,delete} }` per the Users API
+   * `[UNV]`); callers parse defensively.
+   */
+  userPermissions?(
+    userId: number | string,
+    filter?: string,
+  ): Promise<Array<Record<string, unknown>>>;
 }

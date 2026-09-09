@@ -19,10 +19,39 @@ export interface LoaderOptions {
 }
 
 export class LoaderRuntime {
+  /** Per (run, unit) batch counter — continuous across partitions, closure loads, pending rounds and deletes (§2.5.1 reference ids, §8.5 audit). */
+  private readonly batchCounters = new Map<string, number>();
+
   constructor(
     readonly deps: LoaderDeps,
     readonly opts: LoaderOptions = {},
   ) {}
+
+  /**
+   * Next batch number of a unit in this run. Seeded on first use from the
+   * `row_results` already written for the unit (resume, §8.2) so the
+   * `X-VaultAPI-ReferenceId` `{run}:{object}:{batch}` never repeats.
+   */
+  async nextBatchNo(plan: LoadPlan): Promise<number> {
+    const key = `${plan.runId}|${plan.unit.objectKey}|${plan.unit.country}`;
+    let n = this.batchCounters.get(key);
+    if (n === undefined) {
+      n = 0;
+      try {
+        const rows = await this.deps.store.rowResults.query({
+          runId: plan.runId,
+          objectKey: plan.unit.objectKey,
+          country: plan.unit.country,
+        });
+        for (const r of rows) if (r.batchNo && r.batchNo > n) n = r.batchNo;
+      } catch {
+        n = 0;
+      }
+    }
+    n++;
+    this.batchCounters.set(key, n);
+    return n;
+  }
 
   now(): string {
     return (this.opts.now ?? (() => new Date()))().toISOString();

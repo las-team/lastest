@@ -209,9 +209,19 @@ describe("materialise (§7.1 merge rules)", () => {
     expect(us.findings.some((f) => f.code === "SCOPE_NARROWED")).toBe(false);
     const de = materialise(st, resolveCountry(config, "DE"), config, { now });
     expect(de.scope.historyMonths).toBe(24);
+    // day clamped to the target month (no roll-forward that would drop rows)
     expect(computeCutoffDate(new Date("2026-03-31T00:00:00Z"), 1)).toBe(
-      "2026-03-03",
-    ); // JS month arithmetic, UTC
+      "2026-02-28",
+    );
+    expect(computeCutoffDate(new Date("2026-05-31T00:00:00Z"), 1)).toBe(
+      "2026-04-30",
+    );
+    expect(computeCutoffDate(new Date("2026-01-15T00:00:00Z"), 13)).toBe(
+      "2024-12-15",
+    );
+    expect(computeCutoffDate(new Date("2024-02-29T00:00:00Z"), 12)).toBe(
+      "2023-02-28",
+    );
   });
   it("calls join the samples family with samplesIncludeCalls and non-regulated narrowing is flagged", () => {
     const call2 = defineObject({
@@ -291,6 +301,281 @@ describe("materialise (§7.1 merge rules)", () => {
     expect(am.fields.find((f) => f.required === "K")?.target).toBe(
       "legacy_crm_id__c",
     );
+  });
+  it("keeps objects.territory.countryOf as the territory country rule: unit stays global, option carried, info finding", () => {
+    const cfg = parseConfig({
+      ...(JSON.parse(JSON.stringify(config)) as object),
+      countries: {
+        ...config.countries,
+        DE: {
+          ...config.countries.DE,
+          objects: {
+            ...config.countries.DE.objects,
+            territory: { countryOf: "field:Country_Code__c" },
+          },
+        },
+      },
+    } as never);
+    const territory = defineObject({
+      key: "territory",
+      source: "Territory2",
+      target: "territory__v",
+      countryOf: "global",
+      dependsOn: [],
+    });
+    const m = materialise(territory, resolveCountry(cfg, "DE"), cfg, { now });
+    expect(m.countryOf).toEqual([{ kind: "global" }]);
+    expect(m.options.countryOf).toBe("field:Country_Code__c");
+    expect(
+      m.findings.filter((f) => f.code === "CONFIG_TERRITORY_COUNTRY_RULE"),
+    ).toHaveLength(1);
+    expect(m.findings.some((f) => f.code === "MAP_COUNTRY_RULE_INVALID")).toBe(
+      false,
+    );
+  });
+  it("mappingHash excludes the clock-derived cutoffDate (§1.1 #2, §8.2 hash skip)", () => {
+    const call2 = defineObject({
+      key: "call2",
+      source: "Call2_vod__c",
+      target: "call2__v",
+      countryOf: "account",
+      dependsOn: ["account"],
+      scope: {
+        kind: "dated",
+        predicates: [{ field: "Call_Date_vod__c", type: "date" }],
+      },
+    });
+    const cc = resolveCountry(config, "US");
+    const d1 = materialise(call2, cc, config, {
+      now: new Date("2026-09-07T12:00:00Z"),
+    });
+    const d2 = materialise(call2, cc, config, {
+      now: new Date("2026-09-08T12:00:00Z"),
+    });
+    expect(d1.scope.cutoffDate).toBe("2023-09-07");
+    expect(d2.scope.cutoffDate).toBe("2023-09-08");
+    expect(d1.mappingHash).toBe(d2.mappingHash);
+    // a real scope change still moves the hash (DE: call2 is not in a retention family)
+    const de = materialise(call2, resolveCountry(config, "DE"), config, {
+      now,
+    });
+    const cfg = parseConfig({
+      ...(JSON.parse(JSON.stringify(config)) as object),
+      scope: { historyMonths: 30 },
+    } as never);
+    expect(
+      materialise(call2, resolveCountry(cfg, "DE"), cfg, { now }).mappingHash,
+    ).not.toBe(de.mappingHash);
+  });
+  it("scope.objects.<key>.historyMonths: null is unscoped (§7.2.1)", () => {
+    const cfg = parseConfig({
+      ...(JSON.parse(JSON.stringify(config)) as object),
+      countries: {
+        ...config.countries,
+        DE: {
+          ...config.countries.DE,
+          scope: { objects: { multichannel_consent: { historyMonths: null } } },
+        },
+      },
+    } as never);
+    const mc = defineObject({
+      key: "multichannel_consent",
+      source: "Multichannel_Consent_vod__c",
+      target: "multichannel_consent__v",
+      countryOf: "account",
+      dependsOn: ["account"],
+      scope: {
+        kind: "dated",
+        predicates: [{ field: "Capture_Datetime_vod__c", type: "datetime" }],
+      },
+    });
+    const m = materialise(mc, resolveCountry(cfg, "DE"), cfg, { now });
+    expect(m.scope.historyMonths).toBeUndefined();
+    expect(m.scope.cutoffDate).toBeUndefined();
+  });
+  it("never narrows a regulated family below the global window, even without a family knob", () => {
+    const cfg = parseConfig({
+      ...(JSON.parse(JSON.stringify(config)) as object),
+      countries: {
+        ...config.countries,
+        US: {
+          ...config.countries.US,
+          objects: {
+            ...config.countries.US.objects,
+            em_event: { scope: { historyMonths: 12 } },
+          },
+        },
+      },
+    } as never);
+    const emEvent = defineObject({
+      key: "em_event",
+      source: "EM_Event_vod__c",
+      target: "em_event__v",
+      countryOf: "user:OwnerId",
+      dependsOn: ["user"],
+      scope: {
+        kind: "dated",
+        predicates: [{ field: "Start_Time_vod__c", type: "datetime" }],
+        retentionFamily: "tov",
+      },
+    });
+    // US: no tovRetentionMonths → clamped to the global 24
+    const us = materialise(emEvent, resolveCountry(cfg, "US"), cfg, { now });
+    expect(us.scope.historyMonths).toBe(24);
+    expect(us.findings.map((f) => f.code)).toContain("SCOPE_CLAMPED");
+    expect(us.findings.map((f) => f.code)).not.toContain("SCOPE_NARROWED");
+    // DE (EU): tovRetentionMonths 60 → widened
+    const de = materialise(emEvent, resolveCountry(cfg, "DE"), cfg, { now });
+    expect(de.scope.historyMonths).toBe(60);
+  });
+  it("an explicit scope.cutoffDate is only a floor for a regulated family", () => {
+    const cfg = parseConfig({
+      ...(JSON.parse(JSON.stringify(config)) as object),
+      scope: { historyMonths: 24, cutoffDate: "2025-06-01" },
+    } as never);
+    const st = defineObject({
+      key: "sample_transaction",
+      source: "Sample_Transaction_vod__c",
+      target: "sample_transaction__v",
+      countryOf: ["user:OwnerId", "account"],
+      dependsOn: ["sample_lot", "user", "account"],
+      scope: {
+        kind: "dated",
+        predicates: [{ field: "Call_Date_vod__c", type: "date" }],
+        retentionFamily: "samples",
+      },
+    });
+    const us = materialise(st, resolveCountry(cfg, "US"), cfg, { now });
+    expect(us.scope.cutoffDate).toBe("2023-09-07"); // now − 36 months beats the explicit date
+    expect(
+      us.findings.some(
+        (f) =>
+          f.code === "SCOPE_WIDENED" && /cutoffDate/.test(String(f.detail)),
+      ),
+    ).toBe(true);
+    const de = materialise(st, resolveCountry(cfg, "DE"), cfg, { now });
+    expect(de.scope.cutoffDate).toBe("2025-06-01"); // no samples knob: explicit date wins
+    // a non-regulated object keeps the explicit date too
+    const call2 = defineObject({
+      key: "call2",
+      source: "Call2_vod__c",
+      target: "call2__v",
+      countryOf: "account",
+      dependsOn: ["account"],
+      scope: {
+        kind: "dated",
+        predicates: [{ field: "Call_Date_vod__c", type: "date" }],
+      },
+    });
+    expect(
+      materialise(call2, resolveCountry(cfg, "DE"), cfg, { now }).scope
+        .cutoffDate,
+    ).toBe("2025-06-01");
+  });
+  it("an invalid overlay transform is a blocking MAP_TRANSFORM_INVALID finding, not a throw", () => {
+    const cc = resolveCountry(config, "DE");
+    const broken = {
+      ...cc,
+      fieldLayers: {
+        ...cc.fieldLayers,
+        account: [
+          {
+            add: [
+              {
+                source: "X__c",
+                target: "x__v",
+                transform: "picklsit(account.x)",
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const m = materialise(account, broken, config, { now });
+    expect(m.findings).toContainEqual(
+      expect.objectContaining({
+        severity: "blocking",
+        code: "MAP_TRANSFORM_INVALID",
+        field: "x__v",
+      }),
+    );
+    expect(m.fields.map((f) => f.target)).not.toContain("x__v");
+  });
+  it("customFields cannot pass silently: explicit config blocks, a module default warns", () => {
+    const cfg = parseConfig({
+      ...(JSON.parse(JSON.stringify(config)) as object),
+      countries: {
+        ...config.countries,
+        DE: {
+          ...config.countries.DE,
+          objects: {
+            ...config.countries.DE.objects,
+            account: { customFields: { mode: "listed", include: ["Foo__c"] } },
+          },
+        },
+      },
+    } as never);
+    const explicit = materialise(account, resolveCountry(cfg, "DE"), cfg, {
+      now,
+    });
+    expect(explicit.options.customFields).toEqual({
+      mode: "listed",
+      include: ["Foo__c"],
+      exclude: [],
+    });
+    expect(explicit.findings).toContainEqual(
+      expect.objectContaining({
+        severity: "blocking",
+        code: "MAP_CUSTOM_FIELDS_UNSUPPORTED",
+      }),
+    );
+    expect(
+      materialise(account, resolveCountry(config, "DE"), config, {
+        now,
+      }).findings.map((f) => f.code),
+    ).not.toContain("MAP_CUSTOM_FIELDS_UNSUPPORTED");
+    const pm = defineObject({
+      key: "product_metrics",
+      source: "Product_Metrics_vod__c",
+      target: "product_metrics__v",
+      countryOf: "account",
+      dependsOn: ["account", "product"],
+      optionDefaults: {
+        customFields: { mode: "allMatching", include: [], exclude: [] },
+      },
+    });
+    expect(
+      materialise(pm, resolveCountry(config, "DE"), config, { now }).findings,
+    ).toContainEqual(
+      expect.objectContaining({
+        severity: "warning",
+        code: "MAP_CUSTOM_FIELDS_UNSUPPORTED",
+      }),
+    );
+  });
+  it("target.auth is atomic across layers (a country accessToken replaces the global password auth)", () => {
+    const cfg = parseConfig({
+      ...(JSON.parse(JSON.stringify(config)) as object),
+      countries: {
+        ...config.countries,
+        CN: {
+          dataResidency: "cn",
+          target: {
+            vaultDns: "acme-cn.veevavault.cn",
+            auth: { kind: "accessToken", token: "t" },
+          },
+        },
+      },
+    } as never);
+    const cn = resolveCountry(cfg, "CN");
+    expect(cn.target.auth).toEqual({ kind: "accessToken", token: "t" });
+    expect(cn.target.vaultDns).toBe("acme-cn.veevavault.cn");
+    expect(cn.target.migrationUserId).toBe(1); // other target keys still layer
+    expect(resolveCountry(cfg, "DE").target.auth).toEqual({
+      kind: "password",
+      username: "v",
+      password: "p",
+    });
   });
   it("flags duplicate targets after overlays as blocking", () => {
     const cfg = parseConfig({

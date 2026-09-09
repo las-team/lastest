@@ -11,31 +11,37 @@
  * `Active_vod__c = false` (§6.0.4, disable with
  * `objects.sample_lot.statusFromFlag = false`).
  *
- * `Calculated_Quantity_vod__c` is a roll-up that Vault recomputes
- * (`calculated_quantity__v`), so nothing is loaded — but the source value is
- * **extracted anyway** as the expected roll-up for the post-load verification
- * of §6.3.35 (`noTriggersVerify`). A `skip` row would not select the column
- * (the extractor ignores `skip` sources), so the row is `custom(expectedRollup)`:
- * it never emits a payload value and instead records a non-fatal `custom`
- * diagnostic (`SAMPLE_LOT_EXPECTED_ROLLUP`) carrying the number, which the
- * reconciler reads into `reconciliation.extra`. `readExpectedRollup(row)` is
- * the pure reader for callers that hold the source row.
+ * `Calculated_Quantity_vod__c` is a roll-up summary that Vault recomputes
+ * (`calculated_quantity__v`), so the mapping row is `skip` exactly as the
+ * §6.3.18 table says — a mapped row would be dropped twice by preflight
+ * (`SF_FIELD_CALCULATED` on the source, `VT_FIELD_READONLY` on the target)
+ * and never reach the transform. The column is **extracted anyway**
+ * (§6.3.18 "kept in `reconciliation.extra` as the expected roll-up") through
+ * the same mechanism every other module uses for columns read beyond the
+ * mapping rows: `objects.sample_lot.extraColumns`
+ * (`SAMPLE_LOT_VERIFICATION_COLUMNS`), which preflight resolves against the
+ * describe (`extraColumnsOf`) and the column list selects
+ * (`buildColumnList(..., { extra })`). `readExpectedRollup(row)` is the pure
+ * reader the transform runner / reconciler use to persist
+ * `reconciliation.extra.expectedRollups[sfdcId]` for the §6.3.35
+ * `noTriggersVerify` comparison.
  *
  * `lot_catalog__v` (a new Vault object) is not loaded in v1 (open question
  * §9) — it has no SFDC source and therefore no mapping row.
  */
-import type {
-  CustomTransformFn,
-  RowDiagnostic,
-  SourceRow,
-  TransformResult,
-} from "../../types";
+import type { SourceRow } from "../../types";
 import { defineObject } from "../types";
 
 /** Source of the expected roll-up (§6.3.18 / §6.3.35 verification). */
 export const SAMPLE_LOT_ROLLUP_SOURCE = "Calculated_Quantity_vod__c";
-/** Diagnostic code that carries the expected roll-up of a lot row. */
-export const SAMPLE_LOT_EXPECTED_ROLLUP_CODE = "SAMPLE_LOT_EXPECTED_ROLLUP";
+/**
+ * Columns extracted for post-load verification only (never loaded):
+ * declared as `objects.sample_lot.extraColumns` so preflight resolves them
+ * and the extract selects them although no mapping row reads them.
+ */
+export const SAMPLE_LOT_VERIFICATION_COLUMNS: readonly string[] = [
+  SAMPLE_LOT_ROLLUP_SOURCE,
+];
 
 /** `U_M_vod__c` default crosswalk (plain-English values → derived names, all `[UNV]`). */
 export const SAMPLE_LOT_UM_DEFAULTS: Record<string, string> = {
@@ -57,28 +63,6 @@ export function readExpectedRollup(row: SourceRow): number | undefined {
   const n = typeof raw === "number" ? raw : Number(String(raw).trim());
   return Number.isFinite(n) ? n : undefined;
 }
-
-/**
- * `custom(expectedRollup)`: never loads a value; records the expected roll-up
- * as a non-fatal diagnostic so the column is extracted and the number reaches
- * reconciliation (§6.3.18 "extracted anyway", §6.3.35 `noTriggersVerify`).
- */
-export const expectedRollup: CustomTransformFn = (
-  _value,
-  row,
-  ctx,
-): TransformResult => {
-  const n = readExpectedRollup(row);
-  if (n === undefined) return { omit: true };
-  const diagnostic: RowDiagnostic = {
-    kind: "custom",
-    field: ctx.field.target,
-    code: SAMPLE_LOT_EXPECTED_ROLLUP_CODE,
-    value: String(n),
-    detail: "expected calculated_quantity__v roll-up (not loaded)",
-  };
-  return { omit: true, diagnostic };
-};
 
 export const sample_lot = defineObject({
   key: "sample_lot",
@@ -192,11 +176,11 @@ export const sample_lot = defineObject({
     {
       source: SAMPLE_LOT_ROLLUP_SOURCE,
       target: "calculated_quantity__v",
-      transform: "custom(expectedRollup)",
+      transform: "skip",
       required: "-",
       evidence: "DOC",
       notes:
-        "roll-up — Vault computes calculated_quantity__v; never loaded, extracted as the expected roll-up for §6.3.35 verification (reconciliation.extra)",
+        "roll-up — Vault computes calculated_quantity__v; never loaded. Extracted anyway via objects.sample_lot.extraColumns as the expected roll-up for §6.3.35 verification (reconciliation.extra.expectedRollups)",
     },
   ],
   picklists: {
@@ -226,7 +210,10 @@ export const sample_lot = defineObject({
         "(name__v, product__v, ownerid__v) — reported as warning with counts",
     },
   ],
-  custom: { expectedRollup },
+  optionDefaults: {
+    // §6.3.18: the roll-up is extracted for verification although no row loads it
+    extraColumns: [...SAMPLE_LOT_VERIFICATION_COLUMNS],
+  },
   notes:
     "Samples master data (§6.3.18). Load flags follow objects.sample_transaction.load.sampleStrategy jointly with the family (§6.3.35). lot_catalog__v not loaded in v1 (§9).",
 });

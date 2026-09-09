@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatLength,
   legacyIdMdl,
+  legacyIdRepairMdl,
   legacyIdValueMatches,
   looksLikeLegacyId,
   resolveLegacyIdField,
@@ -240,5 +241,62 @@ describe("format helpers", () => {
     );
     expect(looksLikeLegacyId("NET-001")).toBe(false);
     expect(looksLikeLegacyId(42)).toBe(false);
+  });
+});
+
+describe("resolveLegacyIdField — existing legacy_crm_id__c that fails step 5", () => {
+  it("emits a MODIFY Field repair snippet (step 7), used at step 6 under --allow-mdl", () => {
+    const fields = fieldsOf(
+      [
+        {
+          name: "legacy_crm_id__c",
+          type: "String",
+          max_length: 15,
+          unique: false,
+        },
+      ],
+      { legacyIdField: null },
+    );
+    const r = resolveLegacyIdField(
+      input(fields, { externalIdOwnedBy: "integration" }),
+    );
+    expect(r.step).toBe(7);
+    const detail = r.findings.find((f) => f.severity === "blocking")!
+      .detail as { mdl: string; hint: string };
+    expect(detail.mdl).toBe(
+      legacyIdRepairMdl("call2__v", fields.legacy_crm_id__c, 18),
+    );
+    expect(detail.mdl).toContain(
+      "MODIFY Field legacy_crm_id__c(unique(true), max_length(18))",
+    );
+    expect(detail.mdl).not.toContain("ADD Field");
+    expect(detail.hint).toMatch(/MODIFY Field/);
+
+    const r2 = resolveLegacyIdField(
+      input(fields, { externalIdOwnedBy: "integration", allowMdl: true }),
+    );
+    expect(r2.step).toBe(6);
+    expect(r2.field).toBe("legacy_crm_id__c");
+    expect(r2.mdl).toBe(detail.mdl);
+    expect(r2.findings.some((f) => f.severity === "blocking")).toBe(false);
+  });
+
+  it("an unrepairable legacy_crm_id__c (wrong type) yields no MDL even under --allow-mdl", () => {
+    const fields = fieldsOf(
+      [{ name: "legacy_crm_id__c", type: "Number", unique: false }],
+      { legacyIdField: null },
+    );
+    const r = resolveLegacyIdField(
+      input(fields, { externalIdOwnedBy: "integration", allowMdl: true }),
+    );
+    expect(r.step).toBe(7);
+    expect(r.mdl).toBeUndefined();
+    const detail = r.findings.find((f) => f.severity === "blocking")!
+      .detail as { mdl?: string; hint: string };
+    expect(detail.mdl).toBeUndefined();
+    expect(detail.hint).toMatch(/legacyIdField/);
+    expect(legacyIdRepairMdl("call2__v", fields.legacy_crm_id__c, 18)).toBe(
+      undefined,
+    );
   });
 });

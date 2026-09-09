@@ -6,7 +6,11 @@
  * dependencies, loaded with `noTriggers = false` (§6.2). In the wild the
  * object is upserted with `idParam = external_id__v` `[OBS]`; the tool still
  * uses the legacy-id field as idParam and `external_id__v` as the first match
- * key (§3.3).
+ * key (§3.3). Because an integration owns `external_id__v` here, the module
+ * defaults `externalIdOwnedBy = integration` so §3.2 step 4 can never promote
+ * `external_id__v` to the legacy-id field (which would replace the
+ * integration keys with `SF:{orgId15}:{id18}` values and defeat the match
+ * key); `objects.em_venue.externalIdOwnedBy = migration` overrides it.
  *
  * Evidence: only `Name` (`[META-implied]`) and `External_ID_vod__c`
  * (`[OBS idParam]`) are verified sources — `EM_Venue_vod__c` appears in no
@@ -213,6 +217,9 @@ export const em_venue = defineObject({
     { method: "legacy_id" },
   ],
   custom: { countryAuto, stateAuto },
+  // §3.2 step 4: external_id__v is integration-written [OBS idParam] — never a
+  // legacy-id candidate, so it stays a usable match key. Config-overridable.
+  optionDefaults: { externalIdOwnedBy: "integration" },
   notes:
-    "EM master data (§6.3.19): GLOBAL, full scope, inactivate on delete (status__v only). Only Name/External_ID_vod__c are verified sources; the rest resolve at preflight (describe miss = info, row dropped).",
+    "EM master data (§6.3.19): GLOBAL, full scope, inactivate on delete (status__v only). Only Name/External_ID_vod__c are verified sources; the rest resolve at preflight (describe miss = info, row dropped). externalIdOwnedBy defaults to integration so external_id__v stays the match key and is never the legacy-id field (§3.2 step 4).",
 });

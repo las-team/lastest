@@ -11,16 +11,26 @@
  *
  * `territory__v` is an **object reference** in Vault `[DOC]` while the source
  * `Territory_vod__c` is the territory *name* (text 80): `territoryRef`
- * resolves it through `ids.resolveTerritoryByName`; an unresolved name routes
- * the row to `pending_fk` (§6.3.12, `custom(tsfTerritory)`) so it is
- * re-evaluated after closure and reported as `failed(UNRESOLVED_FK)` with the
- * territory name when it never resolves. A String target takes the name as
+ * resolves it through `ids.resolveTerritoryByName` — the `name__v → id`
+ * snapshot of `territory__v` the run loads once per vault, after the
+ * `territory` unit (§6.1 step 1) has matched/created every territory. A name
+ * missing from that snapshot can therefore never resolve later in the run,
+ * and the pending-FK queue (§8.4) only knows deferred `$fk` ids, not names:
+ * `custom(tsfTerritory)` fails the row immediately as `failed(UNRESOLVED_FK)`
+ * with the territory name in the report (retried by `retry-failed` once the
+ * territory exists). This is the §6.3.12 "unresolved → pending_fk" outcome
+ * without the intermediate queue round. A String target takes the name as
  * text.
  *
  * Object types on `tsf__v` mirror the account object types `[DOC]`
  * (`custom(tsfObjectType)`): the account's `RecordType.DeveloperName` is read
  * through the relationship column and crosswalked with `tsf.objectType`
- * (defaults = the account crosswalk); only when the target `allow_types`.
+ * (defaults = the account crosswalk, `TSF_OBJECT_TYPES`) and, when that has
+ * no entry, with the layered `picklists.maps["account.objectType"]` of the
+ * country; only when the target `allow_types`. A country that remaps an
+ * account record type under `objects.account.objectType` must overlay the
+ * same entry under `objects.tsf.objectType` — that per-object override is
+ * not visible from another object's transform context.
  *
  * `External_Id_vod__c` is `{AccountId}__{TerritoryName}` (unique 255) →
  * `{accountVaultId}__{territoryName}` (`$composite`, §3.2) unless
@@ -32,7 +42,11 @@
  * Inactivation (§4.4): `status__v = inactive__v` only.
  */
 import { applyTransform } from "../../transform/registry";
-import type { CustomTransformFn, TransformResult } from "../../types";
+import type {
+  CustomTransformFn,
+  TransformContext,
+  TransformResult,
+} from "../../types";
 import { ACCOUNT_OBJECT_TYPES } from "../account/account";
 import { defineObject } from "../types";
 
@@ -56,9 +70,11 @@ function isEmpty(v: unknown): boolean {
 }
 
 /**
- * `territory__v`: `territoryRef` by name; an unresolved name keeps the row
- * pending (`unresolved` marker with the name as the key, § 6.3.12) instead of
- * failing it outright.
+ * `territory__v`: `territoryRef` by name. An unresolved name is fatal —
+ * `failed(UNRESOLVED_FK)` with the name as the reported value — because the
+ * territory snapshot is complete by the time `tsf` transforms (§6.1 step 1
+ * precedes step 7) and the pending queue cannot park a name-keyed
+ * reference (every `sfdcId` it stores is an 18-char id, CONTRACTS.md).
  */
 export const tsfTerritory: CustomTransformFn = (value, row, ctx) => {
   if (isEmpty(value)) return undefined;
@@ -66,18 +82,37 @@ export const tsfTerritory: CustomTransformFn = (value, row, ctx) => {
   if ("omit" in r && r.diagnostic?.code === "TERRITORY_UNRESOLVED") {
     const name = String(r.diagnostic.value ?? value).trim();
     return {
-      ...r,
-      unresolved: { objectKey: "territory", sfdcId: name },
+      omit: true,
+      diagnostic: {
+        kind: "unresolved_fk",
+        field: ctx.field.target,
+        code: "UNRESOLVED_FK",
+        objectKey: "territory",
+        value: name,
+        detail: `territory "${name}" has no territory__v with that name__v (TERRITORY_UNRESOLVED) — territories are matched in step 1, so the row cannot resolve later in this run`,
+        fatal: true,
+      },
     } satisfies TransformResult;
   }
   return r;
 };
+
+/** Layered account object-type crosswalk key consulted when `tsf.objectType` has no entry. */
+export const TSF_ACCOUNT_OBJECT_TYPE_MAP_KEY = "account.objectType";
 
 /**
  * `object_type__v.api_name__v` = the account's object type when `tsf__v`
  * allows types. Untyped target → omitted; typed target with an empty account
  * record type → fatal `TSF_ACCOUNT_TYPE_MISSING` (Vault would reject the
  * create).
+ *
+ * Crosswalk order: `tsf.objectType` (module defaults = the account crosswalk,
+ * plus `objects.tsf.objectType`) → the country's layered
+ * `picklists.maps["tsf.objectType"]` → `picklists.maps["account.objectType"]`
+ * → the §6.0.2 derivation. The account-map hop keeps a country that
+ * crosswalks account types through `picklists.maps` in step with
+ * `account__v` without a duplicated `tsf` map (a `null` there skips the row
+ * here too, `OBJECT_TYPE_SKIPPED`).
  */
 export const tsfObjectType: CustomTransformFn = (value, row, ctx) => {
   if (!ctx.metadata.allowTypes) return undefined;
@@ -93,11 +128,41 @@ export const tsfObjectType: CustomTransformFn = (value, row, ctx) => {
         fatal: true,
       },
     } satisfies TransformResult;
+  const name = String(devName).trim();
+  let objectTypeCtx: TransformContext = ctx;
+  if (
+    ctx.mapping.objectTypes[name] === undefined &&
+    ctx.country.picklist("tsf.objectType", name) === undefined
+  ) {
+    const fromAccount = ctx.country.picklist(
+      TSF_ACCOUNT_OBJECT_TYPE_MAP_KEY,
+      name,
+    );
+    if (fromAccount === null)
+      return {
+        omit: true,
+        diagnostic: {
+          kind: "skipped",
+          field: "object_type__v.api_name__v",
+          code: "OBJECT_TYPE_SKIPPED",
+          value: name,
+          fatal: true,
+        },
+      } satisfies TransformResult;
+    if (fromAccount !== undefined)
+      objectTypeCtx = {
+        ...ctx,
+        mapping: {
+          ...ctx.mapping,
+          objectTypes: { ...ctx.mapping.objectTypes, [name]: fromAccount },
+        },
+      };
+  }
   return applyTransform(
     { kind: "objectType", mapKey: "tsf.objectType" },
-    devName,
+    name,
     row,
-    ctx,
+    objectTypeCtx,
   );
 };
 
@@ -132,7 +197,11 @@ export const tsf = defineObject({
   targetEvidence: "DOC",
   scope: { kind: "full" },
   countryOf: "account",
-  dependsOn: ["account", "territory", "address"],
+  // `account_territory` precedes `tsf` (§6.1 step 7): creating an
+  // `account_territory__v` auto-creates the matching `tsf__v` [DOC], so the tsf
+  // unit must match those rows before it creates its own. `loadOrder` drops
+  // the dependency when the (default-disabled) object is not enabled.
+  dependsOn: ["account", "territory", "address", "account_territory"],
   objectTypes: TSF_OBJECT_TYPES,
   // master-detail child of Account: no OwnerId; no currency fields
   blockS: { ownerId: false, currency: false },
@@ -154,7 +223,7 @@ export const tsf = defineObject({
       evidence: "DOC",
       sourceType: "string",
       notes:
-        "territoryRef by name (text 80, EXTID = territory name) → object reference [DOC]; unresolved → pending_fk",
+        "territoryRef by name (text 80, EXTID = territory name) → object reference [DOC]; unresolved name → failed(UNRESOLVED_FK) with the name (territories are complete after step 1; the pending queue is id-keyed)",
     },
     {
       source: "External_Id_vod__c",
@@ -252,25 +321,22 @@ export const tsf = defineObject({
       method: "natural_key",
       keys: [
         { target: "account__v", source: TSF_ACCOUNT_FIELD },
-        {
-          target: "territory__v",
-          source: TSF_TERRITORY_FIELD,
-          transform: { kind: "territoryRef" },
-        },
+        { target: "territory__v", source: TSF_TERRITORY_FIELD },
       ],
       evidence: "DOC",
-      notes: "(account__v, territory__v) pair via VQL (§3.3)",
+      notes:
+        "(account__v, territory__v) pair via VQL (§3.3); the matcher compares the payload values — the resolved account id and the territory id custom(tsfTerritory) already put in territory__v — so no key transform is needed",
     },
     {
       method: "external_id",
       keys: [{ target: "external_id__v", source: "External_Id_vod__c" }],
       evidence: "UNV",
       notes:
-        "compared against the verbatim SFDC composite; a rewritten value only matches rows this tool wrote",
+        "compared against the value the tool writes: with rewriteCompositeExternalId (default) that is the {accountVaultId}__{territoryName} composite rendered from the id map, so this key only finds rows written with the same convention (a previous run of this tool); set rewriteCompositeExternalId = false to match a load keyed by the verbatim SFDC composite",
     },
   ],
   custom: { tsfTerritory, tsfObjectType, tsfExternalId },
   optionDefaults: { rewriteCompositeExternalId: true },
   notes:
-    "Territory-specific account fields; object type mirrors the account; territory by name (pending_fk when unresolved); customer target-class/frequency __c columns via objects.tsf.customFields; inactivated (status__v only) on delete (§4.4).",
+    "Territory-specific account fields; object type mirrors the account (overlay objects.tsf.objectType alongside objects.account.objectType); territory by name (failed(UNRESOLVED_FK) when unresolved — territories are complete after step 1); loaded after account_territory (auto-created tsf__v rows are matched, not duplicated); customer target-class/frequency __c columns via objects.tsf.customFields; inactivated (status__v only) on delete (§4.4).",
 });
