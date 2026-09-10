@@ -8,10 +8,6 @@ import { buildCoverageSpec, renderSpecMarkdown } from "@lastest/coverage-model";
 import { DEFAULT_COVERAGE_ENVIRONMENT } from "@/lib/db/schema";
 import type { CoverageSyncSummary } from "@/lib/coverage/sync-job";
 
-// Type-only re-export (erased at compile time, so the "async exports only"
-// rule for server-action modules is unaffected) — the coverage client imports
-// the summary shape from here alongside the actions that produce it.
-export type { CoverageSyncSummary };
 import type { CoverageCellStatus } from "@/lib/db/schema";
 
 // There is deliberately NO synchronous sync action here. One existed

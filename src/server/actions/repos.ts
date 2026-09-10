@@ -31,6 +31,10 @@ import {
   seedGenericSmokeTest,
   type SandboxSeedId,
 } from "@/lib/demo/sandbox-seeds";
+import {
+  SALESFORCE_QUICKSTART_TEMPLATE_ID,
+  seedSalesforceQuickstart,
+} from "@/lib/demo/salesforce-quickstart-seed";
 
 const REPO_SYNC_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -278,6 +282,12 @@ export async function createLocalRepo(
       repo.id,
       templateId as SandboxSeedId,
     );
+  } else if (templateId === SALESFORCE_QUICKSTART_TEMPLATE_ID) {
+    // Salesforce CRM quickstart: 18 Lightning tests that read their login
+    // from the `salesforce` credential and navigate from the repo base URL
+    // the user sets in the next step. Checked before the generic-smoke branch
+    // so a base URL passed alongside the template never downgrades it.
+    seededTestId = await seedSalesforceQuickstart(repo.id);
   } else if (baseUrl) {
     // "Bring your own URL" (e.g. the Blank template): seed a generic,
     // URL-adaptive smoke test against *their* site so the first test targets

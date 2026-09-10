@@ -115,8 +115,10 @@ export default async function TriageAgentPage() {
   const latest = builds[0] ?? null;
   const triagedBuildIds = new Set(recentRuns.map((r) => r.buildId));
 
-  // The toggle is a Pro-plan setting over an AI-backed agent: either gate locks
-  // it, and the tooltip says which one. The plan branch is belt-and-braces —
+  // The toggle is a Pro-plan setting over an AI-backed agent. Only the plan
+  // gate locks it; `ai_off` is the MCP-first state — the client swaps the
+  // in-product run button for the "Use your agent" hint, like every other
+  // agent surface, and keeps the switch settable. The plan branch is belt-and-braces —
   // a team that fails the gate has already been returned the upgrade screen
   // above, so it only fires when there is no team to read a plan from — but the
   // switch must fail closed rather than depend on that early return.

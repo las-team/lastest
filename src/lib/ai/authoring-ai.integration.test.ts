@@ -78,6 +78,17 @@ beforeAll(async () => {
     defaultBranch: "main",
   });
   repoId = repo.id;
+  // Pin the Agent SDK model. With `agentSdkModel` unset, `getAIProvider`
+  // passes `model: undefined` (intended: let the CLI choose) and the Claude
+  // Code child process inherits the developer's ~/.claude/settings.json
+  // model alias, which is not guaranteed to be servable from a test process
+  // ("There's an issue with the selected model (...)"). `ai_settings` is the
+  // supported per-repo override, so the fixture uses it. Set
+  // AUTHORING_AI_TEST_MODEL to run against a different locally available model.
+  await queries.upsertAISettings(repoId, {
+    provider: "claude-agent-sdk",
+    agentSdkModel: process.env.AUTHORING_AI_TEST_MODEL || "claude-sonnet-4-6",
+  });
 }, 30_000);
 
 afterAll(async () => {
