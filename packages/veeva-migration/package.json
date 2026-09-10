@@ -15,7 +15,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "cli": "tsx src/cli.ts"
+    "cli": "tsx src/cli.ts",
+    "demo": "tsx demo/demo-run.ts demo/timeline.jsonl && python3 demo/render.py demo/timeline.jsonl demo/veeva-migration-demo.mp4"
   },
   "dependencies": {
     "commander": "^12.0.0",

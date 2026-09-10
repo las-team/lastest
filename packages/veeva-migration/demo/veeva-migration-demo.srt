@@ -1,0 +1,142 @@
+1
+00:00:07,500 --> 00:00:12,559
+Veeva CRM lives in Salesforce. Vault CRM is a different
+platform with its own objects,
+
+2
+00:00:12,559 --> 00:00:18,206
+fields and API. This package moves the data between them — and
+keeps both in sync until cutover.
+
+3
+00:00:18,206 --> 00:00:21,382
+A run is planned as units — one per object × country —
+
+4
+00:00:21,382 --> 00:00:25,735
+ordered so that every foreign key is loaded after the record
+it points at.
+
+5
+00:00:25,735 --> 00:00:30,441
+Each object module declares its field mapping. Config layers —
+defaults, region,
+
+6
+00:00:30,441 --> 00:00:37,441
+country — are folded into one materialised mapping per unit
+and hashed, so a mapping change is detectable between runs.
+
+7
+00:00:37,441 --> 00:00:42,618
+Preflight checks the plan against live metadata on both sides
+before a single row moves:
+
+8
+00:00:42,618 --> 00:00:46,441
+do the target fields exist, are the types and lengths
+compatible,
+
+9
+00:00:46,441 --> 00:00:52,029
+are the picklist values and object types real? Blocking
+findings stop the run with exit code 2.
+
+10
+00:00:52,029 --> 00:00:55,735
+Every mode takes --dry-run: extract and transform run for
+real,
+
+11
+00:00:55,735 --> 00:01:00,088
+the load is simulated. Nothing is written to Vault and no
+watermark moves.
+
+12
+00:01:01,508 --> 00:01:05,861
+The real init: extract by SOQL scope, transform through the
+pure registry,
+
+13
+00:01:05,861 --> 00:01:09,567
+then bulk-upsert into Vault keyed on the legacy Salesforce id
+—
+
+14
+00:01:09,567 --> 00:01:13,450
+so re-running the same load is idempotent rather than
+duplicating.
+
+15
+00:01:13,450 --> 00:01:15,802
+Which is real data in the target vault —
+
+16
+00:01:15,802 --> 00:01:20,508
+Salesforce field names renamed to Vault ones, references
+rewritten to Vault ids.
+
+17
+00:01:21,325 --> 00:01:27,148
+Every migrated row is recorded in an id crosswalk. Foreign
+keys are only ever resolved through it —
+
+18
+00:01:27,148 --> 00:01:33,266
+never guessed — so a reference that has not been loaded yet
+becomes a pending FK instead of a bad write.
+
+19
+00:01:33,266 --> 00:01:38,031
+Cutover is not a single moment: the source keeps changing
+while the project runs.
+
+20
+00:01:38,031 --> 00:01:44,325
+So the tool runs deltas — a SystemModstamp window with overlap
+and a safety lag, plus the deleted-row feed.
+
+21
+00:01:44,325 --> 00:01:48,207
+A row whose source hash has not changed is never re-sent to
+Vault.
+
+22
+00:01:48,207 --> 00:01:55,442
+And the watermark only advances once a unit actually succeeds
+— an interrupted run resumes its window instead of losing it.
+
+23
+00:01:55,442 --> 00:01:59,501
+And the rename landed in Vault, on the same record — not a
+duplicate.
+
+24
+00:02:02,434 --> 00:02:08,787
+Before anyone signs off, verify re-counts both sides, checks
+foreign keys for orphans and reads a stratified
+
+25
+00:02:08,787 --> 00:02:14,493
+sample back out of Vault field by field. The cutover gate is
+what turns that into a pass or fail.
+
+26
+00:02:14,493 --> 00:02:18,669
+Every run writes a markdown and JSON report: config and
+mapping hashes,
+
+27
+00:02:18,669 --> 00:02:22,904
+per-unit timings, findings, reconciliation, and the ids of
+anything that
+
+28
+00:02:22,904 --> 00:02:26,904
+failed — which is what a regulated programme has to hand an
+auditor.
+
+29
+00:02:26,904 --> 00:02:33,728
+46 object modules, 1190 hermetic tests, no network — the whole
+flow you just watched runs against fakes in a second.

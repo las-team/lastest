@@ -468,6 +468,11 @@ export class FakeSfdcClient implements SfdcClient {
     this.deleted.set(objectName, list);
     return this;
   }
+  /** Move the fake org clock (`serverNow`, delta windows). */
+  setNow(now: string): this {
+    this.opts.now = now;
+    return this;
+  }
   addRecordTypes(rows: SfdcRecordType[]): this {
     this.recordTypeRows.push(...rows);
     return this;
