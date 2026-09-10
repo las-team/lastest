@@ -19,6 +19,7 @@ import {
   Network,
   Lock,
   Waypoints,
+  ArrowRightLeft,
 } from "lucide-react";
 import Image from "next/image";
 import {
@@ -68,7 +69,16 @@ const gamificationNav = [
   { name: "Leaderboard", href: "/leaderboard", icon: Trophy },
 ];
 
-const EARLY_ADOPTER_ITEMS = new Set(["Compose", "Compare", "Impact"]);
+const EARLY_ADOPTER_ITEMS = new Set([
+  "Compose",
+  "Compare",
+  "Impact",
+  // The Veeva CRM -> Vault CRM migration console. Early Adopter for the same
+  // reason as the rest of this set, plus one it does not share: it writes to a
+  // customer's production Vault. `lib/migration/access.ts` enforces the same
+  // switch server-side — this line is only the nav's half of it.
+  "Migrations",
+]);
 
 const definitionNav = [
   { name: "Tests", href: "/tests", icon: FileCode },
@@ -85,6 +95,7 @@ const definitionNav = [
 // triaging a build, so it lives in Verify's header as a drawer beside History.
 const executionNav = [
   { name: "Verify", href: "/verify", icon: ShieldCheck },
+  { name: "Migrations", href: "/migrations", icon: ArrowRightLeft },
   { name: "Agents", href: "/agents", icon: Network },
   { name: "Compare", href: "/compare", icon: GitCompare },
   { name: "Impact", href: "/analytics/impact", icon: TrendingDown },

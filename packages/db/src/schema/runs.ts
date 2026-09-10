@@ -138,7 +138,8 @@ export type BackgroundJobType =
   | "storage_cleanup"
   | "spec_import"
   | "url_diff"
-  | "coverage_sync";
+  | "coverage_sync"
+  | "migration_run";
 
 export type BackgroundJobStatus =
   | "pending"

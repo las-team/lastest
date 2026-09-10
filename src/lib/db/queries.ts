@@ -47,3 +47,4 @@ export * from "./queries/billing";
 // @lastest/plugin-qa-agent/reads, actions through the plugin's own handle.
 export * from "./queries/agents-fleet";
 export * from "./queries/coverage";
+export * from "./queries/migrations";

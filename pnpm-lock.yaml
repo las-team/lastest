@@ -208,6 +208,9 @@ importers:
       '@lastest/url-canonical':
         specifier: workspace:*
         version: link:libs/url-canonical
+      '@lastest/veeva-migration':
+        specifier: workspace:*
+        version: link:packages/veeva-migration
       '@lastest/video-fallback':
         specifier: workspace:*
         version: link:libs/video-fallback

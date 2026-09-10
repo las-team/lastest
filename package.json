@@ -110,6 +110,7 @@
     "@lastest/triage-model": "workspace:*",
     "@lastest/ui": "workspace:*",
     "@lastest/url-canonical": "workspace:*",
+    "@lastest/veeva-migration": "workspace:*",
     "@lastest/video-fallback": "workspace:*",
     "@lastest/wcag-score": "workspace:*",
     "@mcp-b/webmcp-polyfill": "^5.0.1",

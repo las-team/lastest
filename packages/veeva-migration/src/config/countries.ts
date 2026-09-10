@@ -26,7 +26,7 @@
  * override the key itself; otherwise they raise `CONFIG_ENV_MISSING`.
  */
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { getLogger } from "../logger";
@@ -46,9 +46,20 @@ function isDict(v: unknown): v is Dict {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** `<package>/config/` resolved relative to this module (works from source and from a checkout). */
-export const BUILTIN_CONFIG_DIR = fileURLToPath(
-  new URL("../../config/", import.meta.url),
+/**
+ * `<package>/config/` resolved relative to this module (works from source and
+ * from a checkout).
+ *
+ * Deliberately NOT `new URL("../../config/", import.meta.url)`, which reads
+ * more naturally: bundlers treat that form as a static asset reference and try
+ * to resolve it at build time, which fails for a DIRECTORY. Composing the path
+ * from `dirname(fileURLToPath(import.meta.url))` is the same value and stays a
+ * runtime lookup, so the package can be imported from a bundled host (the
+ * Lastest migration console) as well as run from the CLI.
+ */
+export const BUILTIN_CONFIG_DIR = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../config",
 );
 
 export interface BuiltinOverlays {
