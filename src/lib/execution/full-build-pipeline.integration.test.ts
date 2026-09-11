@@ -158,6 +158,12 @@ function renderPage(): string {
 }
 
 let server: http.Server;
+// Step label the recorded test's screenshot lands under ("Step 1"). Baselines
+// and ignore regions are both keyed per step (ignore_regions.step_label is
+// per-step, and getActiveBaseline/getIgnoreRegions match it exactly, with no
+// NULL fallback), so every lookup below must use the label the executor
+// actually assigned rather than assuming an unlabelled screenshot.
+let recordedStepLabel: string | null = null;
 let origin: string;
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────
@@ -196,6 +202,17 @@ const log: Logger = {
 };
 
 beforeAll(async () => {
+  // `createAndRunBuildCore` runs the whole executor in THIS process, and
+  // plugin wiring is a module-global that only the composition root
+  // (`src/instrumentation.ts`, dev server only) installs. Without it the
+  // executor's data-source lookup throws "The data-sources plugin is not
+  // wired" (and the awards recompute after it), `runOneTest` turns that into
+  // a silent failed result, and every build escalates to `blocked`. Same
+  // prologue as e2e/golden-path.integration.test.ts and
+  // quickstart.integration.test.ts; memoized, so it costs once.
+  const { getPluginRuntime } = await import("@/lib/core/runtime");
+  await getPluginRuntime();
+
   await new Promise<void>((resolve) => {
     server = http.createServer((req, res) => {
       if (req.url === "/setup") {
@@ -283,7 +300,15 @@ afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 
   // Children first — synthetic ids have no guaranteed cascade for every
-  // table touched by a build.
+  // table touched by a build. baselines.approved_from_diff_id references
+  // visual_diffs.id, so the approved baselines have to go before the diffs.
+  if (recordedTestId) {
+    await db
+      .delete((await import("@/lib/db/schema")).baselines)
+      .where(
+        eq((await import("@/lib/db/schema")).baselines.testId, recordedTestId),
+      );
+  }
   for (const buildId of buildIds) {
     // review_todos.diff_id -> visual_diffs.id, so todos must go first.
     await db.delete(reviewTodos).where(eq(reviewTodos.buildId, buildId));
@@ -316,11 +341,6 @@ afterAll(async () => {
           (await import("@/lib/db/schema")).testVersions.testId,
           recordedTestId,
         ),
-      );
-    await db
-      .delete((await import("@/lib/db/schema")).baselines)
-      .where(
-        eq((await import("@/lib/db/schema")).baselines.testId, recordedTestId),
       );
     await db.delete(testsTable).where(eq(testsTable.id, recordedTestId));
   }
@@ -594,6 +614,7 @@ describe("Test runs / builds, Setup ordering — build 1 (clean baseline)", () =
     // pixel-compare against instead of also landing as a first-run.
     const diffs = await queries.getVisualDiffsByBuild(result.buildId);
     expect(diffs.length).toBeGreaterThan(0);
+    recordedStepLabel = diffs[0].stepLabel ?? null;
     await approveDiffCore(diffs[0].id, "integration-test-baseline");
     const baselined = await queries.getBuild(result.buildId);
     expect(baselined?.overallStatus).not.toBe("review_required");
@@ -698,7 +719,7 @@ describe("Visual diff review — approve, reject with a comment, ignore regions 
     // Approving promotes a new active baseline for this test/step/branch.
     const baseline = await queries.getActiveBaseline(
       recordedTestId,
-      null,
+      diff.stepLabel ?? null,
       "main",
     );
     expect(baseline?.approvedFromDiffId).toBe(diff.id);
@@ -749,16 +770,20 @@ describe("Visual diff review — approve, reject with a comment, ignore regions 
     // still the blue image approved in build 2.
     const baseline = await queries.getActiveBaseline(
       recordedTestId,
-      null,
+      diff.stepLabel ?? null,
       "main",
     );
     expect(baseline?.imagePath).not.toBe(diff.currentImagePath);
   }, 180_000);
 
   it("build 4: an ignore region over the CTA box masks a real change confined to it", async () => {
+    // Ignore regions are per-step: the executor resolves them with the
+    // screenshot's own step label (getIgnoreRegions(testId, stepLabel)), and
+    // a NULL-labelled region never matches a labelled step.
+    expect(recordedStepLabel).not.toBeNull();
     await queries.createIgnoreRegion({
       testId: recordedTestId,
-      stepLabel: null,
+      stepLabel: recordedStepLabel,
       x: CTA_BOX.x,
       y: CTA_BOX.y,
       width: CTA_BOX.width,

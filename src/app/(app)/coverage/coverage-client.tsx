@@ -47,8 +47,8 @@ import {
   setCoverageDimensionEnabledAction,
   setCoverageCellStatusAction,
   getCoverageSpecAction,
-  type CoverageSyncSummary,
 } from "@/server/actions/coverage";
+import type { CoverageSyncSummary } from "@/lib/coverage/sync-job";
 import { uploadCsvSource } from "@lastest/plugin-data-sources/actions";
 import {
   CoverageTrendPanel,

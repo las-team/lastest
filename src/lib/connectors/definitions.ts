@@ -188,6 +188,13 @@ export const CONNECTOR_TYPES: ConnectorTypeDefinition[] = [
         credentialFields: [
           { key: "username", label: "User name", secret: false },
           { key: "password", label: "Password", secret: true },
+          {
+            key: "securityToken",
+            label: "Security token",
+            secret: true,
+            placeholder:
+              "Optional — needed for SOAP login() outside a trusted IP range",
+          },
         ],
       },
       {

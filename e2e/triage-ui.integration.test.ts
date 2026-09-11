@@ -595,3 +595,179 @@ describe("§4 step 15 — Triage agent: console → run results → verdicts", (
     expect(s.consoleErrors).toEqual([]);
   });
 });
+
+/**
+ * The AI-off state of `/triage-agent` (branch `fix-coverage-n-docs`).
+ *
+ * `TriageLockReason` used to treat `ai_off` like `plan`: switch disabled,
+ * run button disabled, warning copy. That contradicted every other agent
+ * surface, where in-product AI being off is the MCP-first state: the
+ * "run it here" button becomes the "Use your agent" hint and the work happens
+ * over MCP from the user's own client. The branch makes triage agree: only
+ * `plan` locks; `ai_off` swaps the button for `McpCtaHint` (prompt key
+ * `triage`, seeded with the repo's latest build) and keeps the auto-triage
+ * switch settable so the preference survives until built-in AI is switched
+ * on. Neither half was covered: the cases above run with AI on and would pass
+ * unchanged if `ai_off` locked everything again.
+ *
+ * Runs after the AI-on cases on purpose (vitest runs describe blocks in file
+ * order) and restores both team columns in `afterAll`, so it can be moved or
+ * extended without changing what the cases above see. Every navigation is a
+ * full `gotoSettled` (the page is `force-dynamic` and reads the team row per
+ * request, so a DB flip is visible on the next load and never before).
+ */
+describe("§4 step 15, Triage agent: AI off is MCP-first, not locked", () => {
+  const AUTO_SWITCH = '[role="switch"][aria-label="Run triage automatically"]';
+
+  beforeAll(async () => {
+    // Plan stays pro; only in-product AI goes off. `getInProductAiEnabled`
+    // folds `banAiMode` too, which the fixture already cleared.
+    await db
+      .update(teams)
+      .set({ builtInAiEnabled: false })
+      .where(eq(teams.id, teamId!));
+  });
+
+  afterAll(async () => {
+    await db
+      .update(teams)
+      .set({ builtInAiEnabled: true, plan: "pro" })
+      .where(eq(teams.id, teamId!));
+  });
+
+  it("swaps the in-product run button for the MCP hint and keeps the switch settable", async () => {
+    const { page } = s;
+    await gotoSettled(page, "/triage-agent");
+
+    await page
+      .getByRole("heading", { name: "Triage agent", level: 1 })
+      .waitFor({ state: "visible", timeout: 60_000 });
+
+    // The MCP affordance replaces the in-product button rather than sitting
+    // next to a disabled one.
+    const hint = page.getByRole("button", { name: /^Triage with your agent$/ });
+    await hint.waitFor({ state: "visible", timeout: 30_000 });
+    expect(
+      await page.getByRole("button", { name: /^Triage latest build$/ }).count(),
+    ).toBe(0);
+
+    const text = await bodyText(page);
+    // AI_OFF_COPY, matched on a stable fragment rather than the whole line.
+    expect(text).toContain("not triaged in the background");
+    // PLAN_COPY must not leak in: the team is on pro.
+    expect(text).not.toContain("part of the Pro plan");
+
+    // The whole point of the branch: `ai_off` no longer disables the switch.
+    const auto = page.locator(AUTO_SWITCH);
+    await auto.waitFor({ state: "visible", timeout: 30_000 });
+    expect(await auto.isDisabled()).toBe(false);
+  });
+
+  it("the hint's prompt names the repo's latest build and links to MCP setup", async () => {
+    const { page } = s;
+    await page
+      .getByRole("button", { name: /^Triage with your agent$/ })
+      .click();
+
+    // Radix renders the popover into a portal with role="dialog".
+    const popover = page.locator('[role="dialog"]').filter({
+      hasText: "Run this from your AI agent",
+    });
+    await popover.waitFor({ state: "visible", timeout: 30_000 });
+
+    // `PROMPTS.triage` with a buildId embeds the id verbatim; the page hands it
+    // `getBuildsByRepo(repoId, 50)[0]`, which the fixture made the failing build.
+    const prompt = await popover.locator("p.font-mono").innerText();
+    expect(prompt).toContain(`triage build ${failBuildId}`);
+    expect(prompt).toMatch(/^Using the Lastest MCP server/);
+
+    expect(
+      await popover.locator('a[href="/settings#mcp-connect"]').count(),
+    ).toBe(1);
+
+    // Close it so the next case's switch click is not swallowed by the
+    // popover's dismiss layer.
+    await page.keyboard.press("Escape");
+    await popover.waitFor({ state: "hidden", timeout: 10_000 });
+  });
+
+  it("toggling auto-triage while AI is off persists the preference", async () => {
+    const { page } = s;
+    // The fixture set it on; `setTriageAgentEnabled` gates on the plan only,
+    // so with AI off the write must still land.
+    expect((await queries.getAISettings(repoId)).triageAgentEnabled).toBe(true);
+
+    const auto = page.locator(AUTO_SWITCH);
+    await auto.waitFor({ state: "visible", timeout: 30_000 });
+    expect(await auto.getAttribute("aria-checked")).toBe("true");
+    await auto.click();
+
+    await until(
+      "triage_agent_enabled to be written as false",
+      async () =>
+        (await queries.getAISettings(repoId)).triageAgentEnabled === false
+          ? true
+          : null,
+      60_000,
+      500,
+    );
+
+    // A fresh render, not the optimistic state, must show it off, and still
+    // settable.
+    await gotoSettled(page, "/triage-agent");
+    const reloaded = page.locator(AUTO_SWITCH);
+    await reloaded.waitFor({ state: "visible", timeout: 30_000 });
+    expect(await reloaded.getAttribute("aria-checked")).toBe("false");
+    expect(await reloaded.isDisabled()).toBe(false);
+
+    // Put it back so nothing after this block inherits an off switch.
+    await reloaded.click();
+    await until(
+      "triage_agent_enabled to be written back as true",
+      async () =>
+        (await queries.getAISettings(repoId)).triageAgentEnabled === true
+          ? true
+          : null,
+      60_000,
+      500,
+    );
+  });
+
+  it("a free team is still gated by the plan, ahead of the AI state", async () => {
+    const { page } = s;
+    await db.update(teams).set({ plan: "free" }).where(eq(teams.id, teamId!));
+    try {
+      await gotoSettled(page, "/triage-agent");
+
+      if (process.env.STRIPE_SECRET_KEY) {
+        // With billing wired up the page returns `QaAgentUpgradeGate` before
+        // it reads a repo, so the in-page `plan` lock (disabled switch +
+        // PLAN_COPY) is unreachable from the browser: the upgrade screen IS
+        // the free-team state. That branch in `page.tsx` is belt-and-braces
+        // for a session with no team, which a signed-in user cannot produce.
+        await page
+          .getByRole("heading", { name: /Unlock the QA Agent with/i })
+          .waitFor({ state: "visible", timeout: 60_000 });
+        expect(await page.locator(AUTO_SWITCH).count()).toBe(0);
+        expect(
+          await page
+            .getByRole("button", { name: /^Triage with your agent$/ })
+            .count(),
+        ).toBe(0);
+      } else {
+        // Self-hosted: `hasQaAgentAccess` waves every plan through, so the
+        // plan column is inert and the page stays in the AI-off state.
+        await page
+          .getByRole("button", { name: /^Triage with your agent$/ })
+          .waitFor({ state: "visible", timeout: 60_000 });
+        expect(await page.locator(AUTO_SWITCH).isDisabled()).toBe(false);
+      }
+    } finally {
+      await db.update(teams).set({ plan: "pro" }).where(eq(teams.id, teamId!));
+    }
+  });
+
+  it("leaves no unexplained client-side errors in the AI-off state", async () => {
+    expect(s.consoleErrors).toEqual([]);
+  });
+});

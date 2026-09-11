@@ -485,3 +485,45 @@ export async function destroyTeam(teamId: string | undefined): Promise<void> {
   // loudly rather than quietly accumulate rows across re-runs.
   await queries.deleteTeam(teamId);
 }
+
+/**
+ * Preflight for suites whose UI states only exist after a *real* model
+ * response (QA Agent's `qa_plan`, Explorer's `explorer_plan`, quickstart
+ * scouting). Resolves the provider exactly the way a plugin's `ctx.ai`
+ * does for a fresh repository (global `ai_settings` row, else the deployment
+ * default) and asks it for one word.
+ *
+ * A provider can be *configured* and still unable to answer: the Agent SDK
+ * answers "There's an issue with the selected model (...)" on a box whose
+ * `claude` login has no access to the configured model, an API key can be
+ * revoked, a rate limit can be exhausted. None of those is a product bug,
+ * and none can be told apart from one by waiting for a plan panel that a
+ * failed planner will never render. Callers use the `reason` in their
+ * `ctx.skip(...)` message so the skip says *why*, and keep every assertion
+ * that does not depend on the model running.
+ */
+export async function probeAiAvailable(
+  repositoryId?: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  try {
+    const settings = await queries.getAISettings(repositoryId);
+    if (!settings.provider || settings.provider === "none") {
+      return { ok: false, reason: "no AI provider configured" };
+    }
+    const { getAIConfig } = await import("@/lib/playwright/agent-context");
+    const { generateWithAI } = await import("@/lib/ai");
+    const reply = await generateWithAI(
+      getAIConfig(settings),
+      "Reply with the single word OK.",
+      undefined,
+      { signal: AbortSignal.timeout(120_000) },
+    );
+    if (!reply.trim()) {
+      return { ok: false, reason: `${settings.provider} returned no text` };
+    }
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, reason: msg.split("\n")[0].slice(0, 300) };
+  }
+}
