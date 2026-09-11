@@ -246,21 +246,25 @@ describe("repo_credentials", () => {
       fields: fields(),
     });
 
-    expect(await credentialNameTaken(repositoryId, "vaultAdmin")).toBe(true);
-    // ...but not when the row asking is the one that holds it (an edit that
-    // keeps the name must not collide with itself).
-    expect(await credentialNameTaken(repositoryId, "vaultAdmin", a.id)).toBe(
-      false,
-    );
-    expect(await credentialNameTaken(repositoryId, "other")).toBe(false);
+    try {
+      expect(await credentialNameTaken(repositoryId, "vaultAdmin")).toBe(true);
+      // ...but not when the row asking is the one that holds it (an edit that
+      // keeps the name must not collide with itself).
+      expect(await credentialNameTaken(repositoryId, "vaultAdmin", a.id)).toBe(
+        false,
+      );
+      expect(await credentialNameTaken(repositoryId, "other")).toBe(false);
 
-    // A run only ever sees its own repo's credentials.
-    expect(Object.keys(await getCredentialsForRun(repoB))).toEqual([
-      "vaultAdmin",
-    ]);
-
-    await deleteCredential(a.id);
-    await deleteCredential(b.id);
+      // A run only ever sees its own repo's credentials.
+      const runB = await getCredentialsForRun(repoB);
+      expect(Object.keys(runB.credentials)).toEqual(["vaultAdmin"]);
+      expect(Object.keys(runB.secretKeys)).toEqual(["vaultAdmin"]);
+    } finally {
+      // Clean up even on assertion failure: the (repository_id, name) unique
+      // constraint means a leaked "vaultAdmin" row breaks the following tests.
+      await deleteCredential(a.id);
+      await deleteCredential(b.id);
+    }
   });
 
   it("rejects a duplicate handle at the database, not just in the action", async () => {

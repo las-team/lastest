@@ -823,6 +823,13 @@ const SANDBOX_TEMPLATES: SandboxTemplate[] = [
     description: "A real public docs site with rich navigation and content.",
   },
   {
+    id: "salesforce-crm",
+    name: "Salesforce CRM",
+    url: null,
+    description:
+      "18 Lightning tests across Leads, Accounts, Opportunities, Cases, Reports and rep activities. Point it at your org in the next step.",
+  },
+  {
     id: "blank",
     name: "Blank",
     url: null,

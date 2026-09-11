@@ -75,6 +75,25 @@
  * right states. A `failed` terminal state is accepted only when the UI itself
  * renders the failure — a silent stall is not.
  *
+ * ### The AI-availability gate (step 11)
+ *
+ * Step 11's "tasks" artifact is the plan panel (`QaPlanReview`), which only
+ * mounts once `qa_plan` succeeds, and `qa_plan` is a live planner call
+ * (`runQaPlan` in `plugins/qa-agent/src/actions.ts` → `ctx.ai.generate`).
+ * When the configured provider answers with an SDK/model error instead of a
+ * plan (`claude` logged in without access to the configured model, a revoked
+ * key, an exhausted quota), `runQaPlan` marks the step "Planner failed: …",
+ * the pipeline stops, and the panel never renders, so the wait below would
+ * burn its whole 15-minute budget on an environment problem the product
+ * reported correctly. `beforeAll` therefore asks the same provider for one
+ * word (`probeAiAvailable`, harness) and step 11 skips with that reason when
+ * it cannot answer. The plan-render assertion itself is unchanged: with a
+ * working provider it is still required.
+ *
+ * Step 10 is *not* gated: Explorer's live-stream, terminal-badge, tab and
+ * pool-release assertions all hold with a planner that fails, because the
+ * UI renders that failure (`failed` badge) rather than stalling.
+ *
  * Prerequisites: `docker compose up -d`, `pnpm dev:pool`, `pnpm dev`.
  * Run with `pnpm vitest run --config vitest.integration.config.ts e2e/agents-ui.integration.test.ts`.
  */
@@ -87,6 +106,7 @@ import {
   destroyTeam,
   launchSession,
   onboardWithSandbox,
+  probeAiAvailable,
   registerViaUi,
   teamIdForEmail,
   waitForPoolHeadroom,
@@ -390,6 +410,8 @@ async function badgeTexts(page: Page): Promise<string[]> {
 
 let session: Session;
 let teamId: string | undefined;
+/** Result of the one-word provider preflight; see the header's gate section. */
+let ai: Awaited<ReturnType<typeof probeAiAvailable>> = { ok: false };
 
 /**
  * Register + onboard, retrying on a fresh browser session.
@@ -445,6 +467,12 @@ async function setupFixture(attempts = 3): Promise<void> {
 
 beforeAll(async () => {
   await setupFixture();
+  ai = await probeAiAvailable();
+  if (!ai.ok) {
+    console.warn(
+      `[fixture] AI provider cannot answer, step 11 will be skipped: ${ai.reason}`,
+    );
+  }
 }, 600_000);
 
 afterAll(async () => {
@@ -583,7 +611,12 @@ describe("§4 step 10 — Explorer session with a live EB stream", () => {
 // ── Step 11 — QA Agent ──────────────────────────────────────────────────────
 
 describe("§4 step 11 — QA Agent session: crawl → tasks → execution → report", () => {
-  it("runs a full session from /qa-agent and the UI walks the phase timeline to a report", async () => {
+  it("runs a full session from /qa-agent and the UI walks the phase timeline to a report", async (ctx) => {
+    if (!ai.ok) {
+      ctx.skip(
+        `skipped: qa_plan needs a real model response and the configured AI provider cannot run here (${ai.reason})`,
+      );
+    }
     const { page } = session;
     await waitForPoolHeadroom(1, 300_000);
 
