@@ -1,0 +1,31 @@
+{
+  "name": "@lastest/veeva-crm-migration",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Extract functional configuration from a Veeva CRM (Salesforce) org, document it per country and per rep category, and plan/apply the equivalent setup in Veeva Vault CRM. Consumed as TypeScript source, no build step, zero runtime dependencies (native fetch).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./sfdc": "./src/sfdc/index.ts",
+    "./vault": "./src/vault/index.ts",
+    "./docs": "./src/docs/index.ts",
+    "./model": "./src/model/index.ts"
+  },
+  "bin": {
+    "veeva-crm-migration": "./src/cli.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "cli": "tsx src/cli.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "^4.19.0",
+    "typescript": "^5.3.0",
+    "vitest": "^4.1.0"
+  },
+  "license": "FSL-1.1-ALv2"
+}
