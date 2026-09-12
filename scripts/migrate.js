@@ -45,21 +45,17 @@ const PRE_CREATE_SQL = `
     granted_at TIMESTAMP NOT NULL,
     revoked_at TIMESTAMP
   );
-  CREATE TABLE IF NOT EXISTS csv_data_sources (
-    id TEXT PRIMARY KEY,
-    repository_id TEXT,
-    team_id TEXT,
-    alias TEXT NOT NULL,
-    filename TEXT NOT NULL,
-    storage_path TEXT,
-    cached_headers JSONB NOT NULL DEFAULT '[]'::jsonb,
-    cached_data JSONB NOT NULL DEFAULT '[]'::jsonb,
-    row_count INTEGER NOT NULL DEFAULT 0,
-    last_synced_at TIMESTAMP,
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP
-  );
 `;
+// `csv_data_sources` used to be pre-created here, for exactly the reason this
+// list exists. It was removed once it started causing the problem it prevented:
+// the data-sources plugin migration renamed the table to
+// `data_sources_csv_sources` (see DATA_SOURCES_RENAMES), so no schema declares
+// the old name any more, and pre-creating it resurrected an empty table on
+// every push. push then had a DROP with nothing to pair it against until a
+// release added new tables — and a release that adds thirteen
+// (`veeva_migration_*`) turns that stray DROP into "is
+// veeva_migration_audit_log renamed from csv_data_sources?", the unanswerable
+// prompt. `RETIRED_TABLES` below cleans up the copies already out there.
 
 async function preCreate() {
   if (!process.env.DATABASE_URL) return;
@@ -102,6 +98,63 @@ const RETIRED_COLUMNS = [
   { table: "teams", column: "verify_phase_enabled" },
   { table: "teams", column: "web_mcp_enabled" },
 ];
+
+/**
+ * Tables no schema declares any more, dropped before push sees them.
+ *
+ * Same argument as `RETIRED_COLUMNS`, one level up: a table present in the
+ * database and absent from the schema is a DROP in push's plan, and a DROP is
+ * what push pairs with an unrelated CREATE to ask "is this a rename?". The
+ * question is unanswerable in a Job container and the deploy hangs until
+ * activeDeadlineSeconds.
+ *
+ * Guarded by a row count rather than `IF EXISTS` alone: these entries exist
+ * because a table was renamed and the old name was left behind empty, so a
+ * NON-empty one means the rename did not happen the way this script thinks it
+ * did. That is a stop, not a drop.
+ */
+const RETIRED_TABLES = [
+  // Renamed to `data_sources_csv_sources` (DATA_SOURCES_RENAMES). The empty
+  // leftover was re-created on every push by a now-removed PRE_CREATE_SQL entry.
+  "csv_data_sources",
+];
+
+async function dropRetiredTables() {
+  if (!process.env.DATABASE_URL) return;
+  if (RETIRED_TABLES.length === 0) return;
+  let sql;
+  try {
+    sql = require("postgres")(process.env.DATABASE_URL);
+    for (const table of RETIRED_TABLES) {
+      const exists = await sql`
+        select exists (
+          select 1 from information_schema.tables
+          where table_schema = 'public' and table_name = ${table}
+        ) as exists`;
+      if (!exists[0]?.exists) continue;
+      const rows = await sql.unsafe(
+        `select count(*)::text as n from "${table}"`,
+      );
+      const n = Number(rows[0]?.n ?? 0);
+      if (n > 0) {
+        throw new Error(
+          `retired table "${table}" still holds ${n} row(s) — refusing to drop it. ` +
+            "Its rows were expected to have been carried across by a rename step; " +
+            "check them by hand before removing the entry from RETIRED_TABLES.",
+        );
+      }
+      await sql.unsafe(`DROP TABLE IF EXISTS "${table}"`);
+      console.log(`[migrate] dropped retired table ${table}`);
+    }
+  } catch (e) {
+    // FATAL, for the same reason as dropRetiredColumns: a skipped drop is the
+    // stray DROP that hangs push on a rename prompt.
+    console.error("[migrate] retired-table drop FAILED:", e.message);
+    throw e;
+  } finally {
+    if (sql) await sql.end();
+  }
+}
 
 async function dropRetiredColumns() {
   if (!process.env.DATABASE_URL) return;
@@ -1618,6 +1671,7 @@ async function main() {
   // Before every rename step and before push: see RETIRED_COLUMNS for why an
   // add+drop pair on one table has to be split.
   await dropRetiredColumns();
+  await dropRetiredTables();
   await migrateExplorerTables();
   await migrateA11yBaselineOwnership();
   await migrateGamificationTables();

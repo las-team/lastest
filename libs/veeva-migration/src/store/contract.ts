@@ -949,7 +949,20 @@ export function stateStoreContract(
           event: "run.end",
         });
         const all = await s.auditLog.list();
-        expect(all.map((e) => e.id)).toEqual([1, 2, 3]);
+        // Strictly increasing, not literally `[1, 2, 3]`.
+        //
+        // The exact values only ever held for a store whose id sequence was
+        // fresh — the in-memory one, and the deleted `PostgresStateStore` when
+        // its integration test gave each run a private schema. A store whose
+        // isolation is a tenant key inside a shared table (the app's
+        // `PluginDataStateStore`) has a sequence that keeps climbing, and
+        // nothing in the engine depends on the first id being 1: `id` exists to
+        // order an append-only log. Asserting monotonicity tests the store;
+        // asserting `[1, 2, 3]` tested the fixture.
+        const ids = all.map((e) => e.id as number);
+        expect(ids).toHaveLength(3);
+        expect(ids[1]).toBeGreaterThan(ids[0]!);
+        expect(ids[2]).toBeGreaterThan(ids[1]!);
         expect(all[0]).toMatchObject({
           detail: { mode: "init" },
           event: "run.start",
@@ -957,16 +970,18 @@ export function stateStoreContract(
         expect(all[2].detail ?? null).toBeNull();
         expect(
           (await s.auditLog.list({ runId: "r1" })).map((e) => e.id),
-        ).toEqual([1, 2]);
+        ).toEqual([ids[0], ids[1]]);
         expect(
           (await s.auditLog.list({ event: "run.end" })).map((e) => e.id),
-        ).toEqual([3]);
+        ).toEqual([ids[2]]);
+        // `limit` is a tail: the last two events, not the first two.
         expect((await s.auditLog.list({ limit: 2 })).map((e) => e.id)).toEqual([
-          2, 3,
+          ids[1],
+          ids[2],
         ]);
         expect(
           (await s.auditLog.list({ runId: "r1", limit: 1 })).map((e) => e.id),
-        ).toEqual([2]);
+        ).toEqual([ids[1]]);
       });
     });
 

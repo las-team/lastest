@@ -90,7 +90,51 @@ Three structural properties now hold, none of them by discipline:
 `e2e/veeva-migration-store.integration.test.ts` runs the engine's own
 `stateStoreContract` against the new store and then asserts the three leaks are
 gone by construction, including the watermark collision with two projects on the
-same vault.
+same vault. **38 cases, all passing against a real Postgres.**
+
+### The contract suite earned its place: it caught nine real bugs
+
+Worth recording, because the temptation with a 900-line store translation is to
+eyeball it. The first run was **20 failures of 38**, all of them behaviour the
+deleted `PostgresStateStore` got from machinery in `sql.ts` that did not survive
+the move to drizzle:
+
+- `c("sfdc_id", …, { sfdcId: true })` normalised 15-char Salesforce ids to 18 on
+  the way in and out. Lost → every id-keyed lookup in `id_map`, `row_results`,
+  `pending_fk` and `fk_index` missed on a 15-char id.
+- `dedupeRows()` folded duplicate keys inside one batch, because Postgres
+  refuses to `ON CONFLICT DO UPDATE` the same row twice in one statement
+  (SQLSTATE 21000). Lost → `putMany` raised on a repeated id, which is a normal
+  input.
+- The store stamped its own `vaultDns` over the row's, and `probeResults.set`
+  did the same. Lost → a row could claim a second vault inside a store bound to
+  one.
+- `runs.create` silently ignored a duplicate run id (`onConflictDoNothing`), and
+  `runs.update` silently hit nothing for an unknown run. Both must throw; the
+  first would let two runs share an id, the second is how a terminal status goes
+  missing.
+- `runs.update` passed `undefined` through to `SET`, nulling a mapping hash on
+  any partial patch.
+- `merge` neither inserted a tombstone for an unmapped loser nor threw on a
+  missing survivor (§3.4).
+- `findings.previous()` ordered by `started_at`. The engine defines it as the
+  run before this one in **creation** order, and a re-run of an earlier wave
+  carries an older timestamp — the `seq` column exists for this and was dropped
+  in translation.
+- `auditLog.list({ limit })` returned the head. It is a tail: a caller asking
+  for 5 wants the last 5 events.
+- `countFailedByType` bucketed a null error type as `"unknown"`; the reference
+  uses `"UNKNOWN"`, and the value lands in a report beside real Vault codes.
+
+One assertion in the shared contract was changed rather than satisfied:
+`auditLog` asserted the first three ids are literally `[1, 2, 3]`. That only
+ever held for a store with a fresh id sequence — the in-memory one, and the old
+postgres one because its integration test gave each run a private schema. A
+store whose isolation is a tenant key inside a shared table has a sequence that
+keeps climbing, and nothing in the engine depends on the first id being 1
+(`id` orders an append-only log). The assertion now checks the ids are strictly
+increasing and expresses the filter/tail cases in terms of the ids observed, so
+it tests the store instead of the fixture.
 
 ### Why the integration test is in `e2e/`, not in the plugin
 
@@ -240,8 +284,36 @@ change.
   code this migration added.
 - `grep -rn '@/' plugins/veeva-migration/src` — doc comments only, no imports.
   The manifest lists no `postgres`, `@lastest/db`, `playwright` or AI SDK.
-- **Not yet run:** `pnpm db:push` and `pnpm test:integration`. Both mutate the
-  local dev database — the push renames four tables, drops nine FKs and drops
-  the empty `veeva_migration` schema — so they are left for a deliberate run
-  rather than executed from a worktree against a database another branch is
-  checked out against.
+- `pnpm db:push` against local postgres: `[✓] Changes applied`. All 17
+  `veeva_migration_*` tables exist; verified in the catalogue that **no FK
+  points from any of them at a core table**, and that every engine table's
+  primary key leads with `project_id` — `watermarks` included, which is the key
+  whose absence caused the silent data skip.
+- `pnpm test:integration` for the store suite: **38 of 38** against a real
+  database, including the cross-project watermark, runs and id-map assertions
+  and the cascade-on-project-delete check.
+
+### Two pre-existing blockers found while doing it
+
+Neither is caused by this change; both had to be fixed for `db:push` to
+complete at all, and both would have hit the next release regardless.
+
+1. **`pnpm db:push` silently skips every pre-push step unless `DATABASE_URL` is
+   exported.** `scripts/migrate.js` guards each step with
+   `if (!process.env.DATABASE_URL) return;` and nothing loads `.env.local`,
+   while `drizzle.config.ts` falls back to a hardcoded local URL — so
+   `drizzle-kit push` runs while the renames, backfills and FK drops do not.
+   Locally that is exactly the hang the script's own header warns about: the
+   first attempt stopped on *"Is `qa_agent_tasks` created or renamed from
+   another table?"*, an unanswerable prompt, because `migrateQaAgentTables()`
+   had been skipped. Run it as
+   `DATABASE_URL=… pnpm db:push` until the script loads `.env.local` itself.
+2. **A stale `PRE_CREATE_SQL` entry caused the prompt it existed to prevent.**
+   `csv_data_sources` was pre-created there so drizzle would not mistake it for
+   a rename, but the data-sources plugin migration renamed the table to
+   `data_sources_csv_sources`. No schema declares the old name any more, so the
+   pre-create resurrected an empty table on every push, leaving push with a
+   stray DROP — and a release that adds thirteen tables turns that into *"Is
+   `veeva_migration_audit_log` renamed from `csv_data_sources`?"*. The entry is
+   removed and a `RETIRED_TABLES` step (mirroring `RETIRED_COLUMNS`) drops the
+   leftover, refusing if it unexpectedly holds rows.

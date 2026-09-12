@@ -469,6 +469,17 @@ export const veevaMigrationEngineRuns = pgTable(
       .references(() => veevaMigrationProjects.id, { onDelete: "cascade" })
       .notNull(),
     runId: text("run_id").notNull(),
+    /**
+     * Creation order, and load-bearing.
+     *
+     * `findings.previous()` is "the run before this one" for the §5 "new since
+     * last preflight" diff, and the engine's contract defines that by *creation*
+     * order, not by `started_at` — a re-run of an earlier wave can carry an
+     * older timestamp. The original `sql.ts` table had this column for the same
+     * reason; dropping it in translation broke the diff silently, which is what
+     * the contract suite caught.
+     */
+    seq: bigserial("seq", { mode: "number" }).notNull(),
     mode: text("mode").notNull(),
     wave: text("wave"),
     countries: jsonb("countries").$type<string[]>().notNull(),

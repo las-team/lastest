@@ -1,4 +1,5 @@
-import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
+import { to18 } from "@lastest/veeva-migration/transform/ids";
 import type { StateStore } from "@lastest/veeva-migration/store";
 import type {
   AuditLogEntry,
@@ -85,6 +86,37 @@ function chunk<T>(rows: readonly T[], size: number): T[][] {
   return out;
 }
 
+/**
+ * Collapse duplicate keys inside one batch, last write winning.
+ *
+ * Postgres refuses to `ON CONFLICT DO UPDATE` the same row twice in a single
+ * statement ("cannot affect row a second time", SQLSTATE 21000), so a batch the
+ * engine hands over with a repeated id has to be folded first. `keep` names the
+ * fields that must come from the FIRST occurrence rather than the last —
+ * `firstSeenRun` on the id map, `attempts` on the pending-FK queue — which is
+ * the same rule the row's `ON CONFLICT` set clause encodes for writes that
+ * arrive in separate statements.
+ */
+function dedupeBy<T extends Record<string, unknown>>(
+  rows: readonly T[],
+  key: (row: T) => string,
+  keep: readonly (keyof T)[] = [],
+): T[] {
+  const out = new Map<string, T>();
+  for (const row of rows) {
+    const k = key(row);
+    const first = out.get(k);
+    if (!first) {
+      out.set(k, row);
+      continue;
+    }
+    const merged = { ...row } as T;
+    for (const field of keep) merged[field] = first[field];
+    out.set(k, merged);
+  }
+  return [...out.values()];
+}
+
 /** Drop `null`s so an `Omit<…, "projectId">` row matches the engine's optional fields. */
 function clean<T extends Record<string, unknown>>(row: T): T {
   const out: Record<string, unknown> = {};
@@ -118,10 +150,10 @@ export class PluginDataStateStore implements StateStore {
 
   runs: StateStore["runs"] = {
     create: async (run) => {
-      await this.db
-        .insert(engineRuns)
-        .values({ projectId: this.mine, ...run })
-        .onConflictDoNothing();
+      // No `onConflictDoNothing`: the contract requires a duplicate run id to
+      // throw. Silently ignoring it would let two runs share an id and make the
+      // engine's own resume logic read the wrong one.
+      await this.db.insert(engineRuns).values({ projectId: this.mine, ...run });
     },
     get: async (runId) => {
       const [row] = await this.db
@@ -133,12 +165,36 @@ export class PluginDataStateStore implements StateStore {
       return row ? (clean(row) as unknown as RunRecord) : undefined;
     },
     update: async (runId, patch) => {
-      await this.db
+      // `undefined` means "leave alone" and `null` means "clear" — drizzle's
+      // `.set()` does not draw that distinction, so the undefined keys are
+      // stripped here. Passing them through would null a mapping hash on any
+      // partial patch.
+      const set = Object.fromEntries(
+        Object.entries(patch).filter(([, v]) => v !== undefined),
+      );
+      if (Object.keys(set).length === 0) {
+        const [exists] = await this.db
+          .select({ runId: engineRuns.runId })
+          .from(engineRuns)
+          .where(
+            and(
+              eq(engineRuns.projectId, this.mine),
+              eq(engineRuns.runId, runId),
+            ),
+          );
+        if (!exists) throw new Error(`run ${runId} not found`);
+        return;
+      }
+      const updated = await this.db
         .update(engineRuns)
-        .set(patch)
+        .set(set)
         .where(
           and(eq(engineRuns.projectId, this.mine), eq(engineRuns.runId, runId)),
-        );
+        )
+        .returning({ runId: engineRuns.runId });
+      // Throwing on an unknown run is the contract: a patch that silently hits
+      // nothing is how a run's terminal status goes missing.
+      if (updated.length === 0) throw new Error(`run ${runId} not found`);
     },
     list: async (filter) => {
       const where = [eq(engineRuns.projectId, this.mine)];
@@ -234,7 +290,7 @@ export class PluginDataStateStore implements StateStore {
             eq(idMap.projectId, this.mine),
             eq(idMap.vaultDns, this.vaultDns),
             eq(idMap.objectKey, objectKey),
-            eq(idMap.sfdcId, sfdcId),
+            eq(idMap.sfdcId, to18(sfdcId)),
           ),
         );
       return row ? (clean(row) as unknown as IdMapRow) : undefined;
@@ -244,40 +300,55 @@ export class PluginDataStateStore implements StateStore {
     },
     putMany: async (rows) => {
       if (rows.length === 0) return;
-      for (const batch of chunk(rows, this.batchSize)) {
-        await this.db
-          .insert(idMap)
-          .values(batch.map((r) => ({ projectId: this.mine, ...r })))
-          .onConflictDoUpdate({
-            target: [
-              idMap.projectId,
-              idMap.vaultDns,
-              idMap.objectKey,
-              idMap.sfdcId,
-            ],
-            // `firstSeenRun` is deliberately absent: it is the one column an
-            // upsert must not touch (§2.4).
-            set: {
-              vaultObject: sql`excluded.vault_object`,
-              vaultId: sql`excluded.vault_id`,
-              country: sql`excluded.country`,
-              matchMethod: sql`excluded.match_method`,
-              mergedInto: sql`excluded.merged_into`,
-              lastSeenRun: sql`excluded.last_seen_run`,
-              sourceHash: sql`excluded.source_hash`,
-              verifiedHash: sql`excluded.verified_hash`,
-              verifiedAt: sql`excluded.verified_at`,
-              deletedAt: sql`excluded.deleted_at`,
-              objectType: sql`excluded.object_type`,
-              dryRun: sql`excluded.dry_run`,
-            },
-          });
+      // Ids normalised and the store's own vault stamped over the row's — the
+      // id map is bound to one target vault (§2.4), so a row claiming another
+      // is a caller mistake, not a second mapping.
+      const normalised = dedupeBy(
+        rows.map((r) => ({
+          ...r,
+          sfdcId: to18(r.sfdcId),
+          mergedInto: r.mergedInto ? to18(r.mergedInto) : r.mergedInto,
+          vaultDns: this.vaultDns,
+        })),
+        (r) => `${r.objectKey}|${r.sfdcId}`,
+        ["firstSeenRun"],
+      );
+      for (const batch of chunk(normalised, this.batchSize)) {
+        await this.liveSlotGuard(async () => {
+          await this.db
+            .insert(idMap)
+            .values(batch.map((r) => ({ projectId: this.mine, ...r })))
+            .onConflictDoUpdate({
+              target: [
+                idMap.projectId,
+                idMap.vaultDns,
+                idMap.objectKey,
+                idMap.sfdcId,
+              ],
+              // `firstSeenRun` is deliberately absent: it is the one column an
+              // upsert must not touch (§2.4).
+              set: {
+                vaultObject: sql`excluded.vault_object`,
+                vaultId: sql`excluded.vault_id`,
+                country: sql`excluded.country`,
+                matchMethod: sql`excluded.match_method`,
+                mergedInto: sql`excluded.merged_into`,
+                lastSeenRun: sql`excluded.last_seen_run`,
+                sourceHash: sql`excluded.source_hash`,
+                verifiedHash: sql`excluded.verified_hash`,
+                verifiedAt: sql`excluded.verified_at`,
+                deletedAt: sql`excluded.deleted_at`,
+                objectType: sql`excluded.object_type`,
+                dryRun: sql`excluded.dry_run`,
+              },
+            });
+        });
       }
     },
     bulkGet: async (objectKey, sfdcIds) => {
       const out = new Map<string, IdMapRow>();
       if (sfdcIds.length === 0) return out;
-      for (const batch of chunk(sfdcIds, this.batchSize)) {
+      for (const batch of chunk(sfdcIds.map(to18), this.batchSize)) {
         const rows = await this.db
           .select()
           .from(idMap)
@@ -318,29 +389,55 @@ export class PluginDataStateStore implements StateStore {
             eq(idMap.projectId, this.mine),
             eq(idMap.vaultDns, this.vaultDns),
             eq(idMap.objectKey, objectKey),
-            eq(idMap.sfdcId, sfdcId),
+            eq(idMap.sfdcId, to18(sfdcId)),
           ),
         );
     },
     merge: async (objectKey, loserSfdcId, survivorSfdcId, runId) => {
       const survivor = await this.idMap.get(objectKey, survivorSfdcId);
-      await this.db
+      // A merge into an unmapped survivor is not recoverable: there is no Vault
+      // id for the children to be re-pointed at.
+      if (!survivor)
+        throw new Error(`merge survivor ${survivorSfdcId} not in id map`);
+      const loser = to18(loserSfdcId);
+      const survivorId = to18(survivorSfdcId);
+      const updated = await this.db
         .update(idMap)
         .set({
-          mergedInto: survivorSfdcId,
-          lastSeenRun: runId,
+          mergedInto: survivorId,
           // The loser follows the survivor's Vault id (§3.4): children
           // re-pointed through the loser must land on the surviving record.
-          ...(survivor ? { vaultId: survivor.vaultId } : {}),
+          vaultId: survivor.vaultId,
+          matchMethod: "merged",
+          lastSeenRun: runId,
         })
         .where(
           and(
             eq(idMap.projectId, this.mine),
             eq(idMap.vaultDns, this.vaultDns),
             eq(idMap.objectKey, objectKey),
-            eq(idMap.sfdcId, loserSfdcId),
+            eq(idMap.sfdcId, loser),
           ),
-        );
+        )
+        .returning({ sfdcId: idMap.sfdcId });
+      if (updated.length > 0) return;
+      // §3.4: a loser SFDC never mapped on its own still needs a tombstone, so
+      // a child pointing at it resolves to the survivor rather than dangling.
+      await this.liveSlotGuard(() =>
+        this.db.insert(idMap).values({
+          ...survivor,
+          projectId: this.mine,
+          vaultDns: this.vaultDns,
+          sfdcId: loser,
+          mergedInto: survivorId,
+          matchMethod: "merged",
+          firstSeenRun: runId,
+          lastSeenRun: runId,
+          sourceHash: null,
+          verifiedHash: null,
+          verifiedAt: null,
+        }),
+      );
     },
     setSourceHash: async (objectKey, sfdcId, sourceHash, runId) => {
       await this.db
@@ -351,7 +448,7 @@ export class PluginDataStateStore implements StateStore {
             eq(idMap.projectId, this.mine),
             eq(idMap.vaultDns, this.vaultDns),
             eq(idMap.objectKey, objectKey),
-            eq(idMap.sfdcId, sfdcId),
+            eq(idMap.sfdcId, to18(sfdcId)),
           ),
         );
     },
@@ -364,7 +461,7 @@ export class PluginDataStateStore implements StateStore {
             eq(idMap.projectId, this.mine),
             eq(idMap.vaultDns, this.vaultDns),
             eq(idMap.objectKey, objectKey),
-            eq(idMap.sfdcId, sfdcId),
+            eq(idMap.sfdcId, to18(sfdcId)),
           ),
         );
     },
@@ -397,6 +494,35 @@ export class PluginDataStateStore implements StateStore {
       return deleted.length;
     },
   };
+
+  /**
+   * Translate the partial unique index into the error callers match on.
+   *
+   * `id_map_vault_uidx` is the engine's name for "one live Vault record per
+   * (vault_object, vault_id)", and both the reference store and the engine's
+   * own error handling key off that string. The physical index here has to
+   * carry a plugin-namespaced name, so the name callers depend on is restored
+   * in the message rather than in the catalogue.
+   */
+  private async liveSlotGuard<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (err) {
+      // The index name is on the postgres error drizzle wraps, not on the
+      // wrapper's `message` (which carries the SQL and the params).
+      const cause = (err as { cause?: { constraint_name?: string } })?.cause;
+      const constraint =
+        cause?.constraint_name ??
+        (err instanceof Error ? err.message : String(err));
+      if (/uq_veeva_migration_id_map_vault/.test(constraint)) {
+        throw new Error(
+          `id_map_vault_uidx violation: a live row already maps that (vaultObject, vaultId)`,
+          { cause: err },
+        );
+      }
+      throw err;
+    }
+  }
 
   /**
    * Keyset pagination, not a cursor: `core/data` hands over a query surface,
@@ -435,7 +561,11 @@ export class PluginDataStateStore implements StateStore {
   rowResults: StateStore["rowResults"] = {
     upsert: async (rows) => {
       if (rows.length === 0) return;
-      for (const batch of chunk(rows, this.batchSize)) {
+      const normalised = dedupeBy(
+        rows.map((r) => ({ ...r, sfdcId: to18(r.sfdcId) })),
+        (r) => `${r.runId}|${r.objectKey}|${r.sfdcId}`,
+      );
+      for (const batch of chunk(normalised, this.batchSize)) {
         await this.db
           .insert(rowResults)
           .values(batch.map((r) => ({ projectId: this.mine, ...r })))
@@ -469,7 +599,7 @@ export class PluginDataStateStore implements StateStore {
             eq(rowResults.projectId, this.mine),
             eq(rowResults.runId, runId),
             eq(rowResults.objectKey, objectKey),
-            eq(rowResults.sfdcId, sfdcId),
+            eq(rowResults.sfdcId, to18(sfdcId)),
           ),
         );
       return row ? (clean(row) as unknown as RowResult) : undefined;
@@ -541,7 +671,9 @@ export class PluginDataStateStore implements StateStore {
         )
         .groupBy(rowResults.errorType);
       const out: Record<string, number> = {};
-      for (const r of rows) out[r.errorType ?? "unknown"] = r.n;
+      // `UNKNOWN`, upper-case, matching the reference store: the value ends
+      // up in a report's error breakdown next to real Vault error codes.
+      for (const r of rows) out[r.errorType ?? "UNKNOWN"] = r.n;
       return out;
     },
   };
@@ -551,7 +683,18 @@ export class PluginDataStateStore implements StateStore {
   pendingFk: StateStore["pendingFk"] = {
     add: async (rows) => {
       if (rows.length === 0) return;
-      for (const batch of chunk(rows, this.batchSize)) {
+      const normalised = dedupeBy(
+        rows.map((r) => ({
+          ...r,
+          sfdcId: to18(r.sfdcId),
+          targetSfdcId: to18(r.targetSfdcId),
+        })),
+        (r) => `${r.runId}|${r.objectKey}|${r.sfdcId}|${r.field}`,
+        // `attempts` belongs to the queue, not the caller: a re-enqueue of a
+        // row already tried twice must not reset the counter to 1.
+        ["attempts"],
+      );
+      for (const batch of chunk(normalised, this.batchSize)) {
         await this.db
           .insert(pendingFk)
           .values(batch.map((r) => ({ projectId: this.mine, ...r })))
@@ -567,7 +710,7 @@ export class PluginDataStateStore implements StateStore {
               country: sql`excluded.country`,
               targetObjectKey: sql`excluded.target_object_key`,
               targetSfdcId: sql`excluded.target_sfdc_id`,
-              attempts: sql`excluded.attempts`,
+              // `attempts` deliberately absent — see the dedupe above.
               resolvedAt: sql`excluded.resolved_at`,
             },
           });
@@ -627,7 +770,7 @@ export class PluginDataStateStore implements StateStore {
       eq(pendingFk.projectId, this.mine),
       eq(pendingFk.runId, runId),
       eq(pendingFk.objectKey, objectKey),
-      eq(pendingFk.sfdcId, sfdcId),
+      eq(pendingFk.sfdcId, to18(sfdcId)),
       eq(pendingFk.field, field),
     );
   }
@@ -637,7 +780,15 @@ export class PluginDataStateStore implements StateStore {
   fkIndex: StateStore["fkIndex"] = {
     put: async (rows) => {
       if (rows.length === 0) return;
-      for (const batch of chunk(rows, this.batchSize)) {
+      const normalised = dedupeBy(
+        rows.map((r) => ({
+          ...r,
+          sfdcId: to18(r.sfdcId),
+          targetSfdcId: to18(r.targetSfdcId),
+        })),
+        (r) => `${r.objectKey}|${r.sfdcId}|${r.field}`,
+      );
+      for (const batch of chunk(normalised, this.batchSize)) {
         await this.db
           .insert(fkIndex)
           .values(batch.map((r) => ({ projectId: this.mine, ...r })))
@@ -664,7 +815,7 @@ export class PluginDataStateStore implements StateStore {
           and(
             eq(fkIndex.projectId, this.mine),
             eq(fkIndex.targetObjectKey, targetObjectKey),
-            eq(fkIndex.targetSfdcId, targetSfdcId),
+            eq(fkIndex.targetSfdcId, to18(targetSfdcId)),
           ),
         );
       return rows.map((r) => clean(r) as unknown as FkIndexRow);
@@ -677,7 +828,7 @@ export class PluginDataStateStore implements StateStore {
           and(
             eq(fkIndex.projectId, this.mine),
             eq(fkIndex.objectKey, objectKey),
-            eq(fkIndex.sfdcId, sfdcId),
+            eq(fkIndex.sfdcId, to18(sfdcId)),
           ),
         );
       return rows.map((r) => clean(r) as unknown as FkIndexRow);
@@ -779,11 +930,13 @@ export class PluginDataStateStore implements StateStore {
       return rows.map(toStoredFinding);
     },
     previous: async (currentRunId) => {
-      // The run before this one, by start time — not "the last succeeded":
-      // §5's "new since last run" diff is against whatever ran last, including
-      // a failure.
+      // The run before this one in CREATION order, and not "the last
+      // succeeded": §5's "new since last run" diff is against whatever ran
+      // last, including a failure. Creation order rather than `started_at`
+      // because a re-run of an earlier wave can carry an older timestamp —
+      // that is what `seq` is for.
       const [current] = await this.db
-        .select({ startedAt: engineRuns.startedAt })
+        .select({ seq: engineRuns.seq })
         .from(engineRuns)
         .where(
           and(
@@ -798,10 +951,10 @@ export class PluginDataStateStore implements StateStore {
         .where(
           and(
             eq(engineRuns.projectId, this.mine),
-            sql`${engineRuns.startedAt} < ${current.startedAt}`,
+            lt(engineRuns.seq, current.seq),
           ),
         )
-        .orderBy(desc(engineRuns.startedAt))
+        .orderBy(desc(engineRuns.seq))
         .limit(1);
       if (!prev) return [];
       return this.findings.list(prev.runId);
@@ -949,13 +1102,15 @@ export class PluginDataStateStore implements StateStore {
       const where = [eq(auditLog.projectId, this.mine)];
       if (filter?.runId) where.push(eq(auditLog.runId, filter.runId));
       if (filter?.event) where.push(eq(auditLog.event, filter.event));
+      // `limit` is a TAIL, not a head: the log is append-only and a caller
+      // asking for 5 wants the last 5 events, not the first 5.
       const rows = await this.db
         .select()
         .from(auditLog)
         .where(and(...where))
-        .orderBy(asc(auditLog.id))
+        .orderBy(desc(auditLog.id))
         .limit(filter?.limit ?? 500);
-      return rows.map((r) => clean(r) as unknown as AuditLogEntry);
+      return rows.reverse().map((r) => clean(r) as unknown as AuditLogEntry);
     },
   };
 
@@ -978,7 +1133,9 @@ export class PluginDataStateStore implements StateStore {
     set: async (result) => {
       await this.db
         .insert(probeResults)
-        .values({ projectId: this.mine, ...result })
+        // The store's vault, not the row's: a probe result is cached per
+        // (project, vault) and the store is bound to one vault.
+        .values({ ...result, projectId: this.mine, vaultDns: this.vaultDns })
         .onConflictDoUpdate({
           target: [
             probeResults.projectId,

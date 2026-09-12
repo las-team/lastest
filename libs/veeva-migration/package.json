@@ -11,9 +11,10 @@
     "./config/schema": "./src/config/schema.ts",
     "./run": "./src/run/index.ts",
     "./store": "./src/store/index.ts",
+    "./store/contract": "./src/store/contract.ts",
     "./testkit": "./src/testkit/index.ts",
-    "./types": "./src/types.ts",
-    "./store/contract": "./src/store/contract.ts"
+    "./transform/ids": "./src/transform/ids.ts",
+    "./types": "./src/types.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
