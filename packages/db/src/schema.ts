@@ -50,10 +50,9 @@ export * from "./schema/triage";
 // Data-driven coverage: dimensions, occurring cells, cell<->run attribution,
 // coverage snapshots. Slated for extraction into `plugins/coverage`.
 export * from "./schema/coverage";
-// Veeva CRM -> Vault CRM migrations: projects, waves, engine runs and the
-// findings a lead has accepted. Per-row engine state lives in its own
-// `veeva_migration` schema, not here.
-export * from "./schema/migrations";
+// Veeva CRM -> Vault CRM migrations are NOT here: they are
+// `@lastest/plugin-veeva-migration`'s own tables, declared in its manifest's
+// `schema` and reached only through `ctx.data`. Core never reads them.
 
 // ── Feature surfaces (RFC §7 marks both for extraction into plugins) ─────────
 // QA agent / explorer / app map / RCA session state.

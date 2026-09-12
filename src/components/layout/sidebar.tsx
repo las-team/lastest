@@ -75,8 +75,13 @@ const EARLY_ADOPTER_ITEMS = new Set([
   "Impact",
   // The Veeva CRM -> Vault CRM migration console. Early Adopter for the same
   // reason as the rest of this set, plus one it does not share: it writes to a
-  // customer's production Vault. `lib/migration/access.ts` enforces the same
-  // switch server-side — this line is only the nav's half of it.
+  // customer's production Vault. `VeevaMigrationHost.assertRepoSettingsAccess`
+  // enforces the same switch server-side — this line is only the nav's half.
+  //
+  // Still hardcoded although `@lastest/plugin-veeva-migration` declares
+  // `ui.nav` in its manifest: nothing in the app reads `manifest.ui.nav` yet
+  // (`explorer` declares one too and is hardcoded here as well). Building that
+  // consumer would let this whole file shrink; it is its own PR.
   "Migrations",
 ]);
 

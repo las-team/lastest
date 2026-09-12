@@ -101,6 +101,7 @@
     "@lastest/plugin-recorder": "workspace:*",
     "@lastest/plugin-scheduling": "workspace:*",
     "@lastest/plugin-share": "workspace:*",
+    "@lastest/plugin-veeva-migration": "workspace:*",
     "@lastest/pool-service": "workspace:*",
     "@lastest/recording-codegen": "workspace:*",
     "@lastest/route-scan": "workspace:*",

@@ -1,16 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { getCurrentSession } from "@/lib/auth";
-import * as queries from "@/lib/db/queries";
-import { hasMigrationAccess } from "@/lib/migration/access";
-import { MigrationLocked } from "@/components/migrations/migration-locked";
-import { RunDetail } from "@/components/migrations/run-detail";
-import {
-  engineTarget,
-  readConsoleEngineData,
-} from "@/lib/migration/engine-store";
-import type { VaultConnectorConfig } from "@/lib/db/schema";
+import { MigrationLocked } from "@lastest/plugin-veeva-migration/ui/locked";
+import { RunDetail } from "@lastest/plugin-veeva-migration/ui/run-detail";
+import { readMigrationRun } from "@lastest/plugin-veeva-migration/page-reads";
 
 export const dynamic = "force-dynamic";
 
@@ -19,8 +12,8 @@ export const dynamic = "force-dynamic";
  *
  * The console's panels show the LATEST run of a stage; this is where an older
  * one is opened, and where the numbers a report would contain are read without
- * a file. Same engine store, same tables, no summarising — a run page that
- * paraphrased its run would be worse than useless in an audit.
+ * a file. Same tables, same rows, no summarising — a run page that paraphrased
+ * its run would be worse than useless in an audit.
  */
 export default async function MigrationRunPage({
   params,
@@ -28,27 +21,16 @@ export default async function MigrationRunPage({
   params: Promise<{ id: string; runId: string }>;
 }) {
   const { id, runId } = await params;
-  const session = await getCurrentSession();
-  if (!hasMigrationAccess(session?.team)) return <MigrationLocked />;
 
-  const run = await queries.getMigrationRun(runId);
-  if (!run || run.projectId !== id) notFound();
+  let data;
+  try {
+    data = await readMigrationRun(id, runId);
+  } catch {
+    return <MigrationLocked />;
+  }
+  if (!data) notFound();
 
-  const detail = await queries.getMigrationProjectDetail(id);
-  if (!detail) notFound();
-
-  const repo = await queries.getRepository(detail.project.repositoryId);
-  if (!repo || repo.teamId !== session?.team?.id) notFound();
-
-  const vaultDns = (detail.target?.config as VaultConnectorConfig | undefined)
-    ?.vaultDns;
-  const engine = await readConsoleEngineData(
-    engineTarget(vaultDns),
-    run.engineRunId,
-  );
-  const wave = run.waveId
-    ? (detail.waves.find((w) => w.id === run.waveId) ?? null)
-    : null;
+  const { project, run, waveLabel, engine } = data;
 
   return (
     <div className="p-6 space-y-6 max-w-6xl">
@@ -58,12 +40,12 @@ export default async function MigrationRunPage({
           className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
         >
           <ChevronLeft className="h-3 w-3" />
-          {detail.project.name}
+          {project.name}
         </Link>
       </div>
       <RunDetail
         run={run}
-        waveLabel={wave?.label ?? null}
+        waveLabel={waveLabel}
         findings={engine.findings}
         reconciliation={engine.reconciliation}
         failedRows={engine.failedRows}

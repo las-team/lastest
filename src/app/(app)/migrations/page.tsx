@@ -1,8 +1,8 @@
 import { getCurrentSession } from "@/lib/auth";
 import * as queries from "@/lib/db/queries";
-import { hasMigrationAccess } from "@/lib/migration/access";
-import { MigrationsIndexClient } from "./migrations-index-client";
-import { MigrationLocked } from "@/components/migrations/migration-locked";
+import { MigrationsIndexClient } from "@lastest/plugin-veeva-migration/ui/index-client";
+import { MigrationLocked } from "@lastest/plugin-veeva-migration/ui/locked";
+import { readMigrationIndex } from "@lastest/plugin-veeva-migration/page-reads";
 
 export const dynamic = "force-dynamic";
 
@@ -12,13 +12,16 @@ export const dynamic = "force-dynamic";
  * A repo usually has one or two (UAT rehearsal, then PROD), so this is a short
  * list rather than a table: the real screen is the console at
  * `/migrations/[id]`, and this page exists to get you there and to create one.
+ *
+ * The route keeps what Next owns — selected repository, rendering, metadata —
+ * and nothing else. Reads and the access gate belong to
+ * `@lastest/plugin-veeva-migration` (recipe §6), which is why a page cannot
+ * forget one: `readMigrationIndex` calls the gate itself and throws.
  */
 export default async function MigrationsPage() {
   const session = await getCurrentSession();
   const teamId = session?.team?.id;
   const userId = session?.user?.id;
-
-  if (!hasMigrationAccess(session?.team)) return <MigrationLocked />;
 
   const selectedRepo = teamId
     ? await queries.getSelectedRepository(userId, teamId)
@@ -35,32 +38,25 @@ export default async function MigrationsPage() {
     );
   }
 
-  const [projects, connectors, environments] = await Promise.all([
-    queries.listMigrationProjects(selectedRepo.id),
-    queries.listConnectors(selectedRepo.id),
-    queries.listEnvironments(selectedRepo.id),
-  ]);
+  let data;
+  try {
+    data = await readMigrationIndex(selectedRepo.id);
+  } catch {
+    // The gate throws for a team without Early Adopter mode and for a member
+    // without `repos:settings`. Both render the same locked panel — the page is
+    // not the place to tell them apart.
+    return <MigrationLocked />;
+  }
 
-  // Waves and the newest run per project drive the list's status line. Both are
-  // small per project and the list is short, so a per-project pair of queries
-  // is cheaper than the aggregate query it would take to avoid them.
-  const summaries = await Promise.all(
-    projects.map(async (p) => {
-      const [waves, runs] = await Promise.all([
-        queries.listMigrationWaves(p.id),
-        queries.listMigrationRuns(p.id, 1),
-      ]);
-      return { projectId: p.id, waves, lastRun: runs[0] ?? null };
-    }),
-  );
+  const environments = await queries.listEnvironments(selectedRepo.id);
 
   return (
     <MigrationsIndexClient
       repositoryId={selectedRepo.id}
       repoName={selectedRepo.fullName}
-      projects={projects}
-      summaries={summaries}
-      connectors={connectors}
+      projects={data.projects}
+      summaries={data.summaries}
+      connectors={[...data.connectors]}
       environments={environments}
     />
   );
