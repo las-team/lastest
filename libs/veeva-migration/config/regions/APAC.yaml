@@ -1,0 +1,5 @@
+# regions.APAC — Asia-Pacific (§7.3)
+# Body is the `regions.APAC` block itself; JP / AU / KR layer on top.
+# CN is deliberately NOT in this region: it targets a separate China-hosted
+# vault (PIPL, §7.4.4) and carries its own `dataResidency: cn`.
+dataResidency: jp # Japan-hosted vault + JP staging (§7.5); APPI audit log as record of provision [GEN]

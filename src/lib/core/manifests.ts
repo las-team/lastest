@@ -18,6 +18,7 @@ import { rcaPlugin } from "@lastest/plugin-rca";
 import { recorderPlugin } from "@lastest/plugin-recorder";
 import { schedulingPlugin } from "@lastest/plugin-scheduling";
 import { sharePlugin } from "@lastest/plugin-share";
+import { veevaMigrationPlugin } from "@lastest/plugin-veeva-migration";
 import type { resolveRegistry } from "@lastest/kernel";
 
 /**
@@ -59,4 +60,5 @@ export const MANIFESTS: Parameters<typeof resolveRegistry>[0] = [
   schedulingPlugin,
   quickstartPlugin,
   qaAgentPlugin,
+  veevaMigrationPlugin,
 ];

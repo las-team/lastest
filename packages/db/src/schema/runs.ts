@@ -138,6 +138,9 @@ export type BackgroundJobType =
   | "storage_cleanup"
   | "spec_import"
   | "url_diff"
+  // No `migration_run`: a migration is `@lastest/plugin-veeva-migration`'s
+  // job, dispatched through `plugin_jobs` by its manifest's `jobs` handler.
+  // Core typing against a feature's shape is the edge recipe §1.6.1 forbids.
   | "coverage_sync";
 
 export type BackgroundJobStatus =

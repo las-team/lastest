@@ -1,0 +1,20 @@
+# countries.IT — Italy (§7.4.8, inherits regions.EU)
+# GDPR; codice fiscale / albo number in ID_vod__c / customer field.
+region: EU
+defaultTimezone: Europe/Rome
+postalCode: { pattern: "^\\d{5}$", onMismatch: warn }
+phone: { normalise: true, defaultRegion: IT }
+objects:
+  account:
+    fields:
+      add:
+        - { source: ID_vod__c, target: id__v, transform: text } # codice fiscale
+        - { source: Codice_Albo_IT__c, target: codice_albo__c, transform: text } # customer field
+      remove: [npi__v, pdrp_opt_out__v, pdrp_opt_out_date__v]
+  address:
+    fields:
+      add: [{ source: Brick_vod__c, target: brick__v, transform: text }]
+      remove: [dea__v, cds__v, license__v, zip_4__v]
+picklists:
+  # province sigle — remaining ~105 filled by the programme
+  address.state: { MI: milano__c, RM: roma__c }

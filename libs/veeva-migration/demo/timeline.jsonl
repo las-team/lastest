@@ -1,0 +1,175 @@
+{"t":"card","title":"Veeva CRM  →  Vault CRM","subtitle":"@lastest/veeva-migration — data migration, delta sync and cutover","lines":["Everything on screen is a real run of the migration engine.","The Salesforce org and the Vault are the package's hermetic fakes, not a live tenant."],"dur":5}
+{"t":"chapter","text":"1 · What is being migrated"}
+{"t":"caption","text":"Veeva CRM lives in Salesforce. Vault CRM is a different platform with its own objects, fields and API. This package moves the data between them — and keeps both in sync until cutover.","hold":0}
+{"t":"line","text":"","style":"out","pause":0.15}
+{"t":"line","text":"$ veeva-migration plan --config migration.yaml --wave w1","style":"cmd","pause":0.6,"type":true}
+{"t":"pause","dur":0.4}
+{"t":"line","text":"source   https://x.my.salesforce.com  (org 00D000000000001AAA, API 67.0)","style":"dim","pause":0.05}
+{"t":"line","text":"target   acme-crm.veevavault.com  (Vault CRM)","style":"dim","pause":0.05}
+{"t":"line","text":"wave     w1 · countries US","style":"dim","pause":0.05}
+{"t":"line","text":"","style":"out","pause":0.05}
+{"t":"caption","text":"A run is planned as units — one per object × country — ordered so that every foreign key is loaded after the record it points at.","hold":0}
+{"t":"line","text":"load order (FK-topological, cycles broken in a second pass):","style":"key","pause":0.05}
+{"t":"line","text":"#  unit        source object   vault object  depends on","style":"head","pause":0.04}
+{"t":"line","text":"─  ──────────  ──────────────  ────────────  ──────────","style":"dim","pause":0.02}
+{"t":"line","text":"1  account:US  Account         account__v    —         ","style":"out","pause":0.06}
+{"t":"line","text":"2  address:US  Address_vod__c  address__v    account   ","style":"out","pause":0.06}
+{"t":"line","text":"3  call2:US    Call2_vod__c    call2__v      account   ","style":"out","pause":0.06}
+{"t":"pause","dur":1}
+{"t":"chapter","text":"2 · The mapping is data, not code"}
+{"t":"caption","text":"Each object module declares its field mapping. Config layers — defaults, region, country — are folded into one materialised mapping per unit and hashed, so a mapping change is detectable between runs.","hold":0}
+{"t":"line","text":"","style":"out","pause":0.15}
+{"t":"line","text":"$ veeva-migration plan --show-mapping account --country US","style":"cmd","pause":0.6,"type":true}
+{"t":"pause","dur":0.3}
+{"t":"line","text":"account:US → account__v   mapping hash 64814ea775ff","style":"key","pause":0.05}
+{"t":"line","text":"salesforce field       vault field        transform                 req","style":"head","pause":0.04}
+{"t":"line","text":"─────────────────────  ─────────────────  ────────────────────────  ───","style":"dim","pause":0.02}
+{"t":"line","text":"Id                     legacy_crm_id__v   legacyId                  K  ","style":"out","pause":0.06}
+{"t":"line","text":"Name                   name__v            text(128)                 Y  ","style":"out","pause":0.06}
+{"t":"line","text":"Inactive_vod__c        inactive__v        bool                      n  ","style":"out","pause":0.06}
+{"t":"line","text":"Primary_Parent_vod__c  primary_parent__v  secondPass(ref(account))  n  ","style":"out","pause":0.06}
+{"t":"pause","dur":0.9}
+{"t":"chapter","text":"3 · Preflight"}
+{"t":"caption","text":"Preflight checks the plan against live metadata on both sides before a single row moves: do the target fields exist, are the types and lengths compatible, are the picklist values and object types real? Blocking findings stop the run with exit code 2.","hold":0}
+{"t":"line","text":"","style":"out","pause":0.15}
+{"t":"line","text":"$ veeva-migration preflight --config migration.yaml --wave w1","style":"cmd","pause":0.6,"type":true}
+{"t":"pause","dur":0.5}
+{"t":"line","text":"14:25:33.686 INFO  [Run] preflight done {\"run_id\":\"preflight-20260907T120000Z-g4ae\",\"mode\":\"preflight\",\"findings\":0,\"b","style":"dim","pause":0.08}
+{"t":"line","text":"resolved 3 units against acme-crm.veevavault.com metadata","style":"out","pause":0.05}
+{"t":"line","text":"findings: 0 blocking · 0 warning · 0 info","style":"out","pause":0.05}
+{"t":"line","text":"preflight ok — exit 0","style":"ok","pause":0.05}
+{"t":"pause","dur":0.8}
+{"t":"chapter","text":"4 · Dry run"}
+{"t":"caption","text":"Every mode takes --dry-run: extract and transform run for real, the load is simulated. Nothing is written to Vault and no watermark moves.","hold":0}
+{"t":"line","text":"","style":"out","pause":0.15}
+{"t":"line","text":"$ veeva-migration init --config migration.yaml --wave w1 --dry-run","style":"cmd","pause":0.6,"type":true}
+{"t":"pause","dur":0.5}
+{"t":"line","text":"14:25:33.692 INFO  [Run] preflight done {\"run_id\":\"init-20260907T120000Z-gu44\",\"mode\":\"init\",\"findings\":0,\"blocking\":f","style":"dim","pause":0.08}
+{"t":"line","text":"14:25:33.692 INFO  [Run] clocks fixed for the run {\"run_id\":\"init-20260907T120000Z-gu44\",\"mode\":\"init\",\"sfdc_now\":\"202","style":"dim","pause":0.08}
+{"t":"line","text":"14:25:33.693 INFO  [Run] step start {\"run_id\":\"init-20260907T120000Z-gu44\",\"mode\":\"init\",\"step\":0,\"keys\":[\"account\"],\"","style":"dim","pause":0.08}
+{"t":"line","text":"… 19 more log lines","style":"dim","pause":0.05}
+{"t":"line","text":"  account:US   succeeded","style":"ok","pause":0.05}
+{"t":"line","text":"  address:US   succeeded","style":"ok","pause":0.05}
+{"t":"line","text":"  call2:US     succeeded","style":"ok","pause":0.05}
+{"t":"line","text":"vault records written: account__v=0  address__v=0  call2__v=0","style":"key","pause":0.05}
+{"t":"line","text":"dry run — vault untouched","style":"dim","pause":0.05}
+{"t":"pause","dur":0.9}
+{"t":"chapter","text":"5 · Initial load"}
+{"t":"caption","text":"The real init: extract by SOQL scope, transform through the pure registry, then bulk-upsert into Vault keyed on the legacy Salesforce id — so re-running the same load is idempotent rather than duplicating.","hold":0}
+{"t":"line","text":"","style":"out","pause":0.15}
+{"t":"line","text":"$ veeva-migration init --config migration.yaml --wave w1","style":"cmd","pause":0.6,"type":true}
+{"t":"pause","dur":0.5}
+{"t":"line","text":"14:25:33.743 INFO  [Run] dry-run id-map rows purged {\"run_id\":\"init-20260907T120000Z-op1a\",\"mode\":\"init\",\"purged\":6}","style":"dim","pause":0.08}
+{"t":"line","text":"14:25:33.743 INFO  [Run] preflight done {\"run_id\":\"init-20260907T120000Z-op1a\",\"mode\":\"init\",\"findings\":0,\"blocking\":f","style":"dim","pause":0.08}
+{"t":"line","text":"14:25:33.744 INFO  [Run] clocks fixed for the run {\"run_id\":\"init-20260907T120000Z-op1a\",\"mode\":\"init\",\"sfdc_now\":\"202","style":"dim","pause":0.08}
+{"t":"line","text":"14:25:33.744 INFO  [Run] step start {\"run_id\":\"init-20260907T120000Z-op1a\",\"mode\":\"init\",\"step\":0,\"keys\":[\"account\"],\"","style":"dim","pause":0.08}
+{"t":"line","text":"… 21 more log lines","style":"dim","pause":0.05}
+{"t":"line","text":"unit        status  extracted  transformed  created  updated  failed  in vault","style":"head","pause":0.04}
+{"t":"line","text":"──────────  ──────  ─────────  ───────────  ───────  ───────  ──────  ────────","style":"dim","pause":0.02}
+{"t":"line","text":"account:US  pass       2          2            2        0        0       2    ","style":"out","pause":0.06}
+{"t":"line","text":"address:US  pass       2          2            2        0        0       2    ","style":"out","pause":0.06}
+{"t":"line","text":"call2:US    pass       2          2            2        0        0       2    ","style":"out","pause":0.06}
+{"t":"line","text":"run init-20260907T120000Z-op1a — exit 0","style":"ok","pause":0.05}
+{"t":"pause","dur":0.9}
+{"t":"caption","text":"Which is real data in the target vault — Salesforce field names renamed to Vault ones, references rewritten to Vault ids.","hold":0}
+{"t":"line","text":"","style":"out","pause":0.15}
+{"t":"line","text":"$ veeva-migration query 'SELECT id, name__v, primary_parent__v FROM account__v'","style":"cmd","pause":0.6,"type":true}
+{"t":"pause","dur":0.3}
+{"t":"line","text":"vault id         name__v        primary_parent__v  legacy id (crosswalk)","style":"head","pause":0.04}
+{"t":"line","text":"───────────────  ─────────────  ─────────────────  ─────────────────────","style":"dim","pause":0.02}
+{"t":"line","text":"V0U000000001001  Acme Hospital  —                  001000000000001AAA   ","style":"out","pause":0.06}
+{"t":"line","text":"V0U000000001002  Dr Jane Doe    V0U000000001001    001000000000002AAA   ","style":"out","pause":0.06}
+{"t":"pause","dur":0.8}
+{"t":"caption","text":"Every migrated row is recorded in an id crosswalk. Foreign keys are only ever resolved through it — never guessed — so a reference that has not been loaded yet becomes a pending FK instead of a bad write.","hold":0}
+{"t":"line","text":"","style":"out","pause":0.15}
+{"t":"line","text":"$ veeva-migration id-map --object account --country US","style":"cmd","pause":0.6,"type":true}
+{"t":"pause","dur":0.3}
+{"t":"line","text":"salesforce id       vault id         country","style":"head","pause":0.04}
+{"t":"line","text":"──────────────────  ───────────────  ───────","style":"dim","pause":0.02}
+{"t":"line","text":"001000000000001AAA  V0U000000001001  US     ","style":"out","pause":0.06}
+{"t":"line","text":"001000000000002AAA  V0U000000001002  US     ","style":"out","pause":0.06}
+{"t":"pause","dur":0.9}
+{"t":"chapter","text":"6 · Delta sync"}
+{"t":"caption","text":"Cutover is not a single moment: the source keeps changing while the project runs. So the tool runs deltas — a SystemModstamp window with overlap and a safety lag, plus the deleted-row feed.","hold":0}
+{"t":"line","text":"meanwhile, back in Salesforce:","style":"dim","pause":0.05}
+{"t":"line","text":"  · Account 001…001  renamed  → “Acme Hospital (Downtown)”","style":"warn","pause":0.05}
+{"t":"line","text":"  · Account 001…004  created  → “Dr Alan Grant” (child of 001…001)","style":"warn","pause":0.05}
+{"t":"line","text":"  · Account 001…002  touched  → same values, new SystemModstamp","style":"warn","pause":0.05}
+{"t":"line","text":"  · Call2   a0K…002  deleted","style":"warn","pause":0.05}
+{"t":"line","text":"  · everything else untouched","style":"dim","pause":0.05}
+{"t":"line","text":"","style":"out","pause":0.15}
+{"t":"line","text":"$ veeva-migration delta --config migration.yaml --wave w1","style":"cmd","pause":0.6,"type":true}
+{"t":"pause","dur":0.5}
+{"t":"line","text":"14:25:33.771 INFO  [Run] preflight done {\"run_id\":\"delta-20260909T120000Z-kh13\",\"mode\":\"delta\",\"findings\":0,\"blocking\"","style":"dim","pause":0.08}
+{"t":"line","text":"14:25:33.771 INFO  [Run] clocks fixed for the run {\"run_id\":\"delta-20260909T120000Z-kh13\",\"mode\":\"delta\",\"sfdc_now\":\"2","style":"dim","pause":0.08}
+{"t":"line","text":"14:25:33.772 INFO  [Run] step start {\"run_id\":\"delta-20260909T120000Z-kh13\",\"mode\":\"delta\",\"step\":0,\"keys\":[\"account\"]","style":"dim","pause":0.08}
+{"t":"line","text":"14:25:33.773 INFO  [Extract] extracting (REST) {\"run_id\":\"delta-20260909T120000Z-kh13\",\"object_key\":\"account\",\"country","style":"dim","pause":0.08}
+{"t":"line","text":"… 18 more log lines","style":"dim","pause":0.05}
+{"t":"line","text":"unit        status  extracted  unchanged (hash skip)  created  updated  deleted rows  applied  ignored","style":"head","pause":0.04}
+{"t":"line","text":"──────────  ──────  ─────────  ─────────────────────  ───────  ───────  ────────────  ───────  ───────","style":"dim","pause":0.02}
+{"t":"line","text":"account:US  pass       3          1                      1        1        0             0        0   ","style":"out","pause":0.06}
+{"t":"line","text":"address:US  pass       0          0                      0        0        0             0        0   ","style":"out","pause":0.06}
+{"t":"line","text":"call2:US    pass       0          0                      0        0        1             0        1   ","style":"out","pause":0.06}
+{"t":"line","text":"the renamed account was updated in place, the new one created, the touched one hash-skipped —","style":"dim","pause":0.05}
+{"t":"line","text":"and the deleted call was routed by this module's delete policy: ignored in Vault, recorded in the report","style":"dim","pause":0.05}
+{"t":"caption","text":"A row whose source hash has not changed is never re-sent to Vault. And the watermark only advances once a unit actually succeeds — an interrupted run resumes its window instead of losing it.","hold":0}
+{"t":"line","text":"object   kind      watermark                 run         ","style":"head","pause":0.04}
+{"t":"line","text":"───────  ────────  ────────────────────────  ────────────","style":"dim","pause":0.02}
+{"t":"line","text":"account  modstamp  2026-09-09T11:55:00.000Z  delta-202609","style":"out","pause":0.06}
+{"t":"line","text":"account  deleted   2026-09-09T11:55:00.000Z  delta-202609","style":"out","pause":0.06}
+{"t":"line","text":"address  modstamp  2026-09-09T11:55:00.000Z  delta-202609","style":"out","pause":0.06}
+{"t":"line","text":"address  deleted   2026-09-09T11:55:00.000Z  delta-202609","style":"out","pause":0.06}
+{"t":"line","text":"call2    modstamp  2026-09-09T11:55:00.000Z  delta-202609","style":"out","pause":0.06}
+{"t":"line","text":"call2    deleted   2026-09-09T11:55:00.000Z  delta-202609","style":"out","pause":0.06}
+{"t":"line","text":"delta run delta-20260909T120000Z-kh13 — exit 0","style":"ok","pause":0.05}
+{"t":"pause","dur":0.9}
+{"t":"caption","text":"And the rename landed in Vault, on the same record — not a duplicate.","hold":0}
+{"t":"line","text":"","style":"out","pause":0.15}
+{"t":"line","text":"$ veeva-migration query 'SELECT id, name__v FROM account__v'","style":"cmd","pause":0.6,"type":true}
+{"t":"pause","dur":0.3}
+{"t":"line","text":"vault id         name__v                 ","style":"head","pause":0.04}
+{"t":"line","text":"───────────────  ────────────────────────","style":"dim","pause":0.02}
+{"t":"line","text":"V0U000000001001  Acme Hospital (Downtown)","style":"out","pause":0.06}
+{"t":"line","text":"V0U000000001002  Dr Jane Doe             ","style":"out","pause":0.06}
+{"t":"line","text":"V0U000000001007  Dr Alan Grant           ","style":"out","pause":0.06}
+{"t":"pause","dur":0.9}
+{"t":"chapter","text":"7 · Reconcile and gate"}
+{"t":"caption","text":"Before anyone signs off, verify re-counts both sides, checks foreign keys for orphans and reads a stratified sample back out of Vault field by field. The cutover gate is what turns that into a pass or fail.","hold":0}
+{"t":"line","text":"","style":"out","pause":0.15}
+{"t":"line","text":"$ veeva-migration verify --config migration.yaml --wave w1 --fk --samples","style":"cmd","pause":0.6,"type":true}
+{"t":"pause","dur":0.5}
+{"t":"line","text":"14:25:33.792 INFO  [Run] preflight done {\"run_id\":\"verify-20260909T120000Z-0bbn\",\"mode\":\"verify\",\"findings\":0,\"blockin","style":"dim","pause":0.08}
+{"t":"line","text":"14:25:33.792 INFO  [Run] clocks fixed for the run {\"run_id\":\"verify-20260909T120000Z-0bbn\",\"mode\":\"verify\",\"sfdc_now\":","style":"dim","pause":0.08}
+{"t":"line","text":"14:25:33.794 INFO  [Extract] extracting (REST) {\"run_id\":\"verify-20260909T120000Z-0bbn\",\"object_key\":\"account\",\"countr","style":"dim","pause":0.08}
+{"t":"line","text":"… 11 more log lines","style":"dim","pause":0.05}
+{"t":"line","text":"unit        status  sfdc scope  id map  vault count","style":"head","pause":0.04}
+{"t":"line","text":"──────────  ──────  ──────────  ──────  ───────────","style":"dim","pause":0.02}
+{"t":"line","text":"account:US  pass       3           3       3       ","style":"out","pause":0.06}
+{"t":"line","text":"address:US  pass       2           2       2       ","style":"out","pause":0.06}
+{"t":"line","text":"call2:US    pass       1           2       2       ","style":"out","pause":0.06}
+{"t":"line","text":"call2: 1 live row in source scope, 2 in the crosswalk — the deleted call is kept there, tombstoned","style":"dim","pause":0.05}
+{"t":"line","text":"verify — exit 0 (0 = gate passed)","style":"ok","pause":0.05}
+{"t":"pause","dur":0.8}
+{"t":"chapter","text":"8 · Every run leaves a report"}
+{"t":"caption","text":"Every run writes a markdown and JSON report: config and mapping hashes, per-unit timings, findings, reconciliation, and the ids of anything that failed — which is what a regulated programme has to hand an auditor.","hold":0}
+{"t":"line","text":"","style":"out","pause":0.15}
+{"t":"line","text":"$ veeva-migration report --run delta-20260909T120000Z-kh13","style":"cmd","pause":0.6,"type":true}
+{"t":"pause","dur":0.4}
+{"t":"line","text":"# Migration run delta-20260909T120000Z-kh13","style":"key","pause":0.05}
+{"t":"line","text":"","style":"out","pause":0.05}
+{"t":"line","text":"- mode: **delta** · wave: w1 · countries: US","style":"out","pause":0.05}
+{"t":"line","text":"- status: **succeeded** · exit code: 0 · started 2026-09-09T12:00:00.000Z · finished 2026-09-09T12:00:00.000Z","style":"out","pause":0.05}
+{"t":"line","text":"- tool 0.1.0 · config 1918d952e57a · mapping 803576857333","style":"out","pause":0.05}
+{"t":"line","text":"- source org 00D000000000001AAA (API 67.0) · target acme-crm.veevavault.com (API v26.2) · sfdc_now 2026-09-09T12:00:00.000Z","style":"out","pause":0.05}
+{"t":"line","text":"","style":"out","pause":0.05}
+{"t":"line","text":"## Findings (0 blocking, 0 warning, 1 info)","style":"key","pause":0.05}
+{"t":"line","text":"","style":"out","pause":0.05}
+{"t":"line","text":"| severity | code | object | country | field | count | detail |","style":"out","pause":0.05}
+{"t":"line","text":"| --- | --- | --- | --- | --- | --- | --- |","style":"out","pause":0.05}
+{"t":"line","text":"| info | DELETE_IGNORED | call2 | US |  | 1 | {\"policy_ignore\":1} |","style":"out","pause":0.05}
+{"t":"line","text":"","style":"out","pause":0.05}
+{"t":"line","text":"## Units","style":"key","pause":0.05}
+{"t":"line","text":"…","style":"dim","pause":0.05}
+{"t":"pause","dur":0.6}
+{"t":"caption","text":"46 object modules, 1190 hermetic tests, no network — the whole flow you just watched runs against fakes in a second.","hold":0}
+{"t":"card","title":"46 object modules · 1190 tests · no network","subtitle":"packages/veeva-migration","lines":["preflight · extract · transform · load · reconcile — init, delta, final-delta, verify","docs/MIGRATION_SPEC.md is the normative contract; docs/CONTRACTS.md is the builder guide"],"dur":5.5}

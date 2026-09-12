@@ -24,6 +24,7 @@ export {
   CardTitle,
 } from "./card";
 export { cn } from "./cn";
+export { timeAgo } from "./format";
 export {
   DropdownMenu,
   DropdownMenuPortal,

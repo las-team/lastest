@@ -1,0 +1,20 @@
+# countries.CH — Switzerland (§7.4.9 [GEN]: nFADP — GDPR pattern, inherits regions.EU)
+# Not in a §7.3 wave; ships so `countries.CH: {}` (or a wave listing CH) works
+# out of the box. Everything below is [GEN] — confirm with counsel.
+region: EU
+dataResidency: eu
+defaultTimezone: Europe/Zurich
+postalCode: { pattern: "^\\d{4}$", onMismatch: warn }
+phone: { normalise: true, defaultRegion: CH }
+privacy:
+  { erasureListPath: ./privacy/ch-erasures.csv, consentFullHistory: true }
+objects:
+  account:
+    fields:
+      add: [{ source: ID_vod__c, target: id__v, transform: text }] # GLN (MedReg)
+      remove: [npi__v, pdrp_opt_out__v, pdrp_opt_out_date__v]
+  address:
+    required: { state_province__v: false } # canton
+    fields:
+      add: [{ source: Brick_vod__c, target: brick__v, transform: text }]
+      remove: [dea__v, cds__v, license__v, zip_4__v]

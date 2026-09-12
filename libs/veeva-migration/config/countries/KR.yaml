@@ -1,0 +1,24 @@
+# countries.KR — South Korea (§7.4.8, inherits regions.APAC)
+# PIPA + Korean sample law (best-practices.md §6.3) — sample retention widened
+# like the US. Picklist crosswalks are filled by the programme.
+region: APAC
+dataResidency: jp
+defaultTimezone: Asia/Seoul
+scope: { sampleRetentionMonths: 36 }
+privacy:
+  { erasureListPath: ./privacy/kr-erasures.csv, consentFullHistory: true }
+nameTemplates: { person: "{LastName}{FirstName}", separator: "" }
+postalCode: { pattern: "^\\d{5}$", onMismatch: warn }
+objects:
+  account:
+    { fields: { remove: [npi__v, pdrp_opt_out__v, pdrp_opt_out_date__v] } }
+  address:
+    { fields: { remove: [dea__v, cds__v, license__v, zip_4__v, brick__v] } }
+  sample_transaction:
+    {
+      load:
+        {
+          sampleStrategy: noTriggersRecalc,
+          fallbackStrategy: triggersOnTransactions,
+        },
+    }

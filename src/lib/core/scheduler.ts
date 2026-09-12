@@ -77,6 +77,11 @@ export function ensureSchedulerStarted() {
     } catch (error) {
       console.error("[scheduler] Error re-syncing coverage models:", error);
     }
+    try {
+      await processDuePluginJobs();
+    } catch (error) {
+      console.error("[scheduler] Error processing plugin jobs:", error);
+    }
   }, 60_000); // Check every 60 seconds
 
   // Don't keep process alive just for scheduler
@@ -93,6 +98,52 @@ export function stopScheduler() {
     intervalId = null;
   }
   started = false;
+}
+
+let pluginJobsProcessing = false;
+
+/**
+ * Drive core's plugin job queue.
+ *
+ * `processDuePluginJobs()` has existed unused in `runtime.ts` since the queue
+ * was built; its own comment said wiring the interval was "deferred to whoever
+ * registers the first job handler". `@lastest/plugin-veeva-migration` is that
+ * plugin, so this is that wiring.
+ *
+ * Two things a second job-declaring plugin needs to know before relying on it:
+ *
+ *  - **Dispatch is sequential** (`core/jobs`'s `processDueJobs` says so, and
+ *    for a good reason: twenty plugins' jobs firing at once is the capacity
+ *    incident the queue exists to prevent). A migration run takes hours, so it
+ *    occupies this tick for its duration and other plugins' jobs wait. That is
+ *    acceptable while migration is the only long job and is the argument for
+ *    moving the engine to a dedicated worker before a second one lands.
+ *  - **The re-entry guard is this flag**, not the interval. A tick that is
+ *    still inside a multi-hour run must not start a second one.
+ *
+ * The plugin's own stale-run reconciler runs on the same tick — it settles a
+ * run row whose process died between the engine finishing and the write, which
+ * is the one gap the queue itself cannot see.
+ */
+async function processDuePluginJobs() {
+  if (pluginJobsProcessing) return;
+  pluginJobsProcessing = true;
+  try {
+    const { getPluginRuntime, processDuePluginJobs: drain } =
+      await import("@/lib/core/runtime");
+    await getPluginRuntime();
+    const { reconcileStaleRuns } =
+      await import("@lastest/plugin-veeva-migration");
+    await reconcileStaleRuns().catch((error: unknown) => {
+      console.error(
+        "[scheduler] Error reconciling stale migration runs:",
+        error,
+      );
+    });
+    await drain();
+  } finally {
+    pluginJobsProcessing = false;
+  }
 }
 
 let schedulesProcessing = false;
