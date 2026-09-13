@@ -1,0 +1,9 @@
+node_modules/
+.appium/
+*.log
+
+# Full-screen captures include the desktop and other windows; the login sheet
+# renders a live WhatsApp QR credential. Only curated window-scoped proof is
+# committed — see FINDINGS.md §8.
+proof/*-screen.png
+proof/03b-*.png
