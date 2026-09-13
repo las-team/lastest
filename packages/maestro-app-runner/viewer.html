@@ -1,0 +1,157 @@
+<!doctype html>
+<!--
+  Standalone stream viewer for the mobile PoC (#197).
+
+  Renders the live simulator frames the runner serves (Lastest's `stream:frame`
+  protocol) onto a canvas, and forwards clicks back as `stream:input` taps. This
+  is a reviewer convenience so streaming can be verified WITHOUT signing into the
+  Lastest UI — it connects straight to the runner's stream WebSocket.
+
+  Usage: start the runner with MAESTRO_STREAM=1, then just open this file in a
+  browser. It defaults to ws://localhost:9223 (the runner's STREAM_PORT); change
+  the field if you used a different port/host.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Maestro PoC — Simulator Stream</title>
+    <style>
+      body {
+        margin: 0;
+        background: #0b0b0d;
+        color: #e5e7eb;
+        font: 14px system-ui, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        padding: 16px;
+      }
+      #bar {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      input {
+        background: #18181b;
+        color: #e5e7eb;
+        border: 1px solid #333;
+        border-radius: 6px;
+        padding: 6px 8px;
+        width: 260px;
+      }
+      button {
+        background: #2563eb;
+        color: #fff;
+        border: 0;
+        border-radius: 6px;
+        padding: 6px 14px;
+        cursor: pointer;
+      }
+      #status {
+        font: 12px monospace;
+        color: #9ca3af;
+      }
+      #dot {
+        display: inline-block;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: #6b7280;
+      }
+      #dot.on {
+        background: #22c55e;
+        box-shadow: 0 0 8px #22c55e;
+      }
+      canvas {
+        border-radius: 12px;
+        background: #000;
+        max-height: 78vh;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="bar">
+      <span id="dot"></span>
+      <input id="url" value="ws://localhost:9223" />
+      <button id="connect">Connect</button>
+      <span id="status">idle</span>
+    </div>
+    <canvas id="c" width="300" height="651"></canvas>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const canvas = $("c");
+      const ctx = canvas.getContext("2d");
+      let ws = null;
+      let frames = 0,
+        last = performance.now();
+      // Device-pixel size of the incoming frames (from the frame payload). The
+      // runner already scales taps device-px → points, so we send raw frame px.
+      let frameW = 0,
+        frameH = 0;
+
+      function setStatus(t, on) {
+        $("status").textContent = t;
+        $("dot").classList.toggle("on", !!on);
+      }
+
+      function connect() {
+        if (ws) {
+          try {
+            ws.close();
+          } catch {}
+        }
+        const url = $("url").value.trim();
+        setStatus("connecting…", false);
+        ws = new WebSocket(url);
+        ws.onopen = () => setStatus("connected", true);
+        ws.onclose = () => setStatus("disconnected", false);
+        ws.onerror = () => setStatus("error — is the runner up with MAESTRO_STREAM=1?", false);
+        ws.onmessage = (ev) => {
+          let m;
+          try {
+            m = JSON.parse(ev.data);
+          } catch {
+            return;
+          }
+          if (m.type !== "stream:frame" || !m.payload || !m.payload.data) return;
+          frameW = m.payload.width;
+          frameH = m.payload.height;
+          const img = new Image();
+          img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          img.src = "data:image/jpeg;base64," + m.payload.data;
+          frames++;
+          const now = performance.now();
+          if (now - last >= 1000) {
+            setStatus(frames + " fps · " + frameW + "×" + frameH, true);
+            frames = 0;
+            last = now;
+          }
+        };
+      }
+
+      // Click on the canvas → tap on the sim. Convert canvas-space coords to the
+      // frame's device-px space; the runner scales device px → points for idb.
+      canvas.addEventListener("click", (e) => {
+        if (!ws || ws.readyState !== 1 || !frameW) return;
+        const r = canvas.getBoundingClientRect();
+        const x = Math.round(((e.clientX - r.left) / r.width) * frameW);
+        const y = Math.round(((e.clientY - r.top) / r.height) * frameH);
+        ws.send(
+          JSON.stringify({
+            type: "stream:input",
+            payload: { type: "mouse", action: "down", x, y, button: "left" },
+          }),
+        );
+      });
+
+      $("connect").addEventListener("click", connect);
+      connect();
+    </script>
+  </body>
+</html>
