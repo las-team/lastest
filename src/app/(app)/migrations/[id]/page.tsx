@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import * as queries from "@/lib/db/queries";
 import { MigrationConsole } from "@lastest/plugin-veeva-migration/ui/console";
+import { isMigrationGateError } from "@lastest/plugin-veeva-migration";
 import { MigrationLocked } from "@lastest/plugin-veeva-migration/ui/locked";
 import { readMigrationConsole } from "@lastest/plugin-veeva-migration/page-reads";
 
@@ -42,7 +43,8 @@ export default async function MigrationConsolePage({
       stage: stageParam,
       waveId: waveParam ?? null,
     });
-  } catch {
+  } catch (err) {
+    if (!isMigrationGateError(err)) throw err;
     return <MigrationLocked />;
   }
   if (!data) notFound();

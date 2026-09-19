@@ -1,6 +1,7 @@
 import { getCurrentSession } from "@/lib/auth";
 import * as queries from "@/lib/db/queries";
 import { MigrationsIndexClient } from "@lastest/plugin-veeva-migration/ui/index-client";
+import { isMigrationGateError } from "@lastest/plugin-veeva-migration";
 import { MigrationLocked } from "@lastest/plugin-veeva-migration/ui/locked";
 import { readMigrationIndex } from "@lastest/plugin-veeva-migration/page-reads";
 
@@ -41,10 +42,12 @@ export default async function MigrationsPage() {
   let data;
   try {
     data = await readMigrationIndex(selectedRepo.id);
-  } catch {
+  } catch (err) {
     // The gate throws for a team without Early Adopter mode and for a member
     // without `repos:settings`. Both render the same locked panel — the page is
-    // not the place to tell them apart.
+    // not the place to tell them apart. Anything else (a database outage, a
+    // bug) propagates: it must not read as "not an Early Adopter".
+    if (!isMigrationGateError(err)) throw err;
     return <MigrationLocked />;
   }
 

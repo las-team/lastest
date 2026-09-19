@@ -1,5 +1,6 @@
 import "server-only";
 
+import { rm } from "node:fs/promises";
 import path from "node:path";
 
 import type {
@@ -185,5 +186,13 @@ export const appVeevaMigrationHost: VeevaMigrationHost = {
       assertSafeSegment(teamId, "team id"),
       assertSafeSegment(projectId, "project id"),
     );
+  },
+
+  async removeArtifacts(teamId: string, projectId?: string): Promise<void> {
+    const dir =
+      projectId === undefined
+        ? path.join(MIGRATION_STORAGE_DIR, assertSafeSegment(teamId, "team id"))
+        : appVeevaMigrationHost.runArtifactRoot(teamId, projectId);
+    await rm(dir, { recursive: true, force: true });
   },
 };

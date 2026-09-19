@@ -1,7 +1,7 @@
 /**
  * What this plugin still needs from core, and nothing else.
  *
- * Five methods (recipe §1.5 counts calls into core, not imported symbols):
+ * Six methods (recipe §1.5 counts calls into core, not imported symbols):
  *
  * | method | what it replaced |
  * | --- | --- |
@@ -10,6 +10,7 @@
  * | `resolveEndpoints` | the connector/environment half of `getMigrationProjectDetail`, plus the action's private `environmentOf` |
  * | `listConnectors` | the connect panel's connector list |
  * | `runArtifactRoot` | the `run_dir` column, deleted |
+ * | `removeArtifacts` | nothing — extract pages used to outlive the project on disk |
  *
  * ### `resolveConnectorSecrets` is the fourth copy of one credential boundary
  *
@@ -88,6 +89,15 @@ export interface VeevaMigrationHost {
    * storage root and the ids; the run id is appended by the caller.
    */
   runArtifactRoot(teamId: string, projectId: string): string;
+
+  /**
+   * Delete everything under `runArtifactRoot` for a project — or, with no
+   * `projectId`, for every project of a team. The other half of
+   * `runArtifactRoot`: the plugin cannot touch the filesystem, and a project's
+   * rows cascading while gigabytes of extracted HCP data stayed on disk was a
+   * retention hole. Idempotent; a directory that does not exist is fine.
+   */
+  removeArtifacts(teamId: string, projectId?: string): Promise<void>;
 }
 
 export interface MigrationActor {

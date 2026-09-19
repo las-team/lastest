@@ -22,6 +22,20 @@ export interface WorkerHost {
   claimDue(limit: number): Promise<ClaimedJob[]>;
   complete(jobId: string): Promise<void>;
   failAttempt(jobId: string, error: string): Promise<void>;
+  /**
+   * Refresh this worker's lease on a job it is executing, and report whether
+   * the job was cancelled meanwhile. Called every `heartbeatMs` for the
+   * duration of the handler. `cancelled: true` aborts the handler's signal —
+   * it is the only path by which an operator's cancel reaches a handler
+   * already in flight.
+   */
+  heartbeat?(jobId: string): Promise<{ cancelled: boolean }>;
+  /**
+   * Settle `running` jobs whose lease expired because their worker died.
+   * Called once per tick, before claiming, so a dead job's dedupe key is
+   * released before the tick's new enqueues could collapse into it.
+   */
+  reapExpired?(): Promise<number>;
 }
 
 export interface DispatchRun {
@@ -49,8 +63,12 @@ export interface ProcessDueJobsOptions {
   readonly batchSize?: number;
   /** Aborts the handler's signal after this long. No default — unbounded unless asked for. */
   readonly perJobTimeoutMs?: number;
+  /** Interval for `host.heartbeat`. Must be well under the host's lease. */
+  readonly heartbeatMs?: number;
   readonly onError?: (job: ClaimedJob, err: unknown) => void;
 }
+
+export const DEFAULT_HEARTBEAT_MS = 30_000;
 
 /**
  * One tick: claim due jobs, dispatch each, settle pass/fail. Sequential, not
@@ -63,12 +81,27 @@ export interface ProcessDueJobsOptions {
 export async function processDueJobs(
   opts: ProcessDueJobsOptions,
 ): Promise<number> {
+  await opts.host.reapExpired?.();
   const jobs = await opts.host.claimDue(opts.batchSize ?? 10);
 
   for (const job of jobs) {
     const controller = new AbortController();
     const timeout = opts.perJobTimeoutMs
       ? setTimeout(() => controller.abort(), opts.perJobTimeoutMs)
+      : undefined;
+    // The lease. While the handler runs, the row's heartbeat is refreshed so
+    // a reaper on another process does not mistake a long job for a dead one,
+    // and a cancel that landed on the row aborts the signal. A heartbeat
+    // that itself fails (database blip) is ignored: the lease is generous, and
+    // the next beat will catch up.
+    const heartbeat = opts.host.heartbeat
+      ? setInterval(() => {
+          opts.host.heartbeat!(job.id)
+            .then(({ cancelled }) => {
+              if (cancelled) controller.abort();
+            })
+            .catch(() => {});
+        }, opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS)
       : undefined;
     try {
       await opts.dispatch(
@@ -94,6 +127,7 @@ export async function processDueJobs(
       );
     } finally {
       if (timeout) clearTimeout(timeout);
+      if (heartbeat) clearInterval(heartbeat);
     }
   }
 

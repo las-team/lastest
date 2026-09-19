@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, lt } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull, lt } from "drizzle-orm";
 
 import type { VeevaMigrationDb } from "./db";
 import {
@@ -351,26 +351,103 @@ export async function updateMigrationRun(
 }
 
 /**
- * Mark runs that outlived the process that was executing them.
+ * Move a run from `queued` to `running`, and say whether that happened.
  *
- * Still needed, for a narrower reason than before. The run used to be a
- * detached in-process promise, so a deploy mid-init left a `running` row with
- * nobody behind it and the launch guard locked the project forever — and the
- * function that fixed that shipped with **zero callers**. Now the run is a
- * `plugin_jobs` row that core's worker can fail and account for, so this is the
- * reconciler for the gap the queue cannot see: the job row settled but the
- * plugin's own run row did not (the process died between the two writes).
- *
- * It is called from the same tick that drives the plugin job worker — see
- * `reconcileStaleRuns` in `../jobs.ts`.
- *
- * The engine itself is idempotent — re-running an interrupted init is a delta —
- * so failing the row is safe; what is NOT safe is silently starting a second
- * run beside a live one, which is why the threshold is generous.
+ * `false` means the row is no longer queued — an operator cancelled it while
+ * it waited behind another job, or the reconciler settled it — and the handler
+ * must not execute it. Without this check a run that shows "aborted" to the
+ * operator could still start a live load minutes later.
  */
-export async function failStaleMigrationRuns(
+export async function claimQueuedMigrationRun(
   db: VeevaMigrationDb,
-  staleMs = 30 * 60 * 1000,
+  id: string,
+): Promise<boolean> {
+  const rows = await db
+    .update(runs)
+    .set({ status: "running", startedAt: new Date() })
+    .where(and(eq(runs.id, id), eq(runs.status, "queued")))
+    .returning({ id: runs.id });
+  return rows.length > 0;
+}
+
+/**
+ * Write a run's terminal state, but only if it is still in flight.
+ *
+ * A run an operator already cancelled keeps `aborted` even when the engine
+ * returns later with a verdict of its own: the operator's decision is the one
+ * that stands, and the row must not flip back to `succeeded` under them.
+ * Returns whether the write landed.
+ */
+export async function finishMigrationRun(
+  db: VeevaMigrationDb,
+  id: string,
+  patch: {
+    engineRunId?: string | null;
+    status: Exclude<MigrationRunStatus, "queued" | "running">;
+    summary?: MigrationRunSummary;
+    error?: string | null;
+  },
+): Promise<boolean> {
+  const rows = await db
+    .update(runs)
+    .set({ ...patch, finishedAt: new Date() })
+    .where(and(eq(runs.id, id), inArray(runs.status, ["queued", "running"])))
+    .returning({ id: runs.id });
+  return rows.length > 0;
+}
+
+/** The run a queue job belongs to, if any. */
+export async function getMigrationRunByJobId(
+  db: VeevaMigrationDb,
+  jobId: string,
+): Promise<MigrationRun | undefined> {
+  const [row] = await db.select().from(runs).where(eq(runs.jobId, jobId));
+  return row;
+}
+
+export async function deleteMigrationRun(
+  db: VeevaMigrationDb,
+  id: string,
+): Promise<void> {
+  await db.delete(runs).where(eq(runs.id, id));
+}
+
+/** How many runs a project has ever had, in any state. */
+export async function countMigrationRuns(
+  db: VeevaMigrationDb,
+  projectId: string,
+): Promise<number> {
+  const [row] = await db
+    .select({ n: count() })
+    .from(runs)
+    .where(eq(runs.projectId, projectId));
+  return Number(row?.n ?? 0);
+}
+
+/** Every run still `queued` or `running`, across all projects — the reconciler's input. */
+export async function listInFlightMigrationRuns(
+  db: VeevaMigrationDb,
+): Promise<MigrationRun[]> {
+  return db
+    .select()
+    .from(runs)
+    .where(inArray(runs.status, ["queued", "running"]));
+}
+
+/**
+ * Abort a run row that never got a queue job.
+ *
+ * `enqueueMigrationRun` writes the row, then enqueues, then stores the job id.
+ * A crash between the first and the last of those leaves a `queued` row with
+ * no job behind it and the one-run-per-project guard held. This is the only
+ * case that is judged by wall clock, and the window is seconds, so the cutoff
+ * is short. Every run that *does* have a job is judged by the queue's own
+ * status in `reconcileStaleRuns` — never by how long it has been running,
+ * because an init legitimately runs for hours.
+ */
+export async function failOrphanedMigrationRuns(
+  db: VeevaMigrationDb,
+  staleMs = 5 * 60 * 1000,
 ): Promise<number> {
   const cutoff = new Date(Date.now() - staleMs);
   const rows = await db
@@ -378,12 +455,13 @@ export async function failStaleMigrationRuns(
     .set({
       status: "aborted",
       error:
-        "The server restarted while this run was in flight. Re-run the step — loads are idempotent and the watermark did not advance.",
+        "The server restarted before this run reached the queue. Re-run the step — nothing was loaded and the watermark did not advance.",
       finishedAt: new Date(),
     })
     .where(
       and(
-        inArray(runs.status, ["queued", "running"]),
+        eq(runs.status, "queued"),
+        isNull(runs.jobId),
         lt(runs.startedAt, cutoff),
       ),
     )
@@ -443,11 +521,20 @@ export async function acknowledgeFinding(
     });
 }
 
+/**
+ * Delete one acknowledgement. Scoped by project as well as id: the action
+ * guards the caller's access to `projectId`, and this predicate is what makes
+ * that guard cover the row — an id alone would let a member of any project
+ * delete another team's acknowledgement.
+ */
 export async function revokeFindingAck(
   db: VeevaMigrationDb,
+  projectId: string,
   id: string,
 ): Promise<void> {
-  await db.delete(findingAcks).where(eq(findingAcks.id, id));
+  await db
+    .delete(findingAcks)
+    .where(and(eq(findingAcks.id, id), eq(findingAcks.projectId, projectId)));
 }
 
 // ---------------------------------------------------------------------------
@@ -470,6 +557,16 @@ export async function listProjectsForRepo(
     .select({ id: projects.id, teamId: projects.teamId })
     .from(projects)
     .where(eq(projects.repositoryId, repositoryId));
+}
+
+export async function listProjectsForTeam(
+  db: VeevaMigrationDb,
+  teamId: string,
+): Promise<Array<{ id: string; teamId: string }>> {
+  return db
+    .select({ id: projects.id, teamId: projects.teamId })
+    .from(projects)
+    .where(eq(projects.teamId, teamId));
 }
 
 export async function deleteProjectsForRepo(

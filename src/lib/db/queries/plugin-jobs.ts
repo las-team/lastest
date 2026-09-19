@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, lte } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, lte, or } from "drizzle-orm";
 
 import { db } from "../index";
 import { pluginJobs, type NewPluginJob, type PluginJob } from "../schema";
@@ -84,12 +84,81 @@ export async function getPluginJobStatus(
  * Cancel a job if it has not already finished. Silently a no-op for an
  * unknown id or one already `done`/`failed`/`cancelled` — cancellation racing
  * completion is expected, not exceptional.
+ *
+ * A `running` row is cancelled too. The worker sees it on its next heartbeat
+ * (`heartbeatPluginJob` reports the flip) and aborts the handler's signal;
+ * until then the row already reads `cancelled`, and `completePluginJob` /
+ * `failPluginJobAttempt` refuse to overwrite it when the handler returns.
  */
 export async function cancelPluginJob(id: string): Promise<void> {
   await db
     .update(pluginJobs)
-    .set({ status: "cancelled", updatedAt: new Date() })
-    .where(and(eq(pluginJobs.id, id), inArray(pluginJobs.status, ["pending"])));
+    .set({
+      status: "cancelled",
+      updatedAt: new Date(),
+      completedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(pluginJobs.id, id),
+        inArray(pluginJobs.status, ["pending", "running"]),
+      ),
+    );
+}
+
+/** How long a `running` row may go without a heartbeat before it is presumed dead. */
+export const PLUGIN_JOB_LEASE_MS = 5 * 60 * 1000;
+
+/**
+ * Refresh the worker's lease on a job it is executing and report whether an
+ * operator cancelled it meanwhile.
+ *
+ * `cancelled: true` is also returned for an id that no longer exists or is no
+ * longer `running` (reaped by another worker after a long GC pause, say): in
+ * every such case the queue no longer considers this process the owner, and
+ * the handler should stop.
+ */
+export async function heartbeatPluginJob(
+  id: string,
+): Promise<{ cancelled: boolean }> {
+  const [row] = await db
+    .update(pluginJobs)
+    .set({ heartbeatAt: new Date() })
+    .where(and(eq(pluginJobs.id, id), eq(pluginJobs.status, "running")))
+    .returning({ id: pluginJobs.id });
+  return { cancelled: !row };
+}
+
+/**
+ * Fail the attempt of every `running` job whose lease has expired — the
+ * process that claimed it died (deploy, OOM, crash) without settling the row.
+ *
+ * Goes through `failPluginJobAttempt` so `maxAttempts` is honoured: a job that
+ * asked never to be retried (a migration run) settles as `failed` rather than
+ * being re-executed, and one that allows retries is re-queued with backoff.
+ * Called by the worker before it claims, so a dead job's dedupe key is
+ * released before a new enqueue of the same key could be collapsed into it.
+ */
+export async function reapExpiredPluginJobLeases(
+  leaseMs = PLUGIN_JOB_LEASE_MS,
+): Promise<number> {
+  const cutoff = new Date(Date.now() - leaseMs);
+  const expired = await db
+    .select({ id: pluginJobs.id })
+    .from(pluginJobs)
+    .where(
+      and(
+        eq(pluginJobs.status, "running"),
+        or(isNull(pluginJobs.heartbeatAt), lt(pluginJobs.heartbeatAt, cutoff)),
+      ),
+    );
+  for (const { id } of expired) {
+    await failPluginJobAttempt(
+      id,
+      "The worker executing this job stopped heartbeating — its process most likely died.",
+    );
+  }
+  return expired.length;
 }
 
 /**
@@ -119,19 +188,29 @@ export async function claimDuePluginJobs(limit: number): Promise<PluginJob[]> {
     if (due.length === 0) return [];
 
     const ids = due.map((j) => j.id);
+    const now = new Date();
     await tx
       .update(pluginJobs)
-      .set({ status: "running", updatedAt: new Date() })
+      .set({ status: "running", updatedAt: now, heartbeatAt: now })
       .where(inArray(pluginJobs.id, ids));
-    return due.map((j) => ({ ...j, status: "running" as const }));
+    return due.map((j) => ({
+      ...j,
+      status: "running" as const,
+      heartbeatAt: now,
+    }));
   });
 }
 
+/**
+ * Settle a job as `done`. Only a `running` row is touched: one an operator
+ * cancelled mid-flight, or a reaper failed after a lost lease, keeps that
+ * verdict rather than being overwritten by the handler returning late.
+ */
 export async function completePluginJob(id: string): Promise<void> {
   await db
     .update(pluginJobs)
     .set({ status: "done", updatedAt: new Date(), completedAt: new Date() })
-    .where(eq(pluginJobs.id, id));
+    .where(and(eq(pluginJobs.id, id), eq(pluginJobs.status, "running")));
 }
 
 /**
@@ -146,7 +225,9 @@ export async function failPluginJobAttempt(
   error: string,
 ): Promise<void> {
   const job = await getPluginJob(id);
-  if (!job) return;
+  // Same rule as `completePluginJob`: a row that is no longer `running` has
+  // already been settled by someone else (cancelled, or reaped) and keeps it.
+  if (!job || job.status !== "running") return;
 
   const attempts = job.attempts + 1;
   const now = new Date();
@@ -160,7 +241,7 @@ export async function failPluginJobAttempt(
         updatedAt: now,
         completedAt: now,
       })
-      .where(eq(pluginJobs.id, id));
+      .where(and(eq(pluginJobs.id, id), eq(pluginJobs.status, "running")));
     return;
   }
 
@@ -172,7 +253,8 @@ export async function failPluginJobAttempt(
       attempts,
       lastError: error,
       runAfter: new Date(now.getTime() + backoffMs),
+      heartbeatAt: null,
       updatedAt: now,
     })
-    .where(eq(pluginJobs.id, id));
+    .where(and(eq(pluginJobs.id, id), eq(pluginJobs.status, "running")));
 }

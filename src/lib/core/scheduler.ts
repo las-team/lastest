@@ -78,6 +78,11 @@ export function ensureSchedulerStarted() {
       console.error("[scheduler] Error re-syncing coverage models:", error);
     }
     try {
+      await reconcileMigrationRuns();
+    } catch (error) {
+      console.error("[scheduler] Error reconciling migration runs:", error);
+    }
+    try {
       await processDuePluginJobs();
     } catch (error) {
       console.error("[scheduler] Error processing plugin jobs:", error);
@@ -121,9 +126,9 @@ let pluginJobsProcessing = false;
  *  - **The re-entry guard is this flag**, not the interval. A tick that is
  *    still inside a multi-hour run must not start a second one.
  *
- * The plugin's own stale-run reconciler runs on the same tick — it settles a
- * run row whose process died between the engine finishing and the write, which
- * is the one gap the queue itself cannot see.
+ * The worker itself heartbeats each job's lease while its handler runs and
+ * reaps jobs whose worker died before it claims (`core/jobs`), so a deploy
+ * mid-run no longer holds a job as `running` forever.
  */
 async function processDuePluginJobs() {
   if (pluginJobsProcessing) return;
@@ -132,17 +137,37 @@ async function processDuePluginJobs() {
     const { getPluginRuntime, processDuePluginJobs: drain } =
       await import("@/lib/core/runtime");
     await getPluginRuntime();
-    const { reconcileStaleRuns } =
-      await import("@lastest/plugin-veeva-migration");
-    await reconcileStaleRuns().catch((error: unknown) => {
-      console.error(
-        "[scheduler] Error reconciling stale migration runs:",
-        error,
-      );
-    });
     await drain();
   } finally {
     pluginJobsProcessing = false;
+  }
+}
+
+let migrationRunsReconciling = false;
+
+/**
+ * Follow the queue's verdict onto the migration plugin's own run rows.
+ *
+ * Its own re-entry flag, deliberately separate from `pluginJobsProcessing`:
+ * that flag is held for the whole of a multi-hour migration run, and the
+ * reconciler has to keep ticking during exactly that window — it is what
+ * settles a run whose worker died on another replica.
+ *
+ * Named import of one plugin. Like `processLaunchCohorts` above, it is a
+ * plugin-owned periodic pass wired from the one place allowed to import every
+ * plugin; a manifest-declared tick hook would let this file stop naming it.
+ */
+async function reconcileMigrationRuns() {
+  if (migrationRunsReconciling) return;
+  migrationRunsReconciling = true;
+  try {
+    const { getPluginRuntime } = await import("@/lib/core/runtime");
+    await getPluginRuntime();
+    const { reconcileStaleRuns } =
+      await import("@lastest/plugin-veeva-migration");
+    await reconcileStaleRuns();
+  } finally {
+    migrationRunsReconciling = false;
   }
 }
 

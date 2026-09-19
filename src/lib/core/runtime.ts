@@ -422,6 +422,8 @@ export async function processDuePluginJobs(): Promise<number> {
       claimDue: queries.claimDuePluginJobs,
       complete: queries.completePluginJob,
       failAttempt: queries.failPluginJobAttempt,
+      heartbeat: queries.heartbeatPluginJob,
+      reapExpired: () => queries.reapExpiredPluginJobLeases(),
     },
     dispatch: (type, payload, run, scope) =>
       runtime.dispatch(type, payload, run, scope),

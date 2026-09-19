@@ -96,6 +96,23 @@ export default veevaMigrationPlugin;
 export const MIGRATION_LOCKED_MESSAGE =
   "Migrations are an Early Adopter feature. Switch on Early Adopter mode under Settings to enable it for your team.";
 
+/**
+ * Is this the access gate refusing, as opposed to something breaking?
+ *
+ * The three `/migrations` pages render `MigrationLocked` for the former and
+ * must let the latter propagate: a database outage that reads as "you are not
+ * an Early Adopter" is a lie to the operator and hides the fault. The gate
+ * throws either `MIGRATION_LOCKED_MESSAGE` or core's `Forbidden: …` messages.
+ */
+export function isMigrationGateError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return (
+    err.message === MIGRATION_LOCKED_MESSAGE ||
+    err.message.startsWith("Forbidden") ||
+    err.message.startsWith("Unauthorized")
+  );
+}
+
 export type {
   ConnectorDetail,
   ConnectorSummary,

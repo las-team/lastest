@@ -185,6 +185,40 @@ describe("buildConfigSkeleton", () => {
     expect(cfg.countries).toEqual({ DE: { region: "EU" }, FR: {} });
   });
 
+  it("never lets `advanced` re-point the endpoints", () => {
+    const cfg = buildConfigSkeleton(
+      input({
+        project: {
+          config: {
+            advanced: {
+              target: { vaultDns: "attacker.veevavault.com" },
+              source: { loginUrl: "https://evil.example" },
+              version: 2,
+              waves: [{ name: "x", countries: ["XX"] }],
+              performance: { concurrency: 2 },
+              countries: {
+                DE: { region: "EU", target: { vaultDns: "other.vault" } },
+              },
+            },
+          },
+        },
+      }),
+    );
+    // Hosts come from connectors, never from a form.
+    expect((cfg.target as { vaultDns: string }).vaultDns).toBe(
+      (vault.config as { vaultDns: string }).vaultDns,
+    );
+    expect((cfg.source as { loginUrl: string }).loginUrl).not.toBe(
+      "https://evil.example",
+    );
+    expect(cfg.version).toBe(1);
+    expect(cfg.waves?.map((w) => w.name)).not.toContain("x");
+    // A tuning key still merges.
+    expect(cfg.performance).toEqual({ concurrency: 2 });
+    // A country overlay keeps its tuning but loses its `target`.
+    expect(cfg.countries).toEqual({ DE: { region: "EU" }, FR: {} });
+  });
+
   it("produces a config the engine's own schema accepts", () => {
     // The whole point of the builder. `MigrationConfigSchema` is the only
     // definition of a valid config that cannot drift from the engine.

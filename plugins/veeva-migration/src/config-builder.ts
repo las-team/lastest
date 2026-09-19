@@ -134,7 +134,18 @@ function countryOverlays(
   advanced: Record<string, unknown> | undefined,
 ): Record<string, unknown> {
   const declared = (advanced?.countries ?? {}) as Record<string, unknown>;
-  const out: Record<string, unknown> = { ...declared };
+  const out: Record<string, unknown> = {};
+  // Same rule as the top-level merge: a country overlay may tune anything
+  // except where the data goes. A per-country `target` would re-point one
+  // country's load at a Vault no connector vouches for.
+  for (const [iso, layer] of Object.entries(declared)) {
+    if (layer && typeof layer === "object" && !Array.isArray(layer)) {
+      const { target: _target, ...rest } = layer as Record<string, unknown>;
+      out[iso] = rest;
+    } else {
+      out[iso] = layer;
+    }
+  }
   for (const wave of waves) {
     for (const iso of wave.countries) {
       if (!out[iso]) out[iso] = {};
@@ -265,16 +276,53 @@ export function buildConfigSkeleton(
     }));
 
   // `advanced` is merged LAST and shallowly, so an operator can override any
-  // block above (`objects`, a hand-written country overlay, a performance
-  // number) without this builder growing a field per knob. `countries` is
-  // merged rather than replaced because the wave overlays above must survive.
+  // *tuning* block above (`objects`, a hand-written country overlay, a
+  // performance number) without this builder growing a field per knob.
+  // `countries` is merged rather than replaced because the wave overlays above
+  // must survive. Only the keys in `ADVANCED_OVERRIDABLE_KEYS` are honoured:
+  // the invariant the whole design rests on is that hosts come from
+  // connectors, never from a form, and `withSecrets` attaches the real
+  // decrypted credential to whatever `target` it finds — so `source`,
+  // `target`, `version` and `waves` are never taken from here.
   for (const [key, value] of Object.entries(advanced)) {
-    if (key === "countries") continue;
+    if (!ADVANCED_OVERRIDABLE_KEYS.has(key)) continue;
     (skeleton as unknown as Record<string, unknown>)[key] = value;
   }
 
   return skeleton;
 }
+
+/**
+ * Top-level engine config keys an operator's `advanced` blob may set.
+ *
+ * Every `MigrationConfigSchema` key except the four that name or shape the
+ * endpoints (`version`, `source`, `target`, `waves`) and `countries`, which is
+ * merged by `countryOverlays` instead. A new engine key is opt-in here: it must
+ * be added deliberately rather than becoming overridable by default.
+ */
+export const ADVANCED_OVERRIDABLE_KEYS: ReadonlySet<string> = new Set([
+  "legacyId",
+  "delta",
+  "performance",
+  "extract",
+  "load",
+  "pendingFk",
+  "preflight",
+  "locales",
+  "regions",
+  "dataResidency",
+  "scope",
+  "reconcile",
+  "postLoad",
+  "picklists",
+  "objects",
+  "nameTemplates",
+  "formats",
+  "phone",
+  "postalCode",
+  "defaultTimezone",
+  "privacy",
+]);
 
 /** Which credential field keys each auth method contributes. */
 export const REQUIRED_SECRETS: Record<string, string[]> = {

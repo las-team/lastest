@@ -390,6 +390,12 @@ export const veevaMigrationRuns = pgTable(
       table.projectId,
       table.engineRunId,
     ),
+    // The one-run-per-project guard, enforced by the database rather than by
+    // `enqueueMigrationRun`'s read-then-insert alone: two operators clicking
+    // Launch at once must produce one run row, not two rows behind one job.
+    uniqueIndex("uq_veeva_migration_runs_one_active")
+      .on(table.projectId)
+      .where(sql`${table.status} in ('queued', 'running')`),
   ],
 );
 

@@ -455,10 +455,17 @@ export function ReportLinks({ run }: { run: MigrationRun | null }) {
       </p>
     );
   }
+  // `reportPath` is relative to the project's artifact directory on the
+  // server; the absolute path is deliberately not sent to the browser, and the
+  // file is not served — an operator with server access fetches it from there.
   return (
-    <p className="text-xs text-muted-foreground font-mono break-all inline-flex items-center gap-1.5">
-      <ExternalLink className="h-3 w-3 shrink-0" />
-      {run.summary.reportPath}
+    <p className="text-xs text-muted-foreground inline-flex items-start gap-1.5">
+      <ExternalLink className="h-3 w-3 mt-0.5 shrink-0" />
+      <span>
+        Report written on the server, under this migration&apos;s artifact
+        directory at{" "}
+        <span className="font-mono break-all">{run.summary.reportPath}</span>.
+      </span>
     </p>
   );
 }

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
+import { isMigrationGateError } from "@lastest/plugin-veeva-migration";
 import { MigrationLocked } from "@lastest/plugin-veeva-migration/ui/locked";
 import { RunDetail } from "@lastest/plugin-veeva-migration/ui/run-detail";
 import { readMigrationRun } from "@lastest/plugin-veeva-migration/page-reads";
@@ -25,7 +26,8 @@ export default async function MigrationRunPage({
   let data;
   try {
     data = await readMigrationRun(id, runId);
-  } catch {
+  } catch (err) {
+    if (!isMigrationGateError(err)) throw err;
     return <MigrationLocked />;
   }
   if (!data) notFound();

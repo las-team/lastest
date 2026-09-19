@@ -211,14 +211,23 @@ export const pluginJobs = pgTable(
     maxAttempts: integer("max_attempts").notNull().default(3),
     runAfter: timestamp("run_after").notNull(),
     /**
-     * Collapses duplicate enqueues while one is pending. Enforced in the query
-     * layer (check-then-insert), not as a DB constraint — a partial unique
-     * index scoped to `status IN ('pending','running')` is not a pattern used
-     * elsewhere in this schema, and the race it would close (two concurrent
-     * enqueues of the same key) is already vanishingly narrow given jobs are
-     * enqueued from request handlers, not a hot loop.
+     * Collapses duplicate enqueues while one is pending or running. Enforced in
+     * the query layer (check-then-insert), not as a DB constraint — the race it
+     * would close (two concurrent enqueues of the same key) is narrow given
+     * jobs are enqueued from request handlers, not a hot loop, and a plugin
+     * that needs a hard guarantee puts a partial unique index on its own
+     * table (`veeva_migration_runs` does).
      */
     dedupeKey: text("dedupe_key"),
+    /**
+     * The worker's lease. Stamped at claim and refreshed by the worker while
+     * the handler runs (`WorkerHost.heartbeat`); a `running` row whose
+     * heartbeat is older than the lease is a job whose process died, and
+     * `reapExpiredPluginJobLeases` fails the attempt so the queue does not
+     * hold it as running forever. Null on rows claimed before the column
+     * existed — treated as expired.
+     */
+    heartbeatAt: timestamp("heartbeat_at"),
     lastError: text("last_error"),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),

@@ -68,6 +68,58 @@ describe("processDueJobs", () => {
     expect(observedSignal?.aborted).toBe(true);
   });
 
+  it("heartbeats while the handler runs and aborts the signal on cancel", async () => {
+    let beats = 0;
+    const host = hostWith({
+      heartbeat: vi.fn(async () => ({ cancelled: ++beats >= 2 })),
+    });
+    let observedSignal: AbortSignal | undefined;
+    const dispatch = vi.fn(async (_t, _p, run) => {
+      observedSignal = run.signal;
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    });
+
+    await processDueJobs({ host, dispatch, heartbeatMs: 10 });
+
+    expect(host.heartbeat).toHaveBeenCalledWith("j1");
+    expect(beats).toBeGreaterThanOrEqual(2);
+    expect(observedSignal?.aborted).toBe(true);
+  });
+
+  it("stops heartbeating once the handler returns", async () => {
+    const host = hostWith({
+      heartbeat: vi.fn(async () => ({ cancelled: false })),
+    });
+    const dispatch = vi.fn(async () => {});
+
+    await processDueJobs({ host, dispatch, heartbeatMs: 5 });
+    const calls = (host.heartbeat as ReturnType<typeof vi.fn>).mock.calls
+      .length;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect((host.heartbeat as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
+      calls,
+    );
+  });
+
+  it("reaps expired leases before claiming", async () => {
+    const order: string[] = [];
+    const host = hostWith({
+      reapExpired: vi.fn(async () => {
+        order.push("reap");
+        return 0;
+      }),
+      claimDue: vi.fn(async () => {
+        order.push("claim");
+        return [];
+      }),
+    });
+
+    await processDueJobs({ host, dispatch: vi.fn() });
+
+    expect(order).toEqual(["reap", "claim"]);
+  });
+
   it("processes nothing when nothing is due", async () => {
     const host = hostWith({ claimDue: vi.fn(async () => []) });
     const dispatch = vi.fn();

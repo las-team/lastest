@@ -146,6 +146,19 @@ export async function updateMigrationEndpoints(
   input: { sourceConnectorId: string | null; targetConnectorId: string | null },
 ): Promise<void> {
   const { project, db } = await guardProject(projectId);
+  const unchanged =
+    (input.sourceConnectorId ?? null) === (project.sourceConnectorId ?? null) &&
+    (input.targetConnectorId ?? null) === (project.targetConnectorId ?? null);
+  // Endpoints are frozen once a run exists. Watermarks, the id map and the
+  // audit trail are keyed by *project*, so pointing a project at a different
+  // Vault after an init would make the next delta start from the old
+  // high-water mark and silently skip everything before it — the "UAT then
+  // PROD" bug, inside one project. A new target is a new migration.
+  if (!unchanged && (await queries.countMigrationRuns(db, projectId)) > 0) {
+    throw new Error(
+      "This migration has already run against its current endpoints, so they cannot be changed: its watermarks and id map belong to that Vault. Create a new migration for a different source or target.",
+    );
+  }
   const envs = await environmentsOf(
     project.repositoryId,
     input.sourceConnectorId,
@@ -205,7 +218,8 @@ export async function updateMigrationSettings(
 }
 
 export async function deleteMigration(projectId: string): Promise<void> {
-  const { db } = await guardProject(projectId);
+  const { project, db } = await guardProject(projectId);
+  const { host } = veevaMigrationWiring();
   const active = await queries.activeMigrationRuns(db, projectId);
   if (active.length) {
     throw new Error(
@@ -213,6 +227,10 @@ export async function deleteMigration(projectId: string): Promise<void> {
     );
   }
   await queries.deleteMigrationProject(db, projectId);
+  // The rows cascade; the extract pages on disk (customer HCP and account
+  // data) do not, and the plugin cannot touch the filesystem — so the host
+  // that derived the directory is the one that removes it.
+  await host.removeArtifacts(project.teamId, projectId);
   revalidatePath("/migrations");
 }
 
@@ -491,23 +509,29 @@ export async function startMigrationRun(
  * guard while the engine kept extracting from Salesforce and upserting into a
  * live Vault.
  *
- * It now cancels the `plugin_jobs` row, which aborts the handler's
- * `run.signal`, which the engine checks at every unit and batch boundary
- * (`libs/veeva-migration/src/cancel.ts`). The run stops after the batch in
- * flight, so the Vault never sees a half-sent request and the id map stays
- * consistent with what was actually written. Loads are idempotent and the
- * watermark did not advance, so re-running is safe.
+ * It now cancels the `plugin_jobs` row. A job still `pending` never starts
+ * (`executeRun` refuses a run that is no longer `queued`). A job already
+ * `running` is picked up by core's worker on its next heartbeat — within
+ * `DEFAULT_HEARTBEAT_MS`, thirty seconds — which aborts the handler's
+ * `run.signal`; the engine checks that signal at every unit and batch boundary
+ * (`libs/veeva-migration/src/cancel.ts`) and stops after the batch in flight,
+ * so the Vault never sees a half-sent request and the id map stays consistent
+ * with what was actually written. Loads are idempotent and the watermark did
+ * not advance, so re-running is safe.
+ *
+ * The run row is marked `aborted` here, immediately, and every later write to
+ * it from the handler is conditional on the row still being in flight — so
+ * the engine returning minutes later cannot flip it back to `succeeded`.
  */
 export async function cancelMigrationRun(runId: string): Promise<void> {
   const { data } = veevaMigrationWiring();
   const run = await queries.getMigrationRun(orm(data), runId);
   if (!run) throw new Error("Forbidden: Run not found");
   const { ctx, db } = await guardProject(run.projectId);
-  if (run.jobId) await ctx.jobs.cancel(run.jobId).catch(() => {});
-  await queries.updateMigrationRun(db, runId, {
+  if (run.jobId) await ctx.jobs.cancel(run.jobId);
+  await queries.finishMigrationRun(db, runId, {
     status: "aborted",
     error: "Cancelled by an operator.",
-    finishedAt: new Date(),
   });
   refresh(run.projectId);
 }
@@ -546,7 +570,7 @@ export async function revokeFinding(
   ackId: string,
 ): Promise<void> {
   const { db } = await guardProject(projectId);
-  await queries.revokeFindingAck(db, ackId);
+  await queries.revokeFindingAck(db, projectId, ackId);
   refresh(projectId);
 }
 

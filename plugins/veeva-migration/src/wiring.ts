@@ -23,6 +23,13 @@ import type { VeevaMigrationHost } from "./host";
 
 export type VeevaMigrationScopeRequest = {
   readonly repositoryId?: string;
+  /**
+   * Background path only. With no session to derive a team from, the
+   * reconciler passes the project's own `teamId` beside its `repositoryId`;
+   * core checks the repository belongs to that team. Never thread a `teamId`
+   * from a user request through here.
+   */
+  readonly teamId?: string;
 };
 
 /** The slice of `@lastest/kernel`'s `PluginRuntime` this plugin uses. */

@@ -5,7 +5,9 @@ import {
   anonymiseUser,
   deleteProjectsForRepo,
   deleteProjectsForTeam,
+  listProjectsForRepo,
 } from "./data/queries";
+import { veevaMigrationWiring } from "./wiring";
 
 /**
  * The cascades the database no longer performs.
@@ -33,6 +35,14 @@ import {
  *    statement. FKs *between* a plugin's own tables break no rule
  *    (`core-scope.md` §6 is about FKs to *core*), and this is what they buy.
  *
+ * ### Run artifacts on disk are removed by the host
+ *
+ * The engine's extract pages (customer HCP and account data, in gigabytes)
+ * live under `VeevaMigrationHost.runArtifactRoot`, outside the database and
+ * outside anything a cascade reaches. Each hook below asks the host to remove
+ * them after the rows are gone — the plugin cannot touch the filesystem, and
+ * the host that derived the path is the one that knows where it is.
+ *
  * ### One deliberate exception: `veeva_migration_audit_log.actor`
  *
  * `onUserDeleted` nulls this plugin's four *reference* columns but does not
@@ -47,10 +57,16 @@ export function createDeletionHook(): DeletionHook {
   return {
     async onTeamDeleted(teamId: string): Promise<void> {
       await deleteProjectsForTeam(db(), teamId);
+      await veevaMigrationWiring().host.removeArtifacts(teamId);
     },
 
     async onRepoDeleted(repositoryId: string): Promise<void> {
+      const projects = await listProjectsForRepo(db(), repositoryId);
       await deleteProjectsForRepo(db(), repositoryId);
+      const { host } = veevaMigrationWiring();
+      for (const project of projects) {
+        await host.removeArtifacts(project.teamId, project.id);
+      }
     },
 
     async onUserDeleted(userId: string): Promise<void> {

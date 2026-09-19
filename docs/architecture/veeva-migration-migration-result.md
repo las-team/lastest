@@ -211,10 +211,46 @@ What the queue bought beyond correctness: `run.signal` is the cancellation token
 the feature never had, and the job payload carries **one id**. Credentials are
 resolved inside the handler at the moment of use, so plaintext no longer sits in
 a closure for the life of a multi-hour run, and nothing secret is persisted in a
-`plugin_jobs` payload. `failStaleMigrationRuns` — which shipped with zero
-callers — is now the plugin's own reconciler for the one gap the queue cannot
-see (the process died between the engine finishing and the row being written),
-called from the same tick.
+`plugin_jobs` payload.
+
+### 4.1 The run lifecycle, after the second review
+
+The first cut of this claimed cancellation and crash recovery it did not have:
+`cancelPluginJob` only touched `pending` rows, nothing ever aborted a handler
+already in flight, `plugin_jobs` had no lease so a dead worker's job stayed
+`running` forever (and its dedupe key locked the project), and the plugin's
+sweeper judged runs by wall clock — a healthy multi-hour init was "aborted" at
+thirty minutes. All four are closed, and each is owned by the layer that can
+see the fact:
+
+- **Core: the lease.** `plugin_jobs.heartbeat_at` is stamped at claim and
+  refreshed every `DEFAULT_HEARTBEAT_MS` (30 s) by `processDueJobs` while the
+  handler runs. `reapExpiredPluginJobLeases` (called by the worker before it
+  claims) fails the attempt of any `running` row whose heartbeat is older than
+  `PLUGIN_JOB_LEASE_MS` (5 min) — through `failPluginJobAttempt`, so
+  `maxAttempts: 1` is honoured and a migration settles as `failed` rather than
+  re-executing. `completePluginJob` / `failPluginJobAttempt` only touch a row
+  that is still `running`.
+- **Core: cancel reaches a running job.** `cancelPluginJob` now flips `running`
+  rows too; the heartbeat reports the flip (`heartbeatPluginJob` returns
+  `cancelled: true`) and the worker aborts the handler's `AbortController`. The
+  engine sees it at its next unit or batch boundary.
+- **Plugin: the row follows the queue.** `reconcileStaleRuns` asks
+  `ctx.jobs.status` for every in-flight run row and aborts only those whose job
+  is `done`/`failed`/missing. Nothing is judged by elapsed time except a
+  `queued` row with **no job id** (a crash inside `enqueueMigrationRun`; the
+  window is seconds, the cutoff five minutes). The reconciler has its own
+  re-entry flag in the scheduler, separate from the worker's, so it keeps
+  ticking during the long job it exists to watch.
+- **Plugin: every terminal write is conditional.** `finishMigrationRun` writes
+  only while the row is `queued`/`running`; `executeRun` starts only if
+  `claimQueuedMigrationRun` moved it from `queued`. An operator's `aborted`
+  therefore stands, and a run cancelled while waiting behind another job never
+  starts.
+- **Plugin: one run per project, enforced by the database.** Partial unique
+  index `uq_veeva_migration_runs_one_active` on `(project_id) where status in
+  ('queued','running')`, and `enqueueMigrationRun` deletes its own row and
+  refuses if the queue's dedupe handed back a job another run owns.
 
 ## 5. Two known gaps, stated rather than papered over
 
@@ -224,6 +260,15 @@ including `explorer`'s, which also declares one. So the sidebar keeps its
 hardcoded "Migrations" item and its Early-Adopter filter. Declaring `ui.nav` is
 recipe-correct and costs nothing; building the consumer would let that whole file
 shrink and is its own PR.
+
+**Run artifacts on disk** — extract pages under `runArtifactRoot` — are removed
+by `VeevaMigrationHost.removeArtifacts` from `deleteMigration`, `onRepoDeleted`
+and `onTeamDeleted`. The summary's `reportPath` is stored relative to that root
+and is not served; the absolute server path no longer reaches the browser.
+
+**Endpoints freeze once a run exists.** Watermarks and the id map are keyed by
+project, so `updateMigrationEndpoints` refuses to change either connector after
+the first run; a different Vault is a different migration.
 
 **`veeva_migration_audit_log.actor` is not anonymised by `onUserDeleted`.** The
 hook nulls this plugin's four reference columns (`createdBy`, `signedOffBy`,

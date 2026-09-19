@@ -1484,7 +1484,12 @@ async function migrateVeevaMigrationTables() {
           continue;
         }
         // Empty destination is what a prior `push` left behind. Safe to drop.
-        await sql.unsafe(`drop table "${to}"`);
+        // CASCADE because that same push also created the plugin's other new
+        // tables with their FKs *to* this one (waves -> projects, and the
+        // thirteen engine tables); without it the drop fails on the first
+        // dependent. Only the constraints go — the dependent tables are
+        // themselves empty and are handled by their own iteration or re-pushed.
+        await sql.unsafe(`drop table "${to}" cascade`);
       }
       await sql.unsafe(`alter table "${from}" rename to "${to}"`);
       console.log(`[migrate] renamed ${from} -> ${to}`);
