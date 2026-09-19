@@ -45,21 +45,17 @@ const PRE_CREATE_SQL = `
     granted_at TIMESTAMP NOT NULL,
     revoked_at TIMESTAMP
   );
-  CREATE TABLE IF NOT EXISTS csv_data_sources (
-    id TEXT PRIMARY KEY,
-    repository_id TEXT,
-    team_id TEXT,
-    alias TEXT NOT NULL,
-    filename TEXT NOT NULL,
-    storage_path TEXT,
-    cached_headers JSONB NOT NULL DEFAULT '[]'::jsonb,
-    cached_data JSONB NOT NULL DEFAULT '[]'::jsonb,
-    row_count INTEGER NOT NULL DEFAULT 0,
-    last_synced_at TIMESTAMP,
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP
-  );
 `;
+// `csv_data_sources` used to be pre-created here, for exactly the reason this
+// list exists. It was removed once it started causing the problem it prevented:
+// the data-sources plugin migration renamed the table to
+// `data_sources_csv_sources` (see DATA_SOURCES_RENAMES), so no schema declares
+// the old name any more, and pre-creating it resurrected an empty table on
+// every push. push then had a DROP with nothing to pair it against until a
+// release added new tables — and a release that adds thirteen
+// (`veeva_migration_*`) turns that stray DROP into "is
+// veeva_migration_audit_log renamed from csv_data_sources?", the unanswerable
+// prompt. `RETIRED_TABLES` below cleans up the copies already out there.
 
 async function preCreate() {
   if (!process.env.DATABASE_URL) return;
@@ -102,6 +98,63 @@ const RETIRED_COLUMNS = [
   { table: "teams", column: "verify_phase_enabled" },
   { table: "teams", column: "web_mcp_enabled" },
 ];
+
+/**
+ * Tables no schema declares any more, dropped before push sees them.
+ *
+ * Same argument as `RETIRED_COLUMNS`, one level up: a table present in the
+ * database and absent from the schema is a DROP in push's plan, and a DROP is
+ * what push pairs with an unrelated CREATE to ask "is this a rename?". The
+ * question is unanswerable in a Job container and the deploy hangs until
+ * activeDeadlineSeconds.
+ *
+ * Guarded by a row count rather than `IF EXISTS` alone: these entries exist
+ * because a table was renamed and the old name was left behind empty, so a
+ * NON-empty one means the rename did not happen the way this script thinks it
+ * did. That is a stop, not a drop.
+ */
+const RETIRED_TABLES = [
+  // Renamed to `data_sources_csv_sources` (DATA_SOURCES_RENAMES). The empty
+  // leftover was re-created on every push by a now-removed PRE_CREATE_SQL entry.
+  "csv_data_sources",
+];
+
+async function dropRetiredTables() {
+  if (!process.env.DATABASE_URL) return;
+  if (RETIRED_TABLES.length === 0) return;
+  let sql;
+  try {
+    sql = require("postgres")(process.env.DATABASE_URL);
+    for (const table of RETIRED_TABLES) {
+      const exists = await sql`
+        select exists (
+          select 1 from information_schema.tables
+          where table_schema = 'public' and table_name = ${table}
+        ) as exists`;
+      if (!exists[0]?.exists) continue;
+      const rows = await sql.unsafe(
+        `select count(*)::text as n from "${table}"`,
+      );
+      const n = Number(rows[0]?.n ?? 0);
+      if (n > 0) {
+        throw new Error(
+          `retired table "${table}" still holds ${n} row(s) — refusing to drop it. ` +
+            "Its rows were expected to have been carried across by a rename step; " +
+            "check them by hand before removing the entry from RETIRED_TABLES.",
+        );
+      }
+      await sql.unsafe(`DROP TABLE IF EXISTS "${table}"`);
+      console.log(`[migrate] dropped retired table ${table}`);
+    }
+  } catch (e) {
+    // FATAL, for the same reason as dropRetiredColumns: a skipped drop is the
+    // stray DROP that hangs push on a rename prompt.
+    console.error("[migrate] retired-table drop FAILED:", e.message);
+    throw e;
+  } finally {
+    if (sql) await sql.end();
+  }
+}
 
 async function dropRetiredColumns() {
   if (!process.env.DATABASE_URL) return;
@@ -1374,6 +1427,163 @@ async function migrateQaAgentTables() {
   }
 }
 
+// The four `migration_*` tables became `@lastest/plugin-veeva-migration`'s own
+// (RFC §9 phase 4), so they take the plugin's `veeva_migration_` prefix that
+// `core/data`'s `validateSchemaNamespace` requires. Nine FKs to core tables go
+// with the move (`core-scope.md` §6): `repositories` (cascade),
+// `sut_connectors` x2 and `environments` x2, and `users` x4 — all dropped by
+// catalogue lookup after the rename, because implicitly-created constraint
+// names differ between environments. The plugin's `deletion.ts` is what
+// replaces those cascades.
+//
+// `run_dir` is dropped with them. It was free text from a settings form handed
+// to `fs.mkdir`; the run directory is derived by the host now, so the column is
+// not merely unused, it must not be readable as configuration.
+//
+// The ENGINE's old state is a different case and is deliberately NOT migrated.
+// It lived in a separate `veeva_migration` Postgres schema whose rows are keyed
+// by a `vault_dns` string with no project attached, so there is no way to
+// back-fill them into the project-scoped tables without guessing which tenant
+// and which project each row belonged to — which is the same ambiguity that
+// made the old shape a tenancy hole. The schema is dropped if (and only if) it
+// is empty; a non-empty one is left in place and reported, for a human to
+// export or drop deliberately.
+const VEEVA_MIGRATION_RENAMES = [
+  ["migration_projects", "veeva_migration_projects"],
+  ["migration_waves", "veeva_migration_waves"],
+  ["migration_runs", "veeva_migration_runs"],
+  ["migration_finding_acks", "veeva_migration_finding_acks"],
+];
+
+async function migrateVeevaMigrationTables() {
+  if (!process.env.DATABASE_URL) return;
+  let sql;
+  try {
+    sql = require("postgres")(process.env.DATABASE_URL);
+
+    const tableExists = async (name) => {
+      const rows = await sql`
+        select exists (
+          select 1 from information_schema.tables
+          where table_schema = 'public' and table_name = ${name}
+        ) as exists`;
+      return rows[0]?.exists ?? false;
+    };
+    const rowCount = async (name) => {
+      const rows = await sql.unsafe(
+        `select count(*)::text as n from "${name}"`,
+      );
+      return Number(rows[0]?.n ?? 0);
+    };
+
+    for (const [from, to] of VEEVA_MIGRATION_RENAMES) {
+      if (!(await tableExists(from))) continue;
+      if (await tableExists(to)) {
+        if ((await rowCount(to)) > 0) {
+          console.log(`[migrate] ${from} -> ${to}: already migrated`);
+          continue;
+        }
+        // Empty destination is what a prior `push` left behind. Safe to drop.
+        // CASCADE because that same push also created the plugin's other new
+        // tables with their FKs *to* this one (waves -> projects, and the
+        // thirteen engine tables); without it the drop fails on the first
+        // dependent. Only the constraints go — the dependent tables are
+        // themselves empty and are handled by their own iteration or re-pushed.
+        await sql.unsafe(`drop table "${to}" cascade`);
+      }
+      await sql.unsafe(`alter table "${from}" rename to "${to}"`);
+      console.log(`[migrate] renamed ${from} -> ${to}`);
+    }
+
+    // `team_id` is new and NOT NULL in the plugin schema: with the FK to
+    // `repositories` gone it is the only tenancy boundary these tables have.
+    // Added nullable -> backfilled from `repositories` -> orphans deleted, so
+    // push never meets a NULL under its `SET NOT NULL`.
+    if (await tableExists("veeva_migration_projects")) {
+      await sql.unsafe(
+        `alter table "veeva_migration_projects" add column if not exists "team_id" text`,
+      );
+      const filled = await sql.unsafe(
+        `update "veeva_migration_projects" p
+            set "team_id" = r."team_id"
+           from "repositories" r
+          where r."id" = p."repository_id" and p."team_id" is null`,
+      );
+      if (filled.count)
+        console.log(
+          `[migrate] veeva_migration_projects: backfilled team_id on ${filled.count} row(s)`,
+        );
+      const orphans = await sql.unsafe(
+        `delete from "veeva_migration_projects" where "team_id" is null`,
+      );
+      if (orphans.count)
+        console.log(
+          `[migrate] veeva_migration_projects: deleted ${orphans.count} row(s) whose repository is gone`,
+        );
+      await sql.unsafe(
+        `alter table "veeva_migration_projects" drop column if exists "run_dir"`,
+      );
+    }
+
+    // The nine FKs into core, by catalogue lookup under the new table names.
+    const tables = VEEVA_MIGRATION_RENAMES.map(([, to]) => to);
+    const fks = await sql`
+      select rel.relname as table_name, ref.relname as points_at,
+             con.conname as name
+        from pg_constraint con
+        join pg_class rel on rel.oid = con.conrelid
+        join pg_class ref on ref.oid = con.confrelid
+       where con.contype = 'f'
+         and ref.relname in ('repositories', 'users', 'sut_connectors', 'environments')
+         and rel.relname in ${sql(tables)}`;
+    for (const { table_name: table, points_at: target, name } of fks) {
+      await sql.unsafe(`alter table "${table}" drop constraint "${name}"`);
+      console.log(`[migrate] ${table}: dropped FK ${name} (-> ${target})`);
+    }
+
+    // The engine's old schema. Dropped only when empty; see the note above.
+    const engineSchema = await sql`
+      select exists (
+        select 1 from information_schema.schemata
+        where schema_name = 'veeva_migration'
+      ) as exists`;
+    if (engineSchema[0]?.exists) {
+      const rows = await sql`
+        select count(*)::text as n from information_schema.tables
+         where table_schema = 'veeva_migration'`;
+      const tableCount = Number(rows[0]?.n ?? 0);
+      let populated = 0;
+      if (tableCount > 0) {
+        const counts = await sql`
+          select coalesce(sum(n_live_tup), 0)::text as n from pg_stat_user_tables
+           where schemaname = 'veeva_migration'`;
+        populated = Number(counts[0]?.n ?? 0);
+      }
+      if (populated > 0) {
+        console.warn(
+          `[migrate] schema "veeva_migration" still holds ~${populated} row(s) of engine state. ` +
+            "It is NOT migrated: its rows carry no project id, so they cannot be " +
+            "attributed to a tenant. Export or drop it deliberately.",
+        );
+      } else {
+        await sql.unsafe(`drop schema "veeva_migration" cascade`);
+        console.log('[migrate] dropped empty schema "veeva_migration"');
+      }
+    }
+  } catch (e) {
+    // FATAL — a skipped rename means push DROPs `migration_projects` and every
+    // signed-off cutover record on it. Rethrow so main() exits before push
+    // (see migrateExplorerTables).
+    console.error(
+      "[migrate] veeva-migration table migration FAILED:",
+      e.message,
+    );
+    throw e;
+  } finally {
+    if (sql) await sql.end();
+  }
+}
+
 // Every `alter table … rename to …` above carries the table's constraints
 // across UNCHANGED: Postgres renames the relation, not the
 // `repo_awards_repository_id_unique` sitting on it. drizzle then diffs the
@@ -1405,6 +1615,7 @@ const ALL_TABLE_RENAMES = [
   ...DATA_SOURCES_RENAMES,
   ...SCHEDULING_RENAMES,
   ...QA_AGENT_RENAMES,
+  ...VEEVA_MIGRATION_RENAMES,
 ];
 
 async function renameCarriedConstraints() {
@@ -1465,6 +1676,7 @@ async function main() {
   // Before every rename step and before push: see RETIRED_COLUMNS for why an
   // add+drop pair on one table has to be split.
   await dropRetiredColumns();
+  await dropRetiredTables();
   await migrateExplorerTables();
   await migrateA11yBaselineOwnership();
   await migrateGamificationTables();
@@ -1474,6 +1686,7 @@ async function main() {
   await migrateDataSourcesTables();
   await migrateSchedulingTables();
   await migrateQaAgentTables();
+  await migrateVeevaMigrationTables();
   await renameCarriedConstraints();
   await dropPluginUserForeignKeys();
   await nullOrphans();

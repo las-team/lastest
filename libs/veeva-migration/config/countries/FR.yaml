@@ -1,0 +1,30 @@
+# countries.FR — France (§7.4.7, inherits regions.EU)
+# Source specifics: RPPS/ADELI professional ids in ID_vod__c / ID2_vod__c or
+# customer fields; French départements stored in Address_vod__c.State_vod__c;
+# 5-digit postcodes; Brick_vod__c (IQVIA) common; Loi Bertrand / DMOS
+# transparency data is the ToV family (regions.EU tovRetentionMonths).
+region: EU
+defaultTimezone: Europe/Paris
+privacy:
+  { erasureListPath: ./privacy/fr-erasures.csv, consentFullHistory: true }
+phone: { normalise: true, defaultRegion: FR }
+postalCode: { pattern: "^\\d{5}$", onMismatch: warn }
+nameTemplates: { person: "{Salutation} {FirstName} {LastName}" }
+objects:
+  account:
+    fields:
+      add:
+        - { source: ID_vod__c, target: id__v, transform: text } # RPPS
+        - { source: ID2_vod__c, target: id2__v, transform: text } # ADELI
+      remove: [npi__v, pdrp_opt_out__v, pdrp_opt_out_date__v]
+  address:
+    required: { state_province__v: false }
+    fields:
+      add: [{ source: Brick_vod__c, target: brick__v, transform: text }]
+      remove: [dea__v, cds__v, license__v, zip_4__v]
+picklists:
+  # départements — source values are the picklist *values* of State_vod__c for FR
+  # (codes or names, read from describe); resolved by label at preflight.
+  # Remaining ~100 départements filled by the programme.
+  address.state: { "01": ain__c, "75": paris__c, "2A": corse_du_sud__c }
+  account.credentials: { "Dr": dr__c, "Pr": pr__c }

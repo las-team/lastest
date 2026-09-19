@@ -1,0 +1,50 @@
+# countries.MX — Mexico (§7.4.8, inherits regions.LATAM)
+# LFPDPPP; state picklist exists; 5-digit CP; ID_vod__c carries the cédula profesional.
+region: LATAM
+defaultTimezone: America/Mexico_City
+postalCode: { pattern: "^\\d{5}$", onMismatch: warn }
+phone: { normalise: true, defaultRegion: MX }
+nameTemplates: { person: "{FirstName} {LastName}" } # LastName commonly holds both apellidos — never split
+objects:
+  account:
+    fields:
+      add: [{ source: ID_vod__c, target: id__v, transform: text }] # cédula
+      remove: [npi__v, pdrp_opt_out__v, pdrp_opt_out_date__v]
+  address:
+    required: { state_province__v: true }
+    fields: { remove: [dea__v, cds__v, license__v, zip_4__v, brick__v] }
+picklists:
+  # 32 entidades federativas completed from ISO 3166-2:MX [GEN]; customer `__c` values must pre-exist
+  address.state:
+    AGU: aguascalientes__c
+    BCN: baja_california__c
+    BCS: baja_california_sur__c
+    CAM: campeche__c
+    CHP: chiapas__c
+    CHH: chihuahua__c
+    CMX: cdmx__c
+    COA: coahuila__c
+    COL: colima__c
+    DUR: durango__c
+    GUA: guanajuato__c
+    GRO: guerrero__c
+    HID: hidalgo__c
+    JAL: jalisco__c
+    MEX: estado_de_mexico__c
+    MIC: michoacan__c
+    MOR: morelos__c
+    NAY: nayarit__c
+    NLE: nuevo_leon__c
+    OAX: oaxaca__c
+    PUE: puebla__c
+    QUE: queretaro__c
+    ROO: quintana_roo__c
+    SLP: san_luis_potosi__c
+    SIN: sinaloa__c
+    SON: sonora__c
+    TAB: tabasco__c
+    TAM: tamaulipas__c
+    TLA: tlaxcala__c
+    VER: veracruz__c
+    YUC: yucatan__c
+    ZAC: zacatecas__c

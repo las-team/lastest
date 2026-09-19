@@ -1,0 +1,3 @@
+# regions.LATAM — Latin America (§7.3)
+# Body is the `regions.LATAM` block itself; BR / MX layer on top.
+dataResidency: us # LGPD / LFPDPPP permit transfer with adequate safeguards — per counsel [GEN]; the example uses the Americas vault

@@ -39,7 +39,7 @@ export function createJobsFactory(opts: JobsFactoryOptions) {
     });
 }
 
-export { processDueJobs } from "./worker";
+export { DEFAULT_HEARTBEAT_MS, processDueJobs } from "./worker";
 export type {
   ClaimedJob,
   DispatchFn,

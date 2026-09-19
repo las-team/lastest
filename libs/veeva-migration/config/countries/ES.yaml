@@ -1,0 +1,25 @@
+# countries.ES — Spain (§7.4.8, inherits regions.EU)
+# GDPR; profiling-check customer flag. Provinces optional.
+region: EU
+defaultTimezone: Europe/Madrid
+postalCode: { pattern: "^\\d{5}$", onMismatch: warn }
+phone: { normalise: true, defaultRegion: ES }
+objects:
+  account:
+    fields:
+      add: [
+          {
+            source: Profiling_Check_Performed_ES__c,
+            target: profiling_check_performed__c,
+            transform: bool,
+          },
+        ] # customer field (field-mapping.md §5)
+      remove: [npi__v, pdrp_opt_out__v, pdrp_opt_out_date__v]
+  address:
+    required: { state_province__v: false }
+    fields:
+      add: [{ source: Brick_vod__c, target: brick__v, transform: text }]
+      remove: [dea__v, cds__v, license__v, zip_4__v]
+picklists:
+  # provinces optional — remaining 50 filled by the programme
+  address.state: { "Madrid": madrid__c, "Barcelona": barcelona__c }

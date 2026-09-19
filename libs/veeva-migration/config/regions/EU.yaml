@@ -1,0 +1,11 @@
+# regions.EU — EU / EEA (GDPR pattern, §7.3 / §7.4.9 [GEN])
+# Layer order: defaults ← global ← regions.EU ← countries.<ISO>. Every key here
+# may be overridden by a country overlay. Body is the `regions.EU` block itself.
+dataResidency: eu # EU-hosted vault + EU staging (§7.5)
+scope:
+  tovRetentionMonths: 60 # EFPIA / Loi Bertrand transfer-of-value: `tov` family (em_*, expense_*) widened to 5y
+privacy:
+  consentFullHistory: true # GDPR: keep the full opt-in / opt-out history (§7.4.9)
+objects:
+  email_activity:
+    loadIpAddress: false # IP addresses are personal data under GDPR — never loaded in the EU

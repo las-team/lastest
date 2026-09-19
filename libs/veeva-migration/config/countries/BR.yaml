@@ -1,0 +1,58 @@
+# countries.BR — Brazil (§7.4.5, inherits regions.LATAM)
+# Body is the `countries.BR` block itself. Merged beneath the user's
+# `countries.BR` (user wins) by `mergeOverlays()`.
+region: LATAM
+dataResidency: us # LGPD permits transfer with adequate safeguards — per counsel; example uses the Americas vault
+defaultTimezone: America/Sao_Paulo
+scope: { historyMonths: 24 }
+nameTemplates: { person: "{FirstName} {LastName}" }
+phone: { normalise: true, defaultRegion: BR }
+postalCode: { pattern: "^\\d{5}-?\\d{3}$", onMismatch: warn }
+privacy: { erasureListPath: ./privacy/br-erasures.csv }
+objects:
+  account:
+    fields:
+      add:
+        - { source: CPF__c, target: cpf__c, transform: text } # tax id — text, preserve leading zeros; customer field pre-created via MDL
+        - { source: CRM_Number__c, target: crm_number__c, transform: text } # Conselho Regional de Medicina licence
+        - { source: ID_vod__c, target: id__v, transform: text }
+      remove: [npi__v, pdrp_opt_out__v, pdrp_opt_out_date__v]
+  address:
+    fields:
+      add: [{ source: License_vod__c, target: license__v, transform: text }] # CRM number sometimes stored here
+      remove: [dea__v, cds__v, zip_4__v, brick__v]
+    required: { state_province__v: true } # UF is always populated
+picklists:
+  # 27 UFs completed from ISO 3166-2:BR [GEN]; customer `__c` values must pre-exist
+  address.state:
+    AC: ac__c
+    AL: al__c
+    AP: ap__c
+    AM: am__c
+    BA: ba__c
+    CE: ce__c
+    DF: df__c
+    ES: es__c
+    GO: go__c
+    MA: ma__c
+    MT: mt__c
+    MS: ms__c
+    MG: mg__c
+    PA: pa__c
+    PB: pb__c
+    PR: pr__c
+    PE: pe__c
+    PI: pi__c
+    RJ: rj__c
+    RN: rn__c
+    RS: rs__c
+    RO: ro__c
+    RR: rr__c
+    SC: sc__c
+    SP: sp__c
+    SE: se__c
+    TO: to__c
+  # remaining specialties filled by the programme
+  account.specialty:
+    { "Cardiologia": cardiologia__c, "Clínica Médica": clinica_medica__c }
+  account.credentials: { "Dr.": dr__c, "Dra.": dra__c }

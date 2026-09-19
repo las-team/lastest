@@ -46,9 +46,14 @@ import { configureRca } from "@lastest/plugin-rca";
 import { configureRecorder } from "@lastest/plugin-recorder";
 import { configureScheduling } from "@lastest/plugin-scheduling";
 import { configureShare } from "@lastest/plugin-share";
+import { configureVeevaMigration } from "@lastest/plugin-veeva-migration";
 
 import { requireRepoAccess, requireTeamAccess } from "@/lib/auth";
 import * as queries from "@/lib/db/queries";
+import {
+  DEFAULT_SALESFORCE_API_VERSION,
+  DEFAULT_VAULT_API_VERSION,
+} from "@/lib/connectors/definitions";
 import { setTestCreatedListener } from "@/lib/db/test-hooks";
 import { getLogger } from "@/lib/logger";
 import { createAiFactory } from "@/lib/core/ai-capability";
@@ -59,6 +64,7 @@ import { appAwardsHost } from "@/lib/core/awards-host";
 import { appBrowserHost } from "@/lib/core/browser-host";
 import { appCiHost } from "@/lib/core/ci-host";
 import { appDataSourcesHost } from "@/lib/core/data-sources-host";
+import { appVeevaMigrationHost } from "@/lib/core/veeva-migration-host";
 import { appDesignSystemHost } from "@/lib/core/design-system-host";
 import { entitlementsFor } from "@/lib/core/entitlements";
 import { appEventsHost } from "@/lib/core/events-host";
@@ -328,6 +334,19 @@ export async function getPluginRuntime(): Promise<PluginRuntime> {
         data: need("data"),
         storageHost: need("storageHost"),
       }),
+    "veeva-migration": (need) =>
+      configureVeevaMigration({
+        runtime: need("runtime"),
+        host: appVeevaMigrationHost,
+        data: need("data"),
+        // Core's own connector defaults, passed once rather than duplicated in
+        // the package or fetched through a port method for two strings — see
+        // `plugins/veeva-migration/src/connector-shapes.ts`.
+        connectorDefaults: {
+          salesforceApiVersion: DEFAULT_SALESFORCE_API_VERSION,
+          vaultApiVersion: DEFAULT_VAULT_API_VERSION,
+        },
+      }),
     scheduling: (need) =>
       configureScheduling({
         runtime: need("runtime"),
@@ -403,6 +422,8 @@ export async function processDuePluginJobs(): Promise<number> {
       claimDue: queries.claimDuePluginJobs,
       complete: queries.completePluginJob,
       failAttempt: queries.failPluginJobAttempt,
+      heartbeat: queries.heartbeatPluginJob,
+      reapExpired: () => queries.reapExpiredPluginJobLeases(),
     },
     dispatch: (type, payload, run, scope) =>
       runtime.dispatch(type, payload, run, scope),

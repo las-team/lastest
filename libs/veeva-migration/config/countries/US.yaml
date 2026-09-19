@@ -1,0 +1,168 @@
+# countries.US — United States (§7.4.1)
+# Body is the `countries.US` block itself. Merged beneath the user's
+# `countries.US` (user wins) by `mergeOverlays()`; layered defaults ← global ←
+# regions.NA ← this file by `resolveCountry()`.
+region: NA
+dataResidency: us
+defaultTimezone: America/New_York
+scope:
+  sampleRetentionMonths: 36 # PDMA / 21 CFR 203 — samples, call samples, inventories never below 3 years (family `samples`, §7.2)
+  samplesIncludeCalls: true # calls carrying disbursements must accompany their transactions → call2 joins the samples family
+  objects:
+    sample_transaction: { historyMonths: 36 }
+    call2_sample: { historyMonths: 36 }
+    sample_inventory: { historyMonths: 36 }
+    sample_inventory_item: { historyMonths: 36 }
+    call2: { historyMonths: 36 }
+phone: { normalise: true, defaultRegion: US }
+postalCode: { pattern: "^\\d{5}(-\\d{4})?$", onMismatch: warn }
+objects:
+  account:
+    required: { npi__v: false, primary_country__v: true }
+    fields:
+      add:
+        - { source: NPI_vod__c, target: npi__v, transform: text }
+        - {
+            source: PDRP_Opt_Out_vod__c,
+            target: pdrp_opt_out__v,
+            transform: bool,
+          }
+        - {
+            source: PDRP_Opt_Out_Date_vod__c,
+            target: pdrp_opt_out_date__v,
+            transform: date,
+          }
+  address:
+    line1Overflow: spillToLine2
+    fields:
+      add:
+        - { source: Zip_4_vod__c, target: zip_4__v, transform: text }
+        - { source: License_vod__c, target: license__v, transform: text }
+        - {
+            source: License_Status_vod__c,
+            target: license_status__v,
+            transform: "picklist(address.licenseStatus)",
+          }
+        - {
+            source: License_Expiration_Date_vod__c,
+            target: license_expiration_date__v,
+            transform: date,
+          }
+        - { source: DEA_vod__c, target: dea__v, transform: text }
+        - {
+            source: DEA_Status_vod__c,
+            target: dea_status__v,
+            transform: "picklist(address.deaStatus)",
+          }
+        - {
+            source: DEA_Expiration_Date_vod__c,
+            target: dea_expiration_date__v,
+            transform: date,
+          }
+        - {
+            source: DEA_Schedule_vod__c,
+            target: dea_schedule__v,
+            transform: text,
+          }
+        - { source: CDS_vod__c, target: cds__v, transform: text }
+        - {
+            source: CDS_Status_vod__c,
+            target: cds_status__v,
+            transform: "picklist(address.cdsStatus)",
+          }
+        - {
+            source: CDS_Expiration_Date_vod__c,
+            target: cds_expiration_date__v,
+            transform: date,
+          }
+        - { source: ASSMCA_vod__c, target: assmca__v, transform: text } # Puerto Rico
+        - {
+            source: Network_Sample_Eligibility_vod__c,
+            target: network_sample_eligibility__v,
+            transform: "picklist(address.sampleEligibility)",
+          }
+  call2:
+    blobs: { signature: required } # signature pass mandatory (PDMA evidence)
+    fields: { required: { signature_date__v: false } }
+  sample_transaction:
+    deletePolicy: ignore
+    blobs: { signature: required }
+    load: {
+        sampleStrategy: noTriggersRecalc,
+        fallbackStrategy: triggersOnTransactions,
+      } # §6.3.35: recalc action must exist, else Vault maintains roll-ups itself; never NoTriggers without a reload path
+  sample_lot: { statusFromFlag: true }
+  product:
+    fields:
+      add:
+        - { source: Schedule_vod__c, target: schedule__v, transform: text }
+        - {
+            source: Restricted_States_vod__c,
+            target: restricted_states__v,
+            transform: text,
+          }
+postLoad: { recalculateRollups: required } # blocking VT_ROLLUP_RECALC_UNAVAILABLE unless fallbackStrategy applies
+picklists:
+  # 2-letter → target names resolved by label at preflight. The 50 states + DC + PR
+  # are completed from USPS codes [GEN]; confirm the `<code>__v` value names at preflight.
+  address.state:
+    AL: al__v
+    AK: ak__v
+    AZ: az__v
+    AR: ar__v
+    CA: ca__v
+    CO: co__v
+    CT: ct__v
+    DE: de__v
+    FL: fl__v
+    GA: ga__v
+    HI: hi__v
+    ID: id__v
+    IL: il__v
+    IN: in__v
+    IA: ia__v
+    KS: ks__v
+    KY: ky__v
+    LA: la__v
+    ME: me__v
+    MD: md__v
+    MA: ma__v
+    MI: mi__v
+    MN: mn__v
+    MS: ms__v
+    MO: mo__v
+    MT: mt__v
+    NE: ne__v
+    NV: nv__v
+    NH: nh__v
+    NJ: nj__v
+    NM: nm__v
+    NY: ny__v
+    NC: nc__v
+    ND: nd__v
+    OH: oh__v
+    OK: ok__v
+    OR: or__v
+    PA: pa__v
+    RI: ri__v
+    SC: sc__v
+    SD: sd__v
+    TN: tn__v
+    TX: tx__v
+    UT: ut__v
+    VT: vt__v
+    VA: va__v
+    WA: wa__v
+    WV: wv__v
+    WI: wi__v
+    WY: wy__v
+    DC: dc__v
+    PR: pr__v
+  # AMA specialty codes — the remaining ~200 values are filled by the programme.
+  account.specialty:
+    { "AN": anesthesiology__v, "CD": cardiovascular_disease__v }
+  account.credentials:
+    { MD: md__v, DO: do__v, NP: np__v, PA: pa__v, RN: rn__v, PharmD: pharmd__v }
+  # remaining reasons filled by the programme
+  sample_transaction.reason:
+    { "Damaged": damaged__v, "Expired": expired__v, "Lost": lost__v }

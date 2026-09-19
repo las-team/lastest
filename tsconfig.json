@@ -31,5 +31,20 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "packages", "scripts", "tests"]
+  "exclude": [
+    "node_modules",
+    "packages",
+    "scripts",
+    "tests",
+    // `libs/veeva-migration` carries its own stricter tsconfig (ES2022) and is
+    // verified by `pnpm --filter @lastest/veeva-migration typecheck`. Excluded
+    // here as a *root* only: its test files and testkit use ES2018+ syntax and
+    // Node-shaped `ProcessEnv` types that this program does not provide.
+    //
+    // Note `exclude` does not stop tsc following an import, so the app still
+    // typechecks everything it actually reaches in that package under this
+    // target — which is why `reconcile/index.ts` uses `BigInt(0)` rather than
+    // the `0n` literal that would need ES2020 here.
+    "libs/veeva-migration"
+  ]
 }
