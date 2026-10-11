@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
+import { createAuthMiddleware } from "better-auth/api";
 // From the `plugins` barrel, not `better-auth/plugins/mcp`: better-auth 1.6.14
 // ships `dist/plugins/mcp/` but its package `exports` map only publishes
 // `./plugins/mcp/client`, so the deep path resolves under neither Turbopack nor
@@ -204,6 +205,24 @@ export const auth = betterAuth({
     sendResetPassword: async ({ user, token }) => {
       await sendPasswordResetEmail(user.email, token);
     },
+    // A password reset is the recovery path for a compromised account, so it
+    // must kill every live session (cookie and bearer — both are rows in
+    // `sessions`), not just set a new hash an attacker's session never checks.
+    revokeSessionsOnPasswordReset: true,
+  },
+
+  // /change-password only revokes other sessions when the client opts in with
+  // `revokeOtherSessions: true`. Force it server-side so no caller (UI, API,
+  // or a hand-rolled request) can leave a hijacked session alive after a
+  // password change. better-auth deletes all of the user's sessions and issues
+  // a fresh one to the caller, so the user changing the password stays signed in.
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path !== "/change-password") return;
+      return {
+        context: { body: { ...ctx.body, revokeOtherSessions: true } },
+      };
+    }),
   },
 
   // Only register providers whose client id + secret are present. An
