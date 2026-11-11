@@ -24,12 +24,12 @@
     "@lastest/ui": "workspace:*"
   },
   "devDependencies": {
-    "@types/react": "^19",
+    "@types/react": "^19.3.0",
     "lucide-react": "^0.562.0",
-    "next": "16.2.11",
+    "next": "16.4.6",
     "react": "19.2.3",
-    "typescript": "^5",
-    "vitest": "^4.1.0"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
   },
   "license": "FSL-1.1-ALv2"
 }

@@ -23,15 +23,15 @@
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.1",
-    "commander": "^12.0.0",
-    "zod": "^3.23.0"
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "commander": "^12.1.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^20.10.0",
-    "tsup": "^8.0.0",
-    "tsx": "^4.7.0",
-    "typescript": "^5.3.0"
+    "@types/node": "^20.19.43",
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
   },
   "engines": {
     "node": ">=18.0.0"

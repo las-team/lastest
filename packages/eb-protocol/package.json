@@ -16,7 +16,7 @@
     "@lastest/shared": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "^5.3.0"
+    "typescript": "^5.9.3"
   },
   "license": "FSL-1.1-ALv2"
 }

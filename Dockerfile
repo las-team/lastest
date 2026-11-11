@@ -162,20 +162,20 @@ COPY --from=deps --chown=nextjs:nodejs /app/node_modules/drizzle-kit ./node_modu
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.bin/drizzle-kit ./node_modules/.bin/drizzle-kit
 # Postgres driver required by drizzle-kit push at container startup
-COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/postgres@3.4.8 ./node_modules/.pnpm/postgres@3.4.8
-RUN ln -sf .pnpm/postgres@3.4.8/node_modules/postgres ./node_modules/postgres
-COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/esbuild@0.27.2 ./node_modules/.pnpm/esbuild@0.27.2
-COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/@esbuild+linux-x64@0.27.2 ./node_modules/.pnpm/@esbuild+linux-x64@0.27.2
-COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/esbuild-register@3.6.0_esbuild@0.27.2 ./node_modules/.pnpm/esbuild-register@3.6.0_esbuild@0.27.2
-RUN ln -sf .pnpm/esbuild@0.27.2/node_modules/esbuild ./node_modules/esbuild && \
-    ln -sf .pnpm/@esbuild+linux-x64@0.27.2/node_modules/@esbuild ./node_modules/@esbuild && \
-    ln -sf .pnpm/esbuild-register@3.6.0_esbuild@0.27.2/node_modules/esbuild-register ./node_modules/esbuild-register
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/postgres@3.4.9 ./node_modules/.pnpm/postgres@3.4.9
+RUN ln -sf .pnpm/postgres@3.4.9/node_modules/postgres ./node_modules/postgres
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/esbuild@0.28.2 ./node_modules/.pnpm/esbuild@0.28.2
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/@esbuild+linux-x64@0.28.2 ./node_modules/.pnpm/@esbuild+linux-x64@0.28.2
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/esbuild-register@3.6.0_esbuild@0.28.2 ./node_modules/.pnpm/esbuild-register@3.6.0_esbuild@0.28.2
+RUN ln -sf .pnpm/esbuild@0.28.2/node_modules/esbuild ./node_modules/esbuild && \
+    ln -sf .pnpm/@esbuild+linux-x64@0.28.2/node_modules/@esbuild ./node_modules/@esbuild && \
+    ln -sf .pnpm/esbuild-register@3.6.0_esbuild@0.28.2/node_modules/esbuild-register ./node_modules/esbuild-register
 
 # Copy claude-agent-sdk (standalone prunes serverExternalPackages)
 COPY --from=deps --chown=nextjs:nodejs \
-  /app/node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.141_zod@4.4.3/node_modules/@anthropic-ai/claude-agent-sdk \
-  ./node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.141_zod@4.4.3/node_modules/@anthropic-ai/claude-agent-sdk
-RUN ln -sf .pnpm/@anthropic-ai+claude-agent-sdk@0.2.141_zod@4.4.3/node_modules/@anthropic-ai \
+  /app/node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.141_zod@4.6.7/node_modules/@anthropic-ai/claude-agent-sdk \
+  ./node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.141_zod@4.6.7/node_modules/@anthropic-ai/claude-agent-sdk
+RUN ln -sf .pnpm/@anthropic-ai+claude-agent-sdk@0.2.141_zod@4.6.7/node_modules/@anthropic-ai \
   ./node_modules/@anthropic-ai
 # The SDK spawns a platform-native CLI binary shipped as an optionalDependency
 # (@anthropic-ai/claude-agent-sdk-linux-x64). The selective COPY above only pulls
@@ -189,7 +189,7 @@ RUN ln -sf .pnpm/@anthropic-ai+claude-agent-sdk@0.2.141_zod@4.4.3/node_modules/@
 # variant is needed.
 COPY --from=deps --chown=nextjs:nodejs \
   /app/node_modules/.pnpm/@anthropic-ai+claude-agent-sdk-linux-x64@0.2.141/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64 \
-  ./node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.141_zod@4.4.3/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64
+  ./node_modules/.pnpm/@anthropic-ai+claude-agent-sdk@0.2.141_zod@4.6.7/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64
 
 # OCR runs in the dedicated ocr-service container (packages/ocr-service) —
 # tesseract.js is no longer shipped in the app image. Set OCR_SERVICE_URL to
@@ -202,8 +202,8 @@ RUN npm install -g @anthropic-ai/claude-code@latest 2>/dev/null || \
     ln -s /app/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude /usr/local/bin/claude
 
 # Copy ws (used by the bundled embedded-browser dist)
-COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/ws@8.21.0/node_modules/ws ./node_modules/.pnpm/ws@8.21.0/node_modules/ws
-RUN ln -sf .pnpm/ws@8.21.0/node_modules/ws ./node_modules/ws
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.pnpm/ws@8.22.2/node_modules/ws ./node_modules/.pnpm/ws@8.22.2/node_modules/ws
+RUN ln -sf .pnpm/ws@8.22.2/node_modules/ws ./node_modules/ws
 
 # Copy embedded-browser dist + runtime deps
 COPY --from=builder --chown=nextjs:nodejs /app/packages/embedded-browser/dist /app/embedded-browser/dist

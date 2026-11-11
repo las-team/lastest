@@ -16,7 +16,7 @@
     "@lastest/github": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "^5"
+    "typescript": "^5.9.3"
   },
   "license": "FSL-1.1-ALv2"
 }

@@ -34,10 +34,7 @@ type ToolHandler = (params: Record<string, unknown>) => Promise<{
  * keeping the original description. Used by `defineTool` so a restricted
  * connection is never shown an action it cannot call.
  */
-function narrowEnum(
-  original: z.ZodEnum<[string, ...string[]]>,
-  allowed: string[],
-) {
+function narrowEnum(original: z.ZodEnum, allowed: string[]) {
   const next = z.enum(allowed as [string, ...string[]]);
   return original.description ? next.describe(original.description) : next;
 }
@@ -359,7 +356,7 @@ export function createServer(
         .enum(["lastest", "playwright-inspector"])
         .optional(),
       stabilization: z
-        .record(z.unknown())
+        .record(z.string(), z.unknown())
         .nullable()
         .optional()
         .describe(
@@ -800,14 +797,14 @@ export function createServer(
           "Per-test Playwright runtime overrides. Unset fields fall back to the repo playwright settings, then the global defaults. Pass null to clear.",
         ),
       diffOverrides: z
-        .record(z.unknown())
+        .record(z.string(), z.unknown())
         .nullable()
         .optional()
         .describe(
           "Per-test diff overrides (thresholds, anti-aliasing, diff engine, text-region tuning). Pass null to clear.",
         ),
       stabilizationOverrides: z
-        .record(z.unknown())
+        .record(z.string(), z.unknown())
         .nullable()
         .optional()
         .describe(
@@ -840,7 +837,7 @@ export function createServer(
           "Same shape as setupOverrides, applied to teardown. Pass null to clear.",
         ),
       apiDefinition: z
-        .record(z.unknown())
+        .record(z.string(), z.unknown())
         .optional()
         .describe(
           "For api-type tests (update): the request + assertion definition { method, url, headers?, query?, body?, auth?, assertions[] }. The code column is re-synced from this automatically.",
@@ -2645,7 +2642,7 @@ export function createServer(
           '"api" creates a headless HTTP test (E1). Defaults to browser.',
         ),
       apiDefinition: z
-        .record(z.any())
+        .record(z.string(), z.any())
         .optional()
         .describe(
           "API test definition for direct API mode: { method, url, headers?, query?, body?, auth?, assertions: [...] }. Assertion kinds: status|header|jsonPath|jsonSchema|bodyContains|latencyMs.",

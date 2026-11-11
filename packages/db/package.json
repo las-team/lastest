@@ -21,11 +21,11 @@
     "@lastest/triage-model": "workspace:*",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/semantic-conventions": "1.43.0",
-    "drizzle-orm": "^0.45.2",
+    "drizzle-orm": "^0.45.4",
     "postgres": "^3.4.8"
   },
   "devDependencies": {
-    "typescript": "^5.3.0"
+    "typescript": "^5.9.3"
   },
   "license": "FSL-1.1-ALv2"
 }

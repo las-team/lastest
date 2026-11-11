@@ -22,13 +22,13 @@
     "@lastest/contracts": "workspace:*",
     "@lastest/core-data": "workspace:*",
     "@lastest/kernel": "workspace:*",
-    "drizzle-orm": "^0.45.2",
-    "uuid": "^11.0.5"
+    "drizzle-orm": "^0.45.4",
+    "uuid": "^14.0.3"
   },
   "devDependencies": {
-    "next": "16.2.11",
-    "typescript": "^5",
-    "vitest": "^4.1.0"
+    "next": "16.4.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
   },
   "license": "FSL-1.1-ALv2"
 }

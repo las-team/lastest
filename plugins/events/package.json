@@ -17,8 +17,8 @@
     "@lastest/kernel": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "^5",
-    "vitest": "^4.1.0"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
   },
   "license": "FSL-1.1-ALv2"
 }

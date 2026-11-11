@@ -29,16 +29,16 @@
     "@lastest/google-sheets": "workspace:*",
     "@lastest/kernel": "workspace:*",
     "@lastest/ui": "workspace:*",
-    "drizzle-orm": "^0.45.2",
+    "drizzle-orm": "^0.45.4",
     "lucide-react": "^0.562.0",
-    "sonner": "^2.0.7"
+    "sonner": "^2.0.8"
   },
   "devDependencies": {
-    "@types/react": "^19",
-    "next": "16.2.11",
+    "@types/react": "^19.3.0",
+    "next": "16.4.6",
     "react": "^19",
-    "typescript": "^5",
-    "vitest": "^4.1.0"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
   },
   "license": "FSL-1.1-ALv2"
 }
