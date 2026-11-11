@@ -22,12 +22,12 @@
     "@lastest/core-data": "workspace:*",
     "@lastest/eb-protocol": "workspace:*",
     "@lastest/kernel": "workspace:*",
-    "drizzle-orm": "^0.45.2"
+    "drizzle-orm": "^0.45.4"
   },
   "devDependencies": {
-    "next": "16.2.11",
-    "typescript": "^5",
-    "vitest": "^4.1.0"
+    "next": "16.4.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
   },
   "license": "FSL-1.1-ALv2"
 }

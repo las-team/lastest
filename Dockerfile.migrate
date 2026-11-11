@@ -45,8 +45,8 @@ WORKDIR /app
 # Exactly the three packages drizzle-kit push needs — no monorepo, no app deps.
 RUN npm install --no-audit --no-fund \
       drizzle-kit@0.31.8 \
-      drizzle-orm@0.45.2 \
-      postgres@3.4.8 \
+      drizzle-orm@0.45.4 \
+      postgres@3.4.9 \
     && npm cache clean --force
 
 # The schema barrel + the ./schema/ modules it re-exports (their type-only
